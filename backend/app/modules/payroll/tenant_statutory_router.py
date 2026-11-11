@@ -1228,3 +1228,81 @@ def za_run_journal(run_id: int, organization_id: int = Depends(_za_org), db: Ses
     from app.modules.payroll import south_africa_journal as journal
 
     return journal.build_za_journal(db, organization_id, run_id)
+
+
+# -- South Africa (ZP-ZA-ENG-001 Phase 10): G6 parallel payroll cycles ---------
+# Four-eyes (importer != acceptor, explainer != acceptor) is enforced in
+# south_africa_parallel; nothing here changes a payslip.
+
+@router.get("/south-africa/parallel-imports", summary="South Africa parallel-cycle imports (G6)")
+def list_za_parallel_imports(run_id: Optional[int] = Query(None), organization_id: int = Depends(_za_org),
+                             current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_parallel as parallel
+
+    return parallel.list_za_parallel_imports(db, organization_id, run_id)
+
+
+@router.post("/south-africa/parallel-imports",
+             summary="Import an incumbent payroll's results for a committed ZA run and compare (G6)")
+def create_za_parallel_import(
+    payload: Dict[str, Any] = Body(...),
+    organization_id: int = Depends(_za_org),
+    current_user=Depends(get_current_payroll_operator),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import south_africa_parallel as parallel
+
+    out = parallel.import_za_parallel(db, organization_id, payload, current_user.id)
+    db.commit()
+    return out
+
+
+@router.get("/south-africa/parallel-imports/{import_id}", summary="A South Africa parallel cycle and its differences")
+def get_za_parallel_import(import_id: int, organization_id: int = Depends(_za_org),
+                           current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_parallel as parallel
+
+    return parallel.za_parallel_summary(db, organization_id, import_id)
+
+
+@router.post("/south-africa/parallel-imports/{import_id}/accept",
+             summary="Accept a clean South Africa parallel cycle (second person)")
+def accept_za_parallel_import(import_id: int, organization_id: int = Depends(_za_org),
+                              current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_parallel as parallel
+
+    out = parallel.accept_za_parallel_import(db, organization_id, import_id, current_user.id)
+    db.commit()
+    return out
+
+
+@router.post("/south-africa/parallel-imports/{import_id}/withdraw", summary="Withdraw an open parallel cycle")
+def withdraw_za_parallel_import(import_id: int, organization_id: int = Depends(_za_org),
+                                current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_parallel as parallel
+
+    out = parallel.withdraw_za_parallel_import(db, organization_id, import_id, current_user.id)
+    db.commit()
+    return out
+
+
+@router.post("/south-africa/parallel-differences/{diff_id}/explain", summary="Explain a parallel-cycle difference")
+def explain_za_parallel_difference(diff_id: int, payload: Dict[str, Any] = Body(...),
+                                   organization_id: int = Depends(_za_org),
+                                   current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_parallel as parallel
+
+    out = parallel.explain_za_parallel_difference(db, organization_id, diff_id, payload.get("reason"), current_user.id)
+    db.commit()
+    return out
+
+
+@router.post("/south-africa/parallel-differences/{diff_id}/accept",
+             summary="Accept an explained parallel-cycle difference (second person)")
+def accept_za_parallel_difference(diff_id: int, organization_id: int = Depends(_za_org),
+                                  current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_parallel as parallel
+
+    out = parallel.accept_za_parallel_difference(db, organization_id, diff_id, current_user.id)
+    db.commit()
+    return out

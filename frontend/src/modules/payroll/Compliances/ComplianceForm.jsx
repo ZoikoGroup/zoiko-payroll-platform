@@ -8,8 +8,9 @@ import {
 } from "../../../utils/jurisdictionTax";
 import { uploadOrganizationLogo } from "../../../service/orgAdminService";
 import { useOrganization } from "../../../context/OrganizationContext";
+import { useEntitledCountries } from "../EntitledCountriesContext";
 
-function getBaseFields(country) {
+function getBaseFields(country, paysUk = false) {
   const fields = [
     { label: "Company Legal Name", field: "name", type: "text" },
     { label: "Company Type", field: "type", type: "text" },
@@ -59,7 +60,9 @@ function getBaseFields(country) {
   // FPS/EPS filing needs both identifiers on the employer. Same "no UI
   // yet" gap the CA fields above already closed for BC EHT/QC HSF, now
   // closed the same way for UK RTI.
-  if (country === "UK") {
+  // Also for an org whose primary country isn't the UK but which pays UK
+  // employees — their payslips and RTI filings carry these references.
+  if (country === "UK" || paysUk) {
     fields.push(
       { label: "PAYE Reference", field: "payeReference", type: "text" },
       { label: "Accounts Office Reference", field: "accountsOfficeReference", type: "text" },
@@ -134,7 +137,8 @@ export default function ComplianceForm({ companyDetails, onUpdate, onTaxIdentifi
   };
 
   const { taxIdLabel, stateRuleNote } = getComplianceLabels(companyDetails?.jurisdictionCountry);
-  const FIELDS = getBaseFields(companyDetails?.jurisdictionCountry);
+  const { isEntitled } = useEntitledCountries();
+  const FIELDS = getBaseFields(companyDetails?.jurisdictionCountry, isEntitled("UK"));
   const taxFields = getJurisdictionTaxFields(companyDetails?.jurisdictionCountry);
 
   return (

@@ -4,6 +4,7 @@ import { useToast } from "../ToastContext";
 import { getEmployees, bulkDeleteEmployees, getFormSubmissions, DEPARTMENTS, EMPLOYEE_STATUSES } from "../../../service/payrollService";
 import { getCurrencyForJurisdiction } from "../../../utils/currency";
 import { usePayrollSetup } from "../PayrollSetupContext";
+import { useEntitledCountries, toEmployeeCountryCode } from "../EntitledCountriesContext";
 import * as XLSX from "xlsx";
 import EmployeeTable from "./EmployeeTable";
 import EmployeeForm from "./EmployeeForm";
@@ -11,6 +12,7 @@ import EmployeeDetailPanel from "./EmployeeDetailPanel";
 import EmployeeBulkImportModal from "./EmployeeBulkImportModal";
 import { COMPLIANCE_SPECS, complianceColumnHeader } from "./countryFieldSpecs";
 import EmployeeBulkEditPanel from "./EmployeeBulkEditPanel";
+import PlanLimitMessage, { isPlanLimitError } from "../../../components/PlanLimitMessage";
 import SendTemplateBuilder from "./SendTemplateBuilder";
 import SubmissionsReviewPanel from "./SubmissionsReviewPanel";
 
@@ -25,6 +27,8 @@ export default function EmployeeListPage() {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  // No plan yet (or a cancelled one): shown with a "Choose a plan" link.
+  const [planError, setPlanError] = useState(null);
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
@@ -40,6 +44,14 @@ export default function EmployeeListPage() {
     if (!company) return null;
     return getCurrencyForJurisdiction(company.jurisdictionCountry) || getCurrencyForJurisdiction(company.jurisdiction_country);
   }, [company]);
+  // New employees default to the org's PRIMARY entitled country; the
+  // company jurisdiction is only the fallback until entitlements load.
+  const { primaryEmployeeCode } = useEntitledCountries();
+  const defaultCountryCode =
+    primaryEmployeeCode || toEmployeeCountryCode(company?.jurisdictionCountry || company?.jurisdiction_country) || "";
+  // The org's default country: its currencyInfo above (and any currency
+  // override) applies to employees there; others use their own currency.
+  const orgCountryCode = toEmployeeCountryCode(company?.jurisdictionCountry || company?.jurisdiction_country) || "";
 
   const refreshPendingSubmissionCount = useCallback(() => {
     getFormSubmissions("pending").then((rows) => setPendingSubmissionCount(rows.length)).catch(() => {});
@@ -52,11 +64,13 @@ export default function EmployeeListPage() {
   const loadEmployees = useCallback(async () => {
     setLoading(true);
     setLoadError("");
+    setPlanError(null);
     try {
-      const data = await getEmployees({ search, department, status });
+      const data = await getEmployees({ search, department, status }, { throwOnError: true });
       setEmployees(data?.items || data || []);
     } catch (err) {
-      setLoadError(err.message || "Could not load employees. Please try again.");
+      if (isPlanLimitError(err)) setPlanError(err);
+      else setLoadError(err.message || "Could not load employees. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -109,7 +123,11 @@ export default function EmployeeListPage() {
       addToast?.("No employees to export.", "error");
       return;
     }
-    const rows = employees.map((emp) => {
+    // Deduplicate employees by ID to prevent duplicate rows in the export
+    const uniqueEmployees = Array.from(
+      new Map(employees.map((emp) => [emp.id, emp])).values()
+    );
+    const rows = uniqueEmployees.map((emp) => {
       const row = {
         "ID": emp.employeeCode || "",
         "Employee Name": emp.name || "",
@@ -123,7 +141,7 @@ export default function EmployeeListPage() {
         "CTC": emp.ctc || "",
         "Bank Name": emp.bankName || "",
         "Bank Account Number": emp.bankAccountNumber || "",
-        "Country": emp.countryCode || "IN",
+        "Country": emp.countryCode || defaultCountryCode,
         "IFSC Code": emp.ifscCode || "",
         "PAN Number": emp.panNumber || "",
         "UAN": emp.uan || "",
@@ -133,7 +151,12 @@ export default function EmployeeListPage() {
       }
       return row;
     });
-    const headers = Object.keys(rows[0]);
+    // Collect all unique headers from ALL rows (not just rows[0]) so no
+    // compliance column is dropped when the first employee lacks a field
+    // that a later employee has.
+    const allHeaders = new Set();
+    rows.forEach((row) => Object.keys(row).forEach((k) => allHeaders.add(k)));
+    const headers = Array.from(allHeaders);
     const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
     ws["!cols"] = headers.map((h) => ({ wch: Math.max(h.length, 18) }));
     const wb = XLSX.utils.book_new();
@@ -283,6 +306,8 @@ export default function EmployeeListPage() {
               </div>
             </div>
 
+            {planError && <PlanLimitMessage error={planError} className="mb-4" />}
+
             {loadError && (
               <div className="mb-4 rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">
                 {loadError}
@@ -310,6 +335,7 @@ export default function EmployeeListPage() {
                 selectedIds={selectedIds}
                 onSelectionChange={setSelectedIds}
                 currencyInfo={currencyInfo}
+                orgCountryCode={orgCountryCode}
               />
             </div>
 
@@ -320,6 +346,7 @@ export default function EmployeeListPage() {
                 onUpdated={handleEmployeeUpdated}
                 onDeleted={handleEmployeeDeleted}
                 currencyInfo={currencyInfo}
+                orgCountryCode={orgCountryCode}
               />
             )}
           </>
@@ -332,7 +359,8 @@ export default function EmployeeListPage() {
               onCancel={() => setActiveTab("list")}
               onSaved={handleEmployeeCreated}
               currencyInfo={currencyInfo}
-              defaultCountryCode={company?.jurisdictionCountry || company?.jurisdiction_country || "IN"}
+              orgCountryCode={orgCountryCode}
+              defaultCountryCode={defaultCountryCode}
             />
           </div>
         )}
@@ -342,7 +370,8 @@ export default function EmployeeListPage() {
             <EmployeeBulkImportModal
               onClose={() => setActiveTab("list")}
               onImported={handleEmployeesBulkImported}
-              defaultCountryCode={company?.jurisdictionCountry || company?.jurisdiction_country || "IN"}
+              defaultCountryCode={defaultCountryCode}
+              existingEmployees={employees}
             />
           </div>
         )}
@@ -373,7 +402,7 @@ export default function EmployeeListPage() {
 
         {activeTab === "review-submissions" && (
           <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center flex-wrap justify-between gap-3 mb-5">
               <h2 className="text-[15px] font-bold text-foreground">Review Submissions</h2>
               <button onClick={() => setActiveTab("list")} className="text-[13px] font-semibold text-foreground-muted hover:text-primary transition-colors duration-200">
                 Back to list

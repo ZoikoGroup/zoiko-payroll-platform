@@ -43,6 +43,12 @@ const INCOME_TAX_LABELS = {
   BR: "IRRF (Imposto de Renda)",
   // South Africa — PAYE (Pay As You Earn) monthly withholding
   ZA: "PAYE",
+  // Japan — national withholding income tax (gensen chōshū), NTA tables
+  JP: "Withholding Income Tax",
+  // New Zealand — PAYE, which also collects the ACC earner levy (ZP-NZ-ENG-001)
+  NZ: "PAYE (incl. ACC earner levy)",
+  // Poland — the monthly PIT advance (zaliczka na podatek), ZP-PL-ENG-001 §4.
+  PL: "PIT Advance (zaliczka)",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
@@ -61,9 +67,16 @@ const NO_PAYROLL_INCOME_TAX = new Set(["HK", "SA"]);
 const PF_LABELS = { DE: "Pension Insurance" };
 const ESI_LABELS = { DE: "Social Insurance (Health / Unemployment / Care)", CA: "Employment Insurance (EI)", ZA: "UIF (Employee)" };
 const EMPLOYER_PF_LABELS = { DE: "Employer Pension Insurance" };
-const EMPLOYER_ESI_LABELS = { DE: "Employer Social Insurance", CA: "Employer EI Contribution", ZA: "UIF (Employer)" };
+// Poland (ZP-PL-ENG-001) maps onto the generic fields as countries/poland.py
+// returns them: PIT -> tds; employer ZUS (pension, disability, accident) ->
+// employerEsi; FP/FS + FGSP + FEP -> employerPayrollTax; employer PPK ->
+// employerPension. The employee ZUS / health / PPK lines travel in
+// pl_employee_total and are shown by PLPayslipBreakdown from the snapshot.
+const EMPLOYER_ESI_LABELS = { DE: "Employer Social Insurance", CA: "Employer EI Contribution", ZA: "UIF (Employer)",
+  PL: "ZUS (Employer: pension, disability, accident)" };
 // Employer-only payroll levies carried on employer_payroll_tax.
-const EMPLOYER_PAYROLL_TAX_LABELS = { AU: "State Payroll Tax (Employer)", ZA: "SDL (Employer)" };
+const EMPLOYER_PAYROLL_TAX_LABELS = { AU: "State Payroll Tax (Employer)", ZA: "SDL (Employer)",
+  PL: "FP/FS, FGŚP, FEP (Employer)" };
 const SOCIAL_SECURITY_LABELS = {
   CA: "Canada Pension Plan (CPP)",
   BB: "NIS", DO: "SFS (Seguro Familiar de Salud)", GY: "NIS", JM: "NIS", TT: "NIS",
@@ -75,7 +88,8 @@ const SOCIAL_SECURITY_LABELS = {
 };
 const EMPLOYER_SOCIAL_SECURITY_LABELS = { CA: "Employer CPP Contribution", BR: "CPP (Employer INSS)", SA: "GOSI SANED / Unemployment (Employer)" };
 const MEDICARE_LABELS = { AU: "Medicare Levy" };
-const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)", HK: "MPF Mandatory Contribution (Employer)", SA: "GOSI Pension (Employer)" };
+const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)", HK: "MPF Mandatory Contribution (Employer)", SA: "GOSI Pension (Employer)",
+  PL: "PPK (Employer)" };
 const CHURCH_TAX_LABELS = { DE: "Kirchensteuer" };
 const SOLIDARITY_SURCHARGE_LABELS = { DE: "Solidaritätszuschlag" };
 // Trinidad reuses the `professionalTax` field for its Health Surcharge (see
@@ -169,6 +183,9 @@ const TAX_ID_LABELS = {
   CH: "UID (Business Identification No.)",
   BR: "CNPJ / CPF",
   ZA: "SARS PAYE / UIF / SDL Registration",
+  JP: "Corporate Number / Labour Insurance Number",
+  NZ: "IRD number / NZBN",
+  PL: "NIP / REGON / KRS",
 };
 
 // "Professional Tax" is an India-specific, state-levied deduction — only

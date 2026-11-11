@@ -79,6 +79,9 @@ from app.modules.payroll.engine.countries import netherlands as _netherlands
 from app.modules.payroll.engine.countries import mexico as _mexico
 from app.modules.payroll.engine.countries import brazil as _brazil
 from app.modules.payroll.engine.countries import south_africa as _south_africa
+from app.modules.payroll.engine.countries import japan as _japan
+from app.modules.payroll.engine.countries import new_zealand as _new_zealand
+from app.modules.payroll.engine.countries import poland as _poland
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -157,6 +160,9 @@ _calc_netherlands = _netherlands.calculate
 _calc_mexico = _mexico.calculate
 _calc_brazil = _brazil.calculate
 _calc_south_africa = _south_africa.calculate
+_calc_japan = _japan.calculate
+_calc_new_zealand = _new_zealand.calculate
+_calc_poland = _poland.calculate
 
 
 _COUNTRY_CALC = {
@@ -233,6 +239,16 @@ _COUNTRY_CALC = {
     # employer incentive, never an employee line. Fail-closed:
     # countries/south_africa.py; simple mode is blocked in resolver.py.
     "ZA": _calc_south_africa,
+    # Japan (ZP-JP-ENG-001) — monthly resident salary: NTA withholding,
+    # EPI/health/care/child support on SMR, class-based EI and notice-only
+    # resident tax. Fail-closed on every unsigned rule; simple mode is blocked
+    # in resolver.py.
+    "JP": _calc_japan,
+    # New Zealand (ZP-NZ-ENG-001): fail-closed, never the generic calculator.
+    "NZ": _calc_new_zealand,
+    # Poland (ZP-PL-ENG-001): fail-closed orchestrator over
+    # engine/jurisdictions/poland/* (Phase 3); never the generic calculator.
+    "PL": _calc_poland,
 }
 
 
@@ -342,6 +358,15 @@ class StandardStrategy(PayrollStrategy):
             # not retained. It also reduces the IRRF legal-deduction base inside
             # countries/brazil.py. 0 for every non-BR calculation.
             + deductions.get("br_alimony_deduction", Decimal("0"))
+            # Japan: employee social insurance + employment insurance +
+            # resident tax. Withholding tax arrives as tds above. 0 elsewhere.
+            + deductions.get("jp_employee_total", Decimal("0"))
+            # New Zealand: student loan + KiwiSaver employee + child support.
+            # PAYE incl. the ACC earner levy arrives as tds above. 0 elsewhere.
+            + deductions.get("nz_employee_total", Decimal("0"))
+            # Poland: ZUS employee (pension + disability + sickness) + health +
+            # PPK employee. PIT arrives as tds above. 0 elsewhere.
+            + deductions.get("pl_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -624,6 +649,14 @@ class StandardStrategy(PayrollStrategy):
             # Mexico (ZP-MX-ENG-001) — the whole MX dict. Absent from every
             # non-MX calculator dict, so every other country is unchanged.
             mx_result=deductions.get("mx_result"),
+            # Japan (ZP-JP-ENG-001) — the whole JP dict (separate bases,
+            # component amounts, resident-tax notice reference and trace).
+            # Absent from every non-JP calculator dict.
+            jp_result=deductions.get("jp_result"),
+            # New Zealand (ZP-NZ-ENG-001). Absent from every non-NZ calculator dict.
+            nz_result=deductions.get("nz_result"),
+            # Poland (ZP-PL-ENG-001). Absent from every non-PL calculator dict.
+            pl_result=deductions.get("pl_result"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

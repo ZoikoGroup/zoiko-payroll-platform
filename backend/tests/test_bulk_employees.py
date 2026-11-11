@@ -222,3 +222,55 @@ def test_bulk_employee_import_and_update_lifecycle():
     # ── 8. Single employee fetch by id still consistent ──────────────────
     r = client.get(f"/api/payroll/employees/{bharat_id}")
     assert r.status_code == 200 and r.json()["email"] == "bharat@zoiko-dev.example.com", r.text
+
+
+def test_per_country_import_takes_the_import_country_and_refuses_other_countries():
+    """Employees are imported one country at a time: rows with no country
+    take the import's country; a row for another country is refused (it
+    belongs in that country's own import)."""
+    rows = [
+        employee("in-blank@zoiko-dev.example.com", "Blank Country", countryCode=None),
+        employee("in-explicit@zoiko-dev.example.com", "Explicit India", countryCode="India"),
+        employee("us-row@zoiko-dev.example.com", "US Row", countryCode="US",
+                 complianceFields={"ssn": "123-45-6789", "flsa_status": "Exempt", "state_tax_jurisdiction": "CA"}),
+    ]
+    r = client.post("/api/payroll/employees/bulk", json={"employees": rows, "countryCode": "IN"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["created"] == 2, body
+    assert {e["countryCode"] for e in body["employees"]} == {"IN"}, body
+    assert len(body["failed"]) == 1, body
+    assert body["failed"][0]["row"]["email"] == "us-row@zoiko-dev.example.com"
+    assert "Import it with the US template" in body["failed"][0]["reason"], body
+
+    r = client.post("/api/payroll/employees/bulk", json={"employees": rows[:1], "countryCode": "ZZ"})
+    assert r.status_code == 400, r.text
+
+
+def test_import_accepts_the_values_people_type_in_spreadsheets():
+    """"No"/"Yes", any capitalisation, "N/A" in optional fields and a W-4
+    year are read as the field's own values — and stored in canonical form."""
+    row = employee("taylor.morgan@zoiko-dev.example.com", "Taylor Morgan", countryCode="US", complianceFields={
+        "ssn": "123-45-6788", "flsa_status": "Non-exempt", "w4_filing_status": "Married filing jointly",
+        "w4_step2_checkbox": "No", "w4_form_vintage": "2024", "is_nonresident_alien": "No",
+        "ct_withholding_code": "N/A", "nj_rate_table": "N/A", "reciprocity_certificate_on_file": "No",
+        "reciprocity_certificate_expiry": "N/A", "residency_certification_on_file": "No",
+        "residency_certification_date": "N/A", "state_tax_jurisdiction": "ny",
+    })
+    r = client.post("/api/payroll/employees/bulk", json={"employees": [row], "countryCode": "US"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["created"] == 1 and not body["failed"], body
+    cf = body["employees"][0]["complianceFields"]
+    assert cf["flsa_status"] == "Non-Exempt"
+    assert cf["w4_filing_status"] == "Married Filing Jointly"
+    assert cf["w4_step2_checkbox"] == "false" and cf["is_nonresident_alien"] == "false"
+    assert cf["w4_form_vintage"] == "2020 or later (current form)"
+    assert cf["state_tax_jurisdiction"] == "NY"
+    assert "ct_withholding_code" not in cf and "reciprocity_certificate_expiry" not in cf
+
+    # A genuinely wrong value is still refused, with the reason.
+    bad = employee("bad.flsa@zoiko-dev.example.com", "Bad Flsa", countryCode="US", complianceFields={
+        "ssn": "123-45-6787", "flsa_status": "Salaried", "state_tax_jurisdiction": "CA"})
+    r = client.post("/api/payroll/employees/bulk", json={"employees": [bad], "countryCode": "US"})
+    assert r.json()["created"] == 0 and "flsa_status" in r.json()["failed"][0]["reason"]

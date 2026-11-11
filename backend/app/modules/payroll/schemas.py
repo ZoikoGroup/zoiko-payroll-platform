@@ -1105,6 +1105,10 @@ class BulkEmployeeItem(BaseModel):
 
 class BulkEmployeeRequest(BaseModel):
     employees: List[BulkEmployeeItem]
+    # A per-country import (bulk create): every row is an employee of this
+    # country — a row without a country takes it, a row naming another
+    # country is refused. None keeps the per-row Country behavior.
+    countryCode: Optional[str] = None
 
 
 class BulkDeleteRequest(BaseModel):
@@ -1123,9 +1127,6 @@ class BulkUpsertResponse(BaseModel):
     created:   int = 0
     employees: List[EmployeeResponse] = []
     failed:    List[dict] = []
-    created: int
-    employees: List[EmployeeResponse]
-    failed: List[dict] = []
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -1158,8 +1159,33 @@ class PayrollRunCreate(BaseModel):
     # Proceed despite incomplete attendance — recorded on the run and in the
     # activity log. Ignored when attendance is complete.
     attendance_override_reason: Optional[str] = Field(None, alias="attendanceOverrideReason", max_length=1000)
+    jp_payment_kind: Optional[str] = Field(None, alias="jpPaymentKind",
+        description="Japan run payment kind: SALARY or BONUS (default SALARY).")
+    nz_payment_kind: Optional[str] = Field(None, alias="nzPaymentKind",
+        description="New Zealand run payment kind (default REGULAR); set per run, never per employee.")
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("jp_payment_kind")
+    @classmethod
+    def _validate_jp_payment_kind(cls, value):
+        if value is None:
+            return value
+        value = value.strip().upper()
+        if value not in ("SALARY", "BONUS"):
+            raise ValueError("jpPaymentKind must be SALARY or BONUS")
+        return value
+
+    @field_validator("nz_payment_kind")
+    @classmethod
+    def _validate_nz_payment_kind(cls, value):
+        if value is None:
+            return value
+        value = value.strip().upper()
+        if value not in ("REGULAR", "OUT_OF_CYCLE", "LUMP_SUM", "FINAL", "HOLIDAY_PAY_ADVANCE", "CORRECTION"):
+            raise ValueError("nzPaymentKind must be REGULAR, OUT_OF_CYCLE, LUMP_SUM, FINAL, "
+                             "HOLIDAY_PAY_ADVANCE or CORRECTION")
+        return value
 
     @model_validator(mode="after")
     def _auto_label(self) -> "PayrollRunCreate":
@@ -1179,6 +1205,31 @@ class PayrollRunUpdate(BaseModel):
     period_end:   Optional[date] = None
     pay_date:     Optional[date] = None
     notes:        Optional[str] = None
+    jp_payment_kind: Optional[str] = Field(None, alias="jpPaymentKind")
+    nz_payment_kind: Optional[str] = Field(None, alias="nzPaymentKind")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("nz_payment_kind")
+    @classmethod
+    def _validate_nz_payment_kind(cls, value):
+        if value is None:
+            return value
+        value = value.strip().upper()
+        if value not in ("REGULAR", "OUT_OF_CYCLE", "LUMP_SUM", "FINAL", "HOLIDAY_PAY_ADVANCE", "CORRECTION"):
+            raise ValueError("nzPaymentKind must be REGULAR, OUT_OF_CYCLE, LUMP_SUM, FINAL, "
+                             "HOLIDAY_PAY_ADVANCE or CORRECTION")
+        return value
+
+    @field_validator("jp_payment_kind")
+    @classmethod
+    def _validate_jp_payment_kind(cls, value):
+        if value is None:
+            return value
+        value = value.strip().upper()
+        if value not in ("SALARY", "BONUS"):
+            raise ValueError("jpPaymentKind must be SALARY or BONUS")
+        return value
 
 
 class PayrollRunPreviewRequest(BaseModel):
@@ -1197,6 +1248,8 @@ class PayrollRunPreviewRequest(BaseModel):
 class PayrollRunPreviewEmployee(BaseModel):
     employeeId: int
     employeeName: str
+    # The employee's own country — the engine this row was calculated with.
+    country: Optional[str] = None
     department: Optional[str] = None
     attendanceStatus: str = "active"
     monthlyGross: float
@@ -1260,6 +1313,8 @@ class PayrollRunPreviewTotals(BaseModel):
 class PayrollRunPreviewResponse(BaseModel):
     employees: List[PayrollRunPreviewEmployee]
     totals: PayrollRunPreviewTotals
+    # Per employee country, each in its own currency (mixed-country preview).
+    totalsByCountry: List[dict] = []
     calculationMode: Optional[str] = Field(None, alias="calculationMode")
     model_config = ConfigDict(populate_by_name=True)
 
@@ -1291,6 +1346,11 @@ class PayrollRunResponse(BaseModel):
     attendanceOverrideReason: Optional[str] = Field(None, validation_alias="attendance_override_reason", serialization_alias="attendanceOverrideReason")
     attendanceOverrideAt:  Optional[datetime] = Field(None, validation_alias="attendance_override_at", serialization_alias="attendanceOverrideAt")
     approvalStatus:        str = ""
+    # Run detail only (service.get_payroll_run_detail): per-country totals,
+    # each in that country's currency — see service.run_totals_by_country.
+    totalsByCountry:       Optional[List[dict]] = Field(None, validation_alias="totals_by_country", serialization_alias="totalsByCountry")
+    jpPaymentKind:         Optional[str] = Field(None, validation_alias="jp_payment_kind", serialization_alias="jpPaymentKind")
+    nzPaymentKind:         Optional[str] = Field(None, validation_alias="nz_payment_kind", serialization_alias="nzPaymentKind")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -1493,6 +1553,16 @@ class PayslipItemResponse(BaseModel):
     # South Africa (ZP-ZA-ENG-001): emitted by _serialize_payslip for ZA only;
     # declared so response_model does not strip it (ZAPayslipBreakdown).
     zaCalculationSnapshot: Optional[dict] = None
+    # Japan (ZP-JP-ENG-001): the frozen jp_result (separate WHT / SI / EI
+    # bases, bonus section, labour trace) without the frozen inputs. JP only.
+    jpCalculationSnapshot: Optional[dict] = None
+    # New Zealand (ZP-NZ-ENG-001): the frozen nz_result (bases, obligations,
+    # trace) without the frozen inputs. NZ only.
+    nzCalculationSnapshot: Optional[dict] = None
+    # Poland (ZP-PL-ENG-001): the frozen pl_result (bases, obligations, ZUS /
+    # health / PPK / funds, trace) without the frozen inputs. PL only;
+    # declared so response_model does not strip it.
+    plCalculationSnapshot: Optional[dict] = None
     # Mexico (ZP-MX-ENG-001 Phase 6): mx_calculation_snapshot (mx_result +
     # input / content hashes, or the blocked reasons). Emitted for MX only;
     # declared here so response_model does not strip it.
@@ -1507,6 +1577,10 @@ class PayslipItemResponse(BaseModel):
     # reporting, never affects any calculation.
     taxWeek: Optional[int] = None
     taxMonth: Optional[int] = None
+    # UK payslip details (single-payslip GET only): tax code + basis, NI
+    # category, tax period/year, employer PAYE/Accounts Office refs and
+    # tax-year-to-date totals — see service.uk_payslip_details.
+    ukPayslip: Optional[dict] = None
     netPay:             Decimal
     bankName:           Optional[str] = None
     bankAccount:        Optional[str] = None
@@ -2340,6 +2414,10 @@ class TaxSlabResponse(BaseModel):
     # country-level row (e.g. US Federal, India Central), same convention
     # as the model column itself.
     jurisdictionState: Optional[str] = Field(None, validation_alias="jurisdiction_state", serialization_alias="jurisdictionState")
+    # Which tax regime the bracket belongs to (India: "New" | "Old"; None when
+    # the country has one regime) — so a table can label each regime's
+    # brackets instead of running two complete tables together.
+    taxRegime: Optional[str] = Field(None, validation_alias="tax_regime", serialization_alias="taxRegime")
     # Raw numeric bounds, additive alongside the pre-formatted min/max/rate
     # strings above. Needed so PT_FLAT rows (state Professional Tax — a
     # fixed monthly amount per gross-income bracket, not a percentage) can
@@ -4352,6 +4430,9 @@ class DashboardSummaryResponse(BaseModel):
     activeCount:                 Optional[int] = None
     onLeaveCount:                Optional[int] = None
     pendingApprovals:            int
+    # Per-country totals for the same period, each in its own currency
+    # (service._dashboard_country_breakdown).
+    byCountry:                   List[dict] = []
 
     model_config = ConfigDict(populate_by_name=True)
 

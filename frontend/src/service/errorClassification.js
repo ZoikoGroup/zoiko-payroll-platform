@@ -71,3 +71,20 @@ export function loadErrorText(err) {
   if (err.networkError) return "Could not reach the backend server. Check your network connection.";
   return err.message || "Failed to load.";
 }
+
+// Country entitlement / plan-limit block (HTTP 403 from the employee and
+// jurisdiction endpoints), or no usable subscription at all (trace.resource
+// "subscription" — billing require_active_subscription). Accepts a thrown
+// API error OR a bulk-import `failed[]` row ({ reason, trace }) — both carry the same `trace` shape:
+// { resource: "max_jurisdictions", reason?: "country_not_entitled"|"over_limit",
+//   country_code?, entitled?, limit_value?, plan_code? }.
+export function isPlanLimitError(err) {
+  const trace = err && err.trace;
+  if (!trace || typeof trace !== "object") return false;
+  return (
+    trace.resource === "max_jurisdictions" ||
+    trace.resource === "subscription" ||
+    trace.resource === "country_not_entitled" ||
+    trace.reason === "country_not_entitled"
+  );
+}

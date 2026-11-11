@@ -5,6 +5,13 @@ import { usePayrollSetup } from "../PayrollSetupContext";
 import {
   fetchRuns, getAvailableReports, getApplicableReportTemplate, generateReport, getUpcomingFilingDates,
 } from "../../../service/payrollService";
+import { getCountryNameFromCode } from "../../../utils/currency";
+
+// Available reports span every one of the org's payroll countries, so a
+// report is identified by its country + type (the same type can exist for
+// two countries).
+const reportKey = (r) => `${r.country || ""}|${r.reportType}`;
+const reportLabel = (r) => (r.country ? `${r.name} — ${getCountryNameFromCode(r.country) || r.country}` : r.name);
 
 const inputClass = "w-full rounded-[10px] border border-border bg-background px-3 py-2 text-[13px] font-medium text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
 
@@ -35,7 +42,12 @@ export default function ReportGenerationPanel({ onGenerated }) {
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [reports, setReports] = useState([]);
-  const [selectedReportType, setSelectedReportType] = useState("");
+  const [selectedReportKey, setSelectedReportKey] = useState("");
+  const selectedReport = useMemo(() => reports.find((r) => reportKey(r) === selectedReportKey) || null, [reports, selectedReportKey]);
+  const selectedReportType = selectedReport?.reportType || "";
+  const selectedReportCountry = selectedReport?.country || "";
+  // The countries the available reports belong to, in the order received.
+  const reportCountries = useMemo(() => [...new Set(reports.map((r) => r.country || ""))], [reports]);
 
   const [applicable, setApplicable] = useState(null); // { template, validation }
   const [loadingApplicable, setLoadingApplicable] = useState(false);
@@ -73,17 +85,20 @@ export default function ReportGenerationPanel({ onGenerated }) {
   useEffect(() => {
     if (!selectedYear) { setReports([]); return; }
     getAvailableReports({ reportingYear: selectedYear }).then(setReports);
-    setSelectedReportType("");
+    setSelectedReportKey("");
   }, [selectedYear]);
 
   const loadApplicable = useCallback(() => {
     if (!selectedRunId || !selectedReportType || !selectedYear) { setApplicable(null); return; }
     setLoadingApplicable(true);
-    getApplicableReportTemplate({ reportingYear: selectedYear, reportType: selectedReportType, payrollRunId: selectedRunId })
+    getApplicableReportTemplate({
+      reportingYear: selectedYear, reportType: selectedReportType, payrollRunId: selectedRunId,
+      ...(selectedReportCountry ? { country: selectedReportCountry } : {}),
+    })
       .then(setApplicable)
       .catch(() => setApplicable(null))
       .finally(() => setLoadingApplicable(false));
-  }, [selectedRunId, selectedReportType, selectedYear]);
+  }, [selectedRunId, selectedReportType, selectedReportCountry, selectedYear]);
 
   useEffect(() => { loadApplicable(); }, [loadApplicable]);
 
@@ -129,7 +144,16 @@ export default function ReportGenerationPanel({ onGenerated }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div>
           <label className="mb-1 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Jurisdiction</label>
-          <input className={inputClass} value={jurisdictionCountry} disabled />
+          <input
+            className={inputClass}
+            value={selectedReportCountry
+              ? `${getCountryNameFromCode(selectedReportCountry) || selectedReportCountry} (${selectedReportCountry})`
+              : reportCountries.length > 1
+                ? `${reportCountries.map((c) => getCountryNameFromCode(c) || c).join(", ")} — pick a report`
+                : (getCountryNameFromCode(jurisdictionCountry) || jurisdictionCountry)}
+            title="Set by the report you choose — each report belongs to one country"
+            disabled
+          />
         </div>
         <div>
           <label className="mb-1 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Reporting Year</label>
@@ -157,9 +181,17 @@ export default function ReportGenerationPanel({ onGenerated }) {
         </div>
         <div>
           <label className="mb-1 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Report</label>
-          <select className={inputClass} value={selectedReportType} onChange={(e) => setSelectedReportType(e.target.value)} disabled={!selectedYear || reports.length === 0}>
+          <select className={inputClass} value={selectedReportKey} onChange={(e) => setSelectedReportKey(e.target.value)} disabled={!selectedYear || reports.length === 0}>
             <option value="">Select…</option>
-            {reports.map((r) => <option key={r.reportType} value={r.reportType}>{r.name}</option>)}
+            {reportCountries.length > 1
+              ? reportCountries.map((code) => (
+                <optgroup key={code || "none"} label={getCountryNameFromCode(code) || code || "Other"}>
+                  {reports.filter((r) => (r.country || "") === code).map((r) => (
+                    <option key={reportKey(r)} value={reportKey(r)}>{r.name}</option>
+                  ))}
+                </optgroup>
+              ))
+              : reports.map((r) => <option key={reportKey(r)} value={reportKey(r)}>{reportLabel(r)}</option>)}
           </select>
           {selectedYear && reports.length === 0 && (
             <p className="mt-1 text-[11px] text-warning">No published report templates for this jurisdiction/year yet.</p>
@@ -194,7 +226,7 @@ export default function ReportGenerationPanel({ onGenerated }) {
             </>
           ) : (
             <p className="flex items-center gap-1.5 text-[13px] text-warning">
-              <AlertTriangle size={13} /> No Published/Active template found for {jurisdictionCountry} · {selectedYear} · {selectedReportType}.
+              <AlertTriangle size={13} /> No Published/Active template found for {selectedReportCountry || jurisdictionCountry} · {selectedYear} · {selectedReportType}.
             </p>
           )}
         </div>

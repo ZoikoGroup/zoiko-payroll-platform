@@ -6,6 +6,7 @@ const JURISDICTION_TO_CURRENCY = {
   NP: "NPR", NZ: "NZD", OM: "OMR", PK: "PKR", QA: "QAR", RW: "RWF",
   SA: "SAR", SE: "SEK", SG: "SGD", TH: "THB", TZ: "TZS", UG: "UGX",
   ZA: "ZAR",
+  PL: "PLN",
   // Caribbean production jurisdictions (2026-09-21).
   BB: "BBD", KY: "KYD", DO: "DOP", GY: "GYD", JM: "JMD", BS: "BSD", TT: "TTD", PR: "USD",
   India: "INR", "United States": "USD", "United Kingdom": "GBP",
@@ -20,7 +21,7 @@ const JURISDICTION_TO_CURRENCY = {
   Norway: "NOK", Nepal: "NPR", "New Zealand": "NZD", Oman: "OMR",
   Pakistan: "PKR", Qatar: "QAR", Rwanda: "RWF", "Saudi Arabia": "SAR",
   Sweden: "SEK", Singapore: "SGD", Thailand: "THB", Tanzania: "TZS",
-  Uganda: "UGX", "South Africa": "ZAR",
+  Uganda: "UGX", "South Africa": "ZAR", Poland: "PLN",
   Barbados: "BBD", "Cayman Islands": "KYD", "Dominican Republic": "DOP",
   Guyana: "GYD", Jamaica: "JMD", Bahamas: "BSD", "Trinidad and Tobago": "TTD",
   "Puerto Rico": "USD",
@@ -54,6 +55,7 @@ export const CURRENCY_MASTER = {
   NZD: { code: 'NZD', symbol: 'NZ$', name: 'New Zealand Dollar', nameNative: 'New Zealand Dollar', locale: 'en-NZ', flag: '\uD83C\uDDF3\uD83C\uDDFF', decimalDigits: 2 },
   OMR: { code: 'OMR', symbol: '\u0631.\u0639', name: 'Omani Rial', nameNative: '\u0631\u064A\u0627\u0644 \u0639\u0645\u0627\u0646\u064A', locale: 'ar-OM', flag: '\uD83C\uDDF4\uD83C\uDDF2', decimalDigits: 3 },
   PKR: { code: 'PKR', symbol: '\u20A8', name: 'Pakistani Rupee', nameNative: '\u067E\u0627\u06A9\u0633\u062A\u0627\u0646\u06CC \u0631\u0648\u067E\u06CC\u06C1', locale: 'ur-PK', flag: '\uD83C\uDDF5\uD83C\uDDF0', decimalDigits: 2 },
+  PLN: { code: 'PLN', symbol: 'zł', name: 'Polish Złoty', nameNative: 'Polski złoty', locale: 'pl-PL', flag: '🇵🇱', decimalDigits: 2 },
   QAR: { code: 'QAR', symbol: '\u0631.\u0642', name: 'Qatari Riyal', nameNative: '\u0631\u064A\u0627\u0644 \u0642\u0637\u0631\u064A', locale: 'ar-QA', flag: '\uD83C\uDDF6\uD83C\uDDE6', decimalDigits: 2 },
   RWF: { code: 'RWF', symbol: 'RF', name: 'Rwandan Franc', nameNative: "Ifranga ry'u Rwanda", locale: 'rw-RW', flag: '\uD83C\uDDF7\uD83C\uDDFC', decimalDigits: 0 },
   SAR: { code: 'SAR', symbol: '\u0631.\u0633', name: 'Saudi Riyal', nameNative: '\u0631\u064A\u0627\u0644 \u0633\u0639\u0648\u062F\u064A', locale: 'ar-SA', flag: '\uD83C\uDDF8\uD83C\uDDE6', decimalDigits: 2 },
@@ -81,6 +83,15 @@ export function getCurrencyForJurisdiction(jurisdictionCountry) {
   // Fall back to the COUNTRY_OPTIONS table so 2-letter codes not listed in
   // JURISDICTION_TO_CURRENCY (e.g. "DE", "FR") still resolve correctly.
   return getCurrencyForCountry(jurisdictionCountry);
+}
+
+// An employee's own currency: the org's currency (including any org currency
+// override) when the employee is in the org's default country, otherwise the
+// currency of the employee's own country — multi-country orgs pay each
+// employee in their own country's currency.
+export function currencyInfoForCountry(countryCode, orgCurrencyInfo, orgCountryCode) {
+  if (!countryCode || countryCode === orgCountryCode) return orgCurrencyInfo;
+  return getCurrencyForJurisdiction(countryCode) || orgCurrencyInfo;
 }
 
 export function getCurrencyInfo(code) {
@@ -113,6 +124,26 @@ export function formatCurrency(amount, code, position = 'before') {
     return `${formatted}${symbol}`;
   }
   return `${symbol}${formatted}`;
+}
+
+// Locale-aware formatter for one explicit ISO currency code — used where a
+// screen shows several currencies side by side (multi-country runs), so each
+// amount is formatted in its own row's currency rather than the org default.
+export function createCurrencyFormatterForCode(code) {
+  if (!code) return (n) => (n == null ? "—" : formatCurrency(n));
+  const info = CURRENCY_MASTER[code];
+  return (n) => {
+    if (n == null || n === "" || isNaN(n)) return "—";
+    try {
+      return new Intl.NumberFormat(info?.locale || "en-US", {
+        style: "currency",
+        currency: code,
+        maximumFractionDigits: info?.decimalDigits ?? 2,
+      }).format(Number(n));
+    } catch {
+      return formatCurrency(n, code);
+    }
+  };
 }
 
 const SORTED_CURRENCY_CODES = Object.keys(CURRENCY_MASTER);
@@ -179,6 +210,7 @@ export const COUNTRY_OPTIONS = [
   { code: "NZ", name: "New Zealand", currency: "NZD" },
   { code: "OM", name: "Oman", currency: "OMR" },
   { code: "PK", name: "Pakistan", currency: "PKR" },
+  { code: "PL", name: "Poland", currency: "PLN" },
   { code: "QA", name: "Qatar", currency: "QAR" },
   { code: "RW", name: "Rwanda", currency: "RWF" },
   { code: "SA", name: "Saudi Arabia", currency: "SAR" },

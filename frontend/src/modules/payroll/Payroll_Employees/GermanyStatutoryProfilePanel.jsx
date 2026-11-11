@@ -383,24 +383,26 @@ export default function GermanyStatutoryProfilePanel({ employee, onClose }) {
                 )}
                 {showHistory && history.length > 0 && (
                   <div className="mt-3 max-h-48 overflow-y-auto rounded-[10px] border border-border">
-                    <table className="w-full text-[12px]">
-                      <thead className="bg-surface text-foreground-muted">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-semibold">Effective</th>
-                          <th className="px-3 py-2 text-left font-semibold">Tax class</th>
-                          <th className="px-3 py-2 text-left font-semibold">Source</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {history.map((h) => (
-                          <tr key={h.id} className="border-t border-border">
-                            <td className="px-3 py-2">{h.effectiveFrom} → {h.effectiveTo || "current"}</td>
-                            <td className="px-3 py-2">{h.deTaxClass || "—"}</td>
-                            <td className="px-3 py-2">{h.deElstamSource || "—"}</td>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[12px]">
+                        <thead className="bg-surface text-foreground-muted">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-semibold">Effective</th>
+                            <th className="px-3 py-2 text-left font-semibold">Tax class</th>
+                            <th className="px-3 py-2 text-left font-semibold">Source</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {history.map((h) => (
+                            <tr key={h.id} className="border-t border-border">
+                              <td className="px-3 py-2">{h.effectiveFrom} → {h.effectiveTo || "current"}</td>
+                              <td className="px-3 py-2">{h.deTaxClass || "—"}</td>
+                              <td className="px-3 py-2">{h.deElstamSource || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
@@ -425,28 +427,30 @@ export default function GermanyStatutoryProfilePanel({ employee, onClose }) {
                   {importAttempts.length === 0 ? (
                     <p className="px-3 py-3 text-[12px] text-foreground-muted">No import attempts recorded yet.</p>
                   ) : (
-                    <table className="w-full text-[12px]">
-                      <thead className="bg-surface text-foreground-muted">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-semibold">Imported</th>
-                          <th className="px-3 py-2 text-left font-semibold">Schema</th>
-                          <th className="px-3 py-2 text-left font-semibold">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {importAttempts.map((a) => (
-                          <tr key={a.id} className="border-t border-border">
-                            <td className="px-3 py-2">{a.importedAt ? new Date(a.importedAt).toLocaleString() : "—"}</td>
-                            <td className="px-3 py-2">{a.schemaVersion}</td>
-                            <td className="px-3 py-2">
-                              <span className={a.validationStatus === "APPLIED" ? "text-primary font-semibold" : "text-error font-semibold"}>
-                                {a.validationStatus}
-                              </span>
-                            </td>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[12px]">
+                        <thead className="bg-surface text-foreground-muted">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-semibold">Imported</th>
+                            <th className="px-3 py-2 text-left font-semibold">Schema</th>
+                            <th className="px-3 py-2 text-left font-semibold">Status</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {importAttempts.map((a) => (
+                            <tr key={a.id} className="border-t border-border">
+                              <td className="px-3 py-2">{a.importedAt ? new Date(a.importedAt).toLocaleString() : "—"}</td>
+                              <td className="px-3 py-2">{a.schemaVersion}</td>
+                              <td className="px-3 py-2">
+                                <span className={a.validationStatus === "APPLIED" ? "text-primary font-semibold" : "text-error font-semibold"}>
+                                  {a.validationStatus}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </div>
               )}

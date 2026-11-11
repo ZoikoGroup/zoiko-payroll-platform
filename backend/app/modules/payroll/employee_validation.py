@@ -36,6 +36,74 @@ def _clean(value):
     return value or None
 
 
+# Spreadsheet values people actually type, mapped onto each field's own
+# allowed values before validation (imports, the employee form and the API
+# all pass through here). Nothing is guessed: a value that still matches no
+# choice is reported exactly as before.
+_BLANK_WORDS = {"n/a", "na", "n.a.", "-", "--", "nil", "not applicable", "not applicable.", "null"}
+_TRUE_WORDS = {"true", "yes", "y", "1", "checked", "x", "on"}
+_FALSE_WORDS = {"false", "no", "n", "0", "unchecked", "off"}
+_DATE_PATTERN_TEXT = r"^\d{4}-\d{2}-\d{2}$"
+
+
+def _choice_key(value: str) -> str:
+    return re.sub(r"[\s_\-]+", " ", str(value).strip().lower())
+
+
+def _is_boolean_choice(choices) -> bool:
+    return bool(choices) and {c.lower() for c in choices} <= {"true", "false"}
+
+
+def _normalize_spec_value(spec: dict, raw: str):
+    """One field's raw spreadsheet/form value -> the value the field accepts,
+    or None when it is a "no value" placeholder (N/A, -, nil …)."""
+    choices = spec.get("choices")
+    lowered = raw.strip().lower()
+    if lowered in _BLANK_WORDS or (
+        lowered == "none"
+        and not spec.get("none_is_value")
+        and not any(c.lower() == "none" for c in (choices or []))
+    ):
+        return None
+    aliases = spec.get("aliases") if not (choices and raw in choices) else None
+    if callable(aliases):
+        mapped = aliases(raw)
+        if mapped is not None:
+            raw = mapped
+    elif isinstance(aliases, dict):
+        raw = aliases.get(_choice_key(raw), raw)
+    if _is_boolean_choice(choices):
+        if lowered in _TRUE_WORDS:
+            return "true"
+        if lowered in _FALSE_WORDS:
+            return "false"
+    if choices and raw not in choices:
+        wanted = _choice_key(raw)
+        for choice in choices:
+            if _choice_key(choice) == wanted:
+                return choice
+    pattern = spec.get("pattern")
+    if pattern is not None and getattr(pattern, "pattern", None) == _DATE_PATTERN_TEXT:
+        # Unambiguous variants only: 2026/01/15, 2026.01.15, or an ISO datetime.
+        m = re.match(r"^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$", raw) or re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$", raw)
+        if m:
+            return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return raw
+
+
+def _w4_vintage_alias(raw: str):
+    """W-4 form vintage from a year ("2024") or a plain word."""
+    text = raw.strip().lower()
+    year = re.search(r"(19|20)\d{2}", text)
+    if year:
+        return "2020 or later (current form)" if int(year.group(0)) >= 2020 else "Pre-2020 (legacy form)"
+    if text in ("current", "new", "2020+", "post-2020", "post 2020", "latest"):
+        return "2020 or later (current form)"
+    if text in ("legacy", "old", "pre-2020", "pre 2020", "before 2020"):
+        return "Pre-2020 (legacy form)"
+    return None
+
+
 class EmployeeValidationStrategy:
     """Base Strategy. FIELD_SPECS maps compliance_fields key -> spec dict:
         required: bool
@@ -84,6 +152,8 @@ class EmployeeValidationStrategy:
         cleaned = {}
         for key, spec in cls.FIELD_SPECS.items():
             raw = _clean(compliance.get(key))
+            if raw is not None:
+                raw = _normalize_spec_value(spec, raw)
             if raw is None:
                 if spec.get("required"):
                     errors.append(f"{key} is required for {cls.country_code} employees.")
@@ -207,6 +277,9 @@ class USEmployeeValidation(EmployeeValidationStrategy):
         "flsa_status": {"required": True, "choices": ["Exempt", "Non-Exempt"]},
         "w4_filing_status": {
             "choices": ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"],
+            "aliases": {"s": "Single", "mfj": "Married Filing Jointly", "married jointly": "Married Filing Jointly",
+                        "mfs": "Married Filing Separately", "married separately": "Married Filing Separately",
+                        "hoh": "Head of Household", "married": "Married Filing Jointly"},
         },
         # Form W-4 Step 2 "Multiple Jobs or Spouse Works" checkbox (ZP-TAX-
         # US-2026-001 §3.3) — optional; unset/false means the standard
@@ -219,7 +292,8 @@ class USEmployeeValidation(EmployeeValidationStrategy):
         # all (found 2026-09-15 Org Admin onboarding-guidance audit); unset
         # defaults to the current post-2020 table, same as before this
         # field had any UI path.
-        "w4_form_vintage": {"choices": ["2020 or later (current form)", "Pre-2020 (legacy form)"]},
+        "w4_form_vintage": {"choices": ["2020 or later (current form)", "Pre-2020 (legacy form)"],
+                            "aliases": _w4_vintage_alias},
         # Federal W-4 §3.4 controls (ZP-TAX-US-2026-001, gap-closure Plan
         # Phase 2d) — all optional; unset means each is a complete no-op
         # in engine/countries/us.py, never a guessed value.
@@ -378,6 +452,11 @@ class USEmployeeValidation(EmployeeValidationStrategy):
         "reciprocity_certificate_expiry": lambda v: date.fromisoformat(v) if v else None,
         "state_income_tax_election_pct": lambda v: Decimal(v) if v else None,
         "w4_step2_checkbox": lambda v: str(v).lower() == "true",
+        # Real Boolean / Date columns too — without these the string "false"
+        # (or "2026-01-15") was written as-is and the INSERT failed.
+        "is_nonresident_alien": lambda v: str(v).lower() == "true",
+        "residency_certification_on_file": lambda v: str(v).lower() == "true",
+        "residency_certification_date": lambda v: date.fromisoformat(v) if v else None,
         # Compact codes matching what us.py's `ctx.w4_form_vintage ==
         # "PRE_2020"` check literally compares against — same
         # human-readable-in-compliance_fields/compact-in-column split as
@@ -988,6 +1067,7 @@ class SGEmployeeValidation(EmployeeValidationStrategy):
         # Authority/HR-derived fund codes only (SG-015) — never race/religion.
         "shg_funds": {
             "upper": True, "strip_chars": " ",
+            "none_is_value": True,
             "pattern": re.compile(r"^(NONE|(CDAC|ECF|MBMF|SINDA)(=\d{1,4}(\.\d{1,2})?)?(,(CDAC|ECF|MBMF|SINDA)(=\d{1,4}(\.\d{1,2})?)?)*)$"),
             "error": "SHG funds must be NONE or a comma-separated list of CDAC, ECF, MBMF, SINDA — optionally with the "
                      "employee's SHG-instructed monthly amount, e.g. MBMF=10.00.",
@@ -1851,6 +1931,109 @@ class ZAEmployeeValidation(EmployeeValidationStrategy):
                 "South African ID number fails the YYMMDD date check or the Luhn check digit.")
 
 
+# ── Poland (ZP-PL-ENG-001 Phase 0) ─────────────────────────────────────────
+# Published identifier checksums (identifier FORMAT, not statutory payroll
+# content, so they live in code like the ZA Luhn check). Never echo a value.
+_PL_PESEL_WEIGHTS = (1, 3, 7, 9, 1, 3, 7, 9, 1, 3)
+_PL_NIP_WEIGHTS = (6, 5, 7, 2, 3, 4, 5, 6, 7)
+_PL_REGON9_WEIGHTS = (8, 9, 2, 3, 4, 5, 6, 7)
+_PL_REGON14_WEIGHTS = (2, 4, 8, 5, 0, 9, 7, 3, 6, 1, 2, 4, 8)
+# PESEL month offset -> century (the birth month carries the century).
+_PL_PESEL_CENTURIES = ((80, 1800), (60, 2200), (40, 2100), (20, 2000), (0, 1900))
+
+
+def _pl_digits(value) -> str:
+    return re.sub(r"[\s-]", "", str(value or ""))
+
+
+def pl_pesel_birth_date(value) -> Optional[date]:
+    """The date of birth encoded in a PESEL, or None if it is not a real date."""
+    raw = _pl_digits(value)
+    if not re.fullmatch(r"\d{11}", raw):
+        return None
+    yy, mm, dd = int(raw[0:2]), int(raw[2:4]), int(raw[4:6])
+    for offset, century in _PL_PESEL_CENTURIES:
+        if offset < mm <= offset + 12:
+            try:
+                return date(century + yy, mm - offset, dd)
+            except ValueError:
+                return None
+    return None
+
+
+def pl_pesel_is_valid(value) -> bool:
+    raw = _pl_digits(value)
+    if not re.fullmatch(r"\d{11}", raw) or pl_pesel_birth_date(raw) is None:
+        return False
+    total = sum(int(d) * w for d, w in zip(raw[:10], _PL_PESEL_WEIGHTS))
+    return (10 - total % 10) % 10 == int(raw[10])
+
+
+def pl_nip_is_valid(value) -> bool:
+    raw = _pl_digits(value)
+    if not re.fullmatch(r"\d{10}", raw):
+        return False
+    check = sum(int(d) * w for d, w in zip(raw[:9], _PL_NIP_WEIGHTS)) % 11
+    return check != 10 and check == int(raw[9])
+
+
+def pl_regon_is_valid(value) -> bool:
+    raw = _pl_digits(value)
+    if re.fullmatch(r"\d{9}", raw):
+        check = sum(int(d) * w for d, w in zip(raw[:8], _PL_REGON9_WEIGHTS)) % 11
+        return (0 if check == 10 else check) == int(raw[8])
+    if re.fullmatch(r"\d{14}", raw):
+        if not pl_regon_is_valid(raw[:9]):
+            return False
+        check = sum(int(d) * w for d, w in zip(raw[:13], _PL_REGON14_WEIGHTS)) % 11
+        return (0 if check == 10 else check) == int(raw[13])
+    return False
+
+
+class PLEmployeeValidation(EmployeeValidationStrategy):
+    """Poland (ZP-PL-ENG-001) - employee fields that are NOT vault-only.
+
+    DORMANT: consulted only while PL_TENANT_ONBOARDING_ENABLED is on.
+    PESEL and NIP are held ONLY in the encrypted identifier vault
+    (payroll_pl_identifier_vault via /api/payroll/poland/employees/{id}/
+    identifiers, spec section 13, PL-025): a compliance field carrying either
+    is refused, never stored, and the refusal never echoes the value. The run
+    preflight requires a vault PESEL or a passport number (MISSING_IDENTIFIER).
+    The IBAN must be a Polish IBAN passing ISO 13616 mod-97 (masked
+    platform-wide, PLATFORM_SENSITIVE_COMPLIANCE_FIELDS).
+    """
+
+    country_code = "PL"
+    duplicate_field = "passport_number"
+    SENSITIVE_FIELDS = ("passport_number",)
+    FIELD_SPECS = {
+        "passport_number": {
+            "required": False, "upper": True, "strip_chars": " -",
+            "pattern": re.compile(r"^[A-Z0-9]{6,20}$"),
+            "error": "Passport number must be 6-20 letters or digits.",
+        },
+        "iban": {"required": False, "upper": True, "strip_chars": " "},
+    }
+    _VAULT_ONLY = ("national_id", "pesel", "tax_number", "nip", "tax_id")
+
+    @classmethod
+    def validate(cls, compliance: dict) -> dict:
+        keys = {str(k).strip().lower() for k in (compliance or {})}
+        if keys & set(cls._VAULT_ONLY):
+            raise BadRequestException("Polish PESEL and NIP are held only in the encrypted identifier vault "
+                                      "(/api/payroll/poland/employees/{id}/identifiers), never as an "
+                                      "employee field.")
+        return super().validate(compliance)
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        iban = cleaned.get("iban")
+        if iban:
+            if not re.fullmatch(r"PL\d{26}", iban) or not iban_checksum_ok(iban):
+                raise BadRequestException(
+                    "Polish IBAN must be PL followed by 26 digits with a valid check digit.")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1877,6 +2060,31 @@ _STRATEGIES = {
     "NL": NLEmployeeValidation,
 }
 
+class NZEmployeeValidation(EmployeeValidationStrategy):
+    """New Zealand (ZP-NZ-ENG-001 Phase 4).
+
+    DORMANT: consulted only while NZ_TENANT_ONBOARDING_ENABLED is on. Every
+    statutory fact (tax code, KiwiSaver, student loan, notices) lives in the
+    effective-dated payroll_nz_* records with a second person's approval, and
+    the IRD number lives ONLY in the encrypted IRD vault (NZ-023): a
+    compliance field that looks like an IRD number is refused, never stored.
+    """
+
+    country_code = "NZ"
+    SENSITIVE_FIELDS = ("ird_number", "tax_number")
+    FIELD_SPECS = {}
+    _VAULT_ONLY = ("ird_number", "irdnumber", "ird", "tax_number", "tax_file_number")
+
+    @classmethod
+    def validate(cls, compliance: dict) -> dict:
+        keys = {str(k).strip().lower() for k in (compliance or {})}
+        if keys & set(cls._VAULT_ONLY):
+            raise BadRequestException("New Zealand IRD numbers are held only in the encrypted IRD vault "
+                                      "(/api/payroll/new-zealand/employees/{id}/ird-number), never as an "
+                                      "employee field.")
+        return super().validate(compliance)
+
+
 # Strategies built but dormant (Mexico, Phase 4b): consulted only while
 # their country's onboarding flag is on, and never listed in _STRATEGIES —
 # so the "Supported: …" message every other country sees never changes.
@@ -1886,6 +2094,10 @@ _DORMANT_STRATEGIES = {
     "BR": BREmployeeValidation,
     # South Africa (ZP-ZA-ENG-001 Phase 5): dormant until the release gates.
     "ZA": ZAEmployeeValidation,
+    # New Zealand (ZP-NZ-ENG-001 Phase 4): dormant until NZ_TENANT_ONBOARDING_ENABLED.
+    "NZ": NZEmployeeValidation,
+    # Poland (ZP-PL-ENG-001 Phase 0): dormant until PL_TENANT_ONBOARDING_ENABLED.
+    "PL": PLEmployeeValidation,
 }
 
 
@@ -1901,6 +2113,18 @@ def _dormant_strategy(code: str):
         from app.modules.payroll import south_africa_dormancy
 
         return strategy if south_africa_dormancy.onboarding_enabled() else None
+    if code == "NZ":
+        from app.modules.payroll import nz_dormancy
+
+        # The flag, or any Option 3 canary organisation: only an organisation the
+        # organisation-level gate admitted can hold a New Zealand employee.
+        return strategy if nz_dormancy.onboarding_enabled() or nz_dormancy.canary_organization_ids() else None
+    if code == "PL":
+        from app.modules.payroll import poland_dormancy
+
+        # The flag, or any canary organisation: only an organisation the
+        # organisation-level gate admitted can hold a Polish employee.
+        return strategy if poland_dormancy.onboarding_enabled() or poland_dormancy.canary_organization_ids() else None
     from app.modules.payroll import mexico_dormancy
 
     # Phase 10e: the kill switch only — no session here. A Mexican employee

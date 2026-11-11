@@ -161,7 +161,7 @@ def test_list_available_reports_for_org(db, organization):
 
     template = _build_template(db, creator, approver)
     available = service.list_available_reports_for_org(db, organization.id, "2026-27")
-    assert available == [{"reportType": "TDS", "name": template.name}]
+    assert available == [{"reportType": "TDS", "name": template.name, "country": "IN"}]
 
     # A different reporting year sees nothing.
     assert service.list_available_reports_for_org(db, organization.id, "2027-28") == []
@@ -256,7 +256,7 @@ def test_generate_report_uk_p60(db, organization):
     assert generated.rendered_data["employees"][0]["values"]["ni_employee"] == 950.0
 
     available = service.list_available_reports_for_org(db, organization.id, "2026-27")
-    assert available == [{"reportType": "P60", "name": "P60"}]
+    assert available == [{"reportType": "P60", "name": "P60", "country": "UK"}]
 
 
 # ── UK RTI gap-closure Part 9 (ZP-TAX-UK-2026-27-001 §18, 2026-09-09): ───

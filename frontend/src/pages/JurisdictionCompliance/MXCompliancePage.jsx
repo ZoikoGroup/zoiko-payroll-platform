@@ -18,10 +18,10 @@ export default function MXCompliancePage() {
   const extraTabs = useMemo(() => mexicoExtraTabs(orgId, state), [orgId, state]);
   return (
     <div>
-      <div className="mb-4 flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface p-4">
         <span className="text-sm font-semibold text-foreground">Organisation</span>
         <select
-          className="max-w-md flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground"
+          className="w-full min-w-0 max-w-md flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground sm:w-auto"
           value={orgId ?? ""}
           onChange={(e) => setOrgId(e.target.value ? Number(e.target.value) : null)}
           aria-label="Select organisation"

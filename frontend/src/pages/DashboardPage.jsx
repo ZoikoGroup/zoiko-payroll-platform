@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Building2, Users, ShieldCheck, CreditCard, RefreshCcw, LayoutGrid, Info,
 } from "lucide-react";
@@ -8,6 +8,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 
+import { apiFetch, clearSession } from "../api/client";
 import StatusPill from "../components/StatusPill";
 import DateRangeFilter from "../components/DateRangeFilter";
 import { resolveDateRange } from "../utils/dateRangePresets";
@@ -118,6 +119,14 @@ export default function DashboardPage() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState({ preset: "thisYear", ...resolveDateRange("thisYear") });
+  const navigate = useNavigate();
+
+  // Mark the Command Center as viewed so the high-severity alert badge in the
+  // shell clears. Alerts remain in the feed (they're computed dynamically),
+  // but the "new updates" indicator is dismissed once the page is opened.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("alerts-viewed"));
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -132,12 +141,18 @@ export default function DashboardPage() {
         setCharts(chartsRes);
       })
       .catch((err) => {
+        // 401/403 means the session is invalid — clear it and go to login.
+        if (err.status === 401 || err.status === 403) {
+          clearSession();
+          navigate("/login", { replace: true });
+          return;
+        }
         const friendly = aggregateRefusalMessage(err);
         if (friendly) setNotice(friendly);
         else setError(err.message);
       })
       .finally(() => setLoading(false));
-  }, [dateRange]);
+  }, [dateRange, navigate]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -348,37 +363,39 @@ export default function DashboardPage() {
         </ChartCard>
       </div>
 
-      <div className="flex items-center justify-between mt-8 mb-3">
+      <div className="flex items-center flex-wrap justify-between gap-3 mt-8 mb-3">
         <h2 className="text-lg font-semibold text-foreground">Recent Organizations</h2>
         <Link to="/super-admin/organizations" className="text-sm font-medium text-primary-hover hover:text-primary-active">
           View all →
         </Link>
       </div>
       <div className="bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-background text-left text-xs text-foreground-muted">
-            <tr>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Code</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(stats?.recent_organizations || []).map((org) => (
-              <tr key={org.id} className="border-t border-border-light">
-                <td className="px-4 py-3 font-medium text-foreground">{org.organization_name}</td>
-                <td className="px-4 py-3 font-mono text-xs text-foreground-muted">{org.organization_code}</td>
-                <td className="px-4 py-3">
-                  <StatusPill status={org.is_active ? "active" : "inactive"} />
-                </td>
-                <td className="px-4 py-3 text-foreground-muted">
-                  {parseUtc(org.created_at)?.toLocaleDateString() ?? "—"}
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-background text-left text-xs text-foreground-muted">
+              <tr>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Code</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Created</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(stats?.recent_organizations || []).map((org) => (
+                <tr key={org.id} className="border-t border-border-light">
+                  <td className="px-4 py-3 font-medium text-foreground">{org.organization_name}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-foreground-muted">{org.organization_code}</td>
+                  <td className="px-4 py-3">
+                    <StatusPill status={org.is_active ? "active" : "inactive"} />
+                  </td>
+                  <td className="px-4 py-3 text-foreground-muted">
+                    {parseUtc(org.created_at)?.toLocaleDateString() ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {stats && (stats.recent_organizations || []).length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
             <LayoutGrid size={28} className="text-border-strong" />

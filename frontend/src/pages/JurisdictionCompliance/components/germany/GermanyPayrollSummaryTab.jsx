@@ -221,70 +221,72 @@ export default function GermanyPayrollSummaryTab() {
           <h4 className="mb-3 flex items-center gap-1.5 text-sm font-bold text-foreground">
             <BarChart3 size={14} /> Statutory contributions
           </h4>
-          <table className="w-full text-xs">
-            <tbody>
-              {[
-                {
-                  label: "Pension insurance (RV)",
-                  status: pension.status,
-                  employee: pension.employeeAmount,
-                  employer: pension.employerAmount,
-                },
-                {
-                  label: "Social insurance combined (ALV + GKV + PV)",
-                  status: siCombined.status,
-                  employee: siCombined.employeeAmount,
-                  employer: siCombined.employerAmount,
-                },
-                {
-                  label: "Church tax (KiSt)", status: churchTax.status, total: churchTax.amount,
-                  excludedPartialCount: churchTax.excludedPartialCount,
-                },
-                {
-                  label: "Solidarity surcharge (Soli)", status: solidarity.status, total: solidarity.amount,
-                  reason: solidarity.reason, excludedPartialCount: solidarity.excludedPartialCount,
-                },
-              ].map((row) => (
-                <tr key={row.label} className="border-b border-border/70 last:border-0">
-                  <td className="py-2 pr-2 align-top text-foreground-muted">{row.label}</td>
-                  <td className="py-2 text-right align-top">
-                    {/* Phase 8BU: a PARTIAL row still has a real amount
-                        (whatever wasn't excluded) — show it alongside the
-                        chip instead of hiding it behind an "unavailable"
-                        state, which would bury a genuine, real figure. */}
-                    {row.status === "CALCULATED" || row.status === "PARTIAL" ? (
-                      <div className="space-y-0.5">
-                        {row.total !== undefined ? (
-                          <p className="font-semibold text-foreground">{formatCurrency(row.total, "EUR")}</p>
-                        ) : (
-                          <p className="text-foreground">
-                            Employee {formatCurrency(row.employee, "EUR")} · Employer {formatCurrency(row.employer, "EUR")}
-                          </p>
-                        )}
-                        {row.status === "PARTIAL" ? (
-                          <div className="flex justify-end">
-                            <StatusChip status="PARTIAL" />
-                          </div>
-                        ) : null}
-                        {row.status === "PARTIAL" && row.excludedPartialCount ? (
-                          <p className="text-[11px] text-foreground-disabled">
-                            Excludes {row.excludedPartialCount} partial payslip(s) where this is unavailable.
-                          </p>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="text-right">
-                        <StatusChip status={row.status} />
-                        {row.reason ? (
-                          <p className="mt-1 max-w-md text-right text-[11px] text-foreground-disabled">{row.reason}</p>
-                        ) : null}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <tbody>
+                {[
+                  {
+                    label: "Pension insurance (RV)",
+                    status: pension.status,
+                    employee: pension.employeeAmount,
+                    employer: pension.employerAmount,
+                  },
+                  {
+                    label: "Social insurance combined (ALV + GKV + PV)",
+                    status: siCombined.status,
+                    employee: siCombined.employeeAmount,
+                    employer: siCombined.employerAmount,
+                  },
+                  {
+                    label: "Church tax (KiSt)", status: churchTax.status, total: churchTax.amount,
+                    excludedPartialCount: churchTax.excludedPartialCount,
+                  },
+                  {
+                    label: "Solidarity surcharge (Soli)", status: solidarity.status, total: solidarity.amount,
+                    reason: solidarity.reason, excludedPartialCount: solidarity.excludedPartialCount,
+                  },
+                ].map((row) => (
+                  <tr key={row.label} className="border-b border-border/70 last:border-0">
+                    <td className="py-2 pr-2 align-top text-foreground-muted">{row.label}</td>
+                    <td className="py-2 text-right align-top">
+                      {/* Phase 8BU: a PARTIAL row still has a real amount
+                          (whatever wasn't excluded) — show it alongside the
+                          chip instead of hiding it behind an "unavailable"
+                          state, which would bury a genuine, real figure. */}
+                      {row.status === "CALCULATED" || row.status === "PARTIAL" ? (
+                        <div className="space-y-0.5">
+                          {row.total !== undefined ? (
+                            <p className="font-semibold text-foreground">{formatCurrency(row.total, "EUR")}</p>
+                          ) : (
+                            <p className="text-foreground">
+                              Employee {formatCurrency(row.employee, "EUR")} · Employer {formatCurrency(row.employer, "EUR")}
+                            </p>
+                          )}
+                          {row.status === "PARTIAL" ? (
+                            <div className="flex justify-end">
+                              <StatusChip status="PARTIAL" />
+                            </div>
+                          ) : null}
+                          {row.status === "PARTIAL" && row.excludedPartialCount ? (
+                            <p className="text-[11px] text-foreground-disabled">
+                              Excludes {row.excludedPartialCount} partial payslip(s) where this is unavailable.
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="text-right">
+                          <StatusChip status={row.status} />
+                          {row.reason ? (
+                            <p className="mt-1 max-w-md text-right text-[11px] text-foreground-disabled">{row.reason}</p>
+                          ) : null}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div className="rounded-xl border border-border bg-surface p-4">
@@ -329,26 +331,28 @@ export default function GermanyPayrollSummaryTab() {
             Real gross/RV/ALV/GKV/PV figures ARE persisted for these employees — only the listed component(s)
             could not be calculated, and net pay is never shown as a fabricated zero.
           </p>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wide text-foreground-disabled">
-                <th className="py-1 pr-2 font-semibold">Employee</th>
-                <th className="py-1 pr-2 font-semibold">Period</th>
-                <th className="py-1 font-semibold">Unavailable component(s)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {partialEmployees.map((p) => (
-                <tr key={`${p.payrollRunId}-${p.employeeId}`} className="border-b border-border/70 last:border-0">
-                  <td className="py-2 pr-2 align-top text-foreground">{p.employeeName}</td>
-                  <td className="py-2 pr-2 align-top text-foreground-muted">{p.periodLabel}</td>
-                  <td className="py-2 align-top">
-                    <span className="font-mono text-[11px] text-warning">{(p.unavailableComponents || []).join(", ")}</span>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-foreground-disabled">
+                  <th className="py-1 pr-2 font-semibold">Employee</th>
+                  <th className="py-1 pr-2 font-semibold">Period</th>
+                  <th className="py-1 font-semibold">Unavailable component(s)</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {partialEmployees.map((p) => (
+                  <tr key={`${p.payrollRunId}-${p.employeeId}`} className="border-b border-border/70 last:border-0">
+                    <td className="py-2 pr-2 align-top text-foreground">{p.employeeName}</td>
+                    <td className="py-2 pr-2 align-top text-foreground-muted">{p.periodLabel}</td>
+                    <td className="py-2 align-top">
+                      <span className="font-mono text-[11px] text-warning">{(p.unavailableComponents || []).join(", ")}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
 
@@ -358,29 +362,31 @@ export default function GermanyPayrollSummaryTab() {
             <FileWarning size={14} /> Blocked employees
           </h4>
           {blockedEmployees.length ? (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-foreground-disabled">
-                  <th className="py-1 pr-2 font-semibold">Employee</th>
-                  <th className="py-1 pr-2 font-semibold">Period</th>
-                  <th className="py-1 font-semibold">Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {blockedEmployees.map((b, i) => (
-                  <tr key={`${b.payrollRunId}-${b.employeeId}`} className="border-b border-border/70 last:border-0">
-                    <td className="py-2 pr-2 align-top text-foreground">{b.employeeName}</td>
-                    <td className="py-2 pr-2 align-top text-foreground-muted">{b.periodLabel}</td>
-                    <td className="py-2 align-top">
-                      <span className="font-mono text-[11px] text-warning">{b.blockedReasonCode}</span>
-                      {b.blockedReasonMessage ? (
-                        <p className="mt-0.5 text-[11px] text-foreground-disabled">{b.blockedReasonMessage}</p>
-                      ) : null}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-foreground-disabled">
+                    <th className="py-1 pr-2 font-semibold">Employee</th>
+                    <th className="py-1 pr-2 font-semibold">Period</th>
+                    <th className="py-1 font-semibold">Reason</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {blockedEmployees.map((b, i) => (
+                    <tr key={`${b.payrollRunId}-${b.employeeId}`} className="border-b border-border/70 last:border-0">
+                      <td className="py-2 pr-2 align-top text-foreground">{b.employeeName}</td>
+                      <td className="py-2 pr-2 align-top text-foreground-muted">{b.periodLabel}</td>
+                      <td className="py-2 align-top">
+                        <span className="font-mono text-[11px] text-warning">{b.blockedReasonCode}</span>
+                        {b.blockedReasonMessage ? (
+                          <p className="mt-0.5 text-[11px] text-foreground-disabled">{b.blockedReasonMessage}</p>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p className="text-xs text-foreground-disabled">No blocked employees in this period.</p>
           )}
@@ -391,34 +397,36 @@ export default function GermanyPayrollSummaryTab() {
             <CalendarClock size={14} /> Payroll runs
           </h4>
           {payrollRuns.length ? (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-foreground-disabled">
-                  <th className="py-1 pr-2 font-semibold">Period</th>
-                  <th className="py-1 pr-2 font-semibold">Status</th>
-                  <th className="py-1 pr-2 font-semibold">Pay date</th>
-                  <th className="py-1 text-right font-semibold">Calculated</th>
-                  <th className="py-1 text-right font-semibold">Blocked</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payrollRuns.map((r) => (
-                  <tr key={r.runId} className="border-b border-border/70 last:border-0">
-                    <td className="py-2 pr-2 text-foreground">{r.periodLabel}</td>
-                    <td className="py-2 pr-2">
-                      <span className="rounded bg-surface-muted px-1.5 py-0.5 text-[11px] font-semibold text-foreground-muted">
-                        {r.runStatus}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-2 text-foreground-muted">{r.payDate || "—"}</td>
-                    <td className="py-2 pr-2 text-right text-foreground">{r.calculatedCount}</td>
-                    <td className={`py-2 text-right ${r.blockedCount ? "text-warning" : "text-foreground"}`}>
-                      {r.blockedCount}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-foreground-disabled">
+                    <th className="py-1 pr-2 font-semibold">Period</th>
+                    <th className="py-1 pr-2 font-semibold">Status</th>
+                    <th className="py-1 pr-2 font-semibold">Pay date</th>
+                    <th className="py-1 text-right font-semibold">Calculated</th>
+                    <th className="py-1 text-right font-semibold">Blocked</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {payrollRuns.map((r) => (
+                    <tr key={r.runId} className="border-b border-border/70 last:border-0">
+                      <td className="py-2 pr-2 text-foreground">{r.periodLabel}</td>
+                      <td className="py-2 pr-2">
+                        <span className="rounded bg-surface-muted px-1.5 py-0.5 text-[11px] font-semibold text-foreground-muted">
+                          {r.runStatus}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-2 text-foreground-muted">{r.payDate || "—"}</td>
+                      <td className="py-2 pr-2 text-right text-foreground">{r.calculatedCount}</td>
+                      <td className={`py-2 text-right ${r.blockedCount ? "text-warning" : "text-foreground"}`}>
+                        {r.blockedCount}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p className="text-xs text-foreground-disabled">No Germany payroll runs for this period.</p>
           )}

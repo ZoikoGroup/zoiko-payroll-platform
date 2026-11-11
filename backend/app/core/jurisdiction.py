@@ -64,6 +64,17 @@ REGISTRATION_COUNTRIES = [
     # in turn requires the §16/§37 readiness gates (evidence, certification,
     # four-eyes) — adding the name here never activates Sweden by itself.
     "Sweden",
+    # Owner decision 2026-10-29: every configured payroll country is offered
+    # at registration. Listing a country here still never opens it by
+    # itself — onboarding also needs its registry row AVAILABLE and an
+    # Active canonical pack (get_jurisdiction_onboarding_block_reason).
+    "Brazil",
+    "Hong Kong",
+    "Italy",
+    "Netherlands",
+    "Saudi Arabia",
+    "Singapore",
+    "Switzerland",
 ]
 
 # Keyed by the 2-letter code the rest of the payroll module uses
@@ -651,6 +662,54 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^\d{4}/\d{6}/\d{2}$", "example": "2026/123456/07", "primary": False},
         ],
     },
+    # Japan (ZP-JP-ENG-001 Phase 1) - schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES: live Japanese payroll stays disabled until G0-G8
+    # are signed and the registry row leaves PLANNED. Formats only; the
+    # Corporate Number check digit is verified with the employer-registration
+    # service (Phase 5), and My Number is NEVER an organisation identifier.
+    "JP": {
+        "label": "Corporate Number / Labour Insurance Number",
+        "currency": "JPY",
+        "fields": [
+            {"key": "corporate_number", "label": "Corporate Number (NTA, 13 digits)",
+             "pattern": r"^\d{13}$", "example": "1234567890123", "primary": True},
+            {"key": "labour_insurance_number", "label": "Labour insurance number (14 digits)",
+             "pattern": r"^\d{14}$", "example": "13101234567000", "primary": False},
+        ],
+    },
+    # New Zealand (ZP-NZ-ENG-001 Phase 0) - schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES: live New Zealand payroll stays disabled until
+    # release gates G1-G7 are signed and the registry row leaves PLANNED.
+    # Only the public NZBN lives here, because these identifiers are stored in
+    # plaintext on the organisation. The employer IRD number can be a sole
+    # trader's personal IRD number, so it is held encrypted in the NZ IRD vault
+    # (Phase 2) and checked with nz_ird_number_valid below.
+    "NZ": {
+        "label": "NZBN",
+        "currency": "NZD",
+        "fields": [
+            {"key": "nzbn", "label": "NZBN (New Zealand Business Number, 13 digits)",
+             "pattern": r"^\d{13}$", "example": "9429041234567", "primary": True},
+        ],
+    },
+    # Poland (ZP-PL-ENG-001 Phase 0) - schema only. Deliberately NOT in
+    # REGISTRATION_COUNTRIES: live Polish payroll stays disabled until release
+    # gates G1-G7 are signed and the registry row leaves PLANNED (PL-001).
+    # Formats only; the NIP / REGON check digits are verified by
+    # employee_validation.pl_nip_is_valid / pl_regon_is_valid. PESEL is a
+    # personal identifier and never an organisation field.
+    "PL": {
+        "label": "NIP / REGON / KRS",
+        "currency": "PLN",
+        "fields": [
+            {"key": "nip", "label": "NIP (tax identification number, 10 digits)",
+             "pattern": r"^\d{10}$", "example": "1234563218", "primary": True},
+            {"key": "regon", "label": "REGON (statistical number, 9 or 14 digits)",
+             "pattern": r"^(\d{9}|\d{14})$", "example": "123456785", "primary": False},
+            {"key": "krs", "label": "KRS (National Court Register number, 10 digits)",
+             "pattern": r"^\d{10}$", "example": "0000123456", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -704,6 +763,25 @@ COUNTRY_NAME_TO_CODE = {
     "republic of south africa": "ZA",
     "za": "ZA",
     "rsa": "ZA",
+    "japan": "JP",
+    "nippon": "JP",
+    "nihon": "JP",
+    # Without these, "New Zealand" truncates to "NE" (Nebraska / Niger) in
+    # payroll.service._normalize_country.
+    "new zealand": "NZ",
+    "newzealand": "NZ",
+    "aotearoa": "NZ",
+    "aotearoa new zealand": "NZ",
+    "nzl": "NZ",
+    # Without these, "Poland" truncates to "PO" in
+    # payroll.service._normalize_country. The bare "pl" is deliberately NOT an
+    # alias here ("PL" resolves through JURISDICTION_TAX_SCHEMAS; "pl" is also
+    # the paid-leave attendance code).
+    "poland": "PL",
+    "polska": "PL",
+    "rzeczpospolita polska": "PL",
+    "republic of poland": "PL",
+    "pol": "PL",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -732,6 +810,9 @@ CODE_TO_COUNTRY_NAME = {
     "MX": "Mexico",
     "BR": "Brazil",
     "ZA": "South Africa",
+    "JP": "Japan",
+    "NZ": "New Zealand",
+    "PL": "Poland",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this
@@ -748,6 +829,33 @@ ALL_CODE_TO_COUNTRY_NAME = {
     **CODE_TO_COUNTRY_NAME,
     "CA": "Canada",
 }
+
+
+_NZ_IRD_PRIMARY_WEIGHTS = (3, 2, 7, 6, 5, 4, 3, 2)
+_NZ_IRD_SECONDARY_WEIGHTS = (7, 4, 3, 2, 5, 2, 7, 6)
+
+
+def nz_ird_number_valid(value) -> bool:
+    """Inland Revenue's IRD-number check (an algorithm, not a statutory rate):
+    8 or 9 digits (dashes and spaces ignored) in the range 10,000,000 to
+    150,000,000, with a modulus-11 check digit. When the primary weights give
+    a check digit of 10, the secondary weights are used instead; 10 again
+    means the number is invalid."""
+    if value is None:
+        return False
+    digits = "".join(ch for ch in str(value) if ch not in " -")
+    if not digits.isdigit() or len(digits) not in (8, 9):
+        return False
+    number = int(digits)
+    if not 10_000_000 < number < 150_000_000:
+        return False
+    base, check = digits[:-1].zfill(8), int(digits[-1])
+    for weights in (_NZ_IRD_PRIMARY_WEIGHTS, _NZ_IRD_SECONDARY_WEIGHTS):
+        remainder = sum(int(d) * w for d, w in zip(base, weights)) % 11
+        expected = 0 if remainder == 0 else 11 - remainder
+        if expected != 10:
+            return expected == check
+    return False
 
 
 def get_jurisdiction_code(country) -> Optional[str]:

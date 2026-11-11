@@ -1556,6 +1556,26 @@ class PayrollRun(Base):
     # South Africa (ZP-ZA-ENG-001 ZA-016): approval bound to the frozen ZA
     # snapshots + rule pack + engine build; NULL for non-ZA runs (447f57564983).
     za_approval_fingerprint = Column(JSON, nullable=True)
+    # Japan (ZP-JP-ENG-001): approval bound to the frozen JP snapshots + rule
+    # pack + engine build; NULL for non-JP runs (f686d5128f8a).
+    jp_approval_fingerprint = Column(JSON, nullable=True)
+    # Japan run-level payment kind: SALARY or BONUS. NULL = SALARY. This is
+    # deliberately on the run, not the employee: a worker is not permanently
+    # "a bonus employee" and must return to monthly SI after a bonus run.
+    jp_payment_kind = Column(String(10), nullable=True)
+    # New Zealand (ZP-NZ-ENG-001): approval bound to the frozen NZ snapshots +
+    # rule pack + engine build; NULL for non-NZ runs (0e697c2388bf).
+    nz_approval_fingerprint = Column(JSON, nullable=True)
+    # New Zealand run-level payment kind: REGULAR / OUT_OF_CYCLE / LUMP_SUM /
+    # FINAL / HOLIDAY_PAY_ADVANCE / CORRECTION. NULL = REGULAR. On the run, never
+    # the employee (the Japan P5 lesson: a payment kind must not stick).
+    nz_payment_kind = Column(String(20), nullable=True)
+    # New Zealand per-run options (Phase 6, c6ea8c6c35ce): holidayAdvanceMethod,
+    # advancePeriods, lumpSumComponent, finalPayCaseId.
+    nz_run_options = Column(JSON, nullable=True)
+    # Poland (ZP-PL-ENG-001): approval bound to the frozen PL snapshots + rule
+    # pack + engine build; NULL for non-PL runs (1ee3bbde33bb).
+    pl_approval_fingerprint = Column(JSON, nullable=True)
     # Phase 4.2: the first payment channel used for this run — GENERIC_FILE
     # (bank transfer file) or SEPA (NL pain.001 batch); the other is refused,
     # so one run is never paid twice. Migration 8f90dde5f7b5.
@@ -2005,6 +2025,19 @@ class PayslipItem(Base):
     # separate PAYE / UIF / SDL / ETI bases and the calculation trace), replayed
     # exactly as computed. NULL for non-ZA payslips (447f57564983).
     za_calculation_snapshot = Column(JSON, nullable=True)
+    # Japan (ZP-JP-ENG-001): frozen JP inputs + jp_result + trace, replayed
+    # exactly as computed; NULL for non-JP payslips (f686d5128f8a).
+    jp_calculation_snapshot = Column(JSON, nullable=True)
+    # New Zealand (ZP-NZ-ENG-001): frozen NZ inputs + nz_result + trace, replayed
+    # exactly as computed; NULL for non-NZ payslips (0e697c2388bf).
+    nz_calculation_snapshot = Column(JSON, nullable=True)
+    # New Zealand (Phase 6, c6ea8c6c35ce): a correction payslip -> the payslip it
+    # corrects (NZ-006). Plain integer; the service checks the reference.
+    nz_correction_of_id = Column(Integer, nullable=True)
+    # Poland (ZP-PL-ENG-001): frozen PL inputs + pl_result (separate PIT / ZUS /
+    # health / fund / PPK bases) + trace, replayed exactly as computed; NULL for
+    # non-PL payslips (1ee3bbde33bb).
+    pl_calculation_snapshot = Column(JSON, nullable=True)
     # Saudi Arabia: employer Occupational Hazards (2% of contributory wages,
     # capped at 45,000 SAR/month, floor 400 SAR) — informational, not deducted
     # from employee. Zero for non-SA payslips.
@@ -11507,6 +11540,65 @@ class PayrollZaEtiLedgerEntry(Base):
         return f"<PayrollZaEtiLedgerEntry emp={self.employee_id} {self.claim_month} eti={self.eti_amount} {self.status}>"
 
 
+class PayrollZaParallelImport(Base):
+    """One incumbent payroll's results for one committed ZA run (G6 parallel
+    cycle, ZP-ZA-ENG-001 §13). Only the column mapping, the file's SHA-256 and
+    counts are kept, never the file. ACCEPTED only by a second person.
+    Migration 67c8d7454716."""
+    __tablename__ = "payroll_za_parallel_imports"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id   = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False)
+    source_label     = Column(String(120), nullable=False)
+    file_sha256      = Column(String(64), nullable=False)
+    column_mapping   = Column(JSON, nullable=False)
+    row_count        = Column(Integer, nullable=False)
+    matched_count    = Column(Integer, nullable=False, default=0, server_default="0")
+    unmatched_count  = Column(Integer, nullable=False, default=0, server_default="0")
+    status           = Column(String(12), nullable=False, default="OPEN", server_default="OPEN")
+    accepted_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at      = Column(DateTime(timezone=True), nullable=True)
+    created_by_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at       = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'ACCEPTED', 'WITHDRAWN')", name="ck_za_parallel_import_status"),
+        Index("ix_za_parallel_import_org_run", "organization_id", "payroll_run_id"),
+    )
+
+
+class PayrollZaParallelDifference(Base):
+    """One non-zero per-employee, per-concept delta between Zoiko's committed ZA
+    snapshot and the incumbent. UNEXPLAINED -> EXPLAINED (reason) -> ACCEPTED
+    (someone other than the explainer). Never changes a payslip.
+    Migration 67c8d7454716."""
+    __tablename__ = "payroll_za_parallel_differences"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    import_id        = Column(Integer, ForeignKey("payroll_za_parallel_imports.id", ondelete="CASCADE"), nullable=False,
+                              index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    concept          = Column(String(30), nullable=False)
+    zoiko_amount     = Column(Numeric(14, 2), nullable=False)
+    incumbent_amount = Column(Numeric(14, 2), nullable=False)
+    delta            = Column(Numeric(14, 2), nullable=False)
+    status           = Column(String(12), nullable=False, default="UNEXPLAINED", server_default="UNEXPLAINED")
+    reason           = Column(String(1000), nullable=True)
+    explained_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    explained_at     = Column(DateTime(timezone=True), nullable=True)
+    accepted_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at      = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("concept IN ('gross', 'paye', 'uif_employee', 'uif_employer', 'sdl', "
+                           "'other_deductions', 'net')", name="ck_za_parallel_diff_concept"),
+        sa.CheckConstraint("status IN ('UNEXPLAINED', 'EXPLAINED', 'ACCEPTED')", name="ck_za_parallel_diff_status"),
+    )
+
+
 class PayrollZaSarsArtifact(Base):
     """One version of a SARS employer artefact — EMP201, EMP501 (interim /
     annual), IRP5, IT3(a) or a cancellation — built from committed payroll.
@@ -11656,3 +11748,2252 @@ class PayrollZaPayrollOverride(Base):
 
     def __repr__(self):
         return f"<PayrollZaPayrollOverride employee={self.employee_id} {self.field} {self.status}>"
+
+
+# ---------------------------------------------------------------------------
+# Japan (ZP-JP-ENG-001) — database foundation. Migration f686d5128f8a.
+# Employer registrations are TENANT-scoped; every employee table is WORKER
+# "org" scoped. My Number plaintext is never stored: only ciphertext, a key
+# version, and a keyed HMAC fingerprint for duplicate detection (spec §7/§12).
+# ---------------------------------------------------------------------------
+_JP_JSON = postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite")
+
+
+class PayrollJpEmployerRegistration(Base):
+    """One effective-dated version of an employer's Japan setup (spec §7,
+    JP-009): NTA corporate number, withholding office/payer status, JPS
+    pension/health workplace IDs, health insurer, SI deduction timing, labour/
+    EI office and industry class, workers' comp class and municipality
+    reporting. One ACTIVE open row per organisation."""
+    __tablename__ = "payroll_jp_employer_registrations"
+
+    id                              = Column(Integer, primary_key=True, index=True)
+    organization_id                 = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id                 = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_ref                    = Column(String(300), nullable=True)
+    previous_version_id             = Column(Integer, ForeignKey("payroll_jp_employer_registrations.id", ondelete="SET NULL"), nullable=True)
+    created_by_id                   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id                  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at                     = Column(DateTime(timezone=True), nullable=True)
+    created_at                      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                      = Column(DateTime(timezone=True), nullable=True)
+    effective_from                  = Column(Date, nullable=False)
+    effective_to                    = Column(Date, nullable=True)
+    corporate_number                = Column(String(13), nullable=True)
+    withholding_tax_office          = Column(String(100), nullable=True)
+    withholding_payer_status        = Column(String(30), nullable=False, default="STANDARD", server_default="STANDARD")
+    jps_office_symbol               = Column(String(30), nullable=True)
+    jps_office_number               = Column(String(10), nullable=True)
+    health_insurer_type             = Column(String(30), nullable=False)
+    health_insurer_code             = Column(String(20), nullable=True)
+    health_insurer_prefecture       = Column(String(2), nullable=True)
+    si_deduction_timing             = Column(String(20), nullable=True)
+    labour_insurance_number         = Column(String(14), nullable=True)
+    ei_office_number                = Column(String(20), nullable=True)
+    ei_industry_class               = Column(String(30), nullable=False)
+    workers_comp_rate_class         = Column(String(30), nullable=True)
+    municipality_reporting_enabled  = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    source_document_id              = Column(Integer, ForeignKey("payroll_source_artifacts.id", ondelete="SET NULL"), nullable=True)
+    status                          = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_jp_registration_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_jp_registration_dates"),
+        sa.CheckConstraint("withholding_payer_status IN ('STANDARD', 'SMALL_EMPLOYER_SPECIAL')",
+                           name="ck_jp_registration_payer_status"),
+        sa.CheckConstraint("health_insurer_type IN ('KYOKAI_KENPO', 'HEALTH_INSURANCE_SOCIETY')",
+                           name="ck_jp_registration_insurer_type"),
+        sa.CheckConstraint("health_insurer_type <> 'KYOKAI_KENPO' OR health_insurer_prefecture IS NOT NULL",
+                           name="ck_jp_registration_kyokai_prefecture"),
+        sa.CheckConstraint("si_deduction_timing IS NULL OR si_deduction_timing IN "
+                           "('CURRENT_MONTH', 'FOLLOWING_MONTH')", name="ck_jp_registration_si_timing"),
+        sa.CheckConstraint("ei_industry_class IN ('GENERAL', 'AGRICULTURE_SAKE', 'CONSTRUCTION')",
+                           name="ck_jp_registration_ei_industry"),
+        Index("ix_jp_registration_org_period", "organization_id", "effective_from"),
+        Index("uq_jp_registration_one_active", "organization_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpEmployerRegistration org={self.organization_id} {self.status}>"
+
+
+class PayrollJpWorkConditions(Base):
+    """Effective-dated organisation work conditions (spec §6, JP-012/JP-014):
+    the working-time system, scheduled hours, week start, workplace prefecture
+    and whether the specific minimum wage applies. The engine uses these facts
+    to classify hours and compare the minimum wage; it never infers them."""
+    __tablename__ = "payroll_jp_work_conditions"
+
+    id                             = Column(Integer, primary_key=True, index=True)
+    organization_id                = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id                = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_ref                   = Column(String(300), nullable=True)
+    previous_version_id            = Column(Integer, ForeignKey("payroll_jp_work_conditions.id", ondelete="SET NULL"), nullable=True)
+    created_by_id                  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id                 = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at                    = Column(DateTime(timezone=True), nullable=True)
+    created_at                     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                     = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+    effective_from                 = Column(Date, nullable=False)
+    effective_to                   = Column(Date, nullable=True)
+    working_time_system            = Column(String(20), nullable=False, default="STANDARD", server_default="STANDARD")
+    week_start_day                 = Column(SmallInteger, nullable=False, default=0, server_default="0")
+    scheduled_daily_minutes        = Column(Integer, nullable=False)
+    scheduled_monthly_hours        = Column(Numeric(6, 2), nullable=False)
+    workplace_prefecture           = Column(String(2), nullable=False)
+    specific_minimum_wage_applies  = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    status                         = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    # a1a748b50902: the work calendar. Weekdays are 0 = Monday .. 6 = Sunday.
+    # NULL is "not recorded": attendance that needs it BLOCKS.
+    scheduled_weekdays             = Column(String(13), nullable=True)      # "0,1,2,3,4"
+    statutory_day_off_weekday      = Column(SmallInteger, nullable=True)    # the statutory weekly day off
+    public_holidays_off            = Column(Boolean, nullable=True)         # national holidays are days off
+
+    __table_args__ = (
+        sa.CheckConstraint("working_time_system IN ('STANDARD')", name="ck_jp_work_conditions_system"),
+        sa.CheckConstraint("week_start_day BETWEEN 0 AND 6", name="ck_jp_work_conditions_week_start"),
+        sa.CheckConstraint("scheduled_daily_minutes > 0", name="ck_jp_work_conditions_daily_minutes"),
+        sa.CheckConstraint("scheduled_monthly_hours > 0", name="ck_jp_work_conditions_monthly_hours"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_jp_work_conditions_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_jp_work_conditions_dates"),
+        Index("ix_jp_work_conditions_org_period", "organization_id", "effective_from"),
+        Index("uq_jp_work_conditions_one_active", "organization_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpWorkConditions org={self.organization_id} {self.status}>"
+
+
+class PayrollJpAttendanceApproval(Base):
+    """A four-eyes approval of one employee's attendance for one pay period
+    (ZP-JP-ENG-001 §6). It is bound to a fingerprint of the attendance rows:
+    a row added, removed or changed after the request makes it stale, and the
+    engine then treats the hours as unapproved (a1a748b50902)."""
+    __tablename__ = "payroll_jp_attendance_approvals"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False)
+    period_start    = Column(Date, nullable=False)
+    period_end      = Column(Date, nullable=False)
+    fingerprint     = Column(String(64), nullable=False)
+    row_count       = Column(Integer, nullable=False)
+    status          = Column(String(12), nullable=False, default="REQUESTED", server_default="REQUESTED")
+    evidence_ref    = Column(String(300), nullable=True)
+    created_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'VOID')", name="ck_jp_attendance_approval_status"),
+        sa.CheckConstraint("period_end >= period_start", name="ck_jp_attendance_approval_dates"),
+        Index("ix_jp_attendance_approval_employee_period", "organization_id", "employee_id", "period_start"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpAttendanceApproval employee={self.employee_id} {self.period_start} {self.status}>"
+
+
+class PayrollJpRunException(Base):
+    """A second person's approval of one computed Japan run exception
+    (ZP-JP-ENG-001 §8). Bound to the run's payload fingerprint at approval:
+    if the payslips change, the approval no longer covers them (41a1fafbbfdc)."""
+    __tablename__ = "payroll_jp_run_exceptions"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    run_id              = Column(Integer, ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False)
+    exception_key       = Column(String(120), nullable=False)
+    code                = Column(String(40), nullable=False)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="SET NULL"), nullable=True)
+    detail              = Column(Text, nullable=True)
+    payload_fingerprint = Column(String(64), nullable=False)
+    note                = Column(String(500), nullable=True)
+    approved_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at         = Column(DateTime(timezone=True), nullable=False)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("uq_jp_run_exception_approval", "run_id", "exception_key", "payload_fingerprint", unique=True),
+    )
+
+
+class PayrollJpObligation(Base):
+    """A remittance a PAID Japan run creates, written once per run and key:
+    withholding (10th of the next month), social insurance (end of the next
+    month), resident tax per municipality (10th of the next month)."""
+    __tablename__ = "payroll_jp_obligations"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    obligation_type  = Column(String(30), nullable=False)
+    obligation_key   = Column(String(80), nullable=False)
+    period           = Column(String(7), nullable=False)
+    municipality_code = Column(String(6), nullable=True)
+    due_on           = Column(Date, nullable=True)        # NULL: the due-date rule is not signed
+    amount           = Column(Numeric(14, 0), nullable=False)
+    source_run_id    = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    status           = Column(String(12), nullable=False, default="CREATED", server_default="CREATED")
+    channel          = Column(String(40), nullable=True)
+    receipt_ref      = Column(String(100), nullable=True)
+    detail           = Column(_JP_JSON, nullable=True)
+    created_by_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at      = Column(DateTime(timezone=True), nullable=True)
+    submitted_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("obligation_type IN ('WHT_REMITTANCE', 'SI_REMITTANCE', 'RESIDENT_TAX_REMITTANCE')",
+                           name="ck_jp_obligation_type"),
+        sa.CheckConstraint("status IN ('CREATED', 'APPROVED', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'CORRECTED')",
+                           name="ck_jp_obligation_status"),
+        sa.CheckConstraint("amount >= 0", name="ck_jp_obligation_amount"),
+        Index("uq_jp_obligation_run_key", "source_run_id", "obligation_key", unique=True),
+        Index("ix_jp_obligation_org_due", "organization_id", "due_on"),
+    )
+
+
+class PayrollJpYeaDeclaration(Base):
+    """An employee's year-end adjustment declaration (S3): versioned, approved
+    by a second person; only APPROVED declarations reach the calculation."""
+    __tablename__ = "payroll_jp_yea_declarations"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    organization_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False)
+    tax_year            = Column(SmallInteger, nullable=False)
+    declaration_type    = Column(String(30), nullable=False)
+    payload             = Column(_JP_JSON, nullable=False)
+    evidence_ref        = Column(String(300), nullable=True)
+    status              = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    previous_version_id = Column(Integer, ForeignKey("payroll_jp_yea_declarations.id", ondelete="SET NULL"), nullable=True)
+    created_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at         = Column(DateTime(timezone=True), nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("declaration_type IN ('SPOUSE', 'DEPENDANTS', 'INSURANCE_PREMIUMS', 'HOUSING_LOAN', "
+                           "'PREVIOUS_EMPLOYER', 'SMALL_ENTERPRISE_MUTUAL_AID')",
+                           name="ck_jp_yea_declaration_type"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUPERSEDED')", name="ck_jp_yea_declaration_status"),
+        sa.CheckConstraint("tax_year >= 2000", name="ck_jp_yea_declaration_year"),
+        Index("ix_jp_yea_declaration_employee_year", "organization_id", "employee_id", "tax_year"),
+    )
+
+
+class PayrollJpParallelImport(Base):
+    """One incumbent payroll file compared with a committed Japan run (release
+    gate G7). Accepted by a second person once every difference is accepted
+    and every row matched (b8bd939fffca)."""
+    __tablename__ = "payroll_jp_parallel_imports"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    payroll_run_id  = Column(Integer, ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False)
+    period          = Column(String(7), nullable=False)
+    source_label    = Column(String(120), nullable=False)
+    file_sha256     = Column(String(64), nullable=False)
+    column_mapping  = Column(_JP_JSON, nullable=False)
+    row_count       = Column(Integer, nullable=False)
+    matched_count   = Column(Integer, nullable=False)
+    unmatched_count = Column(Integer, nullable=False)
+    status          = Column(String(12), nullable=False, default="OPEN", server_default="OPEN")
+    created_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'ACCEPTED', 'WITHDRAWN')", name="ck_jp_parallel_import_status"),
+        Index("ix_jp_parallel_import_org_period", "organization_id", "period"),
+        Index("uq_jp_parallel_import_run_file", "payroll_run_id", "file_sha256", unique=True),
+    )
+
+
+class PayrollJpParallelDifference(Base):
+    """One employee / concept whose incumbent and Zoiko amounts differ
+    (tolerance zero): explained with a reason, accepted by a different person."""
+    __tablename__ = "payroll_jp_parallel_differences"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    import_id        = Column(Integer, ForeignKey("payroll_jp_parallel_imports.id", ondelete="CASCADE"), nullable=False)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="SET NULL"), nullable=True)
+    concept          = Column(String(40), nullable=False)
+    zoiko_amount     = Column(Numeric(14, 0), nullable=False)
+    incumbent_amount = Column(Numeric(14, 0), nullable=False)
+    delta            = Column(Numeric(14, 0), nullable=False)
+    status           = Column(String(12), nullable=False, default="UNEXPLAINED", server_default="UNEXPLAINED")
+    reason           = Column(String(1000), nullable=True)
+    explained_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    explained_at     = Column(DateTime(timezone=True), nullable=True)
+    accepted_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at      = Column(DateTime(timezone=True), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('UNEXPLAINED', 'EXPLAINED', 'ACCEPTED')",
+                           name="ck_jp_parallel_difference_status"),
+        Index("ix_jp_parallel_difference_import", "import_id"),
+    )
+
+
+class PayrollJpYeaCase(Base):
+    """One year-end adjustment per employee and year (S3):
+    OPEN -> CALCULATED -> REVIEWED (second person) -> APPLIED -> LOCKED, or
+    EXCLUDED with the reason. VOID frees the year for a correction case."""
+    __tablename__ = "payroll_jp_yea_cases"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id     = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False)
+    tax_year        = Column(SmallInteger, nullable=False)
+    state           = Column(String(12), nullable=False, default="OPEN", server_default="OPEN")
+    excluded_reason = Column(String(300), nullable=True)
+    annual_income   = Column(Numeric(14, 0), nullable=True)
+    tax_withheld    = Column(Numeric(14, 0), nullable=True)
+    si_withheld     = Column(Numeric(14, 0), nullable=True)
+    annual_tax      = Column(Numeric(14, 0), nullable=True)
+    difference      = Column(Numeric(14, 0), nullable=True)
+    facts           = Column(_JP_JSON, nullable=True)
+    result          = Column(_JP_JSON, nullable=True)
+    applied_run_id  = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    created_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    calculated_at   = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at     = Column(DateTime(timezone=True), nullable=True)
+    applied_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    applied_at      = Column(DateTime(timezone=True), nullable=True)
+    locked_at       = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("state IN ('OPEN', 'CALCULATED', 'REVIEWED', 'APPLIED', 'LOCKED', 'EXCLUDED', 'VOID')",
+                           name="ck_jp_yea_case_state"),
+        sa.CheckConstraint("tax_year >= 2000", name="ck_jp_yea_case_year"),
+        Index("uq_jp_yea_case_one_live", "organization_id", "employee_id", "tax_year", unique=True,
+              postgresql_where=text("state <> 'VOID'"), sqlite_where=text("state <> 'VOID'")),
+    )
+
+
+class PayrollJpMyNumberVault(Base):
+    """The My Number boundary (spec §7/§12): one encrypted 12-digit My Number
+    per employee or dependant subject, with its key version, a keyed HMAC
+    fingerprint used only for duplicate detection, a purpose limit and the
+    collection/deletion audit. No plaintext and no last-four digits exist in
+    any column. One ACTIVE row per subject."""
+    __tablename__ = "payroll_jp_my_number_vault"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id       = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_ref          = Column(String(300), nullable=True)
+    previous_version_id   = Column(Integer, ForeignKey("payroll_jp_my_number_vault.id", ondelete="SET NULL"), nullable=True)
+    created_by_id         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at           = Column(DateTime(timezone=True), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), nullable=True)
+    employee_id           = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    subject_type          = Column(String(12), nullable=False)          # EMPLOYEE / DEPENDANT
+    subject_ref           = Column(String(64), nullable=False, default="self", server_default="self")
+    ciphertext            = Column(Text, nullable=True)                 # nulled on deletion
+    key_version           = Column(SmallInteger, nullable=False)
+    fingerprint           = Column(String(64), nullable=False)
+    purpose               = Column(String(30), nullable=False, default="TAX_SOCIAL_INSURANCE",
+                                   server_default="TAX_SOCIAL_INSURANCE")
+    collected_at          = Column(DateTime(timezone=True), nullable=False)
+    identity_verified_by  = Column(String(30), nullable=True)           # document TYPE, never its number
+    deleted_at            = Column(DateTime(timezone=True), nullable=True)
+    status                = Column(String(12), nullable=False, default="ACTIVE", server_default="ACTIVE")
+
+    __table_args__ = (
+        sa.CheckConstraint("subject_type IN ('EMPLOYEE', 'DEPENDANT')", name="ck_jp_vault_subject_type"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'DELETED')", name="ck_jp_vault_status"),
+        sa.CheckConstraint("deleted_at IS NOT NULL OR ciphertext IS NOT NULL", name="ck_jp_vault_ciphertext_or_deleted"),
+        Index("uq_jp_vault_one_active", "organization_id", "employee_id", "subject_type", "subject_ref",
+              unique=True, postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpMyNumberVault employee={self.employee_id} subject={self.subject_type} {self.status}>"
+
+
+class PayrollJpMyNumberAccessEvent(Base):
+    """Append-only audit of My Number vault access (spec §7/§12): creation,
+    reveal requested, reveal approved (a second person), revealed, exported and
+    deleted. There is no updated_at and nothing ever updates or deletes these
+    rows."""
+    __tablename__ = "payroll_jp_my_number_access_events"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_ref         = Column(String(300), nullable=True)
+    previous_version_id  = Column(Integer, ForeignKey("payroll_jp_my_number_access_events.id", ondelete="SET NULL"), nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    vault_id             = Column(Integer, ForeignKey("payroll_jp_my_number_vault.id", ondelete="SET NULL"), nullable=True)
+    actor_id             = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action               = Column(String(20), nullable=False)
+    purpose              = Column(String(60), nullable=True)
+    reason               = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("action IN ('CREATE', 'REVEAL_REQUESTED', 'REVEAL_APPROVED', 'REVEALED', "
+                           "'EXPORTED', 'DELETED')", name="ck_jp_vault_event_action"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpMyNumberAccessEvent employee={self.employee_id} action={self.action}>"
+
+
+class PayrollJpWorkerTaxProfile(Base):
+    """Effective-dated worker tax facts (spec §3): residency, primary or
+    secondary declaration (which picks the withholding column), dependant
+    counts and categories, municipality and a token-only FK to the My Number
+    vault. JP-003/004."""
+    __tablename__ = "payroll_jp_worker_tax_profiles"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    organization_id           = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id           = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_ref              = Column(String(300), nullable=True)
+    previous_version_id       = Column(Integer, ForeignKey("payroll_jp_worker_tax_profiles.id", ondelete="SET NULL"), nullable=True)
+    created_by_id             = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id            = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at               = Column(DateTime(timezone=True), nullable=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at                = Column(DateTime(timezone=True), nullable=True)
+    employee_id               = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from            = Column(Date, nullable=False)
+    effective_to              = Column(Date, nullable=True)
+    residency_status          = Column(String(20), nullable=True)        # RESIDENT / NON_RESIDENT
+    declaration_class         = Column(String(20), nullable=True)        # PRIMARY / SECONDARY
+    declaration_received_on   = Column(Date, nullable=True)
+    dependants_count          = Column(SmallInteger, nullable=False, default=0, server_default="0")
+    dependant_facts           = Column(_JP_JSON, nullable=True)          # categories only
+    municipality_code         = Column(String(6), nullable=True)
+    residence_prefecture      = Column(String(2), nullable=True)
+    # SPECIAL needs an APPROVED municipality notice; NOT_APPLICABLE (evidenced)
+    # means no resident tax is withheld this period (e.g. first year in Japan).
+    resident_tax_collection   = Column(String(20), nullable=False, default="SPECIAL", server_default="SPECIAL")
+    my_number_vault_id        = Column(Integer, ForeignKey("payroll_jp_my_number_vault.id", ondelete="SET NULL"), nullable=True)
+    status                    = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("residency_status IS NULL OR residency_status IN ('RESIDENT', 'NON_RESIDENT')",
+                           name="ck_jp_tax_profile_residency"),
+        sa.CheckConstraint("declaration_class IS NULL OR declaration_class IN ('PRIMARY', 'SECONDARY')",
+                           name="ck_jp_tax_profile_declaration"),
+        sa.CheckConstraint("dependants_count >= 0", name="ck_jp_tax_profile_dependants"),
+        sa.CheckConstraint("resident_tax_collection IN ('SPECIAL', 'NOT_APPLICABLE')",
+                           name="ck_jp_tax_profile_resident_tax_collection"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_jp_tax_profile_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_jp_tax_profile_dates"),
+        Index("ix_jp_tax_profile_employee_period", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpWorkerTaxProfile employee={self.employee_id} {self.status}>"
+
+
+class PayrollJpSocialInsuranceEnrollment(Base):
+    """Effective-dated social-insurance facts (spec §5, JP-009/010/011):
+    eligibility, insurer, SMR health/pension grades and amount, the SMR basis,
+    the actual remuneration kept beside (never over) the statutory SMR, care
+    and child-support states, and qualification/loss dates."""
+    __tablename__ = "payroll_jp_social_insurance_enrollments"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    organization_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id       = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_ref          = Column(String(300), nullable=True)
+    previous_version_id   = Column(Integer, ForeignKey("payroll_jp_social_insurance_enrollments.id", ondelete="SET NULL"), nullable=True)
+    created_by_id         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at           = Column(DateTime(timezone=True), nullable=True)
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at            = Column(DateTime(timezone=True), nullable=True)
+    employee_id           = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from        = Column(Date, nullable=False)
+    effective_to          = Column(Date, nullable=True)
+    health_eligible       = Column(Boolean, nullable=False)
+    pension_eligible      = Column(Boolean, nullable=False)
+    health_insurer_code   = Column(String(20), nullable=True)
+    smr_health_grade      = Column(SmallInteger, nullable=True)
+    smr_pension_grade     = Column(SmallInteger, nullable=True)
+    # Health and pension SMR differ above the pension grade ceiling (JP-010).
+    smr_health_amount     = Column(Numeric(12, 0), nullable=True)
+    smr_pension_amount    = Column(Numeric(12, 0), nullable=True)
+    smr_basis             = Column(String(30), nullable=True)
+    actual_remuneration   = Column(_JP_JSON, nullable=True)
+    care_state            = Column(String(20), nullable=True)
+    child_support_state   = Column(String(20), nullable=True)
+    qualification_date    = Column(Date, nullable=True)
+    loss_date             = Column(Date, nullable=True)
+    status                = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("smr_basis IS NULL OR smr_basis IN ('QUALIFICATION', 'ANNUAL_DETERMINATION', "
+                           "'ADHOC_REVISION', 'RETURN_TO_WORK', 'OTHER')", name="ck_jp_si_enrollment_smr_basis"),
+        sa.CheckConstraint("care_state IS NULL OR care_state IN ('NOT_COVERED', 'COVERED', 'EXEMPT')",
+                           name="ck_jp_si_enrollment_care_state"),
+        sa.CheckConstraint("child_support_state IS NULL OR child_support_state IN ('COVERED', 'EXEMPT')",
+                           name="ck_jp_si_enrollment_child_support"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_jp_si_enrollment_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_jp_si_enrollment_dates"),
+        Index("ix_jp_si_enrollment_employee_period", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpSocialInsuranceEnrollment employee={self.employee_id} {self.status}>"
+
+
+class PayrollJpSocialInsuranceEvent(Base):
+    """A social-insurance lifecycle event (spec §11): type, effective dates,
+    payload, SBA amount and bonus date, reporting due date and submission
+    status with its receipt."""
+    __tablename__ = "payroll_jp_social_insurance_events"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    organization_id    = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id    = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_ref       = Column(String(300), nullable=True)
+    previous_version_id = Column(Integer, ForeignKey("payroll_jp_social_insurance_events.id", ondelete="SET NULL"), nullable=True)
+    created_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at        = Column(DateTime(timezone=True), nullable=True)
+    created_at         = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at         = Column(DateTime(timezone=True), nullable=True)
+    employee_id        = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    enrollment_id      = Column(Integer, ForeignKey("payroll_jp_social_insurance_enrollments.id", ondelete="SET NULL"), nullable=True)
+    event_type         = Column(String(30), nullable=False)
+    effective_from     = Column(Date, nullable=False)
+    effective_to       = Column(Date, nullable=True)
+    payload            = Column(_JP_JSON, nullable=True)
+    bonus_paid_on      = Column(Date, nullable=True)
+    sba_amount         = Column(Numeric(12, 0), nullable=True)
+    report_due_on      = Column(Date, nullable=True)
+    submission_status  = Column(String(12), nullable=False, default="CREATED", server_default="CREATED")
+    receipt_ref        = Column(String(100), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("event_type IN ('QUALIFICATION', 'LOSS', 'ANNUAL_DETERMINATION', "
+                           "'ADHOC_REVISION', 'BONUS', 'MATERNITY_EXEMPTION', 'CHILDCARE_EXEMPTION', "
+                           "'RETURN_TO_WORK_REVISION')", name="ck_jp_si_event_type"),
+        sa.CheckConstraint("submission_status IN ('CREATED', 'APPROVED', 'SUBMITTED', 'ACCEPTED', "
+                           "'REJECTED', 'CORRECTED')", name="ck_jp_si_event_submission_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_jp_si_event_dates"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpSocialInsuranceEvent employee={self.employee_id} {self.event_type}>"
+
+
+class PayrollJpEmploymentInsuranceProfile(Base):
+    """Effective-dated employment-insurance facts (spec §6, JP-009): insured
+    flag, EI insured number, industry class and qualification/loss dates."""
+    __tablename__ = "payroll_jp_employment_insurance_profiles"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_ref         = Column(String(300), nullable=True)
+    previous_version_id  = Column(Integer, ForeignKey("payroll_jp_employment_insurance_profiles.id", ondelete="SET NULL"), nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from       = Column(Date, nullable=False)
+    effective_to         = Column(Date, nullable=True)
+    insured              = Column(Boolean, nullable=False)
+    ei_insured_number    = Column(String(20), nullable=True)
+    industry_class       = Column(String(30), nullable=False)
+    qualification_date   = Column(Date, nullable=True)
+    loss_date            = Column(Date, nullable=True)
+    status               = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("industry_class IN ('GENERAL', 'AGRICULTURE_SAKE', 'CONSTRUCTION')",
+                           name="ck_jp_ei_profile_industry"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_jp_ei_profile_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_jp_ei_profile_dates"),
+        Index("ix_jp_ei_profile_employee_period", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpEmploymentInsuranceProfile employee={self.employee_id} {self.status}>"
+
+
+class PayrollJpResidentTaxAssessment(Base):
+    """One version of a municipal resident-tax notice (spec §4, JP-007/008).
+    Resident tax comes only from the notice, never an estimate: the notice
+    reference, fiscal year, exactly twelve monthly amounts, total, source hash
+    and supersession. A change notice creates a NEW version."""
+    __tablename__ = "payroll_jp_resident_tax_assessments"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    organization_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id        = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_ref           = Column(String(300), nullable=True)
+    previous_version_id    = Column(Integer, ForeignKey("payroll_jp_resident_tax_assessments.id", ondelete="SET NULL"), nullable=True)
+    created_by_id          = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at            = Column(DateTime(timezone=True), nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at             = Column(DateTime(timezone=True), nullable=True)
+    employee_id            = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    municipality_code      = Column(String(6), nullable=False)
+    fiscal_notice_year     = Column(SmallInteger, nullable=False)
+    notice_id              = Column(String(50), nullable=False)
+    version                = Column(SmallInteger, nullable=False, default=1, server_default="1")
+    received_on            = Column(Date, nullable=False)
+    first_deduction_month  = Column(Date, nullable=False)
+    monthly_amounts        = Column(_JP_JSON, nullable=False)
+    total_amount           = Column(Numeric(12, 0), nullable=False)
+    source_hash            = Column(String(64), nullable=False)
+    replaces_id            = Column(Integer, ForeignKey("payroll_jp_resident_tax_assessments.id", ondelete="SET NULL"), nullable=True)
+    status                 = Column(String(12), nullable=False, default="IMPORTED", server_default="IMPORTED")
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('IMPORTED', 'APPROVED', 'SUPERSEDED', 'REJECTED')",
+                           name="ck_jp_resident_tax_status"),
+        sa.CheckConstraint("version >= 1", name="ck_jp_resident_tax_version"),
+        Index("uq_jp_resident_tax_notice_version", "organization_id", "employee_id", "municipality_code",
+              "fiscal_notice_year", "version", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollJpResidentTaxAssessment employee={self.employee_id} {self.fiscal_notice_year} v{self.version}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# New Zealand (ZP-NZ-ENG-001 Phase 2, migration 0e697c2388bf)
+# ══════════════════════════════════════════════════════════════════════════
+from sqlalchemy.orm import declared_attr  # noqa: E402
+
+_NZ_JSON = postgresql.JSONB(astext_type=sa.Text()).with_variant(sa.JSON(), "sqlite")
+_NZ_TAX_CODES = ("M", "ME", "M SL", "ME SL", "SB", "S", "SH", "ST", "SA",
+                 "SB SL", "S SL", "SH SL", "ST SL", "SA SL", "ND", "STC")
+
+
+def _nz_in(values) -> str:
+    return "(" + ", ".join(f"'{v}'" for v in values) + ")"
+
+
+class _NzCommon:
+    """id / tenant / legal employer / evidence / version / approval / stamps —
+    the columns every New Zealand table carries (the Japan layout). Statutory
+    rows are never edited in place: a change is a new row whose
+    previous_version_id points at the row it supersedes (NZ-020)."""
+    id                   = Column(Integer, primary_key=True, index=True)
+    evidence_ref         = Column(String(300), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    @declared_attr
+    def organization_id(cls):
+        return Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    @declared_attr
+    def legal_entity_id(cls):
+        return Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    @declared_attr
+    def previous_version_id(cls):
+        return Column(Integer, ForeignKey(f"{cls.__tablename__}.id", ondelete="SET NULL"), nullable=True)
+
+    @declared_attr
+    def created_by_id(cls):
+        return Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    @declared_attr
+    def approved_by_id(cls):
+        return Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class PayrollNzIrdVault(_NzCommon, Base):
+    """Encrypted IRD numbers (spec §13, NZ-023): an employee's, or the
+    employer's (which can be a sole trader's personal number). Ciphertext
+    only — no plaintext and no trailing digits in any column — with its key
+    version and a keyed HMAC fingerprint used only for duplicate detection.
+    One ACTIVE row per employee."""
+    __tablename__ = "payroll_nz_ird_vault"
+
+    updated_at            = Column(DateTime(timezone=True), nullable=True)
+    employee_id           = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=True, index=True)
+    subject_type          = Column(String(10), nullable=False)          # EMPLOYEE / EMPLOYER
+    ciphertext            = Column(Text, nullable=True)                 # nulled on deletion
+    key_version           = Column(SmallInteger, nullable=False)
+    fingerprint           = Column(String(64), nullable=False)
+    purpose               = Column(String(30), nullable=False, default="PAYE_PAYDAY_FILING",
+                                   server_default="PAYE_PAYDAY_FILING")
+    collected_at          = Column(DateTime(timezone=True), nullable=False)
+    deleted_at            = Column(DateTime(timezone=True), nullable=True)
+    status                = Column(String(10), nullable=False, default="ACTIVE", server_default="ACTIVE")
+
+    __table_args__ = (
+        sa.CheckConstraint("subject_type IN ('EMPLOYEE', 'EMPLOYER')", name="ck_nz_vault_subject_type"),
+        sa.CheckConstraint("(subject_type = 'EMPLOYER' AND employee_id IS NULL) OR "
+                           "(subject_type = 'EMPLOYEE' AND employee_id IS NOT NULL)",
+                           name="ck_nz_vault_subject_employee"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'DELETED')", name="ck_nz_vault_status"),
+        sa.CheckConstraint("deleted_at IS NOT NULL OR ciphertext IS NOT NULL", name="ck_nz_vault_ciphertext_or_deleted"),
+        Index("uq_nz_vault_one_active_employee", "organization_id", "employee_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND subject_type = 'EMPLOYEE'"),
+              sqlite_where=text("status = 'ACTIVE' AND subject_type = 'EMPLOYEE'")),
+        Index("uq_nz_vault_fingerprint", "organization_id", "subject_type", "fingerprint", unique=True,
+              postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzIrdVault {self.subject_type} employee={self.employee_id} {self.status}>"
+
+
+class PayrollNzEmployerProfile(_NzCommon, Base):
+    """New Zealand employer setup per legal employer (spec §10/§11, NZ-001):
+    effective-dated, one ACTIVE open row per (organisation, legal entity) —
+    a NULL legal entity is the organisation itself. Bank mandate and filing
+    credentials are REFERENCES only (spec §13); no secret is ever stored."""
+    __tablename__ = "payroll_nz_employer_profiles"
+
+    updated_at                      = Column(DateTime(timezone=True), nullable=True)
+    effective_from                  = Column(Date, nullable=False)
+    effective_to                    = Column(Date, nullable=True)
+    legal_name                      = Column(String(200), nullable=False)
+    employer_ird_vault_id           = Column(Integer, ForeignKey("payroll_nz_ird_vault.id", ondelete="SET NULL"), nullable=True)
+    filing_method                   = Column(String(20), nullable=False)
+    filing_method_evidence_ref      = Column(String(300), nullable=True)
+    annual_paye_esct_basis          = Column(String(12), nullable=True)     # PRIOR_YEAR / ESTIMATE
+    annual_paye_esct_amount         = Column(Numeric(14, 2), nullable=True)
+    remittance_class                = Column(String(15), nullable=False)     # MONTHLY / TWICE_MONTHLY
+    connected_business_group_ref    = Column(String(100), nullable=True)
+    connected_business_evidence_ref = Column(String(300), nullable=True)
+    acc_classification_unit         = Column(String(10), nullable=True)
+    acc_metadata                    = Column(_NZ_JSON, nullable=True)
+    timezone                        = Column(String(40), nullable=False, default="Pacific/Auckland",
+                                             server_default="Pacific/Auckland")
+    bank_mandate_ref                = Column(String(100), nullable=True)
+    filing_credential_ref           = Column(String(100), nullable=True)
+    verification_state              = Column(String(12), nullable=False, default="UNVERIFIED",
+                                             server_default="UNVERIFIED")
+    source_document_id              = Column(Integer, ForeignKey("payroll_source_artifacts.id", ondelete="SET NULL"), nullable=True)
+    status                          = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    # Phase 8 (dd8a60634320): the employer's own journal account map.
+    nz_journal_accounts             = Column(_NZ_JSON, nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_nz_employer_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_nz_employer_dates"),
+        sa.CheckConstraint("filing_method IN ('PAYDAY_GATEWAY', 'MYIR_FILE_UPLOAD', 'MYIR_ONSCREEN', 'PAPER')",
+                           name="ck_nz_employer_filing_method"),
+        sa.CheckConstraint("annual_paye_esct_basis IS NULL OR annual_paye_esct_basis IN ('PRIOR_YEAR', 'ESTIMATE')",
+                           name="ck_nz_employer_paye_esct_basis"),
+        sa.CheckConstraint("remittance_class IN ('MONTHLY', 'TWICE_MONTHLY')", name="ck_nz_employer_remittance_class"),
+        sa.CheckConstraint("connected_business_group_ref IS NULL OR connected_business_evidence_ref IS NOT NULL",
+                           name="ck_nz_employer_connected_evidence"),
+        sa.CheckConstraint("timezone IN ('Pacific/Auckland', 'Pacific/Chatham')", name="ck_nz_employer_timezone"),
+        sa.CheckConstraint("verification_state IN ('UNVERIFIED', 'VERIFIED', 'REJECTED')",
+                           name="ck_nz_employer_verification"),
+        Index("ix_nz_employer_org_period", "organization_id", "effective_from"),
+        Index("uq_nz_employer_one_active_entity", "organization_id", "legal_entity_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NOT NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NOT NULL")),
+        Index("uq_nz_employer_one_active_org", "organization_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzEmployerProfile org={self.organization_id} entity={self.legal_entity_id} {self.status}>"
+
+
+class PayrollNzIrdAccessEvent(_NzCommon, Base):
+    """Append-only audit of IRD vault access: creation, reveal requested,
+    reveal approved (a second person), revealed, exported, deleted and key
+    rotation. No updated_at; nothing ever updates or deletes these rows."""
+    __tablename__ = "payroll_nz_ird_access_events"
+
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=True, index=True)
+    vault_id             = Column(Integer, ForeignKey("payroll_nz_ird_vault.id", ondelete="SET NULL"), nullable=True, index=True)
+    actor_id             = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action               = Column(String(20), nullable=False)
+    purpose              = Column(String(60), nullable=True)
+    reason               = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("action IN ('CREATE', 'REVEAL_REQUESTED', 'REVEAL_APPROVED', 'REVEALED', "
+                           "'EXPORTED', 'DELETED', 'ROTATED')", name="ck_nz_vault_event_action"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzIrdAccessEvent vault={self.vault_id} action={self.action}>"
+
+
+class PayrollNzEmployeeTaxProfile(_NzCommon, Base):
+    """Effective-dated employee tax facts (spec §3, §5, §7): IRD-number state
+    and vault reference, the declared tax code and its source, residency, a
+    tailored-code (STC) certificate, a student-loan certificate and the
+    evidence-backed minimum-wage category (never inferred from age)."""
+    __tablename__ = "payroll_nz_employee_tax_profiles"
+
+    updated_at                 = Column(DateTime(timezone=True), nullable=True)
+    employee_id                = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from             = Column(Date, nullable=False)
+    effective_to               = Column(Date, nullable=True)
+    ird_number_state           = Column(String(10), nullable=False)     # VALID / PENDING / MISSING / INVALID
+    ird_vault_id               = Column(Integer, ForeignKey("payroll_nz_ird_vault.id", ondelete="SET NULL"), nullable=True)
+    tax_code                   = Column(String(8), nullable=False)
+    tax_code_source            = Column(String(20), nullable=False)
+    declaration_received_on    = Column(Date, nullable=True)
+    declaration_ref            = Column(String(300), nullable=True)
+    residency_status           = Column(String(14), nullable=False, default="RESIDENT", server_default="RESIDENT")
+    tailored_certificate_ref   = Column(String(100), nullable=True)
+    tailored_rate_pct          = Column(Numeric(7, 4), nullable=True)
+    tailored_valid_from        = Column(Date, nullable=True)
+    tailored_valid_to          = Column(Date, nullable=True)
+    sl_certificate_type        = Column(String(24), nullable=True)
+    sl_certificate_ref         = Column(String(100), nullable=True)
+    sl_certificate_rate_pct    = Column(Numeric(7, 4), nullable=True)
+    sl_certificate_valid_from  = Column(Date, nullable=True)
+    sl_certificate_valid_to    = Column(Date, nullable=True)
+    min_wage_category          = Column(String(16), nullable=True)
+    min_wage_evidence_ref      = Column(String(300), nullable=True)
+    status                     = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_nz_tax_profile_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_nz_tax_profile_dates"),
+        sa.CheckConstraint("ird_number_state IN ('VALID', 'PENDING', 'MISSING', 'INVALID')",
+                           name="ck_nz_tax_profile_ird_state"),
+        sa.CheckConstraint("ird_number_state <> 'VALID' OR ird_vault_id IS NOT NULL", name="ck_nz_tax_profile_ird_vault"),
+        sa.CheckConstraint(f"tax_code IN {_nz_in(_NZ_TAX_CODES)}", name="ck_nz_tax_profile_tax_code"),
+        sa.CheckConstraint("tax_code_source IN ('IR330_DECLARATION', 'IRD_NOTICE', 'NO_NOTIFICATION')",
+                           name="ck_nz_tax_profile_code_source"),
+        sa.CheckConstraint("residency_status IN ('RESIDENT', 'NON_RESIDENT')", name="ck_nz_tax_profile_residency"),
+        sa.CheckConstraint("tax_code <> 'STC' OR (tailored_certificate_ref IS NOT NULL AND "
+                           "tailored_rate_pct IS NOT NULL AND tailored_valid_from IS NOT NULL)",
+                           name="ck_nz_tax_profile_stc"),
+        sa.CheckConstraint("sl_certificate_type IS NULL OR sl_certificate_type IN "
+                           "('SPECIAL_DEDUCTION_RATE', 'NIL_DEDUCTION')", name="ck_nz_tax_profile_sl_cert_type"),
+        sa.CheckConstraint("sl_certificate_type IS NULL OR (sl_certificate_ref IS NOT NULL AND "
+                           "sl_certificate_valid_from IS NOT NULL)", name="ck_nz_tax_profile_sl_cert"),
+        sa.CheckConstraint("sl_certificate_type IS NULL OR sl_certificate_type <> 'SPECIAL_DEDUCTION_RATE' OR "
+                           "sl_certificate_rate_pct IS NOT NULL", name="ck_nz_tax_profile_sl_cert_rate"),
+        sa.CheckConstraint("min_wage_category IS NULL OR min_wage_category IN "
+                           "('ADULT', 'STARTING_OUT', 'TRAINING', 'EXEMPTION_PERMIT')",
+                           name="ck_nz_tax_profile_min_wage_category"),
+        sa.CheckConstraint("min_wage_category IS NULL OR min_wage_category = 'ADULT' OR "
+                           "min_wage_evidence_ref IS NOT NULL", name="ck_nz_tax_profile_min_wage_evidence"),
+        Index("ix_nz_tax_profile_employee_period", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzEmployeeTaxProfile employee={self.employee_id} {self.tax_code} {self.status}>"
+
+
+class PayrollNzKiwiSaverElection(_NzCommon, Base):
+    """Effective-dated KiwiSaver state (spec §4): membership, employee and
+    employer rates (checked against the pack at run time — no statutory value
+    is a DB constraint), temporary reduction and savings suspension each with
+    evidence and dates (NZ-009), the employee's ESCT rate and basis, and the
+    settlement destination (NZ-007)."""
+    __tablename__ = "payroll_nz_kiwisaver_elections"
+
+    updated_at                       = Column(DateTime(timezone=True), nullable=True)
+    employee_id                      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from                   = Column(Date, nullable=False)
+    effective_to                     = Column(Date, nullable=True)
+    membership_state                 = Column(String(22), nullable=False)
+    enrolment_route                  = Column(String(16), nullable=True)
+    opt_out_evidence_ref             = Column(String(300), nullable=True)
+    employee_rate_pct                = Column(Numeric(5, 2), nullable=True)
+    employer_rate_pct                = Column(Numeric(5, 2), nullable=True)
+    reduction_ref                    = Column(String(100), nullable=True)
+    reduction_from                   = Column(Date, nullable=True)
+    reduction_to                     = Column(Date, nullable=True)
+    employer_matches_reduction       = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    suspension_ref                   = Column(String(100), nullable=True)
+    suspension_from                  = Column(Date, nullable=True)
+    suspension_to                    = Column(Date, nullable=True)
+    esct_rate_pct                    = Column(Numeric(5, 2), nullable=True)
+    esct_basis                       = Column(String(22), nullable=True)
+    esct_basis_amount                = Column(Numeric(14, 2), nullable=True)
+    esct_tax_year                    = Column(String(7), nullable=True)
+    employer_contribution_treatment  = Column(String(16), nullable=False, default="ESCT", server_default="ESCT")
+    settlement_destination           = Column(String(16), nullable=False, default="INLAND_REVENUE",
+                                              server_default="INLAND_REVENUE")
+    complying_fund_ref               = Column(String(100), nullable=True)
+    status                           = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_nz_kiwisaver_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_nz_kiwisaver_dates"),
+        sa.CheckConstraint("membership_state IN ('NOT_MEMBER', 'CONTRIBUTING', 'OPTED_OUT', "
+                           "'SAVINGS_SUSPENSION', 'NOT_ELIGIBLE')", name="ck_nz_kiwisaver_membership"),
+        sa.CheckConstraint("enrolment_route IS NULL OR enrolment_route IN "
+                           "('AUTO_ENROLLED', 'OPT_IN', 'EXISTING_MEMBER')", name="ck_nz_kiwisaver_route"),
+        sa.CheckConstraint("(reduction_ref IS NULL) = (reduction_from IS NULL)", name="ck_nz_kiwisaver_reduction_evidence"),
+        sa.CheckConstraint("(suspension_ref IS NULL) = (suspension_from IS NULL)",
+                           name="ck_nz_kiwisaver_suspension_evidence"),
+        sa.CheckConstraint("membership_state <> 'SAVINGS_SUSPENSION' OR suspension_ref IS NOT NULL",
+                           name="ck_nz_kiwisaver_suspension_state"),
+        sa.CheckConstraint("membership_state <> 'OPTED_OUT' OR opt_out_evidence_ref IS NOT NULL",
+                           name="ck_nz_kiwisaver_opt_out_evidence"),
+        sa.CheckConstraint("esct_basis IS NULL OR esct_basis IN ('PRIOR_YEAR', 'ESTIMATE', 'NEW_EMPLOYEE_ESTIMATE')",
+                           name="ck_nz_kiwisaver_esct_basis"),
+        sa.CheckConstraint("employer_contribution_treatment IN ('ESCT', 'PAYE_ALTERNATIVE')",
+                           name="ck_nz_kiwisaver_treatment"),
+        sa.CheckConstraint("settlement_destination IN ('INLAND_REVENUE', 'COMPLYING_FUND')",
+                           name="ck_nz_kiwisaver_destination"),
+        sa.CheckConstraint("settlement_destination <> 'COMPLYING_FUND' OR complying_fund_ref IS NOT NULL",
+                           name="ck_nz_kiwisaver_fund_ref"),
+        Index("ix_nz_kiwisaver_employee_period", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzKiwiSaverElection employee={self.employee_id} {self.membership_state} {self.status}>"
+
+
+class PayrollNzAuthorityDeduction(_NzCommon, Base):
+    """Immutable authority notices (spec §5, NZ-010): child support,
+    student-loan extra deductions, IRD deduction notices and court
+    attachment orders. A change is a NEW version (replaces_id); the notice
+    body is never stored — only its SHA-256 and an evidence reference
+    (NZ-025)."""
+    __tablename__ = "payroll_nz_authority_deductions"
+
+    updated_at                 = Column(DateTime(timezone=True), nullable=True)
+    employee_id                = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from             = Column(Date, nullable=False)
+    effective_to               = Column(Date, nullable=True)
+    deduction_type             = Column(String(24), nullable=False)
+    notice_id                  = Column(String(60), nullable=False)
+    issuer                     = Column(String(30), nullable=False)
+    received_at                = Column(DateTime(timezone=True), nullable=False)
+    amount_per_payday          = Column(Numeric(12, 2), nullable=True)
+    rate_pct                   = Column(Numeric(7, 4), nullable=True)
+    protected_earnings_policy  = Column(String(24), nullable=False)
+    protected_earnings_amount  = Column(Numeric(12, 2), nullable=True)
+    reason_code                = Column(String(20), nullable=True)
+    file_hash                  = Column(String(64), nullable=False)
+    version                    = Column(SmallInteger, nullable=False, default=1, server_default="1")
+    replaces_id                = Column(Integer, ForeignKey("payroll_nz_authority_deductions.id", ondelete="SET NULL"), nullable=True)
+    status                     = Column(String(12), nullable=False, default="IMPORTED", server_default="IMPORTED")
+
+    __table_args__ = (
+        sa.CheckConstraint("deduction_type IN ('CHILD_SUPPORT', 'STUDENT_LOAN_EXTRA', 'IRD_DEDUCTION_NOTICE', "
+                           "'COURT_ATTACHMENT')", name="ck_nz_notice_type"),
+        sa.CheckConstraint("issuer IN ('INLAND_REVENUE', 'COURT', 'MSD', 'OTHER_AUTHORITY')", name="ck_nz_notice_issuer"),
+        sa.CheckConstraint("amount_per_payday IS NOT NULL OR rate_pct IS NOT NULL", name="ck_nz_notice_amount"),
+        sa.CheckConstraint("protected_earnings_policy IN ('IRD_PROTECTED_NET', 'COURT_SPECIFIED', 'NONE')",
+                           name="ck_nz_notice_protected_policy"),
+        sa.CheckConstraint("protected_earnings_policy <> 'COURT_SPECIFIED' OR protected_earnings_amount IS NOT NULL",
+                           name="ck_nz_notice_protected_amount"),
+        sa.CheckConstraint("version >= 1", name="ck_nz_notice_version"),
+        sa.CheckConstraint("status IN ('IMPORTED', 'APPROVED', 'SUPERSEDED', 'REVOKED', 'REJECTED')",
+                           name="ck_nz_notice_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_nz_notice_dates"),
+        Index("uq_nz_authority_notice_version", "organization_id", "employee_id", "deduction_type", "notice_id",
+              "version", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzAuthorityDeduction employee={self.employee_id} {self.deduction_type} v{self.version}>"
+
+
+class PayrollNzWorkPatternVersion(_NzCommon, Base):
+    """Effective-dated work pattern (spec §8, §11 WorkPatternVersion): the
+    days/hours/roster evidence used by the minimum-wage test and, from Phase 5,
+    the Holidays Act engine."""
+    __tablename__ = "payroll_nz_work_pattern_versions"
+
+    updated_at                  = Column(DateTime(timezone=True), nullable=True)
+    employee_id                 = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from              = Column(Date, nullable=False)
+    effective_to                = Column(Date, nullable=True)
+    pattern_type                = Column(String(10), nullable=False)       # FIXED / ROSTERED / VARIABLE
+    contracted_hours_per_week   = Column(Numeric(6, 2), nullable=True)
+    contracted_days_per_week    = Column(Numeric(3, 1), nullable=True)
+    weekly_schedule             = Column(_NZ_JSON, nullable=True)          # {"MON": 8, ...}
+    roster_cycle_weeks          = Column(SmallInteger, nullable=True)
+    roster_schedule             = Column(_NZ_JSON, nullable=True)
+    hours_source                = Column(String(10), nullable=False)       # CONTRACT / TIMESHEET / ROSTER
+    status                      = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name="ck_nz_work_pattern_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_nz_work_pattern_dates"),
+        sa.CheckConstraint("pattern_type IN ('FIXED', 'ROSTERED', 'VARIABLE')", name="ck_nz_work_pattern_type"),
+        sa.CheckConstraint("hours_source IN ('CONTRACT', 'TIMESHEET', 'ROSTER')", name="ck_nz_work_pattern_hours_source"),
+        sa.CheckConstraint("pattern_type <> 'FIXED' OR weekly_schedule IS NOT NULL", name="ck_nz_work_pattern_fixed"),
+        sa.CheckConstraint("pattern_type <> 'ROSTERED' OR (roster_cycle_weeks IS NOT NULL AND "
+                           "roster_schedule IS NOT NULL)", name="ck_nz_work_pattern_roster"),
+        sa.CheckConstraint("roster_cycle_weeks IS NULL OR roster_cycle_weeks >= 1", name="ck_nz_work_pattern_cycle"),
+        Index("ix_nz_work_pattern_employee_period", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzWorkPatternVersion employee={self.employee_id} {self.pattern_type} {self.status}>"
+
+
+class PayrollNzAccumulatorEntry(_NzCommon, Base):
+    """Append-only ledger behind the ACC earner-levy cap and every year-to-date
+    value (NZ-013): keyed by employee + legal entity + tax year + obligation,
+    so several pay groups of one legal employer share ONE annual cap. A
+    balance is the sum of entries before a payday — replayable, never a
+    mutable counter. A payslip posts each obligation once (RUN); an opening
+    balance carried in from an incumbent payroll needs evidence and a second
+    approver."""
+    __tablename__ = "payroll_nz_accumulator_entries"
+
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    tax_year         = Column(String(7), nullable=False)
+    obligation       = Column(String(24), nullable=False)
+    pay_date         = Column(Date, nullable=False)
+    amount           = Column(Numeric(14, 2), nullable=False)
+    entry_kind       = Column(String(16), nullable=False)                 # RUN / CORRECTION / OPENING_BALANCE
+    run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    result_hash      = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("obligation IN ('ACC_LIABLE_EARNINGS', 'PAYE_GROSS', 'PAYE', 'ACC_LEVY', 'KS_GROSS', "
+                           "'KS_EMPLOYEE', 'KS_EMPLOYER_GROSS', 'ESCT', 'STUDENT_LOAN', 'CHILD_SUPPORT')",
+                           name="ck_nz_accum_obligation"),
+        sa.CheckConstraint("entry_kind IN ('RUN', 'CORRECTION', 'OPENING_BALANCE')", name="ck_nz_accum_kind"),
+        sa.CheckConstraint("entry_kind <> 'OPENING_BALANCE' OR (evidence_ref IS NOT NULL AND "
+                           "approved_by_id IS NOT NULL)", name="ck_nz_accum_opening_evidence"),
+        sa.CheckConstraint("entry_kind <> 'RUN' OR payslip_item_id IS NOT NULL", name="ck_nz_accum_run_payslip"),
+        Index("ix_nz_accum_lookup", "employee_id", "legal_entity_id", "tax_year", "obligation", "pay_date"),
+        Index("uq_nz_accum_payslip_obligation", "payslip_item_id", "obligation", unique=True,
+              postgresql_where=text("entry_kind = 'RUN'"), sqlite_where=text("entry_kind = 'RUN'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzAccumulatorEntry employee={self.employee_id} {self.tax_year} {self.obligation} {self.amount}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# New Zealand Holidays Act (ZP-NZ-ENG-001 Phase 5, migration ac08988ecd3a)
+# ══════════════════════════════════════════════════════════════════════════
+_NZ_LEAVE_TYPES = ("ANNUAL", "SICK", "BEREAVEMENT_CLOSE", "BEREAVEMENT_OTHER", "FAMILY_VIOLENCE", "ALTERNATIVE")
+
+
+class PayrollNzEmployment(_NzCommon, Base):
+    """One employment instance (spec §8, §10): the anniversary anchor for every
+    Holidays Act entitlement. A rehire is a NEW instance unless continuity is
+    evidenced and linked to the prior instance. Pay-as-you-go holiday pay is
+    allowed only on a recorded basis with a written agreement reference."""
+    __tablename__ = "payroll_nz_employments"
+
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    start_date           = Column(Date, nullable=False)
+    end_date             = Column(Date, nullable=True)
+    continuity_rule      = Column(String(16), nullable=False, default="NEW_INSTANCE", server_default="NEW_INSTANCE")
+    prior_employment_id  = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="SET NULL"), nullable=True)
+    termination_reason   = Column(String(30), nullable=True)
+    payg_eligible        = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    payg_basis           = Column(String(28), nullable=True)
+    payg_agreement_ref   = Column(String(300), nullable=True)
+    status               = Column(String(10), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("end_date IS NULL OR end_date >= start_date", name="ck_nz_employment_dates"),
+        sa.CheckConstraint("continuity_rule IN ('NEW_INSTANCE', 'CONTINUOUS')", name="ck_nz_employment_continuity"),
+        sa.CheckConstraint("continuity_rule <> 'CONTINUOUS' OR (evidence_ref IS NOT NULL AND "
+                           "prior_employment_id IS NOT NULL)", name="ck_nz_employment_continuity_evidence"),
+        sa.CheckConstraint("payg_basis IS NULL OR payg_basis IN ('FIXED_TERM_UNDER_12_MONTHS', "
+                           "'IRREGULAR_INTERMITTENT')", name="ck_nz_employment_payg_basis"),
+        sa.CheckConstraint("payg_eligible = false OR (payg_basis IS NOT NULL AND payg_agreement_ref IS NOT NULL)",
+                           name="ck_nz_employment_payg_evidence"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'ENDED')", name="ck_nz_employment_status"),
+        Index("ix_nz_employment_employee_start", "employee_id", "start_date"),
+        Index("uq_nz_employment_one_active", "organization_id", "employee_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzEmployment employee={self.employee_id} {self.start_date} {self.status}>"
+
+
+class PayrollNzPublicHolidayDecision(_NzCommon, Base):
+    """Per employee and public holiday (spec §8): the otherwise-working-day
+    decision with its basis (agreement / operator decisions need evidence),
+    whether it was worked, the shift in NZ local time (a shift may cross
+    midnight) and whether an alternative holiday is due. One APPROVED row per
+    employee and date; a change supersedes."""
+    __tablename__ = "payroll_nz_public_holiday_decisions"
+
+    updated_at              = Column(DateTime(timezone=True), nullable=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id           = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    holiday_date            = Column(Date, nullable=False)
+    holiday_name            = Column(String(80), nullable=False)
+    region                  = Column(String(3), nullable=True)
+    otherwise_working_day   = Column(String(12), nullable=False)          # YES / NO / UNDETERMINED
+    owd_basis               = Column(String(24), nullable=False)
+    owd_evidence_ref        = Column(String(300), nullable=True)
+    worked                  = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    shift_start             = Column(DateTime(timezone=True), nullable=True)
+    shift_end               = Column(DateTime(timezone=True), nullable=True)
+    timezone                = Column(String(40), nullable=False, default="Pacific/Auckland",
+                                     server_default="Pacific/Auckland")
+    hours_on_holiday        = Column(Numeric(6, 2), nullable=True)
+    alternative_holiday_due = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    status                  = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("otherwise_working_day IN ('YES', 'NO', 'UNDETERMINED')", name="ck_nz_phd_owd"),
+        sa.CheckConstraint("owd_basis IN ('FIXED_PATTERN', 'ROSTER', 'HISTORY', 'AGREEMENT', "
+                           "'OPERATOR_DECISION')", name="ck_nz_phd_owd_basis"),
+        sa.CheckConstraint("owd_basis NOT IN ('AGREEMENT', 'OPERATOR_DECISION') OR owd_evidence_ref IS NOT NULL",
+                           name="ck_nz_phd_owd_evidence"),
+        sa.CheckConstraint("worked = false OR (shift_start IS NOT NULL AND shift_end IS NOT NULL)",
+                           name="ck_nz_phd_shift"),
+        sa.CheckConstraint("shift_end IS NULL OR shift_start IS NULL OR shift_end > shift_start",
+                           name="ck_nz_phd_shift_order"),
+        sa.CheckConstraint("timezone IN ('Pacific/Auckland', 'Pacific/Chatham')", name="ck_nz_phd_timezone"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUPERSEDED')", name="ck_nz_phd_status"),
+        Index("uq_nz_phd_one_approved", "employee_id", "holiday_date", unique=True,
+              postgresql_where=text("status = 'APPROVED'"), sqlite_where=text("status = 'APPROVED'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzPublicHolidayDecision employee={self.employee_id} {self.holiday_date} {self.status}>"
+
+
+class PayrollNzLeaveEntitlement(_NzCommon, Base):
+    """The LEGAL Holidays Act entitlement (spec §8, NZ-016): weeks or days
+    vested on a qualifying date / anniversary for one employment instance,
+    with carried-in, taken and paid-out quantities. Never a generic hours
+    accrual. An alternative holiday points at the public-holiday decision
+    that earned it."""
+    __tablename__ = "payroll_nz_leave_entitlements"
+
+    updated_at          = Column(DateTime(timezone=True), nullable=True)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id       = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    leave_type          = Column(String(20), nullable=False)
+    qualifying_date     = Column(Date, nullable=False)
+    entitlement_date    = Column(Date, nullable=False)
+    unit                = Column(String(6), nullable=False)                 # WEEKS / DAYS
+    quantity            = Column(Numeric(8, 4), nullable=False)
+    carried_in          = Column(Numeric(8, 4), nullable=False, default=0, server_default="0")
+    taken               = Column(Numeric(8, 4), nullable=False, default=0, server_default="0")
+    paid_out            = Column(Numeric(8, 4), nullable=False, default=0, server_default="0")
+    source              = Column(String(24), nullable=False)
+    source_decision_id  = Column(Integer, ForeignKey("payroll_nz_public_holiday_decisions.id", ondelete="SET NULL"),
+                                 nullable=True)
+    pack_hash           = Column(String(64), nullable=False)
+    expires_on          = Column(Date, nullable=True)
+    status              = Column(String(12), nullable=False, default="ACTIVE", server_default="ACTIVE")
+
+    __table_args__ = (
+        sa.CheckConstraint(f"leave_type IN {_nz_in(_NZ_LEAVE_TYPES)}", name="ck_nz_entitlement_type"),
+        sa.CheckConstraint("unit IN ('WEEKS', 'DAYS')", name="ck_nz_entitlement_unit"),
+        sa.CheckConstraint("quantity >= 0 AND carried_in >= 0 AND taken >= 0 AND paid_out >= 0",
+                           name="ck_nz_entitlement_non_negative"),
+        sa.CheckConstraint("taken + paid_out <= quantity + carried_in", name="ck_nz_entitlement_balance"),
+        sa.CheckConstraint("source IN ('HOLIDAYS_ACT_2003', 'EMPLOYMENT_AGREEMENT', 'PUBLIC_HOLIDAY_WORKED')",
+                           name="ck_nz_entitlement_source"),
+        sa.CheckConstraint("leave_type <> 'ALTERNATIVE' OR source_decision_id IS NOT NULL",
+                           name="ck_nz_entitlement_alternative_source"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'EXHAUSTED', 'PAID_OUT', 'SUPERSEDED')",
+                           name="ck_nz_entitlement_status"),
+        Index("ix_nz_entitlement_lookup", "employee_id", "leave_type", "entitlement_date"),
+        Index("uq_nz_entitlement_vest", "employment_id", "leave_type", "entitlement_date", unique=True,
+              postgresql_where=text("leave_type <> 'ALTERNATIVE'"), sqlite_where=text("leave_type <> 'ALTERNATIVE'")),
+        Index("uq_nz_entitlement_alternative", "source_decision_id", unique=True,
+              postgresql_where=text("leave_type = 'ALTERNATIVE'"), sqlite_where=text("leave_type = 'ALTERNATIVE'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzLeaveEntitlement employee={self.employee_id} {self.leave_type} {self.entitlement_date}>"
+
+
+class PayrollNzGrossEarningsLedger(_NzCommon, Base):
+    """Append-only statutory gross earnings (spec §8): one row per paid
+    payslip and pay component with its inclusion reason — the base for
+    average weekly earnings and the 8% final-pay test in Phase 6. Written at
+    PAID; nothing updates or deletes these rows."""
+    __tablename__ = "payroll_nz_gross_earnings_ledger"
+
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id    = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=True)
+    run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    pay_date         = Column(Date, nullable=False)
+    period_start     = Column(Date, nullable=False)
+    period_end       = Column(Date, nullable=False)
+    component        = Column(String(24), nullable=False)
+    amount           = Column(Numeric(14, 2), nullable=False)
+    included         = Column(Boolean, nullable=False)
+    treatment        = Column(String(14), nullable=False)
+    reason           = Column(String(120), nullable=False)
+    days_worked      = Column(Numeric(6, 2), nullable=True)
+    pack_hash        = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("treatment IN ('INCLUDED', 'EXCLUDED', 'LUMP_SUM_PATH', 'REVIEW')",
+                           name="ck_nz_gross_ledger_treatment"),
+        sa.CheckConstraint("period_end >= period_start", name="ck_nz_gross_ledger_period"),
+        Index("ix_nz_gross_ledger_lookup", "employee_id", "employment_id", "pay_date"),
+        Index("uq_nz_gross_ledger_payslip_component", "payslip_item_id", "component", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzGrossEarningsLedger employee={self.employee_id} {self.pay_date} {self.component}>"
+
+
+class PayrollNzLeaveEvent(_NzCommon, Base):
+    """Leave taken against a Holidays Act entitlement (spec §8). There is
+    deliberately no reason or narrative column: family-violence leave is
+    always restricted and visible only with the dedicated permission
+    (NZ-023)."""
+    __tablename__ = "payroll_nz_leave_events"
+
+    updated_at         = Column(DateTime(timezone=True), nullable=True)
+    employee_id        = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id      = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    entitlement_id     = Column(Integer, ForeignKey("payroll_nz_leave_entitlements.id", ondelete="SET NULL"), nullable=True)
+    leave_type         = Column(String(20), nullable=False)
+    start_date         = Column(Date, nullable=False)
+    end_date           = Column(Date, nullable=False)
+    quantity           = Column(Numeric(8, 4), nullable=False)
+    unit               = Column(String(6), nullable=False)
+    source_request_id  = Column(Integer, ForeignKey("payroll_leave_requests.id", ondelete="SET NULL"), nullable=True)
+    restricted         = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    status             = Column(String(12), nullable=False, default="REQUESTED", server_default="REQUESTED")
+    # Phase 6 (c6ea8c6c35ce): the leave-pay calculation that paid this event.
+    leave_pay_calculation_id = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"leave_type IN {_nz_in(_NZ_LEAVE_TYPES)}", name="ck_nz_leave_event_type"),
+        sa.CheckConstraint("unit IN ('WEEKS', 'DAYS')", name="ck_nz_leave_event_unit"),
+        sa.CheckConstraint("quantity > 0", name="ck_nz_leave_event_quantity"),
+        sa.CheckConstraint("end_date >= start_date", name="ck_nz_leave_event_dates"),
+        sa.CheckConstraint("leave_type <> 'FAMILY_VIOLENCE' OR restricted = true",
+                           name="ck_nz_leave_event_restricted"),
+        sa.CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'PAID', 'CANCELLED')",
+                           name="ck_nz_leave_event_status"),
+        Index("ix_nz_leave_event_employee_dates", "employee_id", "start_date"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzLeaveEvent employee={self.employee_id} {self.leave_type} {self.status}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# New Zealand leave pay and non-standard payments (ZP-NZ-ENG-001 Phase 6,
+# migration c6ea8c6c35ce)
+# ══════════════════════════════════════════════════════════════════════════
+_NZ_LEAVE_PAY_PURPOSES = ("ANNUAL_LEAVE", "SICK", "BEREAVEMENT", "FAMILY_VIOLENCE", "PUBLIC_HOLIDAY_NOT_WORKED",
+                          "PUBLIC_HOLIDAY_WORKED", "ALTERNATIVE_HOLIDAY", "CASH_UP", "PAYG", "FINAL_VESTED",
+                          "FINAL_UNVESTED")
+
+
+class PayrollNzFinalPayCase(_NzCommon, Base):
+    """A termination's final holiday pay (spec §10, NZ-021): one open case per
+    employment; every outstanding entitlement is resolved in `outstanding`
+    (paid, or listed as not payable) — never silently zeroed."""
+    __tablename__ = "payroll_nz_final_pay_cases"
+
+    updated_at          = Column(DateTime(timezone=True), nullable=True)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id       = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    termination_date    = Column(Date, nullable=False)
+    termination_reason  = Column(String(30), nullable=False)
+    last_anniversary    = Column(Date, nullable=True)
+    outstanding         = Column(_NZ_JSON, nullable=True)
+    run_id              = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    status              = Column(String(12), nullable=False, default="OPEN", server_default="OPEN")
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('OPEN', 'CALCULATED', 'APPROVED', 'PAID', 'CANCELLED')",
+                           name="ck_nz_final_pay_status"),
+        Index("uq_nz_final_pay_one_per_employment", "employment_id", unique=True,
+              postgresql_where=text("status <> 'CANCELLED'"), sqlite_where=text("status <> 'CANCELLED'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzFinalPayCase employee={self.employee_id} {self.termination_date} {self.status}>"
+
+
+class PayrollNzLeavePayCalculation(_NzCommon, Base):
+    """Append-only leave-pay calculation (NZ-017): both candidates (OWP/AWE or
+    RDP/ADP), the winner, the statutory reason, units, rate and amount, the
+    ordinary pay it displaces, and the inputs used. Paid once; never edited."""
+    __tablename__ = "payroll_nz_leave_pay_calculations"
+
+    employee_id                 = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id               = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    leave_event_id              = Column(Integer, ForeignKey("payroll_nz_leave_events.id", ondelete="SET NULL"), nullable=True)
+    public_holiday_decision_id  = Column(Integer, ForeignKey("payroll_nz_public_holiday_decisions.id", ondelete="SET NULL"),
+                                         nullable=True)
+    final_pay_case_id           = Column(Integer, ForeignKey("payroll_nz_final_pay_cases.id", ondelete="SET NULL"), nullable=True)
+    entitlement_id              = Column(Integer, ForeignKey("payroll_nz_leave_entitlements.id", ondelete="SET NULL"), nullable=True)
+    run_id                      = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id             = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    pay_on                      = Column(Date, nullable=False)
+    purpose                     = Column(String(28), nullable=False)
+    method_pair                 = Column(String(10), nullable=False)
+    candidate_a_name            = Column(String(4), nullable=True)
+    candidate_a_amount          = Column(Numeric(14, 4), nullable=True)
+    candidate_b_name            = Column(String(4), nullable=True)
+    candidate_b_amount          = Column(Numeric(14, 4), nullable=True)
+    chosen                      = Column(String(4), nullable=False)
+    statutory_reason            = Column(String(200), nullable=False)
+    units                       = Column(Numeric(14, 4), nullable=False)
+    unit                        = Column(String(6), nullable=False)
+    rate_amount                 = Column(Numeric(14, 4), nullable=False)
+    amount                      = Column(Numeric(14, 2), nullable=False)
+    displaced_amount            = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    restricted                  = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    inputs                      = Column(_NZ_JSON, nullable=False)
+    pack_hash                   = Column(String(64), nullable=False)
+    status                      = Column(String(10), nullable=False, default="CALCULATED", server_default="CALCULATED")
+
+    __table_args__ = (
+        sa.CheckConstraint(f"purpose IN {_nz_in(_NZ_LEAVE_PAY_PURPOSES)}", name="ck_nz_leave_pay_purpose"),
+        sa.CheckConstraint("method_pair IN ('OWP_AWE', 'RDP_ADP', 'PAYG_PCT', 'PCT_GROSS')",
+                           name="ck_nz_leave_pay_method"),
+        sa.CheckConstraint("chosen IN ('OWP', 'AWE', 'RDP', 'ADP', 'PCT')", name="ck_nz_leave_pay_chosen_enum"),
+        sa.CheckConstraint("chosen = 'PCT' OR chosen = candidate_a_name OR chosen = candidate_b_name",
+                           name="ck_nz_leave_pay_chosen_candidate"),
+        sa.CheckConstraint("unit IN ('WEEKS', 'DAYS', 'HOURS', 'AMOUNT')", name="ck_nz_leave_pay_unit"),
+        sa.CheckConstraint("amount >= 0 AND displaced_amount >= 0", name="ck_nz_leave_pay_amount"),
+        sa.CheckConstraint("purpose <> 'FAMILY_VIOLENCE' OR restricted = true", name="ck_nz_leave_pay_restricted"),
+        sa.CheckConstraint("status IN ('CALCULATED', 'PAID', 'VOID')", name="ck_nz_leave_pay_status"),
+        Index("ix_nz_leave_pay_employee_pay_on", "employee_id", "pay_on"),
+        Index("uq_nz_leave_pay_event_live", "leave_event_id", unique=True,
+              postgresql_where=text("leave_event_id IS NOT NULL AND status <> 'VOID'"),
+              sqlite_where=text("leave_event_id IS NOT NULL AND status <> 'VOID'")),
+        Index("uq_nz_leave_pay_decision_live", "public_holiday_decision_id", unique=True,
+              postgresql_where=text("public_holiday_decision_id IS NOT NULL AND status <> 'VOID'"),
+              sqlite_where=text("public_holiday_decision_id IS NOT NULL AND status <> 'VOID'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzLeavePayCalculation employee={self.employee_id} {self.purpose} {self.amount} {self.status}>"
+
+
+class PayrollNzCashUpRequest(_NzCommon, Base):
+    """Annual-holiday cash-up on the employee's written request (spec §8):
+    limited by the signed maximum weeks per entitlement year; one open request
+    per entitlement; approved by a second person."""
+    __tablename__ = "payroll_nz_cash_up_requests"
+
+    updated_at                = Column(DateTime(timezone=True), nullable=True)
+    employee_id               = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    employment_id             = Column(Integer, ForeignKey("payroll_nz_employments.id", ondelete="CASCADE"), nullable=False)
+    entitlement_id            = Column(Integer, ForeignKey("payroll_nz_leave_entitlements.id", ondelete="CASCADE"), nullable=False)
+    requested_on              = Column(Date, nullable=False)
+    written_request_ref       = Column(String(300), nullable=False)
+    weeks                     = Column(Numeric(6, 4), nullable=False)
+    leave_pay_calculation_id  = Column(Integer, ForeignKey("payroll_nz_leave_pay_calculations.id", ondelete="SET NULL"),
+                                       nullable=True)
+    status                    = Column(String(10), nullable=False, default="REQUESTED", server_default="REQUESTED")
+
+    __table_args__ = (
+        sa.CheckConstraint("weeks > 0", name="ck_nz_cash_up_weeks"),
+        sa.CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'PAID', 'REJECTED')", name="ck_nz_cash_up_status"),
+        Index("uq_nz_cash_up_one_open", "entitlement_id", unique=True,
+              postgresql_where=text("status IN ('REQUESTED', 'APPROVED')"),
+              sqlite_where=text("status IN ('REQUESTED', 'APPROVED')")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzCashUpRequest employee={self.employee_id} {self.weeks} {self.status}>"
+
+
+class PayrollNzCorrection(_NzCommon, Base):
+    """A compensating correction (NZ-006): the original PAID payslip is never
+    modified or deleted (RESTRICT); the correction payslip carries only the
+    deltas and its accumulator entries post as CORRECTION."""
+    __tablename__ = "payroll_nz_corrections"
+
+    updated_at                  = Column(DateTime(timezone=True), nullable=True)
+    employee_id                 = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_payslip_item_id    = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=False)
+    correction_run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    correction_payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    reason                      = Column(String(300), nullable=False)
+    input_delta                 = Column(_NZ_JSON, nullable=False)
+    result_delta                = Column(_NZ_JSON, nullable=True)
+    status                      = Column(String(10), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'APPLIED', 'VOID')", name="ck_nz_correction_status"),
+        Index("ix_nz_correction_original", "original_payslip_item_id"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzCorrection original={self.original_payslip_item_id} {self.status}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# New Zealand payday filing and remittance (ZP-NZ-ENG-001 Phase 8,
+# migration dd8a60634320)
+# ══════════════════════════════════════════════════════════════════════════
+_NZ_REMIT_OBLIGATIONS = ("PAYE", "STUDENT_LOAN", "KS_EMPLOYEE", "KS_EMPLOYER_NET", "ESCT", "CHILD_SUPPORT")
+
+
+class PayrollNzFiling(_NzCommon, Base):
+    """A payday filing record per legal employer, payday, schedule, kind and
+    version (spec §9, NZ-018). The payload comes only from PAID payslips and
+    carries IRD numbers as vault id + masked form (D-P8-4). Nothing is sent
+    while content.NZ_EXPORT_SCHEMAS is empty (G3)."""
+    __tablename__ = "payroll_nz_filings"
+
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+    pay_date             = Column(Date, nullable=False)
+    filing_type          = Column(String(24), nullable=False)
+    kind                 = Column(String(10), nullable=False, default="ORIGINAL", server_default="ORIGINAL")
+    version              = Column(SmallInteger, nullable=False, default=1, server_default="1")
+    run_ids              = Column(_NZ_JSON, nullable=False)
+    payload              = Column(_NZ_JSON, nullable=False)
+    payload_hash         = Column(String(64), nullable=False)
+    channel              = Column(String(20), nullable=False)
+    due_on               = Column(Date, nullable=True)
+    status               = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    amends_id            = Column(Integer, ForeignKey("payroll_nz_filings.id", ondelete="SET NULL"), nullable=True)
+    correction_id        = Column(Integer, ForeignKey("payroll_nz_corrections.id", ondelete="SET NULL"), nullable=True)
+    authority_reference  = Column(String(100), nullable=True)
+    authority_errors     = Column(_NZ_JSON, nullable=True)
+    submitted_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    submitted_at         = Column(DateTime(timezone=True), nullable=True)
+    responded_at         = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("filing_type IN ('EMPLOYMENT_INFORMATION', 'EMPLOYEE_DETAILS')", name="ck_nz_filing_type"),
+        sa.CheckConstraint("kind IN ('ORIGINAL', 'AMENDMENT')", name="ck_nz_filing_kind"),
+        sa.CheckConstraint("kind <> 'AMENDMENT' OR amends_id IS NOT NULL", name="ck_nz_filing_amends"),
+        sa.CheckConstraint("version >= 1", name="ck_nz_filing_version"),
+        sa.CheckConstraint("channel IN ('PAYDAY_GATEWAY', 'MYIR_FILE_UPLOAD', 'MYIR_ONSCREEN', 'PAPER')",
+                           name="ck_nz_filing_channel"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'SUPERSEDED')",
+                           name="ck_nz_filing_status"),
+        Index("ix_nz_filing_due", "organization_id", "due_on"),
+        Index("uq_nz_filing_version_entity", "organization_id", "legal_entity_id", "pay_date", "filing_type", "kind",
+              "version", unique=True, postgresql_where=text("legal_entity_id IS NOT NULL"),
+              sqlite_where=text("legal_entity_id IS NOT NULL")),
+        Index("uq_nz_filing_version_org", "organization_id", "pay_date", "filing_type", "kind", "version", unique=True,
+              postgresql_where=text("legal_entity_id IS NULL"), sqlite_where=text("legal_entity_id IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzFiling {self.pay_date} {self.filing_type} {self.kind} v{self.version} {self.status}>"
+
+
+class PayrollNzRemittance(_NzCommon, Base):
+    """One remittance period × obligation × destination (spec §9). PAID only
+    through matched settlements — a filing's acceptance never pays (NZ-019)."""
+    __tablename__ = "payroll_nz_remittances"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    period_start      = Column(Date, nullable=False)
+    period_end        = Column(Date, nullable=False)
+    remittance_class  = Column(String(15), nullable=False)
+    obligation        = Column(String(20), nullable=False)
+    destination       = Column(String(16), nullable=False)
+    fund_ref          = Column(String(100), nullable=False, default="", server_default="")
+    amount            = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    settled           = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    due_on            = Column(Date, nullable=True)
+    status            = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+    late              = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+
+    __table_args__ = (
+        sa.CheckConstraint("period_end >= period_start", name="ck_nz_remittance_period"),
+        sa.CheckConstraint("remittance_class IN ('MONTHLY', 'TWICE_MONTHLY')", name="ck_nz_remittance_class"),
+        sa.CheckConstraint(f"obligation IN {_nz_in(_NZ_REMIT_OBLIGATIONS)}", name="ck_nz_remittance_obligation"),
+        sa.CheckConstraint("destination IN ('INLAND_REVENUE', 'COMPLYING_FUND')", name="ck_nz_remittance_destination"),
+        sa.CheckConstraint("status IN ('OPEN', 'PART_PAID', 'PAID')", name="ck_nz_remittance_status"),
+        Index("ix_nz_remittance_due", "organization_id", "due_on"),
+        Index("uq_nz_remittance_entity", "organization_id", "legal_entity_id", "period_start", "obligation",
+              "destination", "fund_ref", unique=True, postgresql_where=text("legal_entity_id IS NOT NULL"),
+              sqlite_where=text("legal_entity_id IS NOT NULL")),
+        Index("uq_nz_remittance_org", "organization_id", "period_start", "obligation", "destination", "fund_ref",
+              unique=True, postgresql_where=text("legal_entity_id IS NULL"),
+              sqlite_where=text("legal_entity_id IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzRemittance {self.period_start} {self.obligation} {self.amount} {self.status}>"
+
+
+class PayrollNzRemittanceLine(_NzCommon, Base):
+    """Append-only: one payslip's share of a remittance (a correction's delta
+    lands in the ORIGINAL period, D-P8-3)."""
+    __tablename__ = "payroll_nz_remittance_lines"
+
+    remittance_id    = Column(Integer, ForeignKey("payroll_nz_remittances.id", ondelete="CASCADE"), nullable=False)
+    run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    amount           = Column(Numeric(14, 2), nullable=False)
+    source           = Column(String(10), nullable=False)
+    correction_id    = Column(Integer, ForeignKey("payroll_nz_corrections.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("source IN ('RUN', 'CORRECTION')", name="ck_nz_remittance_line_source"),
+        sa.CheckConstraint("source <> 'CORRECTION' OR correction_id IS NOT NULL",
+                           name="ck_nz_remittance_line_correction"),
+        Index("ix_nz_remittance_line_remittance", "remittance_id"),
+        Index("uq_nz_remittance_line_payslip", "payslip_item_id", "remittance_id", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzRemittanceLine remittance={self.remittance_id} {self.amount}>"
+
+
+class PayrollNzSettlement(_NzCommon, Base):
+    """Money paid against a remittance: recorded by one person and matched by
+    a second; a reference only, never bank details."""
+    __tablename__ = "payroll_nz_settlements"
+
+    updated_at         = Column(DateTime(timezone=True), nullable=True)
+    remittance_id      = Column(Integer, ForeignKey("payroll_nz_remittances.id", ondelete="CASCADE"), nullable=False)
+    paid_on            = Column(Date, nullable=False)
+    amount             = Column(Numeric(14, 2), nullable=False)
+    payment_reference  = Column(String(100), nullable=False)
+    status             = Column(String(10), nullable=False, default="RECORDED", server_default="RECORDED")
+    matched_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    matched_at         = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("amount > 0", name="ck_nz_settlement_amount"),
+        sa.CheckConstraint("status IN ('RECORDED', 'MATCHED', 'REVERSED')", name="ck_nz_settlement_status"),
+        Index("ix_nz_settlement_remittance", "remittance_id"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzSettlement remittance={self.remittance_id} {self.amount} {self.status}>"
+
+
+class PayrollNzRunException(_NzCommon, Base):
+    """A second person's approval of a documented exception on one payslip,
+    bound to the run fingerprint (a changed payslip re-blocks). A minimum-wage
+    FAIL is never an approvable exception (D-P8-1)."""
+    __tablename__ = "payroll_nz_run_exceptions"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id            = Column(Integer, ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False)
+    payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    code              = Column(String(40), nullable=False)
+    detail            = Column(_NZ_JSON, nullable=True)
+    run_fingerprint   = Column(String(64), nullable=False)
+    status            = Column(String(10), nullable=False, default="REQUESTED", server_default="REQUESTED")
+
+    __table_args__ = (
+        sa.CheckConstraint("code <> 'NZ_MIN_WAGE_FAIL'", name="ck_nz_run_exception_never_min_wage_fail"),
+        sa.CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'REJECTED')", name="ck_nz_run_exception_status"),
+        Index("uq_nz_run_exception", "run_id", "payslip_item_id", "code", "run_fingerprint", unique=True,
+              postgresql_where=text("status <> 'REJECTED'"), sqlite_where=text("status <> 'REJECTED'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzRunException run={self.run_id} {self.code} {self.status}>"
+
+
+class PayrollNzParallelImport(_NzCommon, Base):
+    """One incumbent-payroll file compared with a committed New Zealand run at
+    zero tolerance (release gate G5, Phase 9). Accepted (approved_by_id) by a
+    person other than its importer."""
+    __tablename__ = "payroll_nz_parallel_imports"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    run_id            = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    pay_date          = Column(Date, nullable=False)
+    cycle_month       = Column(Date, nullable=False)
+    source_name       = Column(String(100), nullable=False)
+    file_hash         = Column(String(64), nullable=False)
+    row_count         = Column(Integer, nullable=False, default=0, server_default="0")
+    matched_count     = Column(Integer, nullable=False, default=0, server_default="0")
+    unmatched_count   = Column(Integer, nullable=False, default=0, server_default="0")
+    column_map        = Column(_NZ_JSON, nullable=False)
+    status            = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+    withdrawn_reason  = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("row_count >= 0 AND matched_count >= 0 AND unmatched_count >= 0",
+                           name="ck_nz_parallel_import_counts"),
+        sa.CheckConstraint("status IN ('OPEN', 'ACCEPTED', 'WITHDRAWN')", name="ck_nz_parallel_import_status"),
+        sa.CheckConstraint("status <> 'ACCEPTED' OR (approved_by_id IS NOT NULL AND approved_by_id <> created_by_id)",
+                           name="ck_nz_parallel_import_four_eyes"),
+        Index("ix_nz_parallel_import_cycle", "status", "cycle_month"),
+        Index("uq_nz_parallel_import_file", "organization_id", "run_id", "file_hash", unique=True,
+              postgresql_where=text("status <> 'WITHDRAWN'"), sqlite_where=text("status <> 'WITHDRAWN'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzParallelImport run={self.run_id} {self.cycle_month} {self.status}>"
+
+
+class PayrollNzParallelDifference(_NzCommon, Base):
+    """One employee and concept that differs between the incumbent payroll and
+    the frozen payslip; explained, then accepted (approved_by_id) by a person
+    other than the explainer."""
+    __tablename__ = "payroll_nz_parallel_differences"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    import_id         = Column(Integer, ForeignKey("payroll_nz_parallel_imports.id", ondelete="CASCADE"), nullable=False)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    concept           = Column(String(24), nullable=False)
+    incumbent_amount  = Column(Numeric(14, 2), nullable=False)
+    zoiko_amount      = Column(Numeric(14, 2), nullable=False)
+    difference        = Column(Numeric(14, 2), nullable=False)
+    explanation       = Column(String(300), nullable=True)
+    explained_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status            = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+
+    __table_args__ = (
+        sa.CheckConstraint("concept IN ('gross', 'paye_incl_acc', 'student_loan', 'ks_employee', "
+                           "'ks_employer_gross', 'esct', 'child_support', 'net_pay')",
+                           name="ck_nz_parallel_difference_concept"),
+        sa.CheckConstraint("status IN ('OPEN', 'EXPLAINED', 'ACCEPTED')", name="ck_nz_parallel_difference_status"),
+        sa.CheckConstraint("status = 'OPEN' OR explanation IS NOT NULL", name="ck_nz_parallel_difference_explained"),
+        sa.CheckConstraint("status <> 'ACCEPTED' OR (approved_by_id IS NOT NULL AND approved_by_id <> explained_by_id)",
+                           name="ck_nz_parallel_difference_four_eyes"),
+        Index("ix_nz_parallel_difference_import", "import_id"),
+        Index("uq_nz_parallel_difference", "import_id", "employee_id", "concept", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollNzParallelDifference import={self.import_id} {self.concept} {self.status}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Poland (ZP-PL-ENG-001 Phase 2, migration 1ee3bbde33bb)
+# ══════════════════════════════════════════════════════════════════════════
+# Vocabularies mirror engine/countries/poland_content.py; no statutory value
+# appears in any constraint (spec page 1) — enumerations, evidence and date
+# order only.
+_PL_CONTRACT_TYPES = ("UMOWA_O_PRACE", "UMOWA_ZLECENIE", "UMOWA_O_DZIELO", "MANAGEMENT_CONTRACT",
+                      "BOARD_REMUNERATION")
+_PL_DECLARATION_TYPES = ("PIT2", "COSTS_COMMUTER", "COSTS_MULTIPLE", "PIT0_UNDER26", "PIT0_RETURN", "PIT0_FAMILY4",
+                         "PIT0_SENIOR", "PIT0_WAIVER", "HIGHER_RATE_REQUEST", "PPK_OPT_OUT", "PPK_REDUCED_RATE",
+                         "PPK_ADDITIONAL", "PRIOR_EMPLOYER_CAP")
+_PL_PPK_STATES = ("NOT_ELIGIBLE", "ELIGIBLE_NOT_ENROLLED", "ENROLLED", "OPTED_OUT", "SUSPENDED_BY_LAW", "ENDED")
+_PL_ACCUMULATORS = ("PIT_TAXABLE_INCOME", "PIT_ADVANCE", "PIT_COSTS_USED", "PIT0_EXEMPT_UNDER26",
+                    "PIT0_EXEMPT_RETURN", "PIT0_EXEMPT_FAMILY4", "PIT0_EXEMPT_SENIOR", "ZUS_CAP_PENSION_BASE",
+                    "ZUS_CAP_DISABILITY_BASE", "SICK_DAYS_EMPLOYER", "PPK_EMPLOYEE", "PPK_EMPLOYER")
+
+
+class _PlCommon(_NzCommon):
+    """The same id / tenant / legal employer / evidence / version / approval /
+    stamp columns as New Zealand (and Japan). Statutory rows are never edited in
+    place: a change is a new row whose previous_version_id points at the row it
+    supersedes."""
+
+
+def _pl_versioned_checks(prefix: str) -> tuple:
+    return (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name=f"ck_pl_{prefix}_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name=f"ck_pl_{prefix}_dates"),
+        sa.CheckConstraint("status <> 'ACTIVE' OR (approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name=f"ck_pl_{prefix}_four_eyes"),
+    )
+
+
+class PayrollPlIdentifierVault(_PlCommon, Base):
+    """Encrypted Polish identifiers (spec §13, PL-025): an employee's PESEL or
+    NIP, or the employer's ZUS contribution account (NRS). Ciphertext only — no
+    plaintext and no trailing digits in any column — with its key version and a
+    keyed HMAC fingerprint used only for duplicate detection
+    (pl_identifiers.py). One ACTIVE row per employee per identifier type."""
+    __tablename__ = "payroll_pl_identifier_vault"
+
+    updated_at       = Column(DateTime(timezone=True), nullable=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=True, index=True)
+    subject_type     = Column(String(10), nullable=False)          # EMPLOYEE / EMPLOYER
+    identifier_type  = Column(String(8), nullable=False)           # PESEL / NIP / NRS
+    ciphertext       = Column(Text, nullable=True)                 # nulled on deletion
+    key_version      = Column(SmallInteger, nullable=False)
+    fingerprint      = Column(String(64), nullable=False)
+    purpose          = Column(String(30), nullable=False, default="PAYROLL_STATUTORY", server_default="PAYROLL_STATUTORY")
+    collected_at     = Column(DateTime(timezone=True), nullable=False)
+    deleted_at       = Column(DateTime(timezone=True), nullable=True)
+    status           = Column(String(10), nullable=False, default="ACTIVE", server_default="ACTIVE")
+
+    __table_args__ = (
+        sa.CheckConstraint("subject_type IN ('EMPLOYEE', 'EMPLOYER')", name="ck_pl_vault_subject_type"),
+        sa.CheckConstraint("(subject_type = 'EMPLOYEE' AND employee_id IS NOT NULL AND "
+                           "identifier_type IN ('PESEL', 'NIP')) OR "
+                           "(subject_type = 'EMPLOYER' AND employee_id IS NULL AND identifier_type = 'NRS')",
+                           name="ck_pl_vault_subject_identifier"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'DELETED')", name="ck_pl_vault_status"),
+        sa.CheckConstraint("deleted_at IS NOT NULL OR ciphertext IS NOT NULL", name="ck_pl_vault_ciphertext_or_deleted"),
+        Index("uq_pl_vault_one_active_employee_identifier", "organization_id", "employee_id", "identifier_type",
+              unique=True, postgresql_where=text("status = 'ACTIVE' AND subject_type = 'EMPLOYEE'"),
+              sqlite_where=text("status = 'ACTIVE' AND subject_type = 'EMPLOYEE'")),
+        Index("uq_pl_vault_fingerprint", "organization_id", "identifier_type", "fingerprint", unique=True,
+              postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+    )
+
+    def __repr__(self):
+        # Never the ciphertext or fingerprint.
+        return f"<PayrollPlIdentifierVault id={self.id} {self.subject_type}/{self.identifier_type} {self.status}>"
+
+
+class PayrollPlIdentifierAccessEvent(_PlCommon, Base):
+    """Append-only audit of every vault action (spec §13 Audit). No updated_at."""
+    __tablename__ = "payroll_pl_identifier_access_events"
+
+    employee_id  = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=True, index=True)
+    vault_id     = Column(Integer, ForeignKey("payroll_pl_identifier_vault.id", ondelete="SET NULL"), nullable=True,
+                          index=True)
+    actor_id     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action       = Column(String(20), nullable=False)
+    purpose      = Column(String(60), nullable=True)
+    reason       = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("action IN ('CREATE', 'REVEAL_REQUESTED', 'REVEAL_APPROVED', 'REVEALED', "
+                           "'EXPORTED', 'DELETED', 'ROTATED')", name="ck_pl_vault_event_action"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlIdentifierAccessEvent vault={self.vault_id} {self.action}>"
+
+
+class PayrollPlEmployerRegistration(_PlCommon, Base):
+    """Per-legal-employer Poland setup (spec §11 PLEmployerRegistration,
+    PL-001): public register numbers (NIP / REGON / KRS), the NRS through the
+    vault, tax-office routing, ZUS deadline class with evidence, the accident
+    rate with its source and contribution-year window, PPK institution and the
+    employer's additional PPK rate, FP/FS and FGSP applicability (NULL = not
+    decided -> the engine blocks), journal accounts, and credential REFERENCES
+    only (never secrets, spec §13). Effective-dated; one ACTIVE open row per
+    (organisation, legal entity); activation needs a second approver."""
+    __tablename__ = "payroll_pl_employer_registrations"
+
+    updated_at                  = Column(DateTime(timezone=True), nullable=True)
+    effective_from              = Column(Date, nullable=False)
+    effective_to                = Column(Date, nullable=True)
+    legal_name                  = Column(String(200), nullable=False)
+    nip                         = Column(String(10), nullable=False)
+    regon                       = Column(String(14), nullable=True)
+    krs                         = Column(String(10), nullable=True)
+    nrs_vault_id                = Column(Integer, ForeignKey("payroll_pl_identifier_vault.id", ondelete="SET NULL"),
+                                         nullable=True)
+    tax_office_code             = Column(String(10), nullable=True)
+    zus_deadline_class          = Column(String(6), nullable=False)
+    zus_deadline_evidence_ref   = Column(String(300), nullable=True)
+    accident_rate_pct           = Column(Numeric(5, 2), nullable=True)
+    accident_rate_source        = Column(String(20), nullable=True)
+    accident_rate_from          = Column(Date, nullable=True)
+    accident_rate_to            = Column(Date, nullable=True)
+    accident_rate_evidence_ref  = Column(String(300), nullable=True)
+    small_payer                 = Column(Boolean, nullable=True)
+    ppk_institution             = Column(String(200), nullable=True)
+    ppk_agreement_ref           = Column(String(100), nullable=True)
+    ppk_employer_additional_pct = Column(Numeric(5, 2), nullable=True)
+    fp_fs_applicable            = Column(Boolean, nullable=True)
+    fgsp_applicable             = Column(Boolean, nullable=True)
+    pl_journal_accounts         = Column(JSON, nullable=True)
+    bank_export_ref             = Column(String(100), nullable=True)
+    filing_credential_ref       = Column(String(100), nullable=True)
+    verification_state          = Column(String(12), nullable=False, default="UNVERIFIED", server_default="UNVERIFIED")
+    source_document_id          = Column(Integer, ForeignKey("payroll_source_artifacts.id", ondelete="SET NULL"),
+                                         nullable=True)
+    status                      = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        *_pl_versioned_checks("employer"),
+        sa.CheckConstraint("zus_deadline_class IN ('DAY_5', 'DAY_15', 'DAY_20')", name="ck_pl_employer_deadline_class"),
+        sa.CheckConstraint("(accident_rate_pct IS NULL) = (accident_rate_source IS NULL)",
+                           name="ck_pl_employer_accident_source"),
+        sa.CheckConstraint("accident_rate_source IS NULL OR accident_rate_source IN "
+                           "('ZUS_NOTICE', 'SELF_DETERMINED', 'SMALL_PAYER_DEFAULT')",
+                           name="ck_pl_employer_accident_source_enum"),
+        sa.CheckConstraint("accident_rate_pct IS NULL OR (accident_rate_from IS NOT NULL AND "
+                           "accident_rate_evidence_ref IS NOT NULL)", name="ck_pl_employer_accident_window"),
+        sa.CheckConstraint("accident_rate_to IS NULL OR accident_rate_to >= accident_rate_from",
+                           name="ck_pl_employer_accident_dates"),
+        sa.CheckConstraint("accident_rate_pct IS NULL OR accident_rate_pct > 0", name="ck_pl_employer_accident_positive"),
+        sa.CheckConstraint("ppk_employer_additional_pct IS NULL OR ppk_employer_additional_pct >= 0",
+                           name="ck_pl_employer_ppk_additional"),
+        sa.CheckConstraint("verification_state IN ('UNVERIFIED', 'VERIFIED', 'REJECTED')",
+                           name="ck_pl_employer_verification"),
+        Index("ix_pl_employer_org_period", "organization_id", "effective_from"),
+        Index("uq_pl_employer_one_active_entity", "organization_id", "legal_entity_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NOT NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NOT NULL")),
+        Index("uq_pl_employer_one_active_org", "organization_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlEmployerRegistration org={self.organization_id} {self.effective_from} {self.status}>"
+
+
+class PayrollPlWorkerProfile(_PlCommon, Base):
+    """Effective-dated Polish coverage facts (spec §3, §11 PLWorkerStatutoryProfile,
+    PL-002 / PL-006): the contract label is an INPUT, not the conclusion.
+    Coverage flags are three-state (NULL = not known -> the engine BLOCKS rather
+    than guess the lowest-cost treatment). PESEL / NIP only through the vault."""
+    __tablename__ = "payroll_pl_worker_profiles"
+
+    updated_at                  = Column(DateTime(timezone=True), nullable=True)
+    employee_id                 = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False,
+                                         index=True)
+    effective_from              = Column(Date, nullable=False)
+    effective_to                = Column(Date, nullable=True)
+    contract_type               = Column(String(20), nullable=False)
+    insurance_title_code        = Column(String(6), nullable=True)
+    cov_pension                 = Column(Boolean, nullable=True)
+    cov_disability              = Column(Boolean, nullable=True)
+    cov_sickness                = Column(Boolean, nullable=True)
+    cov_accident                = Column(Boolean, nullable=True)
+    cov_health                  = Column(Boolean, nullable=True)
+    fte_numerator               = Column(SmallInteger, nullable=True)
+    fte_denominator             = Column(SmallInteger, nullable=True)
+    working_time_system         = Column(String(30), nullable=True)
+    pay_frequency               = Column(String(12), nullable=False, default="MONTHLY", server_default="MONTHLY")
+    tax_residency               = Column(String(14), nullable=False, default="RESIDENT", server_default="RESIDENT")
+    is_student                  = Column(Boolean, nullable=True)
+    is_pensioner                = Column(Boolean, nullable=True)
+    other_titles_declared       = Column(Boolean, nullable=True)
+    other_titles_evidence_ref   = Column(String(300), nullable=True)
+    a1_certificate              = Column(Boolean, nullable=True)
+    fep_qualifying              = Column(Boolean, nullable=True)
+    fep_evidence_ref            = Column(String(300), nullable=True)
+    fep_from                    = Column(Date, nullable=True)
+    fep_to                      = Column(Date, nullable=True)
+    fund_exemption_code         = Column(String(40), nullable=True)
+    fund_exemption_evidence_ref = Column(String(300), nullable=True)
+    service_credit_months       = Column(Integer, nullable=True)
+    pesel_vault_id              = Column(Integer, ForeignKey("payroll_pl_identifier_vault.id", ondelete="SET NULL"),
+                                         nullable=True)
+    nip_vault_id                = Column(Integer, ForeignKey("payroll_pl_identifier_vault.id", ondelete="SET NULL"),
+                                         nullable=True)
+    status                      = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        *_pl_versioned_checks("worker_profile"),
+        sa.CheckConstraint(f"contract_type IN {_nz_in(_PL_CONTRACT_TYPES)}", name="ck_pl_worker_contract_type"),
+        sa.CheckConstraint("insurance_title_code IS NULL OR length(insurance_title_code) = 6",
+                           name="ck_pl_worker_title_code"),
+        sa.CheckConstraint("(fte_numerator IS NULL) = (fte_denominator IS NULL)", name="ck_pl_worker_fte_pair"),
+        sa.CheckConstraint("fte_denominator IS NULL OR (fte_denominator > 0 AND fte_numerator > 0 AND "
+                           "fte_numerator <= fte_denominator)", name="ck_pl_worker_fte_range"),
+        sa.CheckConstraint("pay_frequency IN ('MONTHLY', 'WEEKLY', 'FORTNIGHTLY', 'OTHER')",
+                           name="ck_pl_worker_pay_frequency"),
+        sa.CheckConstraint("tax_residency IN ('RESIDENT', 'NON_RESIDENT')", name="ck_pl_worker_residency"),
+        sa.CheckConstraint("other_titles_declared IS NOT TRUE OR other_titles_evidence_ref IS NOT NULL",
+                           name="ck_pl_worker_other_titles_evidence"),
+        sa.CheckConstraint("fep_qualifying IS NOT TRUE OR (fep_evidence_ref IS NOT NULL AND fep_from IS NOT NULL)",
+                           name="ck_pl_worker_fep_evidence"),
+        sa.CheckConstraint("fep_to IS NULL OR fep_from IS NULL OR fep_to >= fep_from", name="ck_pl_worker_fep_dates"),
+        sa.CheckConstraint("fund_exemption_code IS NULL OR fund_exemption_evidence_ref IS NOT NULL",
+                           name="ck_pl_worker_exemption_evidence"),
+        sa.CheckConstraint("service_credit_months IS NULL OR service_credit_months >= 0",
+                           name="ck_pl_worker_service_credit"),
+        Index("ix_pl_worker_profile_employee_period", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlWorkerProfile employee={self.employee_id} {self.contract_type} {self.effective_from}>"
+
+
+class PayrollPlDeclaration(_PlCommon, Base):
+    """Every payroll-affecting statement (PL-005): PIT-2, costs, PIT-0 reliefs
+    and waiver, higher-rate request, PPK opt-out / reduced rate / additional
+    rate, prior-employer cap evidence. received_at, effective_from/to,
+    evidence, source channel, superseded_by and actor; four-eyes approval.
+    A statement stays effective until changed or withdrawn (PL-007) — no
+    forced annual re-submission."""
+    __tablename__ = "payroll_pl_declarations"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from    = Column(Date, nullable=False)
+    effective_to      = Column(Date, nullable=True)
+    declaration_type  = Column(String(24), nullable=False)
+    value             = Column(JSON, nullable=True)
+    received_at       = Column(DateTime(timezone=True), nullable=False)
+    source_channel    = Column(String(16), nullable=False)
+    superseded_by_id  = Column(Integer, ForeignKey("payroll_pl_declarations.id", ondelete="SET NULL"), nullable=True)
+    withdrawn_at      = Column(DateTime(timezone=True), nullable=True)
+    status            = Column(String(12), nullable=False, default="RECEIVED", server_default="RECEIVED")
+
+    __table_args__ = (
+        sa.CheckConstraint(f"declaration_type IN {_nz_in(_PL_DECLARATION_TYPES)}", name="ck_pl_declaration_type"),
+        sa.CheckConstraint("source_channel IN ('PAPER', 'ELECTRONIC', 'EMPLOYEE_PORTAL', 'IMPORT')",
+                           name="ck_pl_declaration_channel"),
+        sa.CheckConstraint("status IN ('RECEIVED', 'APPROVED', 'WITHDRAWN', 'SUPERSEDED', 'REJECTED')",
+                           name="ck_pl_declaration_status"),
+        sa.CheckConstraint("evidence_ref IS NOT NULL", name="ck_pl_declaration_evidence"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_pl_declaration_dates"),
+        sa.CheckConstraint("status <> 'APPROVED' OR (approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_pl_declaration_four_eyes"),
+        sa.CheckConstraint("status <> 'WITHDRAWN' OR withdrawn_at IS NOT NULL", name="ck_pl_declaration_withdrawn"),
+        sa.CheckConstraint("status <> 'SUPERSEDED' OR superseded_by_id IS NOT NULL", name="ck_pl_declaration_superseded"),
+        Index("ix_pl_declaration_lookup", "employee_id", "declaration_type", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlDeclaration employee={self.employee_id} {self.declaration_type} {self.status}>"
+
+
+class PayrollPlPpkParticipation(_PlCommon, Base):
+    """PPK participation state machine (spec §7): eligibility, enrolment,
+    notice, opt-out (through an approved declaration), the next auto
+    re-enrolment checkpoint. Rates are NOT stored here — they come from
+    declarations (employee) and the employer registration (employer additional)."""
+    __tablename__ = "payroll_pl_ppk_participations"
+
+    updated_at              = Column(DateTime(timezone=True), nullable=True)
+    employee_id             = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False,
+                                     index=True)
+    effective_from          = Column(Date, nullable=False)
+    effective_to            = Column(Date, nullable=True)
+    state                   = Column(String(22), nullable=False)
+    enrolment_date          = Column(Date, nullable=True)
+    notice_state            = Column(String(14), nullable=True)
+    opt_out_declaration_id  = Column(Integer, ForeignKey("payroll_pl_declarations.id", ondelete="SET NULL"), nullable=True)
+    next_reenrolment_date   = Column(Date, nullable=True)
+    status                  = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        *_pl_versioned_checks("ppk"),
+        sa.CheckConstraint(f"state IN {_nz_in(_PL_PPK_STATES)}", name="ck_pl_ppk_state"),
+        sa.CheckConstraint("notice_state IS NULL OR notice_state IN ('NOT_SENT', 'SENT', 'ACKNOWLEDGED')",
+                           name="ck_pl_ppk_notice_state"),
+        sa.CheckConstraint("state <> 'ENROLLED' OR enrolment_date IS NOT NULL", name="ck_pl_ppk_enrolled_date"),
+        sa.CheckConstraint("state <> 'OPTED_OUT' OR opt_out_declaration_id IS NOT NULL",
+                           name="ck_pl_ppk_opt_out_declaration"),
+        Index("ix_pl_ppk_employee_period", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlPpkParticipation employee={self.employee_id} {self.state} {self.effective_from}>"
+
+
+class PayrollPlAccumulatorEntry(_PlCommon, Base):
+    """Append-only ledger (spec §11 Accumulator): cumulative PIT taxable income
+    and advances, deductible costs used, PIT-0 exempt income per relief, the 30x
+    pension and disability cap bases, employer-paid sick days and PPK totals.
+    Keyed by employee + legal entity + year + accumulator; a balance is the sum
+    of entries before a pay date — replayable, never a mutable counter
+    (payroll_ytd_accumulators is updated in place, so it cannot carry
+    correction chains). Prior-employer cap evidence and opening balances need
+    evidence and a different approver (PL-010); a correction is a linked
+    compensating entry, never an edit (PL-018)."""
+    __tablename__ = "payroll_pl_accumulator_entries"
+
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    year             = Column(SmallInteger, nullable=False)
+    accumulator      = Column(String(28), nullable=False)
+    pay_date         = Column(Date, nullable=False)
+    amount           = Column(Numeric(14, 2), nullable=False)
+    entry_kind       = Column(String(16), nullable=False)   # RUN / CORRECTION / PRIOR_EMPLOYER / OPENING_BALANCE
+    run_id           = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    reverses_id      = Column(Integer, ForeignKey("payroll_pl_accumulator_entries.id", ondelete="SET NULL"), nullable=True)
+    declaration_id   = Column(Integer, ForeignKey("payroll_pl_declarations.id", ondelete="SET NULL"), nullable=True)
+    result_hash      = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"accumulator IN {_nz_in(_PL_ACCUMULATORS)}", name="ck_pl_accum_accumulator"),
+        sa.CheckConstraint("entry_kind IN ('RUN', 'CORRECTION', 'PRIOR_EMPLOYER', 'OPENING_BALANCE')",
+                           name="ck_pl_accum_kind"),
+        sa.CheckConstraint("entry_kind NOT IN ('PRIOR_EMPLOYER', 'OPENING_BALANCE') OR "
+                           "(evidence_ref IS NOT NULL AND approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_pl_accum_evidence_four_eyes"),
+        sa.CheckConstraint("entry_kind <> 'PRIOR_EMPLOYER' OR accumulator IN "
+                           "('ZUS_CAP_PENSION_BASE', 'ZUS_CAP_DISABILITY_BASE')",
+                           name="ck_pl_accum_prior_employer_cap_only"),
+        sa.CheckConstraint("entry_kind <> 'RUN' OR payslip_item_id IS NOT NULL", name="ck_pl_accum_run_payslip"),
+        sa.CheckConstraint("entry_kind <> 'CORRECTION' OR reverses_id IS NOT NULL OR run_id IS NOT NULL",
+                           name="ck_pl_accum_correction_link"),
+        Index("ix_pl_accum_lookup", "employee_id", "legal_entity_id", "year", "accumulator", "pay_date"),
+        Index("uq_pl_accum_payslip_accumulator", "payslip_item_id", "accumulator", unique=True,
+              postgresql_where=text("entry_kind = 'RUN'"), sqlite_where=text("entry_kind = 'RUN'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlAccumulatorEntry employee={self.employee_id} {self.year} {self.accumulator} {self.amount}>"
+
+
+_PL_INCAPACITY_CATEGORIES = ("ILLNESS", "ROUTE_ACCIDENT", "PREGNANCY", "DONOR", "WORK_ACCIDENT", "OTHER")
+
+
+class PayrollPlIncapacityEpisode(Base):
+    """Poland incapacity episode (spec §9 IncapacityEpisode / BenefitBaseSnapshot,
+    PL-017 / PL-018; migration e11c2c36df17). Dates, statutory category, the
+    certificate reference and only a POINTER to the protected medical record —
+    never a diagnosis. The approved benefit-base snapshot (daily base, reference
+    window, evidence) is held on the episode. A change is a new version that
+    supersedes the old one; committed payslips are never edited."""
+    __tablename__ = "payroll_pl_incapacity_episodes"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    date_from            = Column(Date, nullable=False)
+    date_to              = Column(Date, nullable=False)
+    category             = Column(String(16), nullable=False)
+    certificate_ref      = Column(String(60), nullable=True)       # restricted: never in calc inputs / snapshots
+    medical_record_ref   = Column(String(100), nullable=True)      # pointer only (PL-017)
+    daily_base_amount    = Column(Numeric(12, 2), nullable=True)
+    base_reference_from  = Column(Date, nullable=True)
+    base_reference_to    = Column(Date, nullable=True)
+    base_evidence_ref    = Column(String(300), nullable=True)
+    evidence_ref         = Column(String(300), nullable=True)
+    status               = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    previous_version_id  = Column(Integer, ForeignKey("payroll_pl_incapacity_episodes.id", ondelete="SET NULL"),
+                                  nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"category IN {_nz_in(_PL_INCAPACITY_CATEGORIES)}", name="ck_pl_incapacity_category"),
+        sa.CheckConstraint("date_to >= date_from", name="ck_pl_incapacity_dates"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUPERSEDED', 'CANCELLED')", name="ck_pl_incapacity_status"),
+        sa.CheckConstraint("evidence_ref IS NOT NULL OR certificate_ref IS NOT NULL", name="ck_pl_incapacity_evidence"),
+        sa.CheckConstraint("daily_base_amount IS NULL OR (daily_base_amount > 0 AND base_reference_from IS NOT NULL "
+                           "AND base_reference_to IS NOT NULL AND base_evidence_ref IS NOT NULL)",
+                           name="ck_pl_incapacity_base_evidence"),
+        sa.CheckConstraint("base_reference_to IS NULL OR base_reference_from IS NULL OR "
+                           "base_reference_to >= base_reference_from", name="ck_pl_incapacity_base_dates"),
+        sa.CheckConstraint("status <> 'APPROVED' OR (approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_pl_incapacity_four_eyes"),
+        Index("ix_pl_incapacity_employee_dates", "employee_id", "date_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlIncapacityEpisode employee={self.employee_id} {self.date_from}..{self.date_to} {self.status}>"
+
+
+_PL_FILING_FORMS = ("DRA", "RCA", "RSA", "RPA", "ZUA", "ZZA", "ZWUA", "PIT11", "PIT4R", "PIT8AR")
+_PL_FILING_STATUSES = ("DRAFT", "APPROVED", "SUPERSEDED", "SUBMITTED", "ACCEPTED", "REJECTED", "CORRECTED")
+
+
+class PayrollPlFiling(Base):
+    """Poland filing record (spec §10, PL-019 / PL-020 / PL-021; migration
+    e75b9219e1f8). A canonical, schema-neutral payload per legal employer, form
+    and period, generated only from frozen PAID payslips, the ledger or approved
+    records (identifiers as vault id + masked form). idempotency_key is unique,
+    so the same payload is never stored twice. Approval needs an archived
+    schema version (schema_version NOT NULL) and a second person; submission
+    and the authority's receipt are recorded by hand (no live transport)."""
+    __tablename__ = "payroll_pl_filings"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    authority            = Column(String(8), nullable=False)
+    form_code            = Column(String(8), nullable=False)
+    period_key           = Column(String(10), nullable=False)
+    subject_key          = Column(String(40), nullable=True)
+    kind                 = Column(String(12), nullable=False, default="ORIGINAL", server_default="ORIGINAL")
+    version              = Column(Integer, nullable=False, default=1, server_default="1")
+    schema_version       = Column(String(20), nullable=True)
+    run_ids              = Column(_NZ_JSON, nullable=True)
+    payload              = Column(_NZ_JSON, nullable=False)
+    payload_hash         = Column(String(64), nullable=False)
+    idempotency_key      = Column(String(64), nullable=False)
+    due_on               = Column(Date, nullable=True)
+    status               = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    corrects_id          = Column(Integer, ForeignKey("payroll_pl_filings.id", ondelete="SET NULL"), nullable=True)
+    previous_version_id  = Column(Integer, ForeignKey("payroll_pl_filings.id", ondelete="SET NULL"), nullable=True)
+    submission_ref       = Column(String(100), nullable=True)
+    receipt_ref          = Column(String(100), nullable=True)
+    rejection            = Column(_NZ_JSON, nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    submitted_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    submitted_at         = Column(DateTime(timezone=True), nullable=True)
+    responded_at         = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("authority IN ('ZUS', 'KAS')", name="ck_pl_filing_authority"),
+        sa.CheckConstraint(f"form_code IN {_nz_in(_PL_FILING_FORMS)}", name="ck_pl_filing_form"),
+        sa.CheckConstraint("kind IN ('ORIGINAL', 'CORRECTION')", name="ck_pl_filing_kind"),
+        sa.CheckConstraint(f"status IN {_nz_in(_PL_FILING_STATUSES)}", name="ck_pl_filing_status"),
+        sa.CheckConstraint("kind <> 'CORRECTION' OR corrects_id IS NOT NULL", name="ck_pl_filing_correction"),
+        sa.CheckConstraint("status IN ('DRAFT', 'SUPERSEDED') OR (approved_by_id IS NOT NULL AND "
+                           "schema_version IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_pl_filing_four_eyes"),
+        sa.CheckConstraint("status NOT IN ('SUBMITTED', 'ACCEPTED', 'REJECTED', 'CORRECTED') OR "
+                           "submission_ref IS NOT NULL", name="ck_pl_filing_submission"),
+        Index("ix_pl_filing_period", "organization_id", "form_code", "period_key"),
+        Index("uq_pl_filing_idempotency", "idempotency_key", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlFiling {self.form_code} {self.period_key} v{self.version} {self.kind} {self.status}>"
+
+
+class PayrollPlSettlement(Base):
+    """Poland liability for one legal employer, liability (ZUS / PIT / PPK) and
+    month (spec §10 Settlement; migration e75b9219e1f8). amount_due comes from
+    the PAID payslips; payments are recorded by hand, each with its own
+    reference (a repeated reference is the same payment, PL-020). A filing's
+    acceptance never marks a liability paid."""
+    __tablename__ = "payroll_pl_settlements"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    liability_type       = Column(String(4), nullable=False)
+    period_key           = Column(String(7), nullable=False)
+    settlement_key       = Column(String(80), nullable=False)
+    due_on               = Column(Date, nullable=True)
+    amount_due           = Column(Numeric(14, 2), nullable=False)
+    paid_amount          = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    payments             = Column(_NZ_JSON, nullable=True)
+    run_ids              = Column(_NZ_JSON, nullable=True)
+    components           = Column(_NZ_JSON, nullable=True)
+    status               = Column(String(10), nullable=False, default="DUE", server_default="DUE")
+    reconciled_by_id     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reconciled_at        = Column(DateTime(timezone=True), nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("liability_type IN ('ZUS', 'PIT', 'PPK')", name="ck_pl_settlement_liability"),
+        sa.CheckConstraint("status IN ('DUE', 'PART_PAID', 'PAID', 'OVERPAID', 'RECONCILED')",
+                           name="ck_pl_settlement_status"),
+        sa.CheckConstraint("amount_due >= 0 AND paid_amount >= 0", name="ck_pl_settlement_amounts"),
+        sa.CheckConstraint("status <> 'RECONCILED' OR reconciled_by_id IS NOT NULL",
+                           name="ck_pl_settlement_reconciled"),
+        Index("uq_pl_settlement_key", "settlement_key", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlSettlement {self.liability_type} {self.period_key} {self.amount_due} {self.status}>"
+
+
+class PayrollPlReconciliationVariance(Base):
+    """An unexplained difference between a Poland liability and what was paid
+    (migration e75b9219e1f8); resolved only by a second person with a reason."""
+    __tablename__ = "payroll_pl_reconciliation_variances"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    settlement_id        = Column(Integer, ForeignKey("payroll_pl_settlements.id", ondelete="CASCADE"), nullable=False,
+                                  index=True)
+    variance_kind        = Column(String(24), nullable=False)
+    expected_amount      = Column(Numeric(14, 2), nullable=False)
+    actual_amount        = Column(Numeric(14, 2), nullable=False)
+    difference           = Column(Numeric(14, 2), nullable=False)
+    status               = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+    resolution           = Column(String(300), nullable=True)
+    raised_by_id         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("variance_kind IN ('UNDERPAID', 'OVERPAID', 'CHANGED_AFTER_PAYMENT')",
+                           name="ck_pl_variance_kind"),
+        sa.CheckConstraint("status IN ('OPEN', 'RESOLVED')", name="ck_pl_variance_status"),
+        sa.CheckConstraint("status <> 'RESOLVED' OR (resolved_by_id IS NOT NULL AND resolution IS NOT NULL "
+                           "AND (raised_by_id IS NULL OR resolved_by_id <> raised_by_id))",
+                           name="ck_pl_variance_four_eyes"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlReconciliationVariance settlement={self.settlement_id} {self.difference} {self.status}>"
+
+
+class PayrollPlParallelImport(_PlCommon, Base):
+    """One incumbent-payroll file compared with a committed Poland run at
+    zero tolerance (release gate G6, Phase 9; migration e7ec6c1933b4). Accepted (approved_by_id) by a
+    person other than its importer."""
+    __tablename__ = "payroll_pl_parallel_imports"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    run_id            = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    pay_date          = Column(Date, nullable=False)
+    cycle_month       = Column(Date, nullable=False)
+    source_name       = Column(String(100), nullable=False)
+    file_hash         = Column(String(64), nullable=False)
+    row_count         = Column(Integer, nullable=False, default=0, server_default="0")
+    matched_count     = Column(Integer, nullable=False, default=0, server_default="0")
+    unmatched_count   = Column(Integer, nullable=False, default=0, server_default="0")
+    column_map        = Column(_NZ_JSON, nullable=False)
+    status            = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+    withdrawn_reason  = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("row_count >= 0 AND matched_count >= 0 AND unmatched_count >= 0",
+                           name="ck_pl_parallel_import_counts"),
+        sa.CheckConstraint("status IN ('OPEN', 'ACCEPTED', 'WITHDRAWN')", name="ck_pl_parallel_import_status"),
+        sa.CheckConstraint("status <> 'ACCEPTED' OR (approved_by_id IS NOT NULL AND approved_by_id <> created_by_id)",
+                           name="ck_pl_parallel_import_four_eyes"),
+        Index("ix_pl_parallel_import_cycle", "status", "cycle_month"),
+        Index("uq_pl_parallel_import_file", "organization_id", "run_id", "file_hash", unique=True,
+              postgresql_where=text("status <> 'WITHDRAWN'"), sqlite_where=text("status <> 'WITHDRAWN'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlParallelImport run={self.run_id} {self.cycle_month} {self.status}>"
+
+
+class PayrollPlParallelDifference(_PlCommon, Base):
+    """One employee and concept that differs between the incumbent payroll and
+    the frozen Poland payslip; explained, then accepted (approved_by_id) by a person
+    other than the explainer."""
+    __tablename__ = "payroll_pl_parallel_differences"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    import_id         = Column(Integer, ForeignKey("payroll_pl_parallel_imports.id", ondelete="CASCADE"), nullable=False)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    concept           = Column(String(24), nullable=False)
+    incumbent_amount  = Column(Numeric(14, 2), nullable=False)
+    zoiko_amount      = Column(Numeric(14, 2), nullable=False)
+    difference        = Column(Numeric(14, 2), nullable=False)
+    explanation       = Column(String(300), nullable=True)
+    explained_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status            = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+
+    __table_args__ = (
+        sa.CheckConstraint("concept IN ('gross', 'pit_advance', 'zus_employee', 'health', 'ppk_employee', "
+                           "'zus_employer', 'employer_funds', 'ppk_employer', 'net_pay')",
+                           name="ck_pl_parallel_difference_concept"),
+        sa.CheckConstraint("status IN ('OPEN', 'EXPLAINED', 'ACCEPTED')", name="ck_pl_parallel_difference_status"),
+        sa.CheckConstraint("status = 'OPEN' OR explanation IS NOT NULL", name="ck_pl_parallel_difference_explained"),
+        sa.CheckConstraint("status <> 'ACCEPTED' OR (approved_by_id IS NOT NULL AND approved_by_id <> explained_by_id)",
+                           name="ck_pl_parallel_difference_four_eyes"),
+        Index("ix_pl_parallel_difference_import", "import_id"),
+        Index("uq_pl_parallel_difference", "import_id", "employee_id", "concept", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<PayrollPlParallelDifference import={self.import_id} {self.concept} {self.status}>"

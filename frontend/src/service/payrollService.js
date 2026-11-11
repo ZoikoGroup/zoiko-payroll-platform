@@ -294,12 +294,15 @@ export const getDashboardBreakdowns = async ({ year, month } = {}) => {
 };
 
 // ── Employees ──────────────────────────────────────────
-export const getEmployees = async (params) => {
+// Errors come back as an empty list unless `throwOnError` — the employee
+// list page needs the real error to explain a no-plan (403) refusal.
+export const getEmployees = async (params, { throwOnError = false } = {}) => {
   try {
     const res = await api.get("/api/payroll/employees", { params });
     const list = res?.items || res?.data || res || [];
     return Array.isArray(list) ? list : [];
-  } catch {
+  } catch (err) {
+    if (throwOnError) throw err;
     return [];
   }
 };
@@ -602,9 +605,11 @@ export const calculateUkClass1A1BCharge = async (chargeType, amount) => {
   });
 };
 
-export const bulkCreateEmployees = async (employees) => {
+// countryCode: a per-country import — every row is an employee of that
+// country (the server refuses rows for another country).
+export const bulkCreateEmployees = async (employees, countryCode) => {
   // Expected response shape: { created: [...employees], failed: [{ row, reason }] }
-  return await api.post("/api/payroll/employees/bulk", { employees });
+  return await api.post("/api/payroll/employees/bulk", countryCode ? { employees, countryCode } : { employees });
 };
 
 export const bulkDeleteEmployees = async (employeeIds) => {
@@ -663,21 +668,32 @@ export const getBankTransferSummary = async (runId) => {
   return await api.get(`/api/payroll/runs/${runId}/bank-transfer-summary`);
 };
 
-export const downloadBankTransferFile = async (runId, format) => {
+// `country` is required by the backend when the run pays employees in more
+// than one country (one bank file per country, each in its own currency);
+// single-country runs omit it exactly as before.
+export const downloadBankTransferFile = async (runId, format, country) => {
   const token = getAccessToken();
-  const requestUrl = `${API_BASE_URL}/api/payroll/runs/${runId}/bank-transfer-file${format ? `?format=${format}` : ""}`;
+  const query = new URLSearchParams();
+  if (format) query.set("format", format);
+  if (country) query.set("country", country);
+  const qs = query.toString();
+  const requestUrl = `${API_BASE_URL}/api/payroll/runs/${runId}/bank-transfer-file${qs ? `?${qs}` : ""}`;
   const res = await fetch(requestUrl, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) {
     // Show the server's reason (e.g. "already paid through SEPA") — not a generic failure.
-    const detail = await res.json().then((b) => b?.detail).catch(() => null);
+    let detail = "Failed to generate bank transfer file";
+    try { detail = (await res.json())?.detail || detail; } catch { /* non-JSON error body */ }
     throw new Error(typeof detail === "string" ? detail : "Failed to generate bank transfer file");
   }
   const blob = await res.blob();
   const disposition = res.headers.get("Content-Disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : `bank-transfer_${runId}`;
+  // Content-Disposition isn't a CORS-exposed header, so the browser usually
+  // can't read the server's name; build the same one (per-country files must
+  // not all download under one name).
+  const filename = match ? match[1] : `bank-transfer_${runId}${country ? `_${country}` : ""}${format ? `.${format}` : ""}`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -731,8 +747,8 @@ export const previewPayrollRun = async (employeeIds, country = "IN", periodStart
 // Shared calendar backing LOP proration in the payroll engine. Intended to
 // also replace whatever separate holiday sources the Attendance/Leave pages
 // currently use, so all three agree on the same list.
-export const getPayrollHolidays = async (year) => {
-  return await api.get("/api/payroll/holidays", { params: year ? { year } : {} });
+export const getPayrollHolidays = async (year, country) => {
+  return await api.get("/api/payroll/holidays", { params: { ...(year ? { year } : {}), ...(country ? { country } : {}) } });
 };
 
 export const upsertPayrollHolidays = async (holidays) => {
@@ -1301,90 +1317,6 @@ export const disablePolicyIntegration = async (policyId, category, providerKey) 
   );
 };
 
-// ── Enterprise Policy Onboarding ─────────────────────────────────────
-// Financial-year ranges are each country's real fiscal year, not a placeholder.
-export const ENTERPRISE_JURISDICTIONS = [
-  { code: "IN", name: "India", flag: "🇮🇳", currency: "INR", financialYear: "Apr 1 – Mar 31" },
-  { code: "US", name: "United States", flag: "🇺🇸", currency: "USD", financialYear: "Jan 1 – Dec 31" },
-  { code: "UK", name: "United Kingdom", flag: "🇬🇧", currency: "GBP", financialYear: "Apr 6 – Apr 5" },
-  { code: "AU", name: "Australia", flag: "🇦🇺", currency: "AUD", financialYear: "Jul 1 – Jun 30" },
-  { code: "DE", name: "Germany", flag: "🇩🇪", currency: "EUR", financialYear: "Jan 1 – Dec 31" },
-  { code: "CA", name: "Canada", flag: "🇨🇦", currency: "CAD", financialYear: "Jan 1 – Dec 31" },
-{ code: "FR", name: "France", flag: "FR", currency: "EUR", financialYear: "Jan 1 - Dec 31" },
-];
-
-export const ENTERPRISE_STATUS_LABELS = {
-  not_configured: "Not Configured",
-  in_progress: "In Progress",
-  configured: "Configured",
-  active: "Active",
-};
-
-export const getEnterpriseJurisdictions = async () => {
-  try {
-    const res = await api.get("/api/payroll/enterprise/jurisdictions");
-    return Array.isArray(res) ? res : res?.data || [];
-  } catch {
-    return [];
-  }
-};
-
-export const addEnterpriseJurisdiction = async (countryCode) => {
-  return await api.post("/api/payroll/enterprise/jurisdictions", { countryCode });
-};
-
-export const updateEnterpriseJurisdiction = async (jurisdictionId, payload) => {
-  return await api.put(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}`, payload);
-};
-
-export const verifyEnterpriseJurisdiction = async (jurisdictionId) => {
-  return await api.post(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}/verify`, {});
-};
-
-export const removeEnterpriseJurisdiction = async (jurisdictionId) => {
-  return await api.delete(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}`);
-};
-
-export const getEnterpriseContributionRates = async (jurisdictionId) => {
-  try {
-    const res = await api.get(`/api/payroll/enterprise/jurisdictions/${jurisdictionId}/contribution-rates`);
-    return Array.isArray(res) ? res : res?.data || [];
-  } catch {
-    return [];
-  }
-};
-
-export const updateEnterpriseContributionRate = async (jurisdictionId, componentKey, payload) => {
-  return await api.put(
-    `/api/payroll/enterprise/jurisdictions/${jurisdictionId}/contribution-rates/${componentKey}`,
-    payload
-  );
-};
-
-export const getEnterpriseValidation = async () => {
-  try {
-    return await api.get("/api/payroll/enterprise/validation");
-  } catch {
-    return { canActivate: false, blockingReasons: ["Could not check activation readiness."], configuredJurisdictions: [] };
-  }
-};
-
-export const activateEnterprise = async () => {
-  return await api.post("/api/payroll/enterprise/activate", {});
-};
-
-export const deactivateEnterprise = async () => {
-  return await api.post("/api/payroll/enterprise/deactivate", {});
-};
-
-export const getEnterpriseDashboard = async () => {
-  try {
-    return await api.get("/api/payroll/enterprise/dashboard");
-  } catch {
-    return { configuredCount: 0, pendingCount: 0, activeCountries: [], completionPct: 0, upcomingFilings: [], recentChanges: [] };
-  }
-};
-
 // Internal provider keys -> what Payroll Policy Management shows the user.
 // Never render category/provider_key strings directly in the UI — always
 // go through these maps, per the spec's "do not expose internal
@@ -1392,7 +1324,6 @@ export const getEnterpriseDashboard = async () => {
 export const CALCULATION_MODE_LABELS = {
   simple: "Simple Payroll",
   standard: "Standard Payroll",
-  enterprise: "Enterprise Payroll",
 };
 
 // Mirrors backend/app/modules/payroll/engine/standard.py's per-country
@@ -1550,8 +1481,9 @@ export const PAYROLL_STATUS_ORDER = ["Draft", "Review", "Approved", "Authorized"
 export const isRunFinalized = (run) => PAYROLL_STATUS_ORDER.indexOf(run?.status) >= PAYROLL_STATUS_ORDER.indexOf("Approved");
 
 export const getAvailableReports = async (params = {}) => {
-  // { reportingYear } -> [{ reportType, name }] — real, backend-owned list
-  // of reports with a Published/Active template for this org's jurisdiction+year.
+  // { reportingYear } -> [{ reportType, name, country }] — real, backend-owned
+  // list of reports with a Published/Active template for each of this org's
+  // payroll countries for the year.
   try {
     const res = await api.get("/api/payroll/report-templates/available", { params });
     return Array.isArray(res) ? res : res?.data || res?.items || [];
@@ -1561,7 +1493,9 @@ export const getAvailableReports = async (params = {}) => {
 };
 
 export const getApplicableReportTemplate = async (params = {}) => {
-  // { reportingYear, reportType, payrollRunId? } — returns { template, validation }.
+  // { reportingYear, reportType, payrollRunId?, country? } — returns { template, validation }.
+  // country picks which of the org's payroll countries the report is for
+  // (backend defaults to the org's default country when omitted).
   // validation is only populated when payrollRunId is passed.
   return await api.get("/api/payroll/report-templates/applicable", { params });
 };
@@ -2936,3 +2870,326 @@ export const recordZaDeductionOrder = (employeeId, payload) =>
   api.post(`${ZA}/employees/${employeeId}/deduction-orders`, payload);
 export const createZaCorrection = (payslipId, payload) => api.post(`${ZA}/payslips/${payslipId}/corrections`, payload);
 export const getZaRunJournal = (runId) => api.get(`${ZA}/runs/${runId}/journal`);
+// Phase 10 — G6 parallel payroll cycles against an incumbent payroll. Four-eyes
+// (importer != acceptor, explainer != acceptor) is enforced server-side.
+export const listZaParallelImports = async (runId) =>
+  zaList(await api.get(`${ZA}/parallel-imports`, { params: runId ? { run_id: runId } : {} }));
+export const importZaParallel = (payload) => api.post(`${ZA}/parallel-imports`, payload);
+export const getZaParallelImport = (importId) => api.get(`${ZA}/parallel-imports/${importId}`);
+export const acceptZaParallelImport = (importId) => api.post(`${ZA}/parallel-imports/${importId}/accept`, {});
+export const withdrawZaParallelImport = (importId) => api.post(`${ZA}/parallel-imports/${importId}/withdraw`, {});
+export const explainZaParallelDifference = (diffId, reason) =>
+  api.post(`${ZA}/parallel-differences/${diffId}/explain`, { reason });
+export const acceptZaParallelDifference = (diffId) => api.post(`${ZA}/parallel-differences/${diffId}/accept`, {});
+
+// Japan (ZP-JP-ENG-001) — routes in backend/app/modules/payroll/japan_org_router.py,
+// mounted under /api/payroll/japan. Every route acts on the caller's own
+// organisation and answers 404 while JP_TENANT_ONBOARDING_ENABLED is off.
+// Four-eyes rules (creator != approver, requester != revealer's approver) are
+// enforced server-side; these calls only submit the operator's decision.
+// Payload keys are the backend's snake_case field names.
+const JP = "/api/payroll/japan";
+const jpList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const jpOne = (res) => res?.data ?? res;
+export const getJpSummary = async () => jpOne(await api.get(`${JP}/summary`));
+export const listJpEmployerRegistrations = async () => jpList(await api.get(`${JP}/employer`));
+export const createJpEmployerRegistration = (payload) => api.post(`${JP}/employer`, payload);
+export const approveJpEmployerRegistration = (id) => api.post(`${JP}/employer/${id}/approve`, {});
+export const listJpWorkConditions = async () => jpList(await api.get(`${JP}/work-conditions`));
+export const createJpWorkConditions = (payload) => api.post(`${JP}/work-conditions`, payload);
+export const approveJpWorkConditions = (id) => api.post(`${JP}/work-conditions/${id}/approve`, {});
+export const listJpBonusReports = async (status) =>
+  jpList(await api.get(`${JP}/bonus-reports`, { params: status ? { status } : {} }));
+export const getJpEmployeeSummary = async (employeeId) =>
+  jpOne(await api.get(`${JP}/employees/${employeeId}/summary`));
+export const listJpTaxProfiles = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/tax-profiles`));
+export const createJpTaxProfile = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/tax-profiles`, payload);
+export const approveJpTaxProfile = (id) => api.post(`${JP}/tax-profiles/${id}/approve`, {});
+export const listJpSocialInsurance = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/social-insurance`));
+export const createJpSocialInsurance = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/social-insurance`, payload);
+export const approveJpSocialInsurance = (id) => api.post(`${JP}/social-insurance/${id}/approve`, {});
+export const listJpSocialInsuranceEvents = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/social-insurance-events`));
+export const createJpSocialInsuranceEvent = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/social-insurance-events`, payload);
+export const approveJpSocialInsuranceEvent = (id) => api.post(`${JP}/social-insurance-events/${id}/approve`, {});
+export const applyJpSocialInsuranceEvent = (id) => api.post(`${JP}/social-insurance-events/${id}/apply`, {});
+export const listJpEmploymentInsurance = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/employment-insurance`));
+export const createJpEmploymentInsurance = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/employment-insurance`, payload);
+export const approveJpEmploymentInsurance = (id) => api.post(`${JP}/employment-insurance/${id}/approve`, {});
+export const listJpResidentTaxNotices = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/resident-tax-notices`));
+export const createJpResidentTaxNotice = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/resident-tax-notices`, payload);
+export const approveJpResidentTaxNotice = (id) => api.post(`${JP}/resident-tax-notices/${id}/approve`, {});
+export const listJpAttendanceApprovals = async (employeeId) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/attendance-approvals`));
+export const requestJpAttendanceApproval = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/attendance-approvals`, payload);
+export const approveJpAttendanceApproval = (id) => api.post(`${JP}/attendance-approvals/${id}/approve`, {});
+export const getJpRunPreflight = async (runId) => jpOne(await api.get(`${JP}/runs/${runId}/preflight`));
+export const listJpMyNumbers = async (employeeId) =>
+  jpList(await api.get(`${JP}/my-numbers`, { params: employeeId ? { employee_id: employeeId } : {} }));
+export const createJpMyNumber = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/my-number`, payload);
+export const requestJpMyNumberReveal = (vaultId, reason) =>
+  api.post(`${JP}/my-numbers/${vaultId}/reveal-request`, { reason });
+export const approveJpMyNumberReveal = (vaultId) => api.post(`${JP}/my-numbers/${vaultId}/reveal-approve`, {});
+export const revealJpMyNumber = async (vaultId) => jpOne(await api.post(`${JP}/my-numbers/${vaultId}/reveal`, {}));
+// Japan Phase 8 — run exceptions, corrections, journal, year-end adjustment,
+// remittance obligations and filing previews (JSON only until G5).
+export const listJpRunExceptions = async (runId) => jpList(await api.get(`${JP}/runs/${runId}/exceptions`));
+export const approveJpRunException = (runId, key, note) =>
+  api.post(`${JP}/runs/${runId}/exceptions/approve`, { key, note });
+export const createJpCorrection = (payslipId, payload) => api.post(`${JP}/payslips/${payslipId}/corrections`, payload);
+export const getJpRunJournal = async (runId, accounts) =>
+  jpOne(await api.post(`${JP}/runs/${runId}/journal`, { accounts }));
+export const listJpYeaDeclarations = async (employeeId, taxYear) =>
+  jpList(await api.get(`${JP}/employees/${employeeId}/year-end/declarations`, { params: taxYear ? { tax_year: taxYear } : {} }));
+export const createJpYeaDeclaration = (employeeId, payload) =>
+  api.post(`${JP}/employees/${employeeId}/year-end/declarations`, payload);
+export const approveJpYeaDeclaration = (id) => api.post(`${JP}/year-end/declarations/${id}/approve`, {});
+export const listJpYeaCases = async (taxYear) => jpList(await api.get(`${JP}/year-end/${taxYear}/cases`));
+export const openJpYeaCase = (employeeId, taxYear) => api.post(`${JP}/employees/${employeeId}/year-end/${taxYear}/cases`, {});
+export const calculateJpYeaCase = (id) => api.post(`${JP}/year-end/cases/${id}/calculate`, {});
+export const reviewJpYeaCase = (id) => api.post(`${JP}/year-end/cases/${id}/review`, {});
+export const applyJpYeaCase = (id, runId) => api.post(`${JP}/year-end/cases/${id}/apply`, { runId });
+export const voidJpYeaCase = (id) => api.post(`${JP}/year-end/cases/${id}/void`, {});
+export const listJpObligations = async (status) =>
+  jpList(await api.get(`${JP}/obligations`, { params: status ? { status } : {} }));
+export const approveJpObligation = (id) => api.post(`${JP}/obligations/${id}/approve`, {});
+export const submitJpObligation = (id, channel) => api.post(`${JP}/obligations/${id}/submit`, { channel });
+export const recordJpObligationReceipt = (id, accepted, receiptRef) =>
+  api.post(`${JP}/obligations/${id}/receipt`, { accepted, receiptRef });
+export const getJpWithholdingCertificate = async (caseId) =>
+  jpOne(await api.get(`${JP}/filings/withholding-certificate/${caseId}`));
+export const getJpSalaryPaymentReports = async (taxYear) =>
+  jpOne(await api.get(`${JP}/filings/salary-payment-reports/${taxYear}`));
+export const getJpBonusReport = async (paidOn) => jpOne(await api.get(`${JP}/filings/bonus-report/${paidOn}`));
+export const getJpAnnualDetermination = async (year) => jpOne(await api.get(`${JP}/filings/annual-determination/${year}`));
+// Japan Phase 9 — release gates and parallel cycles (G7).
+export const getJpReadiness = async () => jpOne(await api.get(`${JP}/readiness`));
+export const listJpParallelImports = async () => jpList(await api.get(`${JP}/parallel-imports`));
+export const createJpParallelImport = (payload) => api.post(`${JP}/parallel-imports`, payload);
+export const getJpParallelImport = async (id) => jpOne(await api.get(`${JP}/parallel-imports/${id}`));
+export const acceptJpParallelImport = (id) => api.post(`${JP}/parallel-imports/${id}/accept`, {});
+export const withdrawJpParallelImport = (id) => api.post(`${JP}/parallel-imports/${id}/withdraw`, {});
+export const explainJpParallelDifference = (id, reason) =>
+  api.post(`${JP}/parallel-differences/${id}/explain`, { reason });
+export const acceptJpParallelDifference = (id) => api.post(`${JP}/parallel-differences/${id}/accept`, {});
+
+// New Zealand (ZP-NZ-ENG-001) — routes in backend/app/modules/payroll/nz_org_router.py,
+// mounted under /api/payroll/new-zealand. Every route acts on the caller's own
+// organisation and answers 404 while NZ_TENANT_ONBOARDING_ENABLED is off.
+// Writes carry a `reason` (NZ-024); four-eyes approvals are enforced
+// server-side. The IRD number is only ever sent on create; responses are
+// masked except the single-use reveal. Payload keys are the backend's
+// snake_case field names.
+const NZ = "/api/payroll/new-zealand";
+const nzList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const nzOne = (res) => res?.data ?? res;
+export const getNzSummary = async () => nzOne(await api.get(`${NZ}/summary`));
+export const getNzReadiness = async () => nzOne(await api.get(`${NZ}/readiness`));
+export const listNzEmployerProfiles = async () => nzList(await api.get(`${NZ}/employer-profiles`));
+export const createNzEmployerProfile = (body) => api.post(`${NZ}/employer-profiles`, body);
+export const approveNzEmployerProfile = (id) => api.post(`${NZ}/employer-profiles/${id}/approve`, {});
+export const verifyNzEmployerProfile = (id, outcome, reason) =>
+  api.post(`${NZ}/employer-profiles/${id}/verify`, { outcome, reason });
+export const setNzEmployerIrdNumber = (id, irdNumber) =>
+  api.post(`${NZ}/employer-profiles/${id}/ird-number`, { irdNumber });
+export const listNzTaxProfiles = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/tax-profiles`));
+export const createNzTaxProfile = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/tax-profiles`, body);
+export const approveNzTaxProfile = (id) => api.post(`${NZ}/tax-profiles/${id}/approve`, {});
+export const listNzKiwiSaver = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/kiwisaver`));
+export const createNzKiwiSaver = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/kiwisaver`, body);
+export const approveNzKiwiSaver = (id) => api.post(`${NZ}/kiwisaver/${id}/approve`, {});
+export const listNzWorkPatterns = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/work-patterns`));
+export const createNzWorkPattern = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/work-patterns`, body);
+export const approveNzWorkPattern = (id) => api.post(`${NZ}/work-patterns/${id}/approve`, {});
+export const listNzNotices = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/authority-deductions`));
+export const importNzNotice = (employeeId, file, meta) => {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("meta", JSON.stringify(meta));
+  return api.post(`${NZ}/employees/${employeeId}/authority-deductions`, form);
+};
+export const approveNzNotice = (id) => api.post(`${NZ}/authority-deductions/${id}/approve`, {});
+export const revokeNzNotice = (id, reason) => api.post(`${NZ}/authority-deductions/${id}/revoke`, { reason });
+export const listNzOpeningBalances = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/opening-balances`));
+export const requestNzOpeningBalance = (employeeId, body) =>
+  api.post(`${NZ}/employees/${employeeId}/opening-balances`, body);
+export const approveNzOpeningBalance = (requestId) => api.post(`${NZ}/opening-balances/${requestId}/approve`, {});
+export const getNzIrdNumber = async (employeeId) => nzOne(await api.get(`${NZ}/employees/${employeeId}/ird-number`));
+export const setNzIrdNumber = (employeeId, irdNumber) =>
+  api.post(`${NZ}/employees/${employeeId}/ird-number`, { irdNumber });
+export const deleteNzIrdNumber = (vaultId, reason) => api.post(`${NZ}/ird-numbers/${vaultId}/delete`, { reason });
+export const requestNzIrdReveal = (vaultId, reason) =>
+  api.post(`${NZ}/ird-numbers/${vaultId}/reveal-requests`, { reason });
+export const approveNzIrdReveal = (vaultId) => api.post(`${NZ}/ird-numbers/${vaultId}/reveal-approvals`, {});
+export const revealNzIrdNumber = async (vaultId) => nzOne(await api.post(`${NZ}/ird-numbers/${vaultId}/reveal`, {}));
+export const getNzRunPreflight = async (runId) => nzOne(await api.get(`${NZ}/runs/${runId}/preflight`));
+export const getNzRunFingerprint = async (runId) => nzOne(await api.get(`${NZ}/runs/${runId}/fingerprint`));
+export const getNzEmployeeSummary = async (employeeId) => nzOne(await api.get(`${NZ}/employees/${employeeId}/summary`));
+// Holidays Act (P5)
+export const listNzEmployments = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/employments`));
+export const createNzEmployment = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/employments`, body);
+export const approveNzEmployment = (id) => api.post(`${NZ}/employments/${id}/approve`, {});
+export const endNzEmployment = (id, body) => api.post(`${NZ}/employments/${id}/end`, body);
+export const vestNzEntitlements = (body) => api.post(`${NZ}/leave/vest`, body);
+export const getNzLeaveEntitlements = async (employeeId) =>
+  nzOne(await api.get(`${NZ}/employees/${employeeId}/leave-entitlements`));
+export const listNzLeaveEvents = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/leave-events`));
+export const cancelNzLeaveEvent = (id, reason) => api.post(`${NZ}/leave-events/${id}/cancel`, { reason });
+export const proposeNzPublicHolidays = (body) => api.post(`${NZ}/public-holidays/propose`, body);
+export const listNzPublicHolidayDecisions = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/public-holiday-decisions`));
+export const updateNzPublicHolidayDecision = (id, body) => api.put(`${NZ}/public-holiday-decisions/${id}`, body);
+export const approveNzPublicHolidayDecision = (id) => api.post(`${NZ}/public-holiday-decisions/${id}/approve`, {});
+export const listNzGrossEarnings = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/gross-earnings`));
+export const listNzFamilyViolenceHolders = async () => nzList(await api.get(`${NZ}/permissions/family-violence`));
+export const grantNzFamilyViolenceView = (userId, reason) =>
+  api.post(`${NZ}/permissions/family-violence`, { userId, reason });
+export const revokeNzFamilyViolenceView = (userId, reason) =>
+  api.delete(`${NZ}/permissions/family-violence/${userId}`, { params: { reason } });
+// Leave pay, final pay and non-standard payments (P6)
+export const calculateNzLeavePay = (eventId, agreement) =>
+  api.post(`${NZ}/leave-events/${eventId}/calculate-pay`, agreement ? { agreement } : {});
+export const calculateNzPublicHolidayPay = (decisionId, agreement) =>
+  api.post(`${NZ}/public-holiday-decisions/${decisionId}/calculate-pay`, agreement ? { agreement } : {});
+export const listNzLeavePayCalculations = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/leave-pay-calculations`));
+export const listNzCashUps = async (employeeId) => nzList(await api.get(`${NZ}/employees/${employeeId}/cash-ups`));
+export const requestNzCashUp = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/cash-ups`, body);
+export const approveNzCashUp = (id, agreement) =>
+  api.post(`${NZ}/cash-ups/${id}/approve`, agreement ? { agreement } : {});
+export const rejectNzCashUp = (id, reason) => api.post(`${NZ}/cash-ups/${id}/reject`, { reason });
+export const listNzFinalPayCases = async (employeeId) =>
+  nzList(await api.get(`${NZ}/employees/${employeeId}/final-pay-cases`));
+export const openNzFinalPayCase = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/final-pay-cases`, body);
+export const getNzFinalPayCase = async (id) => nzOne(await api.get(`${NZ}/final-pay-cases/${id}`));
+export const calculateNzFinalPay = (id, agreement) =>
+  api.post(`${NZ}/final-pay-cases/${id}/calculate`, agreement ? { agreement } : {});
+export const approveNzFinalPay = (id) => api.post(`${NZ}/final-pay-cases/${id}/approve`, {});
+export const cancelNzFinalPay = (id, reason) => api.post(`${NZ}/final-pay-cases/${id}/cancel`, { reason });
+export const createNzSpecialRun = (body) => api.post(`${NZ}/runs/special`, body);
+export const listNzCorrections = async (employeeId) =>
+  nzList(await api.get(`${NZ}/corrections`, { params: employeeId ? { employee_id: employeeId } : undefined }));
+export const createNzCorrection = (itemId, body) => api.post(`${NZ}/payslips/${itemId}/corrections`, body);
+export const approveNzCorrection = (id) => api.post(`${NZ}/corrections/${id}/approve`, {});
+export const applyNzCorrection = (id, payDate) => api.post(`${NZ}/corrections/${id}/apply`, { payDate });
+export const voidNzCorrection = (id, reason) => api.post(`${NZ}/corrections/${id}/void`, { reason });
+export const rehireNz = (employeeId, body) => api.post(`${NZ}/employees/${employeeId}/rehire`, body);
+// Payday filing, remittance, run exceptions and the journal (P8). Submission
+// is refused server-side until gate G3 certifies the filing schema; only the
+// masked JSON preview exists until then.
+export const listNzFilings = async (params) => nzList(await api.get(`${NZ}/filings`, { params }));
+export const getNzFiling = async (id) => nzOne(await api.get(`${NZ}/filings/${id}`));
+export const approveNzFiling = (id) => api.post(`${NZ}/filings/${id}/approve`, {});
+export const submitNzFiling = (id) => api.post(`${NZ}/filings/${id}/submit`, {});
+export const recordNzFilingResponse = (id, body) => api.post(`${NZ}/filings/${id}/response`, body);
+export const listNzRemittances = async (periodStart) =>
+  nzList(await api.get(`${NZ}/remittances`, { params: periodStart ? { periodStart } : undefined }));
+export const getNzRemittance = async (id) => nzOne(await api.get(`${NZ}/remittances/${id}`));
+export const recordNzSettlement = (remittanceId, body) => api.post(`${NZ}/remittances/${remittanceId}/settlements`, body);
+export const matchNzSettlement = (id) => api.post(`${NZ}/settlements/${id}/match`, {});
+export const reverseNzSettlement = (id, reason) => api.post(`${NZ}/settlements/${id}/reverse`, { reason });
+export const listNzRunExceptions = async (runId) => nzList(await api.get(`${NZ}/runs/${runId}/exceptions`));
+export const requestNzRunException = (runId, body) => api.post(`${NZ}/runs/${runId}/exceptions`, body);
+export const approveNzRunException = (id) => api.post(`${NZ}/run-exceptions/${id}/approve`, {});
+export const rejectNzRunException = (id, reason) => api.post(`${NZ}/run-exceptions/${id}/reject`, { reason });
+export const getNzRunJournal = async (runId) => nzOne(await api.get(`${NZ}/runs/${runId}/journal`));
+export const setNzJournalAccounts = (profileId, accounts, reason) =>
+  api.put(`${NZ}/employer-profiles/${profileId}/journal-accounts`, { accounts, reason });
+// Release gates and parallel cycles (P9). Parallel files carry no identifier:
+// the server refuses any IRD-number or bank-account column or value.
+export const listNzParallelImports = async () => nzList(await api.get(`${NZ}/parallel-imports`));
+export const createNzParallelImport = (body) => api.post(`${NZ}/parallel-imports`, body);
+export const getNzParallelImport = async (id) => nzOne(await api.get(`${NZ}/parallel-imports/${id}`));
+export const acceptNzParallelImport = (id) => api.post(`${NZ}/parallel-imports/${id}/accept`, {});
+export const withdrawNzParallelImport = (id, reason) => api.post(`${NZ}/parallel-imports/${id}/withdraw`, { reason });
+export const explainNzParallelDifference = (id, reason) =>
+  api.post(`${NZ}/parallel-differences/${id}/explain`, { reason });
+export const acceptNzParallelDifference = (id) => api.post(`${NZ}/parallel-differences/${id}/accept`, {});
+
+// Poland (ZP-PL-ENG-001) — routes in backend/app/modules/payroll/pl_org_router.py,
+// mounted under /api/payroll/poland. Every route acts on the caller's own
+// organisation and answers 404 while PL_TENANT_ONBOARDING_ENABLED is off.
+// Versioned writes carry a `reason`; four-eyes approvals and the single-use
+// identifier reveal are enforced server-side. PESEL / NIP / NRS are only ever
+// sent on create; responses are masked except the reveal. Payload keys are the
+// backend's snake_case field names.
+const PL = "/api/payroll/poland";
+const plList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const plOne = (res) => res?.data ?? res;
+export const getPlSummary = async () => plOne(await api.get(`${PL}/summary`));
+export const listPlRegistrations = async () => plList(await api.get(`${PL}/employer-registrations`));
+export const createPlRegistration = (body) => api.post(`${PL}/employer-registrations`, body);
+export const approvePlRegistration = (id) => api.post(`${PL}/employer-registrations/${id}/approve`, {});
+export const verifyPlRegistration = (id, outcome, reason) =>
+  api.post(`${PL}/employer-registrations/${id}/verify`, { outcome, reason });
+export const setPlEmployerNrs = (id, nrs) => api.post(`${PL}/employer-registrations/${id}/nrs`, { nrs });
+export const listPlWorkerProfiles = async (employeeId) =>
+  plList(await api.get(`${PL}/employees/${employeeId}/worker-profiles`));
+export const createPlWorkerProfile = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/worker-profiles`, body);
+export const approvePlWorkerProfile = (id) => api.post(`${PL}/worker-profiles/${id}/approve`, {});
+export const listPlStatements = async (employeeId) => plList(await api.get(`${PL}/employees/${employeeId}/statements`));
+export const createPlStatement = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/statements`, body);
+export const approvePlStatement = (id) => api.post(`${PL}/statements/${id}/approve`, {});
+export const withdrawPlStatement = (id, reason, effectiveTo) =>
+  api.post(`${PL}/statements/${id}/withdraw`, { reason, effectiveTo });
+export const listPlPpk = async (employeeId) => plList(await api.get(`${PL}/employees/${employeeId}/ppk`));
+export const createPlPpk = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/ppk`, body);
+export const approvePlPpk = (id) => api.post(`${PL}/ppk/${id}/approve`, {});
+export const listPlPpkReenrolmentDue = async (on) => plList(await api.get(`${PL}/ppk/reenrolment-due`, { params: { on } }));
+export const listPlEpisodes = async (employeeId) =>
+  plList(await api.get(`${PL}/employees/${employeeId}/incapacity-episodes`));
+export const createPlEpisode = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/incapacity-episodes`, body);
+export const approvePlEpisode = (id) => api.post(`${PL}/incapacity-episodes/${id}/approve`, {});
+export const cancelPlEpisode = (id, reason) => api.post(`${PL}/incapacity-episodes/${id}/cancel`, { reason });
+export const listPlIdentifiers = async (employeeId) => plList(await api.get(`${PL}/employees/${employeeId}/identifiers`));
+export const createPlIdentifier = (employeeId, identifierType, value) =>
+  api.post(`${PL}/employees/${employeeId}/identifiers`, { identifierType, value });
+export const requestPlIdentifierReveal = (vaultId, reason) =>
+  api.post(`${PL}/identifiers/${vaultId}/reveal-request`, { reason });
+export const approvePlIdentifierReveal = (vaultId) => api.post(`${PL}/identifiers/${vaultId}/reveal-approve`, {});
+export const revealPlIdentifier = async (vaultId) => plOne(await api.post(`${PL}/identifiers/${vaultId}/reveal`, {}));
+export const deletePlIdentifier = (vaultId, reason) => api.post(`${PL}/identifiers/${vaultId}/delete`, { reason });
+export const getPlAnnualCap = async (employeeId, year) =>
+  plOne(await api.get(`${PL}/employees/${employeeId}/annual-cap`, { params: { year } }));
+export const getPlLeaveEntitlement = async (employeeId, asOf) =>
+  plOne(await api.get(`${PL}/employees/${employeeId}/leave-entitlement`, { params: { asOf } }));
+export const getPlRunPreflight = async (runId) => plList(await api.get(`${PL}/runs/${runId}/preflight`));
+// Poland Phase 8 — filing payloads (no live transport, PL-021), settlements, journal.
+export const listPlFilings = async (params = {}) => plList(await api.get(`${PL}/filings`, { params }));
+export const getPlFiling = async (id) => plOne(await api.get(`${PL}/filings/${id}`));
+export const rebuildPlRunFilings = async (runId) => plList(await api.post(`${PL}/filings/rebuild/${runId}`, {}));
+export const buildPlAnnualFilings = async (year, legalEntityId) =>
+  plList(await api.post(`${PL}/filings/annual`, { year, legalEntityId }));
+export const buildPlRegistrationFiling = (body) => api.post(`${PL}/filings/registration`, body);
+export const approvePlFiling = (id) => api.post(`${PL}/filings/${id}/approve`, {});
+export const recordPlFilingSubmission = (id, submissionRef) => api.post(`${PL}/filings/${id}/submission`, { submissionRef });
+export const recordPlFilingResponse = (id, body) => api.post(`${PL}/filings/${id}/response`, body);
+export const listPlSettlements = async (params = {}) => plList(await api.get(`${PL}/settlements`, { params }));
+export const recordPlSettlementPayment = (id, body) => api.post(`${PL}/settlements/${id}/payments`, body);
+export const reconcilePlSettlement = async (id) => plOne(await api.post(`${PL}/settlements/${id}/reconcile`, {}));
+export const listPlVariances = async (params = {}) => plList(await api.get(`${PL}/variances`, { params }));
+export const resolvePlVariance = (id, reason) => api.post(`${PL}/variances/${id}/resolve`, { reason });
+export const getPlRunJournal = async (runId) => plOne(await api.get(`${PL}/runs/${runId}/journal`));
+// Poland Phase 9 — parallel payroll cycles (gate G6, AC-PL-03).
+export const listPlParallelImports = async () => plList(await api.get(`${PL}/parallel-imports`));
+export const createPlParallelImport = (body) => api.post(`${PL}/parallel-imports`, body);
+export const getPlParallelImport = async (id) => plOne(await api.get(`${PL}/parallel-imports/${id}`));
+export const acceptPlParallelImport = (id) => api.post(`${PL}/parallel-imports/${id}/accept`, {});
+export const withdrawPlParallelImport = (id, reason) => api.post(`${PL}/parallel-imports/${id}/withdraw`, { reason });
+export const explainPlParallelDifference = (id, reason) =>
+  api.post(`${PL}/parallel-differences/${id}/explain`, { reason });
+export const acceptPlParallelDifference = (id) => api.post(`${PL}/parallel-differences/${id}/accept`, {});

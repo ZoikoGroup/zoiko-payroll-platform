@@ -99,7 +99,9 @@ def test_strategy_map_and_message_unchanged():
                                  "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL"]
     # Brazil (ZP-BR-ENG-001 Phase 3) and South Africa (ZP-ZA-ENG-001 Phase 5)
     # are dormant like Mexico, each behind its own flag.
-    assert list(_DORMANT_STRATEGIES) == ["MX", "BR", "ZA"]
+    # + New Zealand (ZP-NZ-ENG-001 Phase 4), dormant behind NZ_TENANT_ONBOARDING_ENABLED.
+    # + Poland (ZP-PL-ENG-001 Phase 0), dormant behind PL_TENANT_ONBOARDING_ENABLED.
+    assert list(_DORMANT_STRATEGIES) == ["MX", "BR", "ZA", "NZ", "PL"]
     assert all(not getattr(cls, "MASK_DUPLICATE_VALUE", False) for cls in _STRATEGIES.values())
 
 
@@ -130,7 +132,10 @@ def test_sensitive_field_set_only_gains_mexican_keys():
     # CPF / PIS / PIX / bank-account keys come only from there.
     assert SENSITIVE_COMPLIANCE_FIELDS - before == {
         "rfc", "curp", "nss", "clabe", "cpf", "pis_nis", "pix_key", "bank_account",
-        "national_id", "tax_number"}
+        "national_id", "tax_number",
+        # + New Zealand (Phase 4): an IRD number is refused as an employee field and
+        # masked if ever supplied - it lives only in the encrypted IRD vault.
+        "ird_number"}
     for cls in _STRATEGIES.values():                                     # no other country uses these keys
         assert not {"rfc", "curp", "nss", "clabe"} & set(cls.FIELD_SPECS), cls.country_code
 
@@ -139,9 +144,10 @@ def test_bank_routing_other_countries_unchanged():
     from app.modules.payroll import bank_routing as br
 
     # Brazil (ZP-BR-ENG-001) follows Mexico, merged from venu; Switzerland and
-    # Saudi Arabia (Phase 4.1, IBAN routing) follow Brazil.
-    assert br.ROUTING_COUNTRIES[:-5] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
-                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-5:] == ("MX", "BR", "CH", "SA", "ZA")
+    # Saudi Arabia (Phase 4.1, IBAN routing) follow Brazil; Poland (ZP-PL-ENG-001
+    # Phase 0, IBAN routing) follows South Africa.
+    assert br.ROUTING_COUNTRIES[:-6] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
+                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-6:] == ("MX", "BR", "CH", "SA", "ZA", "PL")
     assert br.ROUTING_FIELDS["MX"] == [{"key": "clabe", "label": "CLABE"}]
     assert (br.BTF_ROUTING_LABEL["MX"], br.PAYMENT_MODE_LABEL["MX"]) == ("CLABE", "SPEI")
     from app.modules.payroll.employee_validation import mask_routing

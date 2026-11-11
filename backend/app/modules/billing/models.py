@@ -32,6 +32,9 @@ Implementation Blueprint §2.2 "New billing tables":
   - BillingInvoiceLine              → individual line items on an invoice
   - BillingCreditNote                → a credit issued against an invoice
   - BillingDunningState              → current dunning stage per org
+  - OrganizationJurisdiction         → country entitlement ledger (which
+                                       countries an org may employ/run payroll
+                                       in, capped by max_jurisdictions)
   - BillingCommercialAuditEvent      → append-only audit trail for commercial
                                        (billing/entitlement/subscription) events
 
@@ -55,6 +58,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 
 from app.database import Base
@@ -485,6 +489,51 @@ class EnterpriseOrderForm(Base):
 
     def __repr__(self):
         return f"<EnterpriseOrderForm organization_id={self.organization_id} contract_reference={self.contract_reference!r}>"
+
+
+class OrganizationJurisdictionStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    # Entitled before a downgrade lowered max_jurisdictions — kept (never
+    # deleted) so existing employees stay readable, but no new employee
+    # writes or payroll calculation until an upgrade restores it.
+    OVER_LIMIT = "OVER_LIMIT"
+    REMOVED = "REMOVED"
+
+
+class OrganizationJurisdiction(Base):
+    """The country entitlement ledger: which countries an org may add
+    employees in and run payroll for, capped by max_jurisdictions (see
+    billing/jurisdiction_entitlement.py). The registration country is the
+    primary row.
+
+    Deliberately separate from payroll.enterprise's EnterpriseJurisdiction,
+    which stays the per-country DRAFT -> CONFIGURED -> VERIFIED
+    configuration workflow — a Core org never goes through that, but still
+    has exactly one entitled country here.
+    """
+    __tablename__ = "organization_jurisdictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Same normalized 2-letter form as PayrollEmployee.country_code.
+    country_code = Column(String(2), nullable=False)
+    is_primary = Column(Boolean, nullable=False, default=False)
+    status = Column(String(20), nullable=False, default=OrganizationJurisdictionStatus.ACTIVE.value)
+    activated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    activated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "country_code", name="uq_org_jurisdiction"),
+        # At most one primary row per org (partial unique index).
+        Index(
+            "uq_org_jurisdiction_primary", "organization_id", unique=True,
+            postgresql_where=text("is_primary"), sqlite_where=text("is_primary"),
+        ),
+    )
+
+    def __repr__(self):
+        return (f"<OrganizationJurisdiction org_id={self.organization_id} country={self.country_code} "
+                f"primary={self.is_primary} status={self.status}>")
 
 
 class BillingCommercialAuditEvent(Base):

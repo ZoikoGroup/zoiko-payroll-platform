@@ -143,6 +143,38 @@ def calculate_payroll(
             "South Africa payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "JP" and key == "simple":
+        # Japan (ZP-JP-ENG-001): simple mode would silently skip national
+        # withholding, resident tax, social insurance, employment insurance
+        # and labour premiums — all statutory, no fallback. Fail-closed.
+        from app.modules.payroll.engine.countries.japan import JPCalculationBlockedError
+
+        raise JPCalculationBlockedError(
+            "JP_SIMPLE_MODE_UNSUPPORTED",
+            "Japan payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
+    if (ctx.country or "").upper() == "NZ" and key == "simple":
+        # New Zealand (ZP-NZ-ENG-001): simple mode would silently skip PAYE/ACC,
+        # KiwiSaver/ESCT, student loan and authority deductions. Fail-closed.
+        from app.modules.payroll.engine.countries.new_zealand import NZCalculationBlockedError
+
+        raise NZCalculationBlockedError(
+            "NZ_SIMPLE_MODE_UNSUPPORTED",
+            "New Zealand payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
+    if (ctx.country or "").upper() == "PL" and key == "simple":
+        # Poland (ZP-PL-ENG-001): simple mode would silently skip PIT, ZUS,
+        # health, employer funds and PPK — each a separate obligation with its
+        # own base (spec §5-§7). Fail-closed: countries/poland.py.
+        from app.modules.payroll.engine.countries.poland import PLCalculationBlockedError
+
+        raise PLCalculationBlockedError(
+            "PL_SIMPLE_MODE_UNSUPPORTED",
+            "Poland payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)
@@ -267,6 +299,9 @@ def build_context_from_employee(
     mexico_inputs: dict | None = None,
     brazil_inputs: dict | None = None,
     south_africa_inputs: dict | None = None,
+    japan_inputs: dict | None = None,
+    nz_inputs: dict | None = None,
+    poland_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -467,4 +502,15 @@ def build_context_from_employee(
         # South Africa (ZP-ZA-ENG-001): za_statutory_profile + za_* context
         # fields resolved by south_africa_service (Phase 5 calc_inputs).
         **(south_africa_inputs or {}),
+        # Japan (ZP-JP-ENG-001): jp_worker_tax_profile, jp_employer_registration,
+        # jp_social_insurance_enrollment, jp_employment_insurance_profile,
+        # jp_resident_tax_assessments and jp_* context fields resolved by
+        # japan_service (Phase 5 calc_inputs).
+        **(japan_inputs or {}),
+        # New Zealand (ZP-NZ-ENG-001): nz_* context fields resolved by
+        # new_zealand_service.calc_inputs as of the run's payday (NZ-008).
+        **(nz_inputs or {}),
+        # Poland (ZP-PL-ENG-001): pl_* context fields resolved by
+        # poland_service.calc_inputs as of the run's pay date (Phase 4).
+        **(poland_inputs or {}),
     )

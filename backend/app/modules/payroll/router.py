@@ -69,12 +69,14 @@ from app.modules.billing.models import DunningStage
 from app.modules.billing import bwm as billing_bwm
 from app.modules.payroll import service
 from app.modules.payroll.policy.router import policy_router
-from app.modules.payroll.enterprise.router import enterprise_router
 from app.modules.payroll.mail.router import mail_router
 from app.modules.payroll.forms.router import forms_router
 from app.modules.payroll.netherlands_org_router import router as netherlands_org_router
 from app.modules.payroll.mexico_org_router import router as mexico_org_router
 from app.modules.payroll.brazil_org_router import router as brazil_org_router
+from app.modules.payroll.japan_org_router import router as japan_org_router
+from app.modules.payroll.nz_org_router import router as nz_org_router
+from app.modules.payroll.pl_org_router import router as pl_org_router
 from app.modules.payroll.mexico_transfer_router import router as mexico_transfer_router
 from app.modules.payroll.schemas import (
     SwedenLeaveLedgerResponse, SwedenLeaveLedgerUpsert, SwedenSickEpisodeResponse, SwedenSickEpisodeUpsert,
@@ -183,7 +185,6 @@ payroll_router = APIRouter(
 )
 
 payroll_router.include_router(policy_router)
-payroll_router.include_router(enterprise_router)
 payroll_router.include_router(mail_router)
 payroll_router.include_router(forms_router)
 # Netherlands organisation API (/payroll/netherlands/...) — own module, not this file.
@@ -196,8 +197,17 @@ from app.modules.payroll.tenant_statutory_router import router as tenant_statuto
 payroll_router.include_router(tenant_statutory_router)
 # Mexico employer onboarding (/payroll/mexico/...) — own module, not this file.
 payroll_router.include_router(mexico_org_router)
+# Country entitlement (/payroll/jurisdictions/entitled...) — Compliance > Countries.
+from app.modules.payroll.jurisdictions_router import router as jurisdictions_router  # noqa: E402
+
+payroll_router.include_router(jurisdictions_router)
 # Brazil employer onboarding (/payroll/brazil/...) — own module, not this file.
 payroll_router.include_router(brazil_org_router)
+# Japan statutory setup (/payroll/japan/...) ? dormant (404) until JP onboarding is enabled.
+payroll_router.include_router(japan_org_router)
+payroll_router.include_router(nz_org_router)
+# Poland (ZP-PL-ENG-001 Phase 4): /api/payroll/poland, dormant (404) until PL_TENANT_ONBOARDING_ENABLED.
+payroll_router.include_router(pl_org_router)
 # Mexico Phase 10f: the tenant-run master-data transfer (its own guards, not /mexico's).
 payroll_router.include_router(mexico_transfer_router)
 
@@ -283,6 +293,10 @@ def bulk_create_employees(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    # Same MAX_BWM cap create_employee enforces, checked against the whole
+    # batch up front — otherwise an import is a way around the plan limit.
+    current_count = billing_bwm.count_billable_workers(db, current_user.organization_id)
+    require_scope_limit(MAX_BWM, requested_qty=current_count + len(data.employees))(current_user=current_user, db=db)
     result = service.bulk_create_employees(db, data, current_user.organization_id, actor_id=current_user.id)
     return {
         "message": f"{result['created']} created, {len(result['failed'])} failed.",
@@ -857,6 +871,9 @@ def import_employee_elstam_payload(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    # ELStAM is Germany-only: importing it writes German tax data for the
+    # employee, so the org must be entitled to Germany.
+    service._assert_employee_country_entitled(db, current_user.organization_id, "DE")
     return service.import_elstam_structured_payload(
         db, employee_id, current_user.organization_id,
         schema_version=data.schema_version, import_reference=data.import_reference,
@@ -1140,7 +1157,11 @@ def list_runs(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_payroll_runs(db, current_user.organization_id, year=year, month=month, limit=limit, offset=offset)
+    runs = service.get_payroll_runs(db, current_user.organization_id, year=year, month=month, limit=limit, offset=offset)
+    # Per-country totals for every listed run in one grouped query, so a
+    # mixed-country run's list row isn't shown as one cross-currency sum.
+    service.attach_run_country_totals(db, runs, current_user.organization_id)
+    return runs
 
 
 @payroll_router.get(
@@ -1224,7 +1245,8 @@ def add_item(
 ):
     item = service.add_payslip_item(db, run_id, data, current_user.organization_id)
     run = service.get_payroll_run_by_id(db, run_id, current_user.organization_id)
-    country = service._resolve_org_country(db, current_user.organization_id)
+    # The item's own country first (mixed-country runs), org default as fallback.
+    country = item.country_code or service._resolve_org_country(db, current_user.organization_id)
     return service._serialize_payslip(item, run, country=country)
 
 
@@ -2032,7 +2054,7 @@ def list_items(
     run = service.get_payroll_run_by_id(db, run_id, current_user.organization_id)
     items = service.get_payslips_for_run(db, run_id, current_user.organization_id)
     country = service._resolve_org_country(db, current_user.organization_id)
-    return [service._serialize_payslip(item, run, country=country) for item in items]
+    return [service._serialize_payslip(item, run, country=item.country_code or country) for item in items]
 
 
 @payroll_router.get(
@@ -2071,11 +2093,14 @@ def download_bank_transfer_file(
     run_id: int,
     request: Request,
     format: Optional[str] = Query(None, description="csv | xlsx | txt | pdf — defaults to the Banking Policy format"),
+    country: Optional[str] = Query(None, description="Required when the run pays employees in more than one "
+                                                     "country: one bank file per country, in its own currency"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     file_bytes, content_type, _ext, filename = service.generate_bank_transfer_file(
         db, run_id, current_user.organization_id, actor_id=current_user.id, format_override=format,
+        country=country,
     )
     from app.modules.payroll import retention_service
 
@@ -2151,8 +2176,15 @@ def get_payslip(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    data, _item, _run = service.get_payslip_by_id(db, payslip_id, current_user.organization_id)
+    data, item, run = service.get_payslip_by_id(db, payslip_id, current_user.organization_id)
+    if _normalize_payslip_country(data.get("country")) == "UK":
+        data["ukPayslip"] = service.uk_payslip_details(db, item, run)
     return data
+
+
+def _normalize_payslip_country(country):
+    code = (country or "").strip().upper()
+    return "UK" if code in ("UK", "GB") else code
 
 
 @payroll_router.get(
@@ -2259,6 +2291,7 @@ def list_leave_requests(
         employee_id=employee_id,
         status=leave_status,
         leave_type=leave_type,
+        viewer_id=current_user.id,
     )
 
 
@@ -2303,10 +2336,11 @@ def review_leave_request(
 )
 def list_holidays(
     year: Optional[int] = Query(None),
+    country: Optional[str] = Query(None, description="Filter holidays by 2-letter country code (e.g. UK, IN)"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.list_holidays(db, current_user.organization_id, year=year)
+    return service.list_holidays(db, current_user.organization_id, year=year, country=country)
 
 
 @payroll_router.post(
@@ -2746,11 +2780,13 @@ def get_applicable_report_template(
     reportingYear: str = Query(...),
     reportType: str = Query(...),
     payrollRunId: Optional[int] = Query(None, description="If provided, also returns generation validation for this run"),
+    country: Optional[str] = Query(None, description="Which of the org's payroll countries the report is for "
+                                                     "(defaults to the org's default country)"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     return service.get_applicable_report_template_for_org(
-        db, current_user.organization_id, reportingYear, reportType, payroll_run_id=payrollRunId,
+        db, current_user.organization_id, reportingYear, reportType, payroll_run_id=payrollRunId, country=country,
     )
 
 

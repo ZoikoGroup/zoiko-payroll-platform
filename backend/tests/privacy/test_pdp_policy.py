@@ -174,3 +174,52 @@ def test_object_scope_out_of_org_is_404():
     # same org -> allow
     assert P.evaluate(_principal("org_admin", org=2), pol,
                       path_params={"employee_id": 5}, db=_DB(2)).allowed
+
+
+class _RecordingDB:
+    """Records the object-scope filter so it can be compiled for PostgreSQL."""
+
+    def __init__(self, org):
+        self._org = org
+        self.criteria = []
+
+    def query(self, *a, **k):
+        return self
+
+    def filter(self, *criteria):
+        self.criteria.extend(criteria)
+        return self
+
+    def first(self):
+        return (self._org,)
+
+
+def test_object_scope_binds_employee_id_as_integer_on_psycopg3():
+    """Regression: path params are strings. Compared raw, the psycopg 3
+    dialect rendered `payroll_employees.id = %(id_1)s::VARCHAR`; PostgreSQL
+    has no integer = varchar operator, so the query raised and every
+    {employee_id} route denied org admins with PDP_ERROR (403). SQLite
+    accepts the comparison, which is why the HTTP tests never caught it."""
+    from sqlalchemy.dialects.postgresql import psycopg as pg_psycopg
+
+    P, _ = _mod()
+    pol = P.RoutePolicy(method="PUT", path="/e/{employee_id}", data_class=P.DC_WORKER, action="update",
+                        resource="t", principals=frozenset({"org_admin"}), scope_level="tenant")
+    db = _RecordingDB(org=1)
+    d = P.evaluate(_principal("org_admin", org=1), pol, path_params={"employee_id": "139"}, db=db)
+    assert d.allowed, d
+
+    assert db.criteria, "object-scope query was not issued"
+    compiled = db.criteria[0].compile(dialect=pg_psycopg.dialect())
+    assert "VARCHAR" not in str(compiled).upper(), str(compiled)
+    assert list(compiled.params.values()) == [139]
+
+
+def test_object_scope_malformed_employee_id_is_404_without_query():
+    P, _ = _mod()
+    pol = _policy(P.DC_WORKER, "read", principals=("org_admin",), path="/e/{employee_id}")
+    db = _RecordingDB(org=1)
+    d = P.evaluate(_principal("org_admin", org=1), pol, path_params={"employee_id": "abc"}, db=db)
+    assert not d.allowed and d.status_code == 404
+    assert d.reason == "ACCESS_DENIED_OUT_OF_SCOPE"
+    assert db.criteria == []

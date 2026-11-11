@@ -85,28 +85,30 @@ export function SAGosiBranchesTab({ packId }) {
             </p>
             {slabsError && <p role="alert" className="text-[13px] text-error">{slabsError}</p>}
             {gosiSlabs.length === 0 && <p className="text-[12px] text-foreground-muted py-4">No GOSI branch rows configured.</p>}
-            <table className="w-full" aria-label="GOSI branch rows">
-              <thead>
-                <tr>{["Worker Class", "Branch", "EE Rate %", "ER Rate %", "Min (SAR)", "Max (SAR)", "Effective From", "Effective To", ""].map((h) => <th key={h} className={th}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {gosiSlabs.map((s) => (
-                  <tr key={s.id} className="border-t border-border">
-                    <td className={td}>{s.filingStatus || "—"}</td>
-                    <td className={td}>{s.taxRegime || "—"}</td>
-                    <td className={td}>{s.ratePct ?? "—"}</td>
-                    <td className={td}>{s.employerRatePct ?? "—"}</td>
-                    <td className={td}>{s.minAmount ?? "—"}</td>
-                    <td className={td}>{s.maxAmount ?? "—"}</td>
-                    <td className={td}>{s.effectiveFrom ? new Date(s.effectiveFrom).toLocaleDateString() : "—"}</td>
-                    <td className={td}>{s.effectiveTo ? new Date(s.effectiveTo).toLocaleDateString() : "open"}</td>
-                    <td className={td}>
-                      {s.status === "Draft" && <button type="button" className={btn} onClick={() => { setForm(s); setEditingId(s.id); }}>Edit</button>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full" aria-label="GOSI branch rows">
+                <thead>
+                  <tr>{["Worker Class", "Branch", "EE Rate %", "ER Rate %", "Min (SAR)", "Max (SAR)", "Effective From", "Effective To", ""].map((h) => <th key={h} className={th}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {gosiSlabs.map((s) => (
+                    <tr key={s.id} className="border-t border-border">
+                      <td className={td}>{s.filingStatus || "—"}</td>
+                      <td className={td}>{s.taxRegime || "—"}</td>
+                      <td className={td}>{s.ratePct ?? "—"}</td>
+                      <td className={td}>{s.employerRatePct ?? "—"}</td>
+                      <td className={td}>{s.minAmount ?? "—"}</td>
+                      <td className={td}>{s.maxAmount ?? "—"}</td>
+                      <td className={td}>{s.effectiveFrom ? new Date(s.effectiveFrom).toLocaleDateString() : "—"}</td>
+                      <td className={td}>{s.effectiveTo ? new Date(s.effectiveTo).toLocaleDateString() : "open"}</td>
+                      <td className={td}>
+                        {s.status === "Draft" && <button type="button" className={btn} onClick={() => { setForm(s); setEditingId(s.id); }}>Edit</button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div className={card} aria-labelledby="sa-gosi-branch-form">

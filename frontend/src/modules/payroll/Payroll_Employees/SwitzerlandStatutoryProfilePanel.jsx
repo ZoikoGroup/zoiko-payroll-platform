@@ -231,7 +231,7 @@ export default function SwitzerlandStatutoryProfilePanel({ employee, onClose }) 
           <WorkerFacts employee={employee} onDate={onDate} />
 
           <div className="bg-surface-muted/40 border border-border rounded-[14px] p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center flex-wrap justify-between gap-3">
               <h3 className="text-[13px] font-bold text-foreground">QST resolution (advisory)</h3>
               <button type="button" onClick={runQst} disabled={qstLoading}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-foreground-muted hover:text-foreground disabled:opacity-40">
@@ -251,7 +251,7 @@ export default function SwitzerlandStatutoryProfilePanel({ employee, onClose }) 
           </div>
 
           <div className="bg-surface-muted/40 border border-border rounded-[14px] p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center flex-wrap justify-between gap-3">
               <h3 className="text-[13px] font-bold text-foreground">Effective rules (seat canton)</h3>
               <button type="button" onClick={runRules} disabled={rulesLoading}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-foreground-muted hover:text-foreground disabled:opacity-40">

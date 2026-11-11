@@ -105,12 +105,12 @@ export default function Footer() {
               <Link to="/forgot-password" style={styles.link}>Forgot password</Link>
             </li>
             <li style={styles.item}>
-              <a href="https://zoikoone.com" target="_blank" rel="noopener noreferrer" style={styles.link}>
+              <a href="https://zoikopayroll.com/zoiko-payroll-help-center" target="_blank" rel="noopener noreferrer" style={styles.link}>
                 Help center
               </a>
             </li>
             <li style={styles.item}>
-              <a href="https://zoikoone.com" target="_blank" rel="noopener noreferrer" style={styles.link}>
+              <a href="https://zoikopayroll.com/contact" target="_blank" rel="noopener noreferrer" style={styles.link}>
                 Contact support
               </a>
             </li>

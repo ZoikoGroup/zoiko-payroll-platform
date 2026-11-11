@@ -12,7 +12,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AlreadyExistsException
-from app.modules.billing import entitlements
+from app.modules.billing import entitlements, jurisdiction_entitlement
 from app.modules.billing.models import (
     BillingAuthority,
     BillingCommercialAuditEvent,
@@ -117,6 +117,10 @@ def record_order_form(
             payload={"contract_reference": contract_reference, "term_start": term_start.isoformat()},
         )
     )
+    # negotiated_scale_limits may set a different max_jurisdictions.
+    db.flush()
+    jurisdiction_entitlement.safe_reconcile(db, organization_id, actor_user_id=signed_by_user_id,
+                                            reason="enterprise_order_form")
     db.commit()
     db.refresh(order_form)
     return order_form

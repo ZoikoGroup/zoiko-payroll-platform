@@ -33,6 +33,23 @@ def _refused(fn, key):
     assert exc.value.key == key, exc.value.key
 
 
+def _make_org_not_mexican(db, org_id, country):
+    """Move the org's default country to `country` AND remove Mexico from
+    its country ledger. Changing the default alone is not enough once the
+    ledger is populated (any BILLING_ENFORCEMENT_MODE but "off"): an ACTIVE
+    MX ledger row still makes it a multi-country org that runs Mexico.
+    REMOVED (not deleted) so ensure_ledger doesn't re-seed it."""
+    from app.modules.billing.jurisdiction_entitlement import REMOVED
+    from app.modules.billing.models import OrganizationJurisdiction
+    from app.modules.payroll.models import CompanyComplianceDetails
+
+    db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == org_id).update(
+        {"jurisdiction_country": country})
+    db.query(OrganizationJurisdiction).filter(
+        OrganizationJurisdiction.organization_id == org_id, OrganizationJurisdiction.country_code == "MX",
+    ).update({"status": REMOVED})
+
+
 def _paths(db, w):
     from app.modules.payroll import service
     from app.modules.payroll.schemas import PayslipItemCreate
@@ -60,11 +77,8 @@ def test_flag_off_refuses_every_path_and_writes_nothing(db, monkeypatch, path):
 
 @pytest.mark.parametrize("path", ["preview", "generate", "add_item"])
 def test_flag_on_but_not_a_mexican_org_refuses(db, monkeypatch, path):
-    from app.modules.payroll.models import CompanyComplianceDetails
-
     w = rh.world(db, monkeypatch)
-    db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == w.org.id).update(
-        {"jurisdiction_country": "US"})
+    _make_org_not_mexican(db, w.org.id, "US")
     db.commit()
     before = _counts(db)
     with pytest.raises(Exception) as exc:
@@ -77,7 +91,6 @@ def test_flag_on_but_not_a_mexican_org_refuses(db, monkeypatch, path):
 
 def test_guard_codes_directly(db, monkeypatch):
     from app.modules.payroll import mexico_run_service
-    from app.modules.payroll.models import CompanyComplianceDetails
 
     w = rh.world(db, monkeypatch)
     w.run.mx_run_type = "BOGUS"                     # every Phase 9 type is built (9a-9d); an unknown one is refused
@@ -87,8 +100,7 @@ def test_guard_codes_directly(db, monkeypatch):
     w.run.organization_id = w.org.id + 999
     _refused(lambda: mexico_run_service.guard(db, w.employee, w.run), "MX_RUN_ORG_MISMATCH")
     db.rollback()
-    db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == w.org.id).update(
-        {"jurisdiction_country": "NL"})
+    _make_org_not_mexican(db, w.org.id, "NL")
     _refused(lambda: mexico_run_service.guard(db, w.employee, None), "MX_ORG_NOT_MEXICAN")
     _flag_off(monkeypatch)
     _refused(lambda: mexico_run_service.guard(db, w.employee, None), "MX_DORMANT")

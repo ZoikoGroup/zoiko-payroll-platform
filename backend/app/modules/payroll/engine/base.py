@@ -978,6 +978,71 @@ class PayrollContext:
     za_deduction_orders: list = None           # [{id, order_type, authority_type, amount, evidence_ref}]
     za_overrides: list = None                  # APPROVED [{id, field, before, after, reason_code}]
 
+    # ── Japan (ZP-JP-ENG-001; "JP") ───────────────────────────────────────────
+    # Pre-resolved by the service layer; all default to None so non-JP callers unaffected.
+    jp_worker_tax_profile: object = None
+    jp_employer_registration: object = None
+    jp_social_insurance_enrollment: object = None
+    jp_employment_insurance_profile: object = None
+    jp_resident_tax_assessments: list = None
+    jp_organization_id: int = None
+    jp_employee_id: int = None
+    jp_date_of_birth: date = None
+    jp_components: dict = None
+    # New Zealand (ZP-NZ-ENG-001 Phase 3). Supplied by new_zealand_service.calc_inputs
+    # (Phase 4); the engine never reads the database. The payday is ctx.pay_date
+    # and selects every rule (NZ-008).
+    nz_employer_profile: object = None        # ACTIVE employer profile in force on the payday
+    nz_tax_profile: object = None             # ACTIVE employee tax profile
+    nz_kiwisaver: object = None               # ACTIVE KiwiSaver election
+    nz_authority_deductions: list = None      # APPROVED authority notices
+    nz_work_pattern: object = None            # ACTIVE work pattern
+    nz_accumulators: dict = None              # {obligation: YTD before this payday}; missing = unknown
+    nz_hours: Decimal = None                  # paid hours this period (minimum-wage test)
+    nz_hours_source: str = None               # ATTENDANCE / WORK_PATTERN
+    nz_payment_kind: str = None               # None = REGULAR
+    nz_pay_date: date = None                  # the run's payday; preferred over pay_date
+    nz_date_of_birth: date = None
+    nz_components: dict = None                # {"SALARY": ..., "OVERTIME": ...}
+    nz_organization_id: int = None
+    nz_legal_entity_id: int = None
+    nz_employee_id: int = None
+    # Phase 6 — leave pay, final pay and non-standard payments.
+    nz_leave_lines: list = None               # [{calculationId, purpose, amount, displaced}] taken this period
+    nz_final_pay_lines: list = None           # [{calculationId, purpose, amount}] of an APPROVED final-pay case
+    nz_prior_four_week_gross: Decimal = None  # PAYE gross in the 4 weeks before the payday (extra-pay method)
+    nz_run_options: dict = None               # {holidayAdvanceMethod, advancePeriods, lumpSumComponent, ...}
+    # ── Poland (ZP-PL-ENG-001) ────────────────────────────────────────────
+    # Everything countries/poland.py reads, resolved by poland_service.calc_inputs
+    # (Phase 4) as of the pay date. Missing facts BLOCK; nothing is defaulted.
+    pl_pay_date: date = None                  # preferred over pay_date
+    pl_profile: object = None                 # PayrollPlWorkerProfile in force (ACTIVE)
+    pl_registration: object = None            # PayrollPlEmployerRegistration in force (ACTIVE)
+    pl_components: dict = None                # {"SALARY": ..., "OVERTIME_50": ...}; must add up to gross
+    pl_declarations: list = None              # PayrollPlDeclaration rows (only APPROVED in force count)
+    pl_ppk: object = None                     # PayrollPlPpkParticipation in force
+    pl_ytd: dict = None                       # {accumulator: sum before this pay date}; missing key = unknown
+    pl_overtime_events: list = None           # [{kind, event_ref, hours, hourly_rate}] behind OVERTIME_* (PL-016)
+    pl_incapacity_episodes: list = None       # APPROVED episodes: dates, category, daily base — no medical data
+    pl_date_of_birth: date = None             # the sick-pay age test (spec §9)
+    pl_organization_id: int = None
+    pl_legal_entity_id: int = None
+    pl_employee_id: int = None
+    # Phase 4 — bonus path (S1/S8) and lifecycle events (spec §11).
+    jp_payment_kind: str = None                # "SALARY" (default) | "BONUS" (bonus-only payment)
+    jp_prior_month_pay_after_si: Decimal = None  # selects the NTA bonus-rate band
+    jp_ytd_health_sba: Decimal = None          # health SBA already counted this insurance year
+    jp_month_pension_sba: Decimal = None       # pension SBA already counted this month
+    jp_social_insurance_events: list = None    # lifecycle events touching the pay month
+    # Phase 8 — an APPLIED year-end adjustment for THIS run (S3): withheld minus
+    # the annual tax; positive refunds, negative collects. None = no adjustment.
+    jp_year_end_difference: Decimal = None
+    jp_yea_case_id: int = None
+    # Phase 6 - working time, premiums and minimum wage (spec §6, S14).
+    jp_work_conditions: object = None          # PayrollJpWorkConditions in force
+    jp_hours: list = None                      # [{date, worked_minutes, scheduled_minutes, night_minutes, is_holiday}]
+    jp_hours_approved: bool = None             # attendance rows for this period are approved facts
+
     # Netherlands (ZP-NL-ENG-001) — every input countries/netherlands.py reads,
     # resolved by netherlands_service.resolve_nl_calc_inputs. The engine
     # BLOCKS (NetherlandsCalculationBlockedError) rather than guess any that
@@ -1719,6 +1784,20 @@ class PayrollResult:
     # Mexico (ZP-MX-ENG-001) — the whole dict countries/mexico.py returns
     # under 'mx_result'. None for every non-MX country.
     mx_result: dict = None
+
+    # Japan (ZP-JP-ENG-001) — the whole dict countries/japan.py returns under
+    # 'jp_result' (separate WHT/SI/EI bases, every employee/employer component,
+    # the resident-tax notice reference and the calculation trace). None
+    # elsewhere. No My Number, name or bank data is ever placed here.
+    jp_result: dict = None
+    # New Zealand (ZP-NZ-ENG-001): the whole NZ dict (separate bases, obligations,
+    # accumulator deltas, exceptions, trace and hashes). None for every other country.
+    nz_result: dict = None
+    # Poland (ZP-PL-ENG-001): the whole PL dict (separate bases, every ZUS /
+    # health / PPK / fund component, applicability decisions, accumulator deltas,
+    # exceptions, trace and hashes). None for every other country. No PESEL,
+    # NIP or bank data is ever placed here.
+    pl_result: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
     # The whole dict countries/brazil.py returns under 'br_result' key (spec,

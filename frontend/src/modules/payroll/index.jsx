@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { X } from "lucide-react";
 import { ToastProvider, useToast } from "../../context/ToastContext";
 import { PayrollSetupProvider } from "./PayrollSetupContext";
+import { EntitledCountriesProvider } from "./EntitledCountriesContext";
 
 import DashboardPage  from "./DashBoards/DashboardPage";
 import EmployeeList   from "./Payroll_Employees/EmployeeListPage";
@@ -95,7 +96,9 @@ function PayrollModuleContent() {
 export default function ZoikoPayrollModule() {
   return (
     <PayrollSetupProvider>
-      <PayrollModuleContent />
+      <EntitledCountriesProvider>
+        <PayrollModuleContent />
+      </EntitledCountriesProvider>
     </PayrollSetupProvider>
   );
 }

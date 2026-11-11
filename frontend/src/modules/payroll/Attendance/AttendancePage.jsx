@@ -973,6 +973,19 @@ export default function AttendancePage() {
     return String(h || "").trim().toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
   }
 
+  // The map's own keys go through the same normalization as uploaded
+  // headers — "Date (YYYY-MM-DD)" normalizes to "date (yyyy mm dd)", so the
+  // raw key "date (yyyy-mm-dd)" never matched and the template's own Date
+  // column was silently ignored ("Date is required" on every row). A header
+  // with a bracketed hint ("Break (min)") also matches by its plain name.
+  const ATTENDANCE_HEADER_LOOKUP = Object.fromEntries(
+    Object.entries(ATTENDANCE_HEADER_MAP).map(([k, v]) => [normalizeAttHeader(k), v])
+  );
+  function attHeaderKey(h) {
+    const n = normalizeAttHeader(h);
+    return ATTENDANCE_HEADER_LOOKUP[n] || ATTENDANCE_HEADER_LOOKUP[n.replace(/\s*\(.*?\)\s*/g, " ").trim()];
+  }
+
   function normalizeAttTime(val) {
     if (!val && val !== 0) return "";
     const s = String(val).trim();
@@ -1236,9 +1249,9 @@ export default function AttendancePage() {
 
     function parseMatrixSheet(rawRows, sheetName, monthFromSheet) {
       const headers = Object.keys(rawRows[0] || {});
-      const nameKey = headers.find((h) => ATTENDANCE_HEADER_MAP[normalizeAttHeader(h)] === "name");
-      const idKey = headers.find((h) => ATTENDANCE_HEADER_MAP[normalizeAttHeader(h)] === "employeeId");
-      const deptKey = headers.find((h) => ATTENDANCE_HEADER_MAP[normalizeAttHeader(h)] === "department");
+      const nameKey = headers.find((h) => attHeaderKey(h) === "name");
+      const idKey = headers.find((h) => attHeaderKey(h) === "employeeId");
+      const deptKey = headers.find((h) => attHeaderKey(h) === "department");
       const dayHeaders = headers.filter((h) => /^\d{1,2}$/.test(String(h).trim()) && Number(h) >= 1 && Number(h) <= 31);
 
       const results = [];
@@ -1333,7 +1346,7 @@ export default function AttendancePage() {
             rawRows.forEach((rawRow, idx) => {
               const mapped = {};
               for (const [rawHeader, rawValue] of Object.entries(rawRow)) {
-                const key = ATTENDANCE_HEADER_MAP[normalizeAttHeader(rawHeader)];
+                const key = attHeaderKey(rawHeader);
                 if (key) mapped[key] = rawValue;
               }
               const rawEmployeeVal = mapped.employeeId;
@@ -1940,7 +1953,7 @@ export default function AttendancePage() {
           <div className="bg-primary/5 border border-primary/15 rounded-[14px] px-4 py-3 text-[13px] text-foreground-muted">
             Only <strong>Active</strong> employees are shown. Inactive employees are excluded from attendance tracking.
           </div>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-surface border border-border rounded-[18px] p-5 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-[1px]">
               <div className="p-2.5 rounded-[12px] bg-category-teal/10">
                 <Users className="w-5 h-5 text-category-teal" />
@@ -2648,7 +2661,7 @@ export default function AttendancePage() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-4 gap-3 mb-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                   <div className="bg-background rounded-[12px] p-3 text-center border border-border">
                     <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Employees</p>
                     <p className="text-[18px] font-bold text-foreground">{summaryTotal}</p>

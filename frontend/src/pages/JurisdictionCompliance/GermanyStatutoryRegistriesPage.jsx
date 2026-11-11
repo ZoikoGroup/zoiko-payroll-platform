@@ -951,7 +951,7 @@ export function ChurchTaxTab() {
             <div className="mb-3 flex items-start gap-2 rounded-[10px] border border-border bg-surface-muted px-3 py-2 text-[11px] text-foreground-muted">
               {matrix.sourceStatus}
             </div>
-            <div className="grid grid-cols-4 gap-2 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
               {matrix.laender.map((l) => (
                 <div key={l.code} className="rounded-[10px] border border-border p-2.5 text-center">
                   <div className="text-[11px] font-bold text-foreground">{l.code}</div>
@@ -1105,24 +1105,26 @@ export function SourceEvidenceTab() {
           A checkmark means a source-artifact row citing that evidence exists below — never inferred from the
           document&apos;s own reference table alone. An unchecked row is genuinely <strong>SOURCE_REQUIRED</strong>.
         </p>
-        <table className="w-full text-[12px]">
-          <thead><tr><Th>ID</Th><Th>Requirement</Th><Th>Status</Th></tr></thead>
-          <tbody>
-            {DE_SRC_REFERENCE.map(([id, label, hint]) => (
-              <tr key={id} className="border-t border-border">
-                <Td>{id}</Td>
-                <Td>{label}</Td>
-                <Td>
-                  {foundFor(hint) ? (
-                    <span className="inline-flex items-center gap-1 text-primary font-semibold"><Check size={13} /> Evidence recorded</span>
-                  ) : (
-                    <span className="font-semibold text-warning">SOURCE_REQUIRED</span>
-                  )}
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead><tr><Th>ID</Th><Th>Requirement</Th><Th>Status</Th></tr></thead>
+            <tbody>
+              {DE_SRC_REFERENCE.map(([id, label, hint]) => (
+                <tr key={id} className="border-t border-border">
+                  <Td>{id}</Td>
+                  <Td>{label}</Td>
+                  <Td>
+                    {foundFor(hint) ? (
+                      <span className="inline-flex items-center gap-1 text-primary font-semibold"><Check size={13} /> Evidence recorded</span>
+                    ) : (
+                      <span className="font-semibold text-warning">SOURCE_REQUIRED</span>
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
 
       <Card
@@ -1144,19 +1146,21 @@ export function SourceEvidenceTab() {
         {loading && <p className="text-[12px] text-foreground-muted">Loading…</p>}
         <ErrorBanner message={error} />
         {artifacts && (
-          <table className="w-full text-[12px]">
-            <thead><tr><Th>Agency</Th><Th>Title</Th><Th>Reviewed</Th><Th>Actions</Th></tr></thead>
-            <tbody>
-              {artifacts.map((a) => (
-                <tr key={a.id} className="border-t border-border">
-                  <Td>{a.agency}</Td>
-                  <Td className="max-w-md truncate">{a.title}</Td>
-                  <Td>{a.reviewerApprovedAt ? new Date(a.reviewerApprovedAt).toLocaleDateString() : "—"}</Td>
-                  <Td>{!a.reviewerApprovedAt && <button className={btnSecondary} onClick={() => review(a.id)}>Mark reviewed</button>}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead><tr><Th>Agency</Th><Th>Title</Th><Th>Reviewed</Th><Th>Actions</Th></tr></thead>
+              <tbody>
+                {artifacts.map((a) => (
+                  <tr key={a.id} className="border-t border-border">
+                    <Td>{a.agency}</Td>
+                    <Td className="max-w-md truncate">{a.title}</Td>
+                    <Td>{a.reviewerApprovedAt ? new Date(a.reviewerApprovedAt).toLocaleDateString() : "—"}</Td>
+                    <Td>{!a.reviewerApprovedAt && <button className={btnSecondary} onClick={() => review(a.id)}>Mark reviewed</button>}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
     </>
@@ -1189,20 +1193,22 @@ export function AuditTab() {
       {rows && rows.length === 0 && <p className="text-[12px] text-foreground-muted">No audit events for this filter.</p>}
       {rows && rows.length > 0 && (
         <div className="max-h-[32rem] overflow-y-auto">
-          <table className="w-full text-[12px]">
-            <thead><tr><Th>When</Th><Th>Actor</Th><Th>Action</Th><Th>Entity</Th><Th>Reason</Th></tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id} className="border-t border-border">
-                  <Td>{r.createdAt ? new Date(r.createdAt).toLocaleString() : "—"}</Td>
-                  <Td>{r.actorId ?? "system"}</Td>
-                  <Td>{r.action}</Td>
-                  <Td>{r.entityType} #{r.entityId}</Td>
-                  <Td>{r.reason || "—"}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead><tr><Th>When</Th><Th>Actor</Th><Th>Action</Th><Th>Entity</Th><Th>Reason</Th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-t border-border">
+                    <Td>{r.createdAt ? new Date(r.createdAt).toLocaleString() : "—"}</Td>
+                    <Td>{r.actorId ?? "system"}</Td>
+                    <Td>{r.action}</Td>
+                    <Td>{r.entityType} #{r.entityId}</Td>
+                    <Td>{r.reason || "—"}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </Card>

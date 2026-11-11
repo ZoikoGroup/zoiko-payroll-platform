@@ -37,6 +37,23 @@ _GUARDED = [
     "447f57564983",  # South Africa za_foundation (guarded from day one, lock_timeout)
     "c15d5b87d6f5",  # South Africa Phase 8 SARS payments / variances (guarded, lock_timeout)
     "3880223bfaa0",  # South Africa Phase 9 overrides / deduction authority (guarded, lock_timeout)
+    "67c8d7454716",
+    "668472e4eb72",  # organizations.timezone (guarded, lock_timeout)  # South Africa Phase 10 parallel cycles (guarded, lock_timeout)
+    "f686d5128f8a",  # Japan Phase 2 jp_foundation (guarded from day one, lock_timeout)
+    "9c1d7e4a2b6f",  # Japan run payment kind (guarded, lock_timeout)
+    "a7c4e9d1b2f8",  # Japan work conditions (guarded, lock_timeout)
+    "a1a748b50902",  # Japan work calendar + attendance approvals (guarded, lock_timeout)
+    "41a1fafbbfdc",  # Japan P8 lifecycle and filings (guarded, lock_timeout)
+    "b8bd939fffca",  # Japan P9 parallel cycles (guarded, lock_timeout)
+    "0e697c2388bf",  # New Zealand P2 nz_foundation (guarded from day one, lock_timeout)
+    "ac08988ecd3a",  # New Zealand P5 nz_holidays_act (guarded from day one, lock_timeout)
+    "c6ea8c6c35ce",  # New Zealand P6 nz_leave_pay (guarded from day one, lock_timeout)
+    "dd8a60634320",  # New Zealand P8 nz_filings (guarded from day one, lock_timeout)
+    "a8cde2482ef0",  # New Zealand P9 nz_parallel_cycles (guarded from day one, lock_timeout)
+    "1ee3bbde33bb",  # Poland P2 pl_foundation (guarded from day one, lock_timeout)
+    "e11c2c36df17",  # Poland P6 pl_incapacity_episodes (guarded from day one, lock_timeout)
+    "e75b9219e1f8",  # Poland P8 pl_filing_settlement (guarded from day one, lock_timeout)
+    "e7ec6c1933b4",  # Poland P9 pl_parallel_cycles (guarded from day one, lock_timeout)
 ]
 
 

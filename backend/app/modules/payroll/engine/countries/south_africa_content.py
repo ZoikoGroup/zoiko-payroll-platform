@@ -198,6 +198,8 @@ ZA_PARAMETER_KEYS = {
     "za_four_eyes_variable_pay_pct": "employee_pct",
     "za_four_eyes_bank_change_days": "amount",
     "za_deduction_authority_types": "text",
+    # Parallel-cycle materiality (ZA-016, D-4)
+    "za_parallel_materiality_amount": "amount",
 }
 
 # ── ContributionRate scalar content ───────────────────────────────────────
@@ -331,6 +333,9 @@ ZA_SCALAR_CONTENT = (
     # agreement / court order permits (spec §5).
     ("za_deduction_authority_types", "Recognised authorities for a non-statutory payroll deduction",
      None, None, None, "STATUTORY,COURT_ORDER,CONSENT,COLLECTIVE", "S11", False, None, None),
+    # D-4: Parallel-cycle materiality threshold (rand per employee per concept); recorded as evidence.
+    ("za_parallel_materiality_amount", "Parallel-cycle materiality threshold per employee per concept (ZAR)",
+     None, None, None, None, "S1", True, None, None),
 )
 
 # Rows that are deliberately empty: present so "not configured" is explicit,
@@ -338,6 +343,7 @@ ZA_SCALAR_CONTENT = (
 ZA_EMPTY_BY_DESIGN = frozenset({
     "za_bcea_overtime_multiplier", "za_bcea_sunday_multiplier", "za_bcea_public_holiday_multiplier",
     "za_damage_deduction_limit_pct", "za_four_eyes_variable_pay_pct", "za_four_eyes_bank_change_days",
+    "za_parallel_materiality_amount",
 })
 DEDUCTION_TYPES_NEEDING_LIMIT = ("DAMAGE", "LOSS")
 OVERRIDE_FIELDS = ("za_paye", "za_uif_employee", "za_uif_employer", "za_sdl", "za_other_deductions")

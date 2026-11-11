@@ -5,7 +5,7 @@ import PayslipFilters from "./PayslipFilters";
 import PayslipStub from "./PayslipStub";
 import PayslipDownloadButton from "./PayslipDownloadButton";
 import { getPayslips, getEmployees, deletePayslip } from "../../../service/payrollService";
-import { formatCurrency } from "../../../utils/currency";
+import { formatCurrency, getCurrencyForJurisdiction, normalizeCountryCode } from "../../../utils/currency";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
 const statusConfig = {
@@ -41,6 +41,18 @@ export default function PayslipsPage() {
   // Sourced from the shared, once-per-session PayrollSetupContext instead of
   // this page's own independent getCompanyProfile() call.
   const { company: companyProfile, currencyCode } = usePayrollSetup();
+  // Each payslip is paid in its own country's currency — the org currency
+  // (which may carry an explicit override) only applies to payslips in the
+  // org's own jurisdiction country.
+  const orgCountry = companyProfile?.jurisdictionCountry || companyProfile?.jurisdiction_country || "";
+  const payslipCurrency = useCallback((p) => {
+    const country = p?.country || p?.countryCode;
+    if (!country) return currencyCode;
+    const sameAsOrg = (normalizeCountryCode(country) || country.toUpperCase())
+      === (normalizeCountryCode(orgCountry) || orgCountry.toUpperCase());
+    if (sameAsOrg) return currencyCode;
+    return getCurrencyForJurisdiction(country)?.code || currencyCode;
+  }, [currencyCode, orgCountry]);
   const [deletingId, setDeletingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -180,7 +192,7 @@ export default function PayslipsPage() {
 
       {activeTab === "payslips" && (
         <>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-surface border border-border rounded-[18px] p-4 flex items-center gap-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
               <div className="p-2.5 rounded-[12px] bg-primary/10">
                 <FileText className="w-5 h-5 text-primary" />
@@ -243,58 +255,60 @@ export default function PayslipsPage() {
                 </button>
               </div>
             ) : (
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="px-4 py-3.5 w-10">
-                      <input type="checkbox" checked={selectAll} onChange={handleSelectAll} className="w-4 h-4 rounded border-border text-primary" />
-                    </th>
-                    {["Payslip ID","Employee","Department","Pay Period","Pay Date","Net Pay","Status",""].map((h) => (
-                      <th key={h} className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {payslips.map((p) => {
-                    const sc = statusConfig[p.status] || statusConfig.Unknown;
-                    const Icon = sc.icon;
-                    return (
-                      <tr key={p.id} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
-                        <td className="px-4 py-4">
-                          <input
-                            type="checkbox"
-                            checked={selected.has(p.id)}
-                            onChange={() => handleSelect(p.id)}
-                            className="w-4 h-4 rounded border-border text-primary"
-                          />
-                        </td>
-                        <td className="px-5 py-4 font-mono text-[12px] text-foreground-muted font-semibold">{p.id}</td>
-                        <td className="px-5 py-4">
-                          <button onClick={() => setSelectedPayslip(p)} className="font-semibold text-foreground hover:text-primary text-left transition-colors duration-200">
-                            {p.employee}
-                          </button>
-                        </td>
-                        <td className="px-5 py-4 text-foreground-muted">{p.department}</td>
-                        <td className="px-5 py-4 text-foreground-muted">{p.period}</td>
-                        <td className="px-5 py-4 text-foreground-muted">{p.payDate}</td>
-                        <td className="px-5 py-4 font-bold text-foreground">{formatCurrency(p.netPay || 0, currencyCode)}</td>
-                        <td className="px-5 py-4">
-                          <span className={`flex items-center gap-1.5 w-fit rounded-full px-3 py-1 text-[11px] font-bold ${sc.color}`}>
-                            <Icon size={11} /> {p.status}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => { setSelectedPayslip(p); setActiveTab("payslip-detail"); }} className="p-1.5 rounded-[10px] text-foreground-muted hover:text-foreground hover:bg-surface-muted transition-all duration-150">
-                              <ChevronRight size={15} />
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="px-4 py-3.5 w-10">
+                        <input type="checkbox" checked={selectAll} onChange={handleSelectAll} className="w-4 h-4 rounded border-border text-primary" />
+                      </th>
+                      {["Payslip ID","Employee","Department","Pay Period","Pay Date","Net Pay","Status",""].map((h) => (
+                        <th key={h} className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {payslips.map((p) => {
+                      const sc = statusConfig[p.status] || statusConfig.Unknown;
+                      const Icon = sc.icon;
+                      return (
+                        <tr key={p.id} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
+                          <td className="px-4 py-4">
+                            <input
+                              type="checkbox"
+                              checked={selected.has(p.id)}
+                              onChange={() => handleSelect(p.id)}
+                              className="w-4 h-4 rounded border-border text-primary"
+                            />
+                          </td>
+                          <td className="px-5 py-4 font-mono text-[12px] text-foreground-muted font-semibold">{p.id}</td>
+                          <td className="px-5 py-4">
+                            <button onClick={() => setSelectedPayslip(p)} className="font-semibold text-foreground hover:text-primary text-left transition-colors duration-200">
+                              {p.employee}
                             </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                          <td className="px-5 py-4 text-foreground-muted">{p.department}</td>
+                          <td className="px-5 py-4 text-foreground-muted">{p.period}</td>
+                          <td className="px-5 py-4 text-foreground-muted">{p.payDate}</td>
+                          <td className="px-5 py-4 font-bold text-foreground">{formatCurrency(p.netPay || 0, payslipCurrency(p))}</td>
+                          <td className="px-5 py-4">
+                            <span className={`flex items-center gap-1.5 w-fit rounded-full px-3 py-1 text-[11px] font-bold ${sc.color}`}>
+                              <Icon size={11} /> {p.status}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setSelectedPayslip(p); setActiveTab("payslip-detail"); }} className="p-1.5 rounded-[10px] text-foreground-muted hover:text-foreground hover:bg-surface-muted transition-all duration-150">
+                                <ChevronRight size={15} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
 
             {!loading && !error && payslips.length === 0 && (
@@ -307,7 +321,7 @@ export default function PayslipsPage() {
           </div>
 
           {selectedPayslip && activeTab !== "payslip-detail" && (
-            <PayslipStub payslip={selectedPayslip} onClose={() => setSelectedPayslip(null)} currencyCode={currencyCode} company={companyProfile} />
+            <PayslipStub payslip={selectedPayslip} onClose={() => setSelectedPayslip(null)} currencyCode={payslipCurrency(selectedPayslip)} company={companyProfile} />
           )}
         </>
       )}
@@ -315,7 +329,7 @@ export default function PayslipsPage() {
       {activeTab === "payslip-detail" && (
         <>
           {selectedPayslip ? (
-            <PayslipStub payslip={selectedPayslip} onClose={() => { setSelectedPayslip(null); setActiveTab("payslips"); }} currencyCode={currencyCode} company={companyProfile} />
+            <PayslipStub payslip={selectedPayslip} onClose={() => { setSelectedPayslip(null); setActiveTab("payslips"); }} currencyCode={payslipCurrency(selectedPayslip)} company={companyProfile} />
           ) : (
             <div className="text-center py-16">
               <Receipt size={40} className="mx-auto mb-3 text-foreground-muted/40" />
@@ -404,75 +418,77 @@ export default function PayslipsPage() {
                   <p className="text-[13px] text-foreground-muted mt-1">There are no payslips to manage.</p>
                 </div>
               ) : (
-                <table className="w-full text-[13px]">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="px-4 py-3.5 w-10">
-                        <input type="checkbox" checked={selectAll} onChange={handleSelectAll} className="w-4 h-4 rounded border-border text-primary" />
-                      </th>
-                      {["Payslip ID","Employee","Department","Pay Period","Net Pay","Status","Action"].map((h) => (
-                        <th key={h} className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/50">
-                    {payslips.map((p) => {
-                      const sc = statusConfig[p.status] || statusConfig.Unknown;
-                      const Icon = sc.icon;
-                      const isDeleting = deletingId === p.id;
-                      return (
-                        <tr key={p.id} className={`transition-colors duration-150 ${isDeleting ? "opacity-50" : "hover:bg-background dark:hover:bg-surface-muted"}`}>
-                          <td className="px-4 py-4">
-                            <input
-                              type="checkbox"
-                              checked={selected.has(p.id)}
-                              onChange={() => handleSelect(p.id)}
-                              className="w-4 h-4 rounded border-border text-primary"
-                            />
-                          </td>
-                          <td className="px-5 py-4 font-mono text-[12px] text-foreground-muted font-semibold">{p.id}</td>
-                          <td className="px-5 py-4 font-semibold text-foreground">{p.employee}</td>
-                          <td className="px-5 py-4 text-foreground-muted">{p.department}</td>
-                          <td className="px-5 py-4 text-foreground-muted">{p.period}</td>
-                          <td className="px-5 py-4 font-bold text-foreground">{formatCurrency(p.netPay || 0, currencyCode)}</td>
-                          <td className="px-5 py-4">
-                            <span className={`flex items-center gap-1.5 w-fit rounded-full px-3 py-1 text-[11px] font-bold ${sc.color}`}>
-                              <Icon size={11} /> {p.status}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4">
-                            {confirmDelete === p.id ? (
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => handleDeletePayslip(p.id)}
-                                  disabled={isDeleting}
-                                  className="flex items-center gap-1 rounded-[8px] bg-error text-white px-3 py-1 text-[11px] font-bold transition-all duration-200 hover:bg-error disabled:opacity-50"
-                                >
-                                  <Trash2 size={10} /> {isDeleting ? "..." : "Yes"}
-                                </button>
-                                <button onClick={() => setConfirmDelete(null)} className="rounded-[8px] bg-surface-muted text-foreground-muted px-3 py-1 text-[11px] font-bold hover:text-foreground-muted transition-all duration-200">
-                                  No
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1">
-                                <PayslipDownloadButton payslip={p} iconOnly />
-                                <button
-                                  onClick={() => setConfirmDelete(p.id)}
-                                  disabled={isDeleting}
-                                  title="Delete payslip"
-                                  className="rounded-[10px] p-1.5 text-foreground-muted hover:text-error hover:bg-error/10 transition-colors disabled:opacity-50"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[13px]">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="px-4 py-3.5 w-10">
+                          <input type="checkbox" checked={selectAll} onChange={handleSelectAll} className="w-4 h-4 rounded border-border text-primary" />
+                        </th>
+                        {["Payslip ID","Employee","Department","Pay Period","Net Pay","Status","Action"].map((h) => (
+                          <th key={h} className="px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/50">
+                      {payslips.map((p) => {
+                        const sc = statusConfig[p.status] || statusConfig.Unknown;
+                        const Icon = sc.icon;
+                        const isDeleting = deletingId === p.id;
+                        return (
+                          <tr key={p.id} className={`transition-colors duration-150 ${isDeleting ? "opacity-50" : "hover:bg-background dark:hover:bg-surface-muted"}`}>
+                            <td className="px-4 py-4">
+                              <input
+                                type="checkbox"
+                                checked={selected.has(p.id)}
+                                onChange={() => handleSelect(p.id)}
+                                className="w-4 h-4 rounded border-border text-primary"
+                              />
+                            </td>
+                            <td className="px-5 py-4 font-mono text-[12px] text-foreground-muted font-semibold">{p.id}</td>
+                            <td className="px-5 py-4 font-semibold text-foreground">{p.employee}</td>
+                            <td className="px-5 py-4 text-foreground-muted">{p.department}</td>
+                            <td className="px-5 py-4 text-foreground-muted">{p.period}</td>
+                            <td className="px-5 py-4 font-bold text-foreground">{formatCurrency(p.netPay || 0, payslipCurrency(p))}</td>
+                            <td className="px-5 py-4">
+                              <span className={`flex items-center gap-1.5 w-fit rounded-full px-3 py-1 text-[11px] font-bold ${sc.color}`}>
+                                <Icon size={11} /> {p.status}
+                              </span>
+                            </td>
+                            <td className="px-5 py-4">
+                              {confirmDelete === p.id ? (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => handleDeletePayslip(p.id)}
+                                    disabled={isDeleting}
+                                    className="flex items-center gap-1 rounded-[8px] bg-error text-white px-3 py-1 text-[11px] font-bold transition-all duration-200 hover:bg-error disabled:opacity-50"
+                                  >
+                                    <Trash2 size={10} /> {isDeleting ? "..." : "Yes"}
+                                  </button>
+                                  <button onClick={() => setConfirmDelete(null)} className="rounded-[8px] bg-surface-muted text-foreground-muted px-3 py-1 text-[11px] font-bold hover:text-foreground-muted transition-all duration-200">
+                                    No
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  <PayslipDownloadButton payslip={p} iconOnly />
+                                  <button
+                                    onClick={() => setConfirmDelete(p.id)}
+                                    disabled={isDeleting}
+                                    title="Delete payslip"
+                                    className="rounded-[10px] p-1.5 text-foreground-muted hover:text-error hover:bg-error/10 transition-colors disabled:opacity-50"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>

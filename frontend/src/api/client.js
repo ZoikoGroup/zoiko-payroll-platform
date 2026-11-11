@@ -1,43 +1,17 @@
-import { tryRefreshToken } from "../service/api";
+import {
+  tryRefreshToken,
+  getAccessToken,
+  getRefreshToken,
+  getStoredUser,
+  setStoredUser,
+  setSession,
+  clearSession,
+} from "../service/api";
 import { requestStepUp, STEP_UP_REQUIRED } from "../utils/stepUp";
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8000`;
 
-const TOKEN_KEY = "zoiko_payroll_access";
-const REFRESH_KEY = "zoiko_payroll_refresh";
-const USER_KEY = "zoiko_payroll_user";
-
-export function getAccessToken() {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function getRefreshToken() {
-  return localStorage.getItem(REFRESH_KEY);
-}
-
-export function setSession(data) {
-  localStorage.setItem(TOKEN_KEY, data.access_token);
-  localStorage.setItem(REFRESH_KEY, data.refresh_token);
-  localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-}
-
-export function getStoredUser() {
-  try {
-    return JSON.parse(localStorage.getItem(USER_KEY) || "null");
-  } catch {
-    return null;
-  }
-}
-
-export function setStoredUser(user) {
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-}
-
-export function clearSession() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(REFRESH_KEY);
-  localStorage.removeItem(USER_KEY);
-}
+export { getAccessToken, getRefreshToken, getStoredUser, setStoredUser, setSession, clearSession };
 
 async function refreshSession() {
   // Rotating refresh tokens: use the shared single-flight refresh (ZP-PRIV B08).

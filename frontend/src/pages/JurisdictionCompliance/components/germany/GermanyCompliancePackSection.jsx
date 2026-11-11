@@ -64,7 +64,7 @@ export default function GermanyCompliancePackSection() {
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-surface p-5">
-        <div className="mb-1 flex items-center justify-between gap-3">
+        <div className="mb-1 flex items-center flex-wrap justify-between gap-3">
           <h3 className="text-sm font-bold text-foreground">Germany Compliance Pack (Tax Year Version)</h3>
           <button
             onClick={() => setShowNewPack(true)}

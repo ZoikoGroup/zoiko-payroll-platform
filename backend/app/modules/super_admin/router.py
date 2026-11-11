@@ -13,7 +13,7 @@ import uuid
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, Body, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, Query, Body, File, Form, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -50,6 +50,7 @@ from app.modules.super_admin.schemas import (
     SettingCreate,
     SettingResponse,
     SettingUpdate,
+    SuperAdminUserDetailResponse,
     SuperAdminUserListResponse,
     SuperAdminUserResponse,
 )
@@ -202,11 +203,148 @@ def list_platform_users(
             first_name=u.first_name,
             last_name=u.last_name,
             is_active=u.is_active,
-            created_at=u.created_at,
+            is_verified=bool(u.is_verified),
+            workspace_type=o.workspace_type if o else None,
+            created_at=_as_utc(u.created_at),
+            updated_at=_as_utc(u.updated_at),
         )
         for u, o in rows
     ]
     return SuperAdminUserListResponse(users=users, total=total)
+
+
+def _as_utc(value):
+    """Stored datetimes are naive UTC; mark them so they serialise with "Z"."""
+    from datetime import timezone
+
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
+
+
+@router.get("/users/{user_id}", response_model=SuperAdminUserDetailResponse)
+def get_platform_user_detail(
+    user_id: int,
+    request: Request,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """One user's account, the organisation details captured at registration,
+    and sign-in security activity - read-only, for the Platform Users panel.
+    Each view is recorded as a PRIVILEGED_READ security event."""
+    from datetime import datetime, timedelta
+
+    from app.core.exceptions import NotFoundException
+    from app.core.jurisdiction import get_jurisdiction_schema
+    from app.modules.auth import audit as auth_audit
+    from app.modules.auth.models import AuthAuditEvent, MfaCredential, SecurityActionPurpose, SecurityActionToken
+    from app.modules.auth.service import is_privileged
+    from app.modules.billing.models import BillingPlan, BillingPlanVersion, BillingSubscription
+    from app.modules.security import events as security_events
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise NotFoundException("User", "id")
+    org = (db.query(Organization).filter(Organization.id == user.organization_id).first()
+           if user.organization_id else None)
+
+    invite = (db.query(SecurityActionToken)
+              .filter(SecurityActionToken.email == user.email,
+                      SecurityActionToken.purpose == SecurityActionPurpose.INVITE)
+              .order_by(SecurityActionToken.created_at.asc()).first())
+    accepted = (db.query(AuthAuditEvent)
+                .filter(AuthAuditEvent.user_id == user.id,
+                        AuthAuditEvent.event_type == auth_audit.INVITATION_ACCEPTED)
+                .order_by(AuthAuditEvent.occurred_at.asc()).first())
+
+    # Users carry no created_by column: the channel is inferred from the
+    # account flags, the invitation and the organisation's own origin.
+    if user.is_temporary:
+        created_via = "SUPPORT_ACCESS"
+    elif invite is not None:
+        created_via = "INVITED"
+    elif org is None:
+        created_via = "PLATFORM_ACCOUNT"
+    else:
+        first_user_id = (db.query(User.id).filter(User.organization_id == org.id)
+                         .order_by(User.id.asc()).limit(1).scalar())
+        if org.created_by_user_id is None and first_user_id == user.id:
+            created_via = "TRIAL_SIGNUP" if org.workspace_type == "EVALUATION" else "REGISTRATION"
+        else:
+            created_via = "ADDED_BY_ADMIN"
+
+    accepted_at = accepted.occurred_at if accepted else (invite.used_at if invite else None)
+    account = {
+        "id": user.id, "email": user.email, "first_name": user.first_name, "last_name": user.last_name,
+        "phone": user.phone or None, "role": user.role, "is_active": user.is_active,
+        "is_verified": bool(user.is_verified), "is_temporary": bool(user.is_temporary),
+        "access_expires_at": _as_utc(user.access_expires_at), "created_at": _as_utc(user.created_at),
+        "updated_at": _as_utc(user.updated_at), "created_via": created_via,
+        "invitation_sent_at": _as_utc(invite.created_at) if invite else None,
+        "invitation_accepted_at": _as_utc(accepted_at),
+    }
+
+    organization = None
+    if org is not None:
+        schema = get_jurisdiction_schema(org.country) or {}
+        labels = {f["key"]: f["label"] for f in schema.get("fields", [])}
+        identifiers = [{"key": str(k), "label": labels.get(k, str(k)), "value": None if v is None else str(v)}
+                       for k, v in (org.tax_identifiers or {}).items()]
+        creator = (db.query(User.email).filter(User.id == org.created_by_user_id).scalar()
+                   if org.created_by_user_id else None)
+        plan = None
+        sub = (db.query(BillingSubscription).filter(BillingSubscription.organization_id == org.id)
+               .order_by(BillingSubscription.created_at.desc()).first())
+        if sub is not None:
+            row = (db.query(BillingPlan.code, BillingPlan.name)
+                   .join(BillingPlanVersion, BillingPlanVersion.plan_id == BillingPlan.id)
+                   .filter(BillingPlanVersion.id == sub.plan_version_id).first()
+                   if sub.plan_version_id else None)
+            plan = {"code": row[0] if row else None, "name": row[1] if row else None, "status": sub.status,
+                    "current_period_end": _as_utc(sub.current_period_end)}
+        organization = {
+            "id": org.id, "name": org.organization_name, "code": org.organization_code,
+            "industry": org.industry, "company_type": org.company_type, "address": org.address,
+            "city": org.city, "state": org.state, "country": org.country, "email": org.email,
+            "phone": org.phone, "tax_no": org.tax_no, "registration_number": org.registration_number,
+            "tax_identifiers": identifiers, "currency": org.currency, "data_region": org.data_region,
+            "timezone": org.timezone,
+            "workspace_type": org.workspace_type, "billing_onboarding_status": org.billing_onboarding_status,
+            "billing_classification": org.billing_classification, "is_active": org.is_active,
+            "terms_accepted_at": _as_utc(org.terms_accepted_at), "created_at": _as_utc(org.created_at),
+            "created_by_email": creator, "plan": plan,
+        }
+
+    def _latest(event_type):
+        return (db.query(AuthAuditEvent)
+                .filter(AuthAuditEvent.user_id == user.id, AuthAuditEvent.event_type == event_type)
+                .order_by(AuthAuditEvent.occurred_at.desc()).first())
+
+    last_login = _latest(auth_audit.LOGIN_SUCCESS)
+    last_failed = _latest(auth_audit.LOGIN_FAILED)
+    last_reset = _latest(auth_audit.PASSWORD_RESET)
+    failed_30d = (db.query(AuthAuditEvent)
+                  .filter(AuthAuditEvent.user_id == user.id,
+                          AuthAuditEvent.event_type == auth_audit.LOGIN_FAILED,
+                          AuthAuditEvent.occurred_at >= datetime.utcnow() - timedelta(days=30)).count())
+    mfa = db.query(MfaCredential).filter(MfaCredential.user_id == user.id).first()
+    security = {
+        "mfa_required": is_privileged(user),
+        "mfa_enrolled_at": _as_utc(mfa.enrolled_at) if mfa else None,
+        "mfa_confirmed_at": _as_utc(mfa.confirmed_at) if mfa else None,
+        "last_login_at": _as_utc(last_login.occurred_at) if last_login else None,
+        "last_login_ip": last_login.client_address if last_login else None,
+        "last_login_user_agent": last_login.user_agent if last_login else None,
+        "failed_logins_30d": failed_30d,
+        "last_failed_login_at": _as_utc(last_failed.occurred_at) if last_failed else None,
+        "last_password_reset_at": _as_utc(last_reset.occurred_at) if last_reset else None,
+    }
+
+    security_events.emit(db, "PRIVILEGED_READ", result="allow", actor_user_id=current_user.id,
+                         actor_role="super_admin", organization_id=user.organization_id,
+                         target_type="user", target_id=f"user:{user.id}", action="read",
+                         reason_code="PLATFORM_USER_DETAIL", request=request)
+    return SuperAdminUserDetailResponse(account=account, organization=organization, security=security)
 
 
 @router.put("/users/{user_id}/status", response_model=SuccessResponse)
@@ -4531,6 +4669,165 @@ def hong_kong_configuration_update_row(kind: str, row_id: int, payload: HkConfig
     return hong_kong_service.update_row(db, kind, row_id, payload.model_dump(exclude_none=True), current_user.id)
 
 
+# ── New Zealand signing console (ZP-NZ-ENG-001 Phase 7a, decision Option 1) ──
+# Super Admin values drive the NZ calculation only through governance: a
+# governed edit / sign with a source and a reason, a distinct approver (the
+# editors are refused), then activation, which still refuses while any row is
+# pending or any authority table is empty.
+@router.get("/compliance/new-zealand/packs", summary="New Zealand packs with their status")
+def new_zealand_packs(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    return nz_super_admin.list_packs(db)
+
+
+@router.get("/compliance/new-zealand/packs/{pack_row_id}/signing-status",
+            summary="What still blocks activation of a New Zealand pack (pending rows, empty tables, editors)")
+def new_zealand_signing_status(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                               db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    return nz_super_admin.signing_status(db, pack_row_id)
+
+
+@router.put("/compliance/new-zealand/configuration/rows/{kind}/{row_id}",
+            summary="Governed edit / sign of one New Zealand statutory row (editable packs; source + reason; audited)")
+def new_zealand_configuration_update_row(kind: str, row_id: int, payload: dict = Body(...),
+                                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    result = nz_super_admin.update_row(db, kind, row_id, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.post("/compliance/new-zealand/packs/{pack_row_id}/tables/{rule_type}/rows",
+             summary="Add a row to a New Zealand authority table (editable packs; source + reason; audited)")
+def new_zealand_add_table_row(pack_row_id: int, rule_type: str, payload: dict = Body(...),
+                              current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    result = nz_super_admin.add_table_row(db, pack_row_id, rule_type, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.delete("/compliance/new-zealand/configuration/table-rows/{row_id}",
+               summary="Remove a New Zealand authority-table row (editable packs; reason; audited)")
+def new_zealand_delete_table_row(row_id: int, reason: Optional[str] = Query(None),
+                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    result = nz_super_admin.delete_table_row(db, row_id, {"reason": reason}, current_user.id)
+    db.commit()
+    return result
+
+
+@router.post("/compliance/new-zealand/packs/{pack_row_id}/golden-check",
+             summary="Replay a New Zealand pack's Inland Revenue examples through the engine (read-only; gate G1)")
+def new_zealand_golden_check(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                             db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    return nz_super_admin.golden_check(db, pack_row_id)
+
+
+@router.post("/compliance/new-zealand/seed-draft",
+             summary="Create the Draft New Zealand pack from the specification (only while none exists; reason; audited)")
+def new_zealand_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    result = nz_super_admin.seed_draft(db, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.get("/compliance/new-zealand/decisions", summary="New Zealand owner decisions D-1 to D-7")
+def new_zealand_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import nz_super_admin
+
+    return nz_super_admin.decisions(db)
+
+
+# ── Poland signing console (ZP-PL-ENG-001 Phase 7a; spec §12 statutory content console) ──
+# Same governance as New Zealand: governed edit / sign with a source and a
+# reason, a distinct approver (editors refused), activation still refused while
+# any row is pending or empty. Undefined policies may be signed NOT_SUPPORTED.
+@router.get("/compliance/poland/packs", summary="Poland packs with their status")
+def poland_packs(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    return pl_super_admin.list_packs(db)
+
+
+@router.get("/compliance/poland/packs/{pack_row_id}/configuration",
+            summary="Every canonical row of a Poland pack (scalars, PIT bands, earning classes)")
+def poland_configuration(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    return pl_super_admin.configuration(db, pack_row_id)
+
+
+@router.get("/compliance/poland/packs/{pack_row_id}/signing-status",
+            summary="What still blocks activation of a Poland pack (pending, empty, editors)")
+def poland_signing_status(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                          db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    return pl_super_admin.signing_status(db, pack_row_id)
+
+
+@router.put("/compliance/poland/configuration/rows/{kind}/{row_id}",
+            summary="Governed edit / sign of one Poland statutory row (editable packs; source + reason; audited)")
+def poland_configuration_update_row(kind: str, row_id: int, payload: dict = Body(...),
+                                    current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    result = pl_super_admin.update_row(db, kind, row_id, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.post("/compliance/poland/seed-draft",
+             summary="Create the Draft Poland pack from the specification (only while none exists; reason; audited)")
+def poland_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    result = pl_super_admin.seed_draft(db, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.get("/compliance/poland/decisions", summary="Poland owner decisions D-1 to D-7")
+def poland_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import poland_service
+
+    return poland_service.owner_decisions(db)
+
+
+@router.post("/compliance/poland/packs/{pack_row_id}/authority-examples",
+             summary="Add an official / independent worked example to a Poland pack (reviewed source; gate G1)")
+def poland_add_authority_example(pack_row_id: int, payload: dict = Body(...),
+                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    result = pl_super_admin.add_golden_example(db, pack_row_id, payload, getattr(current_user, "id", None))
+    db.commit()
+    return result
+
+
+@router.post("/compliance/poland/packs/{pack_row_id}/golden-check",
+             summary="Replay a Poland pack's authority examples through the engine (read-only; gate G1)")
+def poland_golden_check(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                        db: Session = Depends(get_db)):
+    from app.modules.payroll import pl_super_admin
+
+    return pl_super_admin.golden_check(db, pack_row_id)
+
+
 @router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
              summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
 def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,
@@ -4987,3 +5284,28 @@ def south_africa_compliance_summary(current_user=Depends(get_current_super_admin
     from app.modules.payroll import south_africa_service
 
     return south_africa_service.statutory_summary(db)
+
+
+@router.get("/compliance/south-africa/readiness",
+            summary="South Africa release gates G0-G7 (read-only)")
+def south_africa_compliance_readiness(current_user=Depends(get_current_super_admin),
+                                      db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_readiness, south_africa_service
+
+    return {
+        "gates": south_africa_readiness.gate_states(db),
+        "codeChecks": south_africa_readiness.code_check_rows(db),
+        "gaPreconditions": south_africa_readiness.ga_preconditions(db),
+        "decisions": south_africa_service.owner_decisions(db),
+        "noGo": list(south_africa_readiness.NO_GO),
+        "openPoints": south_africa_readiness.open_points(),
+    }
+
+
+@router.get("/compliance/south-africa/readiness/gate-checklists",
+            summary="South Africa gate checklists (read-only)")
+def south_africa_compliance_gate_checklists(current_user=Depends(get_current_super_admin),
+                                            db: Session = Depends(get_db)):
+    from app.modules.payroll import south_africa_readiness
+
+    return south_africa_readiness.gate_checklists(db)

@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, ChevronDown, Loader2, RotateCcw, ListTree } from "lucide-react";
+import { X, ArrowLeft, ChevronDown, Loader2, RotateCcw, ListTree, Sparkles } from "lucide-react";
 import { getRunById, getRunItems, getRunLeaveSummary, recalculateEmployeePayslip } from "../../../service/payrollService";
 import { useToast } from "../ToastContext";
 import { getPayrollLabels, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
-import { formatCurrency } from "../../../utils/currency";
-import RunStatusTimeline from "./RunStatusTimeline";
+import { formatCurrency, createCurrencyFormatterForCode, getCountryNameFromCode, getCurrencyForJurisdiction } from "../../../utils/currency";
+import CountryTotalsTable from "../../../components/payroll/CountryTotalsTable";
 import AssistInlinePanel from "../../assist/AssistInlinePanel";
 import SGRunPreflightPanel from "./SGRunPreflightPanel";
 import HKRunPreflightPanel from "./HKRunPreflightPanel";
@@ -21,8 +21,27 @@ import BRRunPreflightPanel from "./BRRunPreflightPanel";
 import BRPayslipBreakdown from "./BRPayslipBreakdown";
 import ZAPayslipBreakdown from "./ZAPayslipBreakdown";
 import ZARunExceptionsPanel from "./ZARunExceptionsPanel";
+import JPPayslipBreakdown from "./JPPayslipBreakdown";
+import JPRunPreflightPanel from "./JPRunPreflightPanel";
+import JPRunExceptionsPanel from "./JPRunExceptionsPanel";
+import NZPayslipBreakdown from "./NZPayslipBreakdown";
+import NZRunPreflightPanel from "./NZRunPreflightPanel";
+import NZRunFilingPanel from "./NZRunFilingPanel";
+import PLPayslipBreakdown from "./PLPayslipBreakdown";
+import PLRunPreflightPanel from "./PLRunPreflightPanel";
+import PLRunJournalPanel from "./PLRunJournalPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
+
+// Columns of the per-country totals table shown for a run that pays
+// employees in more than one country (detail.totalsByCountry).
+const COUNTRY_TOTAL_COLUMNS = [
+  { key: "employeeCount", label: "Employees" },
+  { key: "totalGross", label: "Gross", money: true },
+  { key: "totalDeductions", label: "Deductions", money: true, accent: "text-error" },
+  { key: "totalEmployerContribution", label: "Employer Contributions", money: true, accent: "text-category-teal" },
+  { key: "totalNet", label: "Net", money: true, accent: "text-primary" },
+];
 
 function fmtCurrencyLocal(n, fmtCurrency) {
   if (fmtCurrency) return fmtCurrency(n);
@@ -46,7 +65,7 @@ function fmtDate(v) {
   }
 }
 
-function StatusBadge({ status }) {
+export function StatusBadge({ status }) {
   const map = {
     Draft: "bg-info/10 text-info",
     Review: "bg-warning/10 text-warning",
@@ -295,7 +314,7 @@ function AttendanceLeaveBlock({ item, leave }) {
   );
 }
 
-function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculated }) {
+function EmployeeRow({ item, leave, fmtCurrency: orgFmtCurrency, currencyByCountry, runId, runStatus, onRecalculated }) {
   const [open, setOpen] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
   const [traceOpen, setTraceOpen] = useState(false);
@@ -307,6 +326,10 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
   const nlSnapshot = (item.country || item.countryCode) === "NL" ? item.nlCalculationSnapshot : null;
   // Mexico: the frozen engine result + input hashes (MX-063 trace)
   const mxSnapshot = (item.country || item.countryCode) === "MX" ? item.mxCalculationSnapshot : null;
+  // Each payslip is paid in its own country's currency (from the run's
+  // totalsByCountry); the org-currency formatter is only the fallback.
+  const rowCurrency = currencyByCountry?.[String(item.country || item.countryCode || "").toUpperCase()];
+  const fmtCurrency = rowCurrency ? createCurrencyFormatterForCode(rowCurrency) : orgFmtCurrency;
 
   async function handleRecalculate(e) {
     e.stopPropagation();
@@ -385,6 +408,9 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
             {mxSnapshot && <MXRunCalculationTrace snapshot={mxSnapshot} />}
             {(item.country || item.countryCode) === "BR" && item.brCalculationSnapshot && <BRPayslipBreakdown snapshot={item.brCalculationSnapshot} employeeName={item.employee} />}
             {(item.country || item.countryCode) === "ZA" && item.zaCalculationSnapshot && <ZAPayslipBreakdown snapshot={item.zaCalculationSnapshot} employeeName={item.employee} />}
+            {(item.country || item.countryCode) === "JP" && item.jpCalculationSnapshot && <JPPayslipBreakdown snapshot={item.jpCalculationSnapshot} employeeName={item.employee} />}
+            {(item.country || item.countryCode) === "NZ" && item.nzCalculationSnapshot && <NZPayslipBreakdown snapshot={item.nzCalculationSnapshot} employeeName={item.employee} />}
+            {(item.country || item.countryCode) === "PL" && item.plCalculationSnapshot && <PLPayslipBreakdown snapshot={item.plCalculationSnapshot} employeeName={item.employee} />}
             <EarningsDeductionsBlock item={item} fmtCurrency={fmtCurrency} />
             <AttendanceLeaveBlock item={item} leave={leave} />
             <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}
@@ -396,11 +422,12 @@ function EmployeeRow({ item, leave, fmtCurrency, runId, runStatus, onRecalculate
   );
 }
 
-export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
+export default function RunDetailPanel({ run, onClose, fmtCurrency, onDetailLoaded }) {
   const [detail, setDetail] = useState(null);
   const [items, setItems] = useState([]);
   const [leaveSummary, setLeaveSummary] = useState({});
   const [loading, setLoading] = useState(true);
+  const [showAssist, setShowAssist] = useState(false);
 
   const load = useCallback(async () => {
     if (!run?.id) return;
@@ -414,37 +441,71 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
       setDetail(runDetail);
       setItems(runItems);
       setLeaveSummary(leave || {});
+      onDetailLoaded?.({ runId: run.id, detail: runDetail, items: runItems, leaveSummary: leave || {} });
     } finally {
       setLoading(false);
     }
-  }, [run?.id]);
+  }, [run?.id, onDetailLoaded]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  const totalsByCountry = detail?.totalsByCountry || [];
+  const isMultiCountry = totalsByCountry.length > 1;
+  const currencyByCountry = Object.fromEntries(
+    totalsByCountry.filter((r) => r.country && r.currency).map((r) => [String(r.country).toUpperCase(), r.currency]),
+  );
+  const showBlockedColumn = totalsByCountry.some((r) => Number(r.blockedCount) > 0);
+  const itemsByCountry = items.reduce((groups, item) => {
+    const country = String(item.country || item.countryCode || "Other").toUpperCase();
+    if (!groups.has(country)) groups.set(country, []);
+    groups.get(country).push(item);
+    return groups;
+  }, new Map());
+
   if (!run) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-background/40 backdrop-blur-sm" onClick={onClose}>
-      <div
-        className="flex h-full w-full max-w-5xl flex-col bg-surface border-l border-border shadow-[0_24px_48px_rgba(0,0,0,0.15)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-6 py-5 border-b border-border">
-          <div>
-            <h2 className="text-[15px] font-bold text-foreground">
-              Payroll Run &middot; {detail?.period || run.period}
-            </h2>
-            <p className="text-[12px] text-foreground-muted mt-0.5">Run details and employee-level breakdown</p>
+    <section className="flex min-h-full flex-col rounded-2xl border border-border bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <div className="flex items-center justify-between border-b border-border bg-surface px-6 py-4">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Back to runs"
+              title="Back to runs"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-muted px-2.5 py-1.5 text-xs font-semibold text-foreground-muted hover:bg-surface hover:text-foreground transition-all duration-150 shrink-0"
+            >
+              <ArrowLeft size={14} />
+              <span className="hidden sm:inline">Back</span>
+            </button>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-foreground">
+                  Payroll Run &middot; {detail?.period || run.period}
+                </h2>
+                <StatusBadge status={detail?.status || run.status} />
+              </div>
+              <p className="text-xs text-foreground-muted mt-0.5">Run details and employee-level breakdown</p>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close panel"
-            className="border border-border bg-surface-muted rounded-[12px] p-2 text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
-          >
-            <X size={15} />
-          </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setShowAssist((prev) => !prev)}
+              className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-semibold transition-all duration-200 ${
+                showAssist
+                  ? "border-primary bg-primary text-white shadow-sm"
+                  : "border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary"
+              }`}
+              aria-expanded={showAssist}
+              aria-label={showAssist ? "Close AI Assist panel" : "Ask AI Assist about this run"}
+            >
+              <Sparkles size={14} />
+              <span>{showAssist ? "Close Assist" : "Ask Assist"}</span>
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -454,8 +515,6 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
             </div>
           ) : (
             <>
-              <RunStatusTimeline run={detail || run} />
-
               {detail?.attendanceOverrideReason && (
                 <div className="rounded-[14px] border border-warning/30 bg-warning/10 px-4 py-3 mb-5 text-[13px] text-foreground">
                   <strong>Run with incomplete attendance (admin override).</strong> Employees without attendance were paid as present for those days.
@@ -468,7 +527,7 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
 
               <div className="bg-surface-muted rounded-[18px] p-5 mb-5">
                 <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-4">Run Information</h4>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
                   <InfoField label="Payroll Period">{detail?.period || run.period}</InfoField>
                   <InfoField label="Payroll Status"><StatusBadge status={detail?.status || run.status} /></InfoField>
                   <InfoField label="Approval Status">
@@ -483,14 +542,63 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
                   <InfoField label="Employees">{detail?.employees ?? items.length}</InfoField>
                 </div>
               </div>
+              <p className="text-[12px] text-foreground-muted mb-2">
+                {run.status === "Draft"
+                  ? "Created. Click the check icon in the Actions column to advance this run to Review when ready."
+                  : run.status === "Review"
+                  ? "Awaiting approval. Click the check icon in the Actions column to open approval (target: Approved)."
+                  : run.status === "Approved"
+                  ? "Approved. Click the check icon in the Actions column to authorize (target: Authorized)."
+                  : run.status === "Authorized"
+                  ? "Authorized. Click the check icon in the Actions column to mark as Paid (target: Paid)."
+                  : run.status === "Paid"
+                  ? "Paid. You can view payroll details and payment information. Click the check icon in the Actions column to close the run when ready (target: Closed)."
+                  : run.status === "Closed"
+                  ? "Completed and closed. No further action needed."
+                  : "No next action available."
+                }
+              </p>
 
-              <div className="mb-5">
-                <AssistInlinePanel
-                  contextObject={{ type: "PAYROLL_RUN", id: run.id }}
-                  title="Ask Assist about this run"
-                  subtitle={`Ask about readiness, exceptions, or status for ${detail?.period || run.period} — answered using only this run's own data.`}
-                />
-              </div>
+              {/* Mixed-country run: the run's own gross/net are a raw sum
+                  across currencies, so totals are shown per country only. */}
+              {isMultiCountry && (
+                <div className="mb-5">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1">Totals by Country</h4>
+                  <p className="text-[12px] text-foreground-muted mb-3">
+                    This run pays employees in {totalsByCountry.length} countries — each total is in that country&apos;s own currency and they are not added together.
+                  </p>
+                  <CountryTotalsTable
+                    rows={totalsByCountry}
+                    columns={showBlockedColumn
+                      ? [...COUNTRY_TOTAL_COLUMNS.slice(0, 1), { key: "blockedCount", label: "Blocked", accent: "text-error" }, ...COUNTRY_TOTAL_COLUMNS.slice(1)]
+                      : COUNTRY_TOTAL_COLUMNS}
+                  />
+                </div>
+              )}
+
+              {showAssist && (
+                <div className="mb-6 rounded-[18px] border border-primary/20 bg-surface shadow-md overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-primary/5 border-b border-primary/10">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                      <Sparkles size={14} />
+                      <span>Assist AI &middot; Run Insights</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAssist(false)}
+                      className="inline-flex items-center gap-1 text-xs text-foreground-muted hover:text-foreground px-2 py-1 rounded-lg hover:bg-surface-muted transition-colors"
+                    >
+                      <X size={14} />
+                      <span>Close</span>
+                    </button>
+                  </div>
+                  <AssistInlinePanel
+                    contextObject={{ type: "PAYROLL_RUN", id: run.id }}
+                    title="Ask Assist about this run"
+                    subtitle={`Ask about readiness, exceptions, or status for ${detail?.period || run.period} — answered using only this run's own data.`}
+                  />
+                </div>
+              )}
 
               {items.some((i) => (i.country || i.countryCode) === "SG") && <SGRunPreflightPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "HK") && <HKRunPreflightPanel runId={run.id} />}
@@ -507,54 +615,90 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
               {items.some((i) => (i.country || i.countryCode) === "ZA") && (
                 <ZARunExceptionsPanel runId={run.id} runStatus={(detail || run).status} items={items} />
               )}
+              {items.some((i) => (i.country || i.countryCode) === "JP") && (
+                <>
+                  <JPRunPreflightPanel runId={run.id} />
+                  <JPRunExceptionsPanel runId={run.id} runStatus={(detail || run).status} />
+                </>
+              )}
+              {items.some((i) => (i.country || i.countryCode) === "NZ") && <NZRunPreflightPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "PL") && <PLRunPreflightPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "PL")
+                && ["Paid", "Closed"].includes((detail || run).status) && <PLRunJournalPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "NZ") && (
+                <NZRunFilingPanel runId={run.id} items={items.filter((i) => (i.country || i.countryCode) === "NZ")}
+                  paid={["Paid", "Closed"].includes((detail || run).status)} />
+              )}
               <HKCorrectionRequestPanel run={detail || run} items={items} />
 
               <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-3">
                 Employee Payroll Details
               </h4>
-              <div className="rounded-[14px] border border-border overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-surface-muted border-b border-border">
-                        {BREAKDOWN_COLUMNS.map((col) => (
-                          <th
-                            key={col.key}
-                            className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted whitespace-nowrap"
-                          >
-                            {col.label}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {items.length === 0 ? (
-                        <tr>
-                          <td colSpan={BREAKDOWN_COLUMNS.length} className="px-5 py-10 text-center text-[13px] text-foreground-muted">
-                            No employee payslips in this run yet.
-                          </td>
-                        </tr>
-                      ) : (
-                        items.map((item) => (
-                          <EmployeeRow
-                            key={item.id}
-                            item={item}
-                            leave={leaveSummary?.[item.employeeId]}
-                            fmtCurrency={fmtCurrency}
-                            runId={run.id}
-                            runStatus={detail?.status || run.status}
-                            onRecalculated={load}
-                          />
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+              {items.length === 0 ? (
+                <div className="rounded-[14px] border border-border px-5 py-10 text-center text-[13px] text-foreground-muted">
+                  No employee payslips in this run yet.
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-5">
+                  {[...itemsByCountry.entries()].map(([country, countryItems]) => {
+                    const countryName = getCountryNameFromCode(country) || country;
+                    const currency = currencyByCountry[country] || getCurrencyForJurisdiction(country)?.code;
+                    const countryFormatter = currency ? createCurrencyFormatterForCode(currency) : fmtCurrency;
+
+                    return (
+                      <section key={country} className="overflow-hidden rounded-[16px] border border-border">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-muted px-4 py-3">
+                          <div>
+                            <h5 className="text-sm font-bold text-foreground">{countryName}</h5>
+                            <p className="text-[11px] text-foreground-muted">
+                              {countryItems.length} {countryItems.length === 1 ? "employee" : "employees"}
+                              {currency ? ` · ${currency}` : ""}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-primary">
+                            Country payroll
+                          </span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-surface-muted/60 border-b border-border">
+                                {BREAKDOWN_COLUMNS.map((col) => (
+                                  <th
+                                    key={col.key}
+                                    className={`px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-foreground-muted whitespace-nowrap ${
+                                      ["gross", "deductions", "net"].includes(col.key) ? "text-right" : "text-left"
+                                    }`}
+                                  >
+                                    {col.label}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/50">
+                              {countryItems.map((item) => (
+                                <EmployeeRow
+                                  key={item.id}
+                                  item={item}
+                                  leave={leaveSummary?.[item.employeeId]}
+                                  fmtCurrency={countryFormatter}
+                                  currencyByCountry={currencyByCountry}
+                                  runId={run.id}
+                                  runStatus={detail?.status || run.status}
+                                  onRecalculated={load}
+                                />
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
         </div>
-      </div>
-    </div>
+    </section>
   );
 }

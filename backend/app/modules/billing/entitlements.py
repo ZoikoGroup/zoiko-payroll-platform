@@ -445,13 +445,25 @@ def require_active_subscription(
         return
 
     subscription = get_active_subscription(db, organization_id)
-    if subscription is None:
-        raise ForbiddenException("An active commercial relationship is required for production workspaces.")
-
-    if subscription.status in (SubscriptionStatus.ACTIVE.value, SubscriptionStatus.PAST_DUE.value):
+    if subscription is not None and subscription.status in (
+        SubscriptionStatus.ACTIVE.value, SubscriptionStatus.PAST_DUE.value
+    ):
         return
 
-    raise ForbiddenException("An active commercial relationship is required for production workspaces.")
+    # The trace lets the UI (PlanLimitMessage) offer "Choose a plan" — both
+    # ways out (checkout, or the free evaluation via /billing/start-trial)
+    # start from the plan page.
+    if subscription is None:
+        raise ForbiddenException(
+            "Your organization doesn't have a plan yet. Choose a plan, or start the free "
+            "30-day evaluation, to add employees and run payroll.",
+            trace={"resource": "subscription", "reason": "no_subscription"},
+        )
+    raise ForbiddenException(
+        f"Your subscription is {subscription.status.lower().replace('_', ' ')}. Choose a plan "
+        "to add employees and run payroll again.",
+        trace={"resource": "subscription", "reason": "subscription_inactive", "status": subscription.status},
+    )
 
 
 def list_entitlement_overrides(db: Session, organization_id: int) -> list:
@@ -507,6 +519,14 @@ def create_entitlement_override(
             },
         )
     )
+    if feature_key == "max_jurisdictions":
+        # A raised country limit restores paused countries right away (and
+        # a lowered one pauses extras). Expiry is picked up lazily by
+        # jurisdiction_entitlement.ensure_ledger's self-heal.
+        from app.modules.billing.jurisdiction_entitlement import safe_reconcile
+
+        db.flush()
+        safe_reconcile(db, organization_id, actor_user_id=granted_by_user_id, reason="entitlement_override")
     db.commit()
     db.refresh(override)
     _notify_entitlement_override_granted(db, override, organization_id)

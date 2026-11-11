@@ -7,8 +7,8 @@ _base_wrapper.html + PALETTE design system as batch-1:
   - render smoke: every template composes through the shared wrapper with no
     unresolved placeholders and the canonical palette;
   - palette parity: no batch-2 file hardcodes a hex outside PALETTE;
-  - trigger wiring: real service call sites (enterprise jurisdiction
-    lifecycle, policy update, forms review/submission, billing override,
+  - trigger wiring: real service call sites (policy update,
+    forms review/submission, billing override,
     super-admin currency) and surrogate senders each fire the correct
     template to the correct recipient, best-effort.
 
@@ -23,8 +23,6 @@ from app.services.email_service import (
     PALETTE,
     _compose_email_html,
 )
-from app.modules.payroll.enterprise.models import EnterpriseJurisdiction, JurisdictionStatus
-from app.modules.payroll.enterprise.schemas import GeneralConfig, JurisdictionConfigUpdate
 
 import pytest
 
@@ -184,104 +182,6 @@ def test_rejected_template_notes_block_is_conditional():
     assert "Reviewer note" in with_notes
     without = _render("form_submission_rejected.html", {"notes": ""})
     assert "Reviewer note" not in without
-
-
-# ── Trigger wiring: enterprise jurisdiction lifecycle (real service) ───────
-
-def test_add_jurisdiction_notifies_org(db, organization, caplog):
-    organization.email = "admin@acme.example.com"
-    from app.modules.payroll.enterprise import service as ent_service
-    with caplog.at_level(logging.INFO):
-        row = ent_service.add_jurisdiction(db, organization.id, "DE")
-    sent = _mock_send_templates(caplog)
-    assert "jurisdiction_added.html" in sent, sent
-    assert row.country_code == "DE"
-
-
-def test_update_jurisdiction_config_notifies_with_diff(db, organization, caplog):
-    organization.email = "admin@acme.example.com"
-    row = EnterpriseJurisdiction(
-        organization_id=organization.id, country_code="DE",
-        status=JurisdictionStatus.DRAFT.value,
-        general_config={"payrollFrequency": "Monthly"},
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    from app.modules.payroll.enterprise import service as ent_service
-    with caplog.at_level(logging.INFO):
-        ent_service.update_jurisdiction_config(
-            db, organization.id, row.id,
-            JurisdictionConfigUpdate(generalConfig=GeneralConfig(payrollFrequency="Weekly")),
-        )
-    sent = _mock_send_templates(caplog)
-    assert "jurisdiction_config_updated.html" in sent, sent
-
-
-def test_update_jurisdiction_config_no_change_sends_nothing(db, organization, caplog):
-    organization.email = "admin@acme.example.com"
-    row = EnterpriseJurisdiction(
-        organization_id=organization.id, country_code="DE",
-        status=JurisdictionStatus.DRAFT.value,
-        general_config={"payrollFrequency": "Monthly"},
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    from app.modules.payroll.enterprise import service as ent_service
-    with caplog.at_level(logging.INFO):
-        ent_service.update_jurisdiction_config(
-            db, organization.id, row.id,
-            JurisdictionConfigUpdate(generalConfig=GeneralConfig(payrollFrequency="Monthly")),
-        )
-    assert not _mock_send_templates(caplog)
-
-
-def test_verify_jurisdiction_notifies(db, organization, caplog, monkeypatch):
-    organization.email = "admin@acme.example.com"
-    row = EnterpriseJurisdiction(
-        organization_id=organization.id, country_code="DE",
-        status=JurisdictionStatus.CONFIGURED.value,
-        general_config={"payrollFrequency": "Monthly"},
-        compliance_config={"governmentFilingSchedule": "Quarterly"},
-        payroll_rules_config={"overtime": "None"},
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    from app.modules.payroll.enterprise import service as ent_service
-    # verify hits the engine country resolver indirectly via company details —
-    # resolve lazily to keep this a black-box test.
-    monkeypatch.setattr(
-        "app.modules.payroll.enterprise.service._recompute_enterprise_status",
-        lambda db, organization_id: None,
-    )
-    with caplog.at_level(logging.INFO):
-        out = ent_service.verify_jurisdiction(db, organization.id, row.id)
-    sent = _mock_send_templates(caplog)
-    assert "jurisdiction_verified.html" in sent, sent
-    assert out.status == JurisdictionStatus.VERIFIED.value
-
-
-def test_remove_jurisdiction_notifies(db, organization, caplog):
-    organization.email = "admin@acme.example.com"
-    row = EnterpriseJurisdiction(organization_id=organization.id, country_code="DE")
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    from app.modules.payroll.enterprise import service as ent_service
-    monkeypatch_cfg = pytest.MonkeyPatch()
-    monkeypatch_cfg.setattr(
-        "app.modules.payroll.enterprise.service._recompute_enterprise_status",
-        lambda db, organization_id: None,
-    )
-    try:
-        with caplog.at_level(logging.INFO):
-            ent_service.remove_jurisdiction(db, organization.id, row.id)
-    finally:
-        monkeypatch_cfg.undo()
-    sent = _mock_send_templates(caplog)
-    assert "jurisdiction_removed.html" in sent, sent
 
 
 # ── Trigger wiring: policy update + integration toggle (real service) ──────

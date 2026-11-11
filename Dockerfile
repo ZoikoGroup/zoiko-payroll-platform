@@ -14,13 +14,15 @@ COPY --from=frontend-build /app/frontend/dist /usr/share/nginx/html
 # ── Stage 3: Backend ──────────────────────────────────────────────────────
 FROM python:3.12-slim AS backend
 
-# System deps: tesseract-ocr (pytesseract), libgl1/libglib2.0 (Pillow), libpq-dev (psycopg)
+# System deps: tesseract-ocr (pytesseract), libgl1/libglib2.0 (Pillow), libpq-dev (psycopg),
+# fonts-dejavu-core (Unicode TTF for generated PDFs: Polish letters, PL-023)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         tesseract-ocr \
         libgl1 \
         libglib2.0-0 \
         libpq-dev \
+        fonts-dejavu-core \
         gcc && \
     rm -rf /var/lib/apt/lists/*
 

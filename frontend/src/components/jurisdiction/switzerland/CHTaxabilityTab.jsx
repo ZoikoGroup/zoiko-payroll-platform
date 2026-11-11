@@ -57,7 +57,7 @@ export default function CHTaxabilityTab({ addToast }) {
 
   return (
     <section aria-labelledby="ch-class-heading" className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start flex-wrap justify-between gap-3">
         <div>
           <h3 id="ch-class-heading" className="text-sm font-semibold text-foreground">Earning classification (G5)</h3>
           <p className="text-xs text-foreground-muted">

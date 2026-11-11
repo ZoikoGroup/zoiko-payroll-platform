@@ -65,6 +65,11 @@ export const COUNTRIES = [
   // type, medical scheme, travel, UIF and ETI facts live on the South Africa
   // statutory profile (employee detail → "Manage"), never here.
   { code: "ZA", name: "South Africa" },
+  // Poland (ZP-PL-ENG-001 Phase 0) — mirrors employee_validation.py's
+  // PLEmployeeValidation (passport; Polish IBAN mod-97) plus bank_routing.py's
+  // PL IBAN routing. PESEL and NIP are vault-only (spec §13); contract, ZUS
+  // title, PIT statements and PPK live on the Poland statutory profile, never here.
+  { code: "PL", name: "Poland" },
 ];
 
 // ISO 13616 IBAN check digits (mirrors employee_validation.py's
@@ -86,6 +91,17 @@ function bsnPassesElfproef(value) {
   const weights = [9, 8, 7, 6, 5, 4, 3, 2, -1];
   const total = value.split("").reduce((sum, d, i) => sum + Number(d) * weights[i], 0);
   return total % 11 === 0;
+}
+
+// W-4 form vintage from a year ("2024") or a plain word — mirrors
+// employee_validation.py's _w4_vintage_alias.
+function w4VintageAlias(raw) {
+  const text = String(raw).trim().toLowerCase();
+  const year = text.match(/(19|20)\d{2}/);
+  if (year) return Number(year[0]) >= 2020 ? "2020 or later (current form)" : "Pre-2020 (legacy form)";
+  if (["current", "new", "2020+", "post-2020", "post 2020", "latest"].includes(text)) return "2020 or later (current form)";
+  if (["legacy", "old", "pre-2020", "pre 2020", "before 2020"].includes(text)) return "Pre-2020 (legacy form)";
+  return null;
 }
 
 // Brazilian CPF Modulo 11 check digits (mirrors employee_validation.py's
@@ -155,6 +171,37 @@ function zaIdPassesCheck(value) {
   return total % 10 === 0;
 }
 
+// Polish PESEL (mirrors employee_validation.py's pl_pesel_is_valid): 11
+// digits, the birth month carrying the century (+80 1800s, +0 1900s,
+// +20 2000s, +40 2100s, +60 2200s) and weights 1,3,7,9,1,3,7,9,1,3.
+export function plPeselIsValid(value) {
+  const raw = String(value || "").replace(/[\s-]/g, "");
+  if (!/^\d{11}$/.test(raw)) return false;
+  const yy = Number(raw.slice(0, 2));
+  const monthCode = Number(raw.slice(2, 4));
+  const dd = Number(raw.slice(4, 6));
+  const centuries = [[80, 1800], [60, 2200], [40, 2100], [20, 2000], [0, 1900]];
+  const match = centuries.find(([offset]) => monthCode > offset && monthCode <= offset + 12);
+  if (!match) return false;
+  const [offset, century] = match;
+  const mm = monthCode - offset;
+  const d = new Date(Date.UTC(century + yy, mm - 1, dd));
+  if (d.getUTCFullYear() !== century + yy || d.getUTCMonth() !== mm - 1 || d.getUTCDate() !== dd) return false;
+  const weights = [1, 3, 7, 9, 1, 3, 7, 9, 1, 3];
+  const total = weights.reduce((sum, w, i) => sum + w * Number(raw[i]), 0);
+  return (10 - (total % 10)) % 10 === Number(raw[10]);
+}
+
+// Polish NIP (mirrors pl_nip_is_valid): weights 6,5,7,2,3,4,5,6,7 mod 11;
+// a remainder of 10 is never valid.
+export function plNipIsValid(value) {
+  const raw = String(value || "").replace(/[\s-]/g, "");
+  if (!/^\d{10}$/.test(raw)) return false;
+  const weights = [6, 5, 7, 2, 3, 4, 5, 6, 7];
+  const check = weights.reduce((sum, w, i) => sum + w * Number(raw[i]), 0) % 11;
+  return check !== 10 && check === Number(raw[9]);
+}
+
 // A PIX key only carries check digits when its declared type is CPF or CNPJ;
 // EMAIL / PHONE / RANDOM are validated server-side by type (BR-K6).
 function pixKeyPassesCheckDigits(value, keyType) {
@@ -172,7 +219,8 @@ export const COUNTRY_FIELD_SPECS = {
   US: [
     { key: "ssn", label: "SSN", type: "text", placeholder: "123-45-6789", required: true, strip: " ", pattern: /^\d{3}-\d{2}-\d{4}$/, error: "SSN must be in the format 123-45-6789." },
     { key: "flsa_status", label: "FLSA status", type: "select", required: true, choices: ["Exempt", "Non-Exempt"] },
-    { key: "w4_filing_status", label: "W-4 filing status", type: "select", choices: ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"] },
+    { key: "w4_filing_status", label: "W-4 filing status", type: "select", choices: ["Single", "Married Filing Jointly", "Married Filing Separately", "Head of Household"],
+      aliases: { s: "Single", mfj: "Married Filing Jointly", "married jointly": "Married Filing Jointly", mfs: "Married Filing Separately", "married separately": "Married Filing Separately", hoh: "Head of Household", married: "Married Filing Jointly" } },
     // Form W-4 Step 2 "Multiple Jobs or Spouse Works" checkbox — a real,
     // higher-withholding bracket table (backend: hardcoded_defaults.py's
     // "_STEP2"-tagged federal TaxSlab rows), not cosmetic. Optional:
@@ -185,7 +233,7 @@ export const COUNTRY_FIELD_SPECS = {
     // UI path at all until this fix (2026-09-15 onboarding-guidance
     // audit). Unset defaults to the current post-2020 form, same as
     // before this field had a UI.
-    { key: "w4_form_vintage", label: "W-4 form vintage", type: "select", choices: ["2020 or later (current form)", "Pre-2020 (legacy form)"] },
+    { key: "w4_form_vintage", label: "W-4 form vintage", type: "select", choices: ["2020 or later (current form)", "Pre-2020 (legacy form)"], aliases: w4VintageAlias },
     // Federal W-4 §3.4 controls — all optional, each a no-op until set.
     // w4_allowances_claimed only matters on the legacy (pre-2020) form path.
     { key: "w4_allowances_claimed", label: "W-4 allowances claimed (pre-2020 form only)", type: "number", min: 0 },
@@ -474,6 +522,15 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "branch_code", label: "Branch code", type: "text", placeholder: "6 digits", strip: " -", pattern: /^\d{6}$/, error: "Branch code must be 6 digits." },
     { key: "account_number", label: "Account number", type: "text", placeholder: "7–11 digits", strip: " -", pattern: /^\d{7,11}$/, error: "Account number must be 7-11 digits." },
   ],
+  // Poland — mirrors backend PLEmployeeValidation. PESEL and NIP are held ONLY
+  // in the encrypted identifier vault (Poland statutory profile, spec §13) and
+  // are refused as employee fields; the run preflight needs a vault PESEL or a
+  // passport. plPeselIsValid / plNipIsValid above serve the vault form.
+  PL: [
+    { key: "passport_number", label: "Passport number (if no PESEL)", type: "text", placeholder: "6–20 letters/digits", upper: true, strip: " -", pattern: /^[A-Z0-9]{6,20}$/, error: "Passport number must be 6–20 letters/digits." },
+    // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.PL).
+    { key: "iban", label: "IBAN", type: "text", placeholder: "PL + 26 digits", upper: true, strip: " ", pattern: /^PL\d{26}$/, check: ibanPassesMod97, error: "Polish IBAN must be PL followed by 26 digits with a valid check digit." },
+  ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).
   HK: [
@@ -485,6 +542,15 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "bank_code", label: "Bank (clearing) code", type: "text", placeholder: "004", pattern: /^\d{3}$/, error: "Hong Kong bank code must be 3 digits." },
     { key: "branch_code", label: "Branch code", type: "text", placeholder: "123", pattern: /^\d{3}$/, error: "Hong Kong branch code must be 3 digits." },
   ],
+};
+
+// The one identifier per country that must be unique across employees —
+// mirrors each strategy's duplicate_field in employee_validation.py (India's
+// PAN is its own column, checked the same way server-side).
+export const DUPLICATE_ID_FIELDS = {
+  US: "ssn", UK: "nino", AU: "tfn", CA: "sin", DE: "steuer_id", IE: "ppsn", SG: "nric_fin",
+  HK: "hkid", SE: "swedish_id_number", IT: "codice_fiscale", CH: "ahv_number", SA: "national_id_iqama",
+  NL: "bsn", MX: "curp", BR: "cpf", PL: "passport_number",
 };
 
 // Every jurisdiction's compliance field, flattened into one list — used to
@@ -507,13 +573,62 @@ export function complianceColumnHeader(spec) {
 // API would return. Order of checks matches the server exactly: clean →
 // strip_chars → uppercase → choices → pattern. Returns a list of messages;
 // empty means valid. The server remains authoritative and re-validates.
+// Spreadsheet values people actually type, mapped onto each field's allowed
+// values — mirrors employee_validation.py's _normalize_spec_value exactly
+// (the server applies the same rules, so the preview and the import agree).
+// Returns "" for a "no value" placeholder (N/A, -, nil …).
+const BLANK_WORDS = new Set(["n/a", "na", "n.a.", "-", "--", "nil", "not applicable", "not applicable.", "null"]);
+const TRUE_WORDS = new Set(["true", "yes", "y", "1", "checked", "x", "on"]);
+const FALSE_WORDS = new Set(["false", "no", "n", "0", "unchecked", "off"]);
+const choiceKey = (v) => String(v).trim().toLowerCase().replace(/[\s_-]+/g, " ");
+
+export function normalizeComplianceValue(spec, value) {
+  if (value === undefined || value === null) return "";
+  if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
+  let raw = String(value).trim();
+  if (!raw) return "";
+  const choices = spec.choices || null;
+  const lowered = raw.toLowerCase();
+  if (BLANK_WORDS.has(lowered) || (lowered === "none" && !(choices || []).some((c) => c.toLowerCase() === "none"))) return "";
+  const isExactChoice = Boolean(choices && choices.includes(raw));
+  if (!isExactChoice && typeof spec.aliases === "function") {
+    const mapped = spec.aliases(raw);
+    if (mapped != null) raw = mapped;
+  } else if (!isExactChoice && spec.aliases) {
+    raw = spec.aliases[choiceKey(raw)] || raw;
+  }
+  if (choices && choices.every((c) => ["true", "false"].includes(c.toLowerCase()))) {
+    if (TRUE_WORDS.has(lowered)) return "true";
+    if (FALSE_WORDS.has(lowered)) return "false";
+  }
+  if (choices && !choices.includes(raw)) {
+    const match = choices.find((c) => choiceKey(c) === choiceKey(raw));
+    if (match) return match;
+  }
+  if (spec.type === "date") {
+    const m = raw.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/) || raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/);
+    if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  }
+  return raw;
+}
+
+// A country's compliance fields with every value normalized; placeholders dropped.
+export function normalizeComplianceFields(countryCode, complianceFields) {
+  const out = { ...(complianceFields || {}) };
+  for (const spec of COUNTRY_FIELD_SPECS[countryCode] || []) {
+    if (!(spec.key in out)) continue;
+    const value = normalizeComplianceValue(spec, out[spec.key]);
+    if (value === "") delete out[spec.key];
+    else out[spec.key] = value;
+  }
+  return out;
+}
+
 export function validateComplianceFields(countryCode, complianceFields) {
   const countryName = COUNTRIES.find((c) => c.code === countryCode)?.name || countryCode;
   const errors = [];
   for (const spec of COUNTRY_FIELD_SPECS[countryCode] || []) {
-    let raw = complianceFields?.[spec.key];
-    if (raw === undefined || raw === null) raw = "";
-    raw = String(raw).trim();
+    let raw = normalizeComplianceValue(spec, complianceFields?.[spec.key]);
     if (!raw) {
       if (spec.required) errors.push(`${spec.label} is required for ${countryName} employees.`);
       continue;

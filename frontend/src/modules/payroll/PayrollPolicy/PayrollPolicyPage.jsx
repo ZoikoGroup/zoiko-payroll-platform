@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import { Settings, ChevronDown, Users, Plug, CalendarClock, Lock, Info } from "lucide-react";
 import { useToast } from "../ToastContext";
-import EnterpriseConfirmModal from "./EnterpriseConfirmModal";
 import PayrollEmailSettingsPanel from "./PayrollEmailSettingsPanel";
 import {
   getActivePolicy,
@@ -12,7 +10,6 @@ import {
   CALCULATION_MODE_LABELS,
   INTEGRATION_LABELS,
   EMPLOYEE_CATEGORY_LABELS,
-  ENTERPRISE_STATUS_LABELS,
 } from "../../../service/payrollService";
 import { usePayrollSetup } from "../PayrollSetupContext";
 
@@ -201,12 +198,10 @@ function InheritedDefaultsNote({ hasLock }) {
 export default function PayrollPolicyPage() {
   const { addToast } = useToast();
   const { refresh: refreshPayrollSetup } = usePayrollSetup();
-  const navigate = useNavigate();
   const [policy, setPolicy] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
-  const [showEnterpriseModal, setShowEnterpriseModal] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -250,22 +245,12 @@ export default function PayrollPolicyPage() {
 
   const handleCalculationModeChange = (mode) => {
     if (mode === policy.calculationMode) return;
-    if (mode === "enterprise") {
-      setShowEnterpriseModal(true);
-      return;
-    }
     const label = CALCULATION_MODE_LABELS[mode];
     const ok = window.confirm(
       `Switch to ${label}? This only affects FUTURE payroll runs — already-approved or paid runs are never recalculated.`
     );
     if (!ok) return;
     handleSaveGeneral({ calculationMode: mode });
-  };
-
-  const handleConfigureCompliance = async () => {
-    setShowEnterpriseModal(false);
-    await handleSaveGeneral({ calculationMode: "enterprise" });
-    navigate("/payroll/compliances", { state: { enterpriseOnboarding: true } });
   };
 
   const handleCategoryChange = (category, field, value) => {
@@ -426,17 +411,6 @@ export default function PayrollPolicyPage() {
                     <div className="flex items-center gap-2">
                       <p className="text-[13px] font-bold text-foreground">{label}</p>
                       {isLockedOut && <Lock size={12} className="text-foreground-muted" />}
-                      {mode === "enterprise" && (
-                        <StatusBadge
-                          label={ENTERPRISE_STATUS_LABELS[policy.enterpriseStatus] || "Not Configured"}
-                          tone={
-                            policy.enterpriseStatus === "active" ? "green"
-                            : policy.enterpriseStatus === "configured" ? "blue"
-                            : policy.enterpriseStatus === "in_progress" ? "amber"
-                            : "gray"
-                          }
-                        />
-                      )}
                     </div>
                     {mode === "simple" && (
                       <p className="text-[11px] text-foreground-muted mt-1">Net = Gross − Unpaid Leave. No PF/ESI/PT/TDS.</p>
@@ -860,14 +834,6 @@ export default function PayrollPolicyPage() {
             );
           })}
         </div>
-      )}
-
-      {showEnterpriseModal && (
-        <EnterpriseConfirmModal
-          onCancel={() => setShowEnterpriseModal(false)}
-          onEnableLater={() => setShowEnterpriseModal(false)}
-          onConfigure={handleConfigureCompliance}
-        />
       )}
     </div>
   );

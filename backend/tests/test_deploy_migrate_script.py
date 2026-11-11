@@ -101,59 +101,170 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                      # Phase 8 (c15d5b87d6f5): SARS payments + approved reconciliation variances.
                      "payroll_za_sars_payments", "payroll_za_reconciliation_variances",
                      # Phase 9 (3880223bfaa0, on merge 92c67cab49fc): approved result overrides.
-                     "payroll_za_payroll_overrides"}
+                     "payroll_za_payroll_overrides",
+                     # Phase 10 (67c8d7454716): G6 parallel payroll cycles.
+                     "payroll_za_parallel_imports", "payroll_za_parallel_differences"}
+        # Japan foundation (f686d5128f8a, ZP-JP-ENG-001 Phase 2): eight
+        # payroll_jp_* tables, the payslip snapshot and the run fingerprint.
+        jp_tables = {"payroll_jp_employer_registrations", "payroll_jp_my_number_vault",
+                     "payroll_jp_my_number_access_events", "payroll_jp_worker_tax_profiles",
+                     "payroll_jp_social_insurance_enrollments", "payroll_jp_social_insurance_events",
+                     "payroll_jp_employment_insurance_profiles", "payroll_jp_resident_tax_assessments"}
+        # Japan P5/P6 (9c1d7e4a2b6f, a7c4e9d1b2f8, a1a748b50902): the run payment
+        # kind, the work-conditions table with its calendar columns and the
+        # attendance approvals - every one must be visible to the drift filter.
+        jp_p6_tables = {"payroll_jp_work_conditions", "payroll_jp_attendance_approvals",
+                        # Japan P8 (41a1fafbbfdc)
+                        "payroll_jp_run_exceptions", "payroll_jp_obligations",
+                        "payroll_jp_yea_declarations", "payroll_jp_yea_cases",
+                        # Japan P9 (b8bd939fffca)
+                        "payroll_jp_parallel_imports", "payroll_jp_parallel_differences"}
+        jp_p6_columns = {"payroll_runs": {"jp_payment_kind"},
+                         "payroll_jp_work_conditions": {"scheduled_weekdays", "statutory_day_off_weekday",
+                                                        "public_holidays_off"}}
+        jp_tables |= jp_p6_tables
+        # New Zealand P2 (0e697c2388bf, ZP-NZ-ENG-001): eight payroll_nz_* tables, the
+        # payslip snapshot, the run fingerprint and the run payment kind - pending on
+        # top of Japan P9, so pending from every revision below.
+        nz_tables = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz_ird_access_events",
+                     "payroll_nz_employee_tax_profiles", "payroll_nz_kiwisaver_elections",
+                     "payroll_nz_authority_deductions", "payroll_nz_work_pattern_versions",
+                     "payroll_nz_accumulator_entries",
+                     # New Zealand P8 (dd8a60634320): filings, remittances, settlements, run exceptions.
+                     "payroll_nz_filings", "payroll_nz_remittances", "payroll_nz_remittance_lines",
+                     "payroll_nz_settlements", "payroll_nz_run_exceptions",
+                     # New Zealand P9 (a8cde2482ef0): parallel cycles.
+                     "payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
+                     # New Zealand P6 (c6ea8c6c35ce): leave pay, cash-ups, final pay, corrections.
+                     "payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
+                     "payroll_nz_cash_up_requests", "payroll_nz_corrections",
+                     # New Zealand P5 (ac08988ecd3a): Holidays Act tables.
+                     "payroll_nz_employments", "payroll_nz_public_holiday_decisions", "payroll_nz_leave_entitlements",
+                     "payroll_nz_gross_earnings_ledger", "payroll_nz_leave_events",
+                     # Poland P2 (1ee3bbde33bb, ZP-PL-ENG-001): pending on top of New Zealand P9.
+                     "payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
+                     "payroll_pl_employer_registrations", "payroll_pl_worker_profiles", "payroll_pl_declarations",
+                     "payroll_pl_ppk_participations", "payroll_pl_accumulator_entries",
+                                        "payroll_pl_incapacity_episodes",  # + Poland P6 (e11c2c36df17)
+                                        "payroll_pl_filings", "payroll_pl_settlements",
+                                        "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
+                                        "payroll_pl_parallel_imports",
+                                        "payroll_pl_parallel_differences"}  # + Poland P9 (e7ec6c1933b4)
+        nz_run_columns = {"nz_approval_fingerprint", "nz_payment_kind", "nz_run_options",   # + P6 options
+                          "pl_approval_fingerprint"}                                        # + Poland P2
+        jp_tables |= nz_tables
+        jp_p6_tables |= nz_tables
+        jp_columns = {"payslip_items": {"jp_calculation_snapshot", "nz_calculation_snapshot", "nz_correction_of_id",
+                                        "pl_calculation_snapshot"},
+                      "payroll_runs": {"jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns},
+                      "payroll_jp_work_conditions": jp_p6_columns["payroll_jp_work_conditions"],
+                      # New Zealand P6 (c6ea8c6c35ce) adds a column to its P5 table.
+                      "payroll_nz_leave_events": {"leave_pay_calculation_id"},
+                      # New Zealand P8 (dd8a60634320) adds the journal account map to its P2 table.
+                      "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
+        # 668472e4eb72 (2026-10-30): organizations.timezone, on top of Japan Phase 2.
+        tz_columns = {"organizations": {"timezone"}}
         mx_final_mile = {"payroll_mx_decisions", *MX_X4_TABLES}     # Mexico m20 (d3f8b2a6c1e9)
+        # Country entitlement ledger (b4d6f8a0c2e3, joined at d4c8f1a7b2e9 / c2e7a4f9b1d8):
+        # pending on top of every production revision below.
+        country = {"organization_jurisdictions"}
+        google_tables = {"google_pending"}
+        google_columns = {"users": {"auth_provider", "google_id", "avatar_url"}}
+
+        def assert_google_pending(tables, columns):
+            assert google_tables <= tables
+            assert google_columns["users"] <= columns.get("users", set())
+
         tables, columns = pending_objects("f6c2a9d1e4b7")        # production since PR #125
-        assert tables == {"payroll_mx_cfdi_system_concepts"} | brazil_tables | za_tables | mx_final_mile
+        assert_google_pending(tables, columns)
+        assert tables == ({"payroll_mx_cfdi_system_concepts"} | brazil_tables | za_tables
+                          | mx_final_mile | country | jp_tables | google_tables)
         # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c) and Phases 1/4.2
         # (135dbbeb9818, 8f90dde5f7b5), on top of production a8e4c1f7d3b5: every
         # table AND every column on an existing table must be explained, or a
         # self-heal refuses.
         tables, columns = pending_objects("a8e4c1f7d3b5")
-        assert tables == brazil_tables | za_tables | mx_final_mile
-        assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel", "za_approval_fingerprint"}
+        assert_google_pending(tables, columns)
+        assert tables == brazil_tables | za_tables | mx_final_mile | country | jp_tables | google_tables
+        assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel", "za_approval_fingerprint",
+                                           "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
+        assert columns["payroll_jp_work_conditions"] == {"scheduled_weekdays", "statutory_day_off_weekday",
+                                                         "public_holidays_off"}
         assert columns["payroll_nl_payment_batches"] == {"pain001_xml", "created_at_utc", "batch_kind",
                                                          "authority_payment_id"}
-        assert len(columns["payroll_employee_statutory_profiles"]) == 10 + 13 + 3         # + Mexico m21 (union member, SDI + evidence)
+        assert len(columns["payroll_employee_statutory_profiles"]) == 10 + 13 + 3   # + Mexico m21 (union member, SDI + evidence)
         assert "za_calculation_snapshot" in columns["payslip_items"]
         assert {"version", "previous_version_id", "effective_from", "effective_to",
                 "created_by_id"} == columns["payroll_br_employer_profiles"]
         assert {"organization_id", "fpas_status", "fpas_evidence_ref", "active_from", "active_to",
                 "created_by_id", "updated_at"} == columns["payroll_br_establishments"]
         tables, columns = pending_objects("8f90dde5f7b5")        # production since PR #129
-        assert tables == za_tables | mx_final_mile
+        assert_google_pending(tables, columns)
+        assert tables == za_tables | mx_final_mile | country | jp_tables | google_tables
         assert columns["payroll_mx_approved_hours"] == {"overtime_dates"}                   # Mexico m18
-        assert columns["payroll_runs"] == {"za_approval_fingerprint"}
-        assert columns["payslip_items"] == {"za_calculation_snapshot"}
-        assert len(columns["payroll_employee_statutory_profiles"]) == 13 + 3              # + Mexico m21 (union member, SDI + evidence)
+        assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
+        assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot", "nz_calculation_snapshot", "nz_correction_of_id",
+                                            "pl_calculation_snapshot"}
+        assert len(columns["payroll_employee_statutory_profiles"]) == 13 + 3   # + Mexico m21 (union member, SDI + evidence)
         # Production since PR #136 (A18): Mexico m20 (d3f8b2a6c1e9) and South Africa
         # (447f57564983 -> c15d5b87d6f5) both grow from it, joined by merge 92c67cab49fc.
         tables, columns = pending_objects("c7d2e9a4f1b6")
-        assert tables == za_tables | mx_final_mile and "payroll_mx_approved_hours" not in columns
-        assert columns["payroll_runs"] == {"za_approval_fingerprint"}
-        assert columns["payslip_items"] == {"za_calculation_snapshot"}
-        assert len(columns["payroll_employee_statutory_profiles"]) == 13 + 3              # + Mexico m21 (union member, SDI + evidence)
+        assert_google_pending(tables, columns)
+        assert tables == (za_tables | mx_final_mile | country | jp_tables | nz_tables | google_tables)
+        assert "payroll_mx_approved_hours" not in columns
+        assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
+        assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot", "nz_calculation_snapshot", "nz_correction_of_id",
+                                            "pl_calculation_snapshot"}
+        assert len(columns["payroll_employee_statutory_profiles"]) == 13 + 3   # + Mexico m21 (union member, SDI + evidence)
         tables, columns = pending_objects("b9f3d5a1c7e2")
-        assert tables == za_tables | mx_final_mile and "payroll_mx_approved_hours" not in columns
-        # Across merge 92c67cab49fc each side also runs the OTHER side (scripts.drift_pending_filter
-        # counts every head ancestor the stamp lacks, not only the stamp -> head path).
+        assert_google_pending(tables, columns)
+        assert tables == (za_tables | mx_final_mile | country | jp_tables | google_tables)
+        assert "payroll_mx_approved_hours" not in columns
+        # Mexico m21 (efc56f3235e2, sweep S1) is the head: pending from every earlier stamp.
         mx_m21 = {"payroll_mx_terminations": {"indemnity_daily_salary", "indemnity_salary_evidence_ref"},
                   "payroll_mx_labor_policies": {"hourly_rate_daily_hours", "special_pay_withholding_method"},
                   "payroll_employee_statutory_profiles": {"mx_union_member", "mx_sdi_operator_entered",
-                                                          "mx_sdi_evidence_ref"}}     # Mexico m21 (efc56f3235e2)
+                                                          "mx_sdi_evidence_ref"}}
+        # Across merge 92c67cab49fc each side also runs the OTHER side (scripts.drift_pending_filter
+        # counts every head ancestor the stamp lacks, not only the stamp -> head path).
         tables, columns = pending_objects("c15d5b87d6f5")      # a database at South Africa P8
-        assert tables == mx_final_mile | {"payroll_za_payroll_overrides"}
+        assert_google_pending(tables, columns)
+        assert tables == mx_final_mile | country | jp_tables | google_tables | {"payroll_za_payroll_overrides",
+                                                      "payroll_za_parallel_imports",
+                                                      "payroll_za_parallel_differences"}
         assert columns == {"payroll_court_ordered_deductions": {"za_authority_type", "za_evidence_ref"},
-                           "payroll_za_employer_registrations": {"za_journal_accounts"}, **mx_m21}
-        tables, columns = pending_objects("3880223bfaa0")      # production since PR #140: only Mexico m21
-        assert tables == set() and columns == mx_m21
+                           "payroll_za_employer_registrations": {"za_journal_accounts"}, **jp_columns,
+                           **tz_columns, **google_columns, **mx_m21}
         tables, columns = pending_objects("d3f8b2a6c1e9")      # a database at Mexico m20
-        assert tables == za_tables
+        assert_google_pending(tables, columns)
+        assert tables == za_tables | country | jp_tables | google_tables
+        # Production since PR #140 (South Africa P9): Phase 10, the country
+        # entitlement ledger and Japan Phase 2 are pending.
+        tables, columns = pending_objects("3880223bfaa0")
+        assert_google_pending(tables, columns)
+        assert tables == ({"payroll_za_parallel_imports", "payroll_za_parallel_differences"}
+                          | country | jp_tables | google_tables)
+        assert columns == {**jp_columns, **tz_columns, **google_columns, **mx_m21}
+        # A database already at Japan Phase 2 has the registration timezone and
+        # Japan P5/P6 pending.
+        tables, columns = pending_objects("f686d5128f8a")
+        assert_google_pending(tables, columns)
+        assert tables == jp_p6_tables | google_tables
+        assert columns == {**tz_columns, **jp_p6_columns, **google_columns, **mx_m21,
+                           "payroll_runs": {"jp_payment_kind", *nz_run_columns},
+                           "payslip_items": {"nz_calculation_snapshot", "nz_correction_of_id", "pl_calculation_snapshot"},
+                           "payroll_nz_leave_events": {"leave_pay_calculation_id"},
+                           "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
+        # A database at Poland P9 (e7ec6c1933b4, main's head before m21): only Mexico m21 is pending.
+        tables, columns = pending_objects("e7ec6c1933b4")
+        assert tables == set() and columns == mx_m21
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")
+        assert_google_pending(tables, columns)
         assert {"payroll_mx_vacation_records", "pay_groups", "payroll_mx_terminations"} <= tables
         assert "data_region" in columns.get("organizations", set())
-        tables, _ = pending_objects("e3b9c2d7f4a1")
+        tables, columns = pending_objects("e3b9c2d7f4a1")
+        assert_google_pending(tables, columns)
         assert {"payroll_mx_run_corrections", "payroll_mx_vacation_records"} <= tables
     finally:
         os.chdir(here)

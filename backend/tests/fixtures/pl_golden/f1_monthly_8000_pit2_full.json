@@ -1,0 +1,44 @@
+{
+  "name": "f1_monthly_8000_pit2_full",
+  "spec": "ZP-PL-ENG-001 v1.0",
+  "payDate": "2026-03-31",
+  "source": "hand-computed from poland_content values + TEST fixtures in tests/_pl_engine_helpers.py",
+  "description": "Monthly salary 8,000 PLN, March 2026, PIT-2 FULL, standard costs, PPK enrolled 2% / 1.5%, YTD zero.",
+  "inputs": {
+    "gross": "8000"
+  },
+  "expected": {
+    "pit": "513.00",
+    "pit_base": "6773.00",
+    "zus_employee": {
+      "EMERYTALNE": "780.80",
+      "RENTOWE": "120.00",
+      "CHOROBOWE": "196.00"
+    },
+    "zus_employer": {
+      "EMERYTALNE": "780.80",
+      "RENTOWE": "520.00",
+      "WYPADKOWE": "133.60"
+    },
+    "health": "621.29",
+    "ppk_employee": "160.00",
+    "ppk_employer": "120.00",
+    "funds": {
+      "FP_FS": "196.00",
+      "FGSP": "8.00",
+      "FEP": "0.00"
+    },
+    "employee_total": "1878.09",
+    "employer_total": "1758.40",
+    "net": "5608.91",
+    "exceptions": []
+  },
+  "hand": [
+    "ZUS ee: 8000x9.76%=780.80; x1.50%=120.00; x2.45%=196.00 -> 1096.80",
+    "health: (8000-1096.80)=6903.20 x9% = 621.288 -> 621.29",
+    "PPK: 8000x2%=160.00 ee; x1.5%=120.00 er (employer PPK taxable: TEST policy)",
+    "PIT: 8000+120-1096.80-250=6773.20 -> 6773; x12%=812.76; -300 = 512.76 -> 513",
+    "FP 8000x2.45%=196.00 (base >= 4806); FGSP x0.10%=8.00",
+    "net = 8000-513-1096.80-621.29-160 = 5608.91"
+  ]
+}

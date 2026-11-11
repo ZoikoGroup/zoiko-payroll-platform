@@ -262,7 +262,7 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
         <div className="space-y-5">
           <FieldRow label="Component" value={entry.displayName} mono={entry.componentKey} />
           <FormSection title="General">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="col-span-2"><label className={labelClass}>Label</label><input className={inputClass} value={form.label} onChange={set("label")} /></div>
               <div><label className={labelClass}>State / District</label>
                 <select className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")}>
@@ -273,7 +273,7 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
             </div>
           </FormSection>
           <FormSection title="Calculation">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {desc.employeeRate && desc.employerRate && (
                 <>
                   <NumericField label="Employee Rate %" value={form.employeeSharePct} onChange={set("employeeSharePct")} suffix="%" placeholder="6.20" />
@@ -290,7 +290,7 @@ export default function USAAddComponentModal({ pack, rates, onClose, onEditExist
           </FormSection>
           {desc.filingStatus && (
             <FormSection title="Applicability">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className={labelClass}>Filing Status (optional)</label>
                   <select className={inputClass} value={form.filingStatus} onChange={set("filingStatus")}>
@@ -345,7 +345,7 @@ function AdvancedSettings({ form, set, advancedOpen, onToggle }) {
         Advanced Settings
       </button>
       {advancedOpen && (
-        <div className="mt-2 grid grid-cols-3 gap-3">
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div><label className={labelClass}>Sort Order</label><input type="number" className={inputClass} value={form.sortOrder} onChange={set("sortOrder")} /></div>
           <div className="col-span-2"><label className={labelClass}>Reason for change (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. ZP-TAX-US reference" /></div>
         </div>

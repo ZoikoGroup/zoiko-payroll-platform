@@ -55,7 +55,7 @@ def test_br_tax_schema_is_registered_schema_only():
         assert get_jurisdiction_code(name) == "BR"
     assert ALL_COUNTRY_NAME_TO_CODE["brazil"] == "BR"
     # Same rule as NL / SA / HK / MX: no self-service registration until G1–G8.
-    assert "Brazil" not in REGISTRATION_COUNTRIES
+    assert "Brazil" in REGISTRATION_COUNTRIES  # offered at registration (owner decision 2026-10-29)
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -98,12 +98,6 @@ def test_service_normalizes_brazil_names():
 
     for name in ("Brazil", "brasil", "BR"):
         assert service._normalize_country(name) == "BR"
-
-
-def test_br_not_in_enterprise_supported_countries():
-    from app.modules.payroll.enterprise.service import SUPPORTED_COUNTRY_CODES
-
-    assert "BR" not in SUPPORTED_COUNTRY_CODES
 
 
 def test_tax_schema_endpoint_lists_brazil(db):

@@ -74,7 +74,7 @@ def test_t09_super_admin_is_refused_on_every_worker_and_tenant_workflow_route(cl
             allowed.append((e["method"], e["path"], resp.status_code))
         if not _identity_free(resp.text):
             leaks.append((e["method"], e["path"]))
-        assert resp.headers.get("Cache-Control") == "no-store, private", e["path"]
+        assert resp.headers.get("Cache-Control") == "no-store", e["path"]
     assert not allowed, f"Super Admin reached worker / tenant routes: {allowed[:20]}"
     assert not leaks, f"identity in a refusal: {leaks[:20]}"
     record(test_id="T09_route_sweep", role="super_admin", scope="platform", tenant_ids=world.tenant_ids(),
@@ -133,7 +133,7 @@ def test_t09_responses_are_never_cacheable(client, world):
     for who, url in (("TA", "/api/payroll/employees"), ("SA", "/api/super-admin/reports/organizations"),
                      ("SA", f"/api/payroll/employees/{world.employees['A1'].id}")):
         resp = client.get(url, headers=world.headers(who))
-        assert resp.headers["Cache-Control"] == "no-store, private" and "Authorization" in resp.headers["Vary"]
+        assert resp.headers["Cache-Control"] == "no-store" and "Authorization" in resp.headers["Vary"]
 
 
 def test_t09_bi_aggregates_suppress_small_cohorts(client, world):

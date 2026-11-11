@@ -155,12 +155,14 @@ class BillingSubscriptionResponse(BaseModel):
 
     id: int
     organization_id: int
-    plan_version_id: int
+    # None on the ENTERPRISE_ORDER_FORM route — Enterprise is never plan-versioned.
+    plan_version_id: Optional[int] = None
     billing_authority: str
     status: str
     current_period_start: datetime
     current_period_end: datetime
     stripe_subscription_id: Optional[str] = None
+    cancel_requested_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -448,6 +450,10 @@ class BillingMySubscriptionResponse(BaseModel):
 
     subscription: BillingSubscriptionResponse
     entitlement_flags: dict = {}
+    # Country entitlement usage: {"used", "limit" (None = unlimited),
+    # "countries": [{code, name, status, isPrimary}]} — see
+    # billing/jurisdiction_entitlement.py.
+    country_usage: Optional[dict] = None
 
 
 class BillingTrialStatusResponse(BaseModel):
@@ -508,11 +514,21 @@ class BillingCheckoutRequest(BaseModel):
     # (now) for self-service Core/Professional. Never inferred from
     # checkout completing — see Organization.service_commencement_at.
     service_commencement_at: Optional[datetime] = None
+    # A plan with a lower country limit than the org currently uses pauses
+    # the extra countries (OVER_LIMIT). Checkout refuses that change (409)
+    # unless the admin has seen GET /billing/plan-change-impact and confirms.
+    acknowledge_country_pause: bool = False
 
 
 class BillingCheckoutResponse(BaseModel):
-    """POST /billing/checkout — response containing Stripe checkout URL."""
-    checkout_url: str
+    """POST /billing/checkout — either a Stripe Checkout URL to redirect to
+    (first subscription / trial conversion), or, for an org that already has
+    an active paid Stripe subscription, an in-place plan change
+    (plan_changed=True, no redirect — Stripe prorates the difference)."""
+    checkout_url: Optional[str] = None
+    plan_changed: bool = False
+    plan_code: Optional[str] = None
+    message: Optional[str] = None
 
 
 class BillingStartTrialResponse(BaseModel):

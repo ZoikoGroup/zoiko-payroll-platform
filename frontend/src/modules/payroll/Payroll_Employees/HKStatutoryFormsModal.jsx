@@ -239,7 +239,7 @@ export default function HKStatutoryFormsModal({ employee, onClose }) {
           </section>
 
           <section className={card} aria-labelledby="hk-ird">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center flex-wrap justify-between gap-3">
               <h3 id="hk-ird" className={h}>IRD notifications and tax clearance</h3>
               <button type="button" className={btn} onClick={async () => { const out = await run(() => createHkIrdEventCases(employee.id), "IR56 cases created where an event is due."); if (out) { const controls = out?.data?.controls || out?.controls || []; loadCases(); if (controls.length) setNotice(`IR56 cases checked. ${controls.map((c) => c.message).join(" ")}`); } }}>
                 Create due IR56 cases

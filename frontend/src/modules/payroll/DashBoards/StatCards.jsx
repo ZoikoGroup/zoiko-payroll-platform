@@ -2,6 +2,17 @@ import { useState, useEffect } from "react";
 import { Wallet, Users, Receipt, Building2, TrendingUp, Minus, TrendingDown } from "lucide-react";
 import { getDashboardSummary } from "../../../service/payrollService";
 import { formatCurrency } from "../../../utils/currency";
+import CountryTotalsTable from "../../../components/payroll/CountryTotalsTable";
+
+// Per-country breakdown columns (summary.byCountry) for an org paying
+// employees in more than one country — each row in its own currency.
+const BY_COUNTRY_COLUMNS = [
+  { key: "payslips", label: "Payslips" },
+  { key: "totalGross", label: "Gross", money: true },
+  { key: "totalTaxes", label: "Taxes", money: true, accent: "text-error" },
+  { key: "totalNet", label: "Net", money: true, accent: "text-primary" },
+];
+const MULTI_CURRENCY_LABEL = "Multiple currencies";
 
 function fmtCurrency(n, currencyCode) {
   if (n == null) return formatCurrency(0, currencyCode);
@@ -9,7 +20,7 @@ function fmtCurrency(n, currencyCode) {
   return formatCurrency(v, currencyCode);
 }
 
-export default function StatCards({ filter, refreshTick, currencyCode }) {
+export default function StatCards({ filter, refreshTick, currencyCode, onMixedCurrenciesChange }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -30,6 +41,13 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
     return () => { cancelled = true; };
   }, [filter?.year, filter?.month, refreshTick]);
 
+  // Tells the dashboard whether this summary spans several currencies, so the
+  // trend/breakdown charts (cross-currency sums) can say so.
+  const spansCurrencies = (data?.byCountry?.length || 0) > 1;
+  useEffect(() => {
+    onMixedCurrenciesChange?.(spansCurrencies);
+  }, [spansCurrencies, onMixedCurrenciesChange]);
+
   if (loading) {
     return (
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
@@ -44,7 +62,11 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
     );
   }
 
-  const changePct = data?.totalPayrollCostChangePct;
+  // The top-level money totals add every country's currency together, so
+  // with more than one country they're replaced by the by-country table.
+  const byCountry = data?.byCountry || [];
+  const isMultiCountry = byCountry.length > 1;
+  const changePct = isMultiCountry ? null : data?.totalPayrollCostChangePct;
   const isUp = changePct != null && changePct > 0;
   const isDown = changePct != null && changePct < 0;
   const isStable = changePct == null || changePct === 0;
@@ -57,8 +79,10 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
       key: "total",
       icon: Wallet,
       label: isAllTime ? "Total Payroll (All Time)" : "Total Payroll (Net)",
-      value: fmtCurrency(data?.totalNet ?? data?.totalPayrollCost, currencyCode),
-      indicator: changePct != null ? `${isUp ? "+" : ""}${changePct}% vs last month` : "No prior data",
+      value: isMultiCountry ? MULTI_CURRENCY_LABEL : fmtCurrency(data?.totalNet ?? data?.totalPayrollCost, currencyCode),
+      indicator: isMultiCountry
+        ? "See totals by country below"
+        : changePct != null ? `${isUp ? "+" : ""}${changePct}% vs last month` : "No prior data",
       indicatorColor: isStable
         ? "text-foreground-muted"
         : isUp
@@ -83,11 +107,11 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
       key: "deduction",
       icon: Receipt,
       label: isAllTime ? "Deduction (All Time)" : "Deduction (This Month)",
-      value: fmtCurrency(totalDeductions, currencyCode),
-      indicator: attendanceDed > 0
+      value: isMultiCountry ? MULTI_CURRENCY_LABEL : fmtCurrency(totalDeductions, currencyCode),
+      indicator: attendanceDed > 0 && !isMultiCountry
         ? `${fmtCurrency(attendanceDed, currencyCode)} attendance`
         : `${data?.pendingApprovals ?? 0} runs pending approval`,
-      indicatorColor: attendanceDed > 0 ? "text-error" : "text-warning",
+      indicatorColor: attendanceDed > 0 && !isMultiCountry ? "text-error" : "text-warning",
       iconBg: "bg-error/10",
       iconColor: "text-error",
       trendIcon: Minus,
@@ -96,8 +120,8 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
       key: "gross",
       icon: Building2,
       label: isAllTime ? "Gross Pay (All Time)" : "Gross Pay (This Month)",
-      value: fmtCurrency(data?.totalGross, currencyCode),
-      indicator: "Before deductions",
+      value: isMultiCountry ? MULTI_CURRENCY_LABEL : fmtCurrency(data?.totalGross, currencyCode),
+      indicator: isMultiCountry ? "See totals by country below" : "Before deductions",
       indicatorColor: "text-foreground-muted",
       iconBg: "bg-category-teal/10",
       iconColor: "text-category-teal",
@@ -105,7 +129,7 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
     },
   ];
 
-  return (
+  const cardGrid = (
     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
       {cards.map((card) => {
         const Icon = card.icon;
@@ -133,6 +157,23 @@ export default function StatCards({ filter, refreshTick, currencyCode }) {
           </div>
         );
       })}
+    </div>
+  );
+
+  if (!isMultiCountry) return cardGrid;
+
+  return (
+    <div className="space-y-5">
+      {cardGrid}
+      <div className="rounded-[18px] border border-border bg-surface p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+          {isAllTime ? "Payroll by Country (All Time)" : "Payroll by Country (This Month)"}
+        </p>
+        <p className="mt-1 mb-3 text-[12px] text-foreground-muted">
+          Employees are paid in {byCountry.length} countries — each total is in that country&apos;s own currency and they are not added together.
+        </p>
+        <CountryTotalsTable rows={byCountry} columns={BY_COUNTRY_COLUMNS} />
+      </div>
     </div>
   );
 }

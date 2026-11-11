@@ -32,8 +32,50 @@ P8_TABLES = ("payroll_za_sars_payments", "payroll_za_reconciliation_variances")
 # Phase 9 (3880223bfaa0): approved result overrides (WORKER "org") + nullable columns.
 P9_REVISION = "3880223bfaa0"
 P9_TABLES = ("payroll_za_payroll_overrides",)
+# Phase 10 (67c8d7454716): G6 parallel cycles - imports TENANT, differences WORKER "org".
+P10_REVISION = "67c8d7454716"
+P10_TENANT = ("payroll_za_parallel_imports",)
+P10_WORKER = ("payroll_za_parallel_differences",)
+P10_TABLES = P10_TENANT + P10_WORKER
 P9_COLUMNS = {"payroll_court_ordered_deductions": {"za_authority_type", "za_evidence_ref"},
               "payroll_za_employer_registrations": {"za_journal_accounts"}}
+# Japan foundation (f686d5128f8a) is also pending from c7d2e9a4f1b6.
+JP_TABLES = {"payroll_jp_employer_registrations", "payroll_jp_my_number_vault",
+             "payroll_jp_my_number_access_events", "payroll_jp_worker_tax_profiles",
+             "payroll_jp_social_insurance_enrollments", "payroll_jp_social_insurance_events",
+             "payroll_jp_employment_insurance_profiles", "payroll_jp_resident_tax_assessments",
+             # Japan P6 (a7c4e9d1b2f8, a1a748b50902).
+             "payroll_jp_work_conditions", "payroll_jp_attendance_approvals",
+             # Japan P8 (41a1fafbbfdc).
+             "payroll_jp_run_exceptions", "payroll_jp_obligations",
+             "payroll_jp_yea_declarations", "payroll_jp_yea_cases",
+             # Japan P9 (b8bd939fffca).
+             "payroll_jp_parallel_imports", "payroll_jp_parallel_differences"}
+# New Zealand foundation (0e697c2388bf) is pending on top of Japan P9.
+NZ_TABLES = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz_ird_access_events",
+             "payroll_nz_employee_tax_profiles", "payroll_nz_kiwisaver_elections",
+             "payroll_nz_authority_deductions", "payroll_nz_work_pattern_versions",
+             "payroll_nz_accumulator_entries",
+             # New Zealand P8 (dd8a60634320).
+             "payroll_nz_filings", "payroll_nz_remittances", "payroll_nz_remittance_lines",
+             "payroll_nz_settlements", "payroll_nz_run_exceptions",
+             # New Zealand P9 (a8cde2482ef0).
+             "payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
+             # New Zealand P6 (c6ea8c6c35ce).
+             "payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
+             "payroll_nz_cash_up_requests", "payroll_nz_corrections",
+             # New Zealand P5 (ac08988ecd3a).
+             "payroll_nz_employments", "payroll_nz_public_holiday_decisions", "payroll_nz_leave_entitlements",
+             "payroll_nz_gross_earnings_ledger", "payroll_nz_leave_events",
+             # Poland P2 (1ee3bbde33bb) is pending on top of New Zealand P9.
+             "payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
+             "payroll_pl_employer_registrations", "payroll_pl_worker_profiles", "payroll_pl_declarations",
+             "payroll_pl_ppk_participations", "payroll_pl_accumulator_entries",
+                                        "payroll_pl_incapacity_episodes",  # + Poland P6 (e11c2c36df17)
+                                        "payroll_pl_filings", "payroll_pl_settlements",
+                                        "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
+                                        "payroll_pl_parallel_imports",
+                                        "payroll_pl_parallel_differences"}  # + Poland P9 (e7ec6c1933b4)
 
 
 def _load(prefix):
@@ -99,7 +141,7 @@ def test_classify_agrees_with_the_policies_the_revision_applies(classified):
 def test_every_south_africa_table_has_a_policy_source(classified):
     _rls, worker, tenant = classified
     za = {t for t in set(worker) | tenant if t.startswith("payroll_za_")}
-    assert za == set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES)
+    assert za == set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | set(P10_TABLES)
 
 
 def test_revision_emits_the_derived_policy(classified):
@@ -197,14 +239,22 @@ def test_deploy_drift_filter_explains_every_za_object():
         os.chdir(here)
     # Mexico m20 (d3f8b2a6c1e9) also grows from c7d2e9a4f1b6 (joined by merge 92c67cab49fc).
     mexico_m20 = {"payroll_mx_decisions", "payroll_mx_parallel_imports", "payroll_mx_parallel_differences"}
-    assert tables == set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | mexico_m20
+    # The country entitlement ledger (b4d6f8a0c2e3) and Japan Phase 2 are pending from here too.
+    google_tables = {"google_pending"}
+    google_columns = {"auth_provider", "google_id", "avatar_url"}
+    assert tables == (set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | set(P10_TABLES)
+                      | mexico_m20 | {"organization_jurisdictions"} | JP_TABLES | NZ_TABLES | google_tables)
+    assert columns["users"] == google_columns
     for table, names in P9_COLUMNS.items():
         assert columns[table] == names, table
     # Mexico m21 (efc56f3235e2) adds three columns on the same table after this chain.
     assert columns["payroll_employee_statutory_profiles"] - {"mx_union_member", "mx_sdi_operator_entered",
                                                              "mx_sdi_evidence_ref"} == {name for name, _t in module._PROFILE_COLUMNS}
-    assert columns["payslip_items"] == {"za_calculation_snapshot"}
-    assert columns["payroll_runs"] == {"za_approval_fingerprint"}
+    assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot",
+                                        "nz_calculation_snapshot", "nz_correction_of_id", "pl_calculation_snapshot"}
+    assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint",
+                                       "jp_payment_kind", "nz_approval_fingerprint", "nz_payment_kind",
+                                       "nz_run_options", "pl_approval_fingerprint"}
 
 
 def test_revision_is_a_single_child_of_the_previous_head():
@@ -281,3 +331,39 @@ def test_p9_revision_is_the_single_child_of_the_za_p8_mexico_m20_merge():
     module = _load(P9_REVISION)
     assert (module.revision, module.down_revision) == (P9_REVISION, "92c67cab49fc")
     assert tuple(_load("92c67cab49fc").down_revision) == (P8_REVISION, "d3f8b2a6c1e9")
+
+
+# ── Phase 10: 67c8d7454716 (G6 parallel payroll cycles) ─────────────────────
+def test_p10_tables_get_the_policy_classify_derives(classified):
+    rls, worker, tenant = classified
+    for table in P10_TENANT:
+        assert table in tenant and table not in worker, table
+    for table in P10_WORKER:
+        assert worker.get(table) == "org" and table not in tenant, table
+    bind = _CaptureBind()
+    _load(P10_REVISION)._rls_for_new_tables(bind)
+    want = {t: " ".join(rls._TENANT_PREDICATE.split()) for t in P10_TENANT}
+    want.update({t: " ".join(rls._worker_predicate("org").split()) for t in P10_WORKER})
+    assert _policies(bind.sql) == want
+    for table in P10_TABLES:
+        assert f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY' in bind.sql
+
+
+def test_p10_matches_the_models_replays_and_downgrades(model_engine):
+    engine, metadata = model_engine
+    with engine.begin() as conn:
+        for table in reversed(P10_TABLES):
+            conn.execute(sa.text(f'DROP TABLE "{table}"'))
+    _run(engine, "upgrade", P10_REVISION)
+    for table in P10_TABLES:
+        assert _cols(engine, table) == {c.name for c in metadata.tables[table].columns}, table
+    before = {t: _cols(engine, t) for t in sa.inspect(engine).get_table_names()}
+    _run(engine, "upgrade", P10_REVISION)                                 # replay: no-op
+    assert {t: _cols(engine, t) for t in sa.inspect(engine).get_table_names()} == before
+    _run(engine, "downgrade", P10_REVISION)
+    assert set(before) - set(sa.inspect(engine).get_table_names()) == set(P10_TABLES)
+
+
+def test_p10_revision_is_the_single_child_of_phase_9():
+    module = _load(P10_REVISION)
+    assert (module.revision, module.down_revision) == (P10_REVISION, P9_REVISION)

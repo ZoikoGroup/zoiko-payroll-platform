@@ -105,27 +105,29 @@ export default function SubmissionsReviewPanel({ onApplied }) {
             </div>
 
             <div className="rounded-[12px] border border-border overflow-hidden">
-              <table className="w-full text-[12.5px]">
-                <thead>
-                  <tr className="bg-surface-muted">
-                    <th className="px-3.5 py-2 text-left text-[10.5px] font-bold uppercase tracking-widest text-foreground-muted">Field</th>
-                    <th className="px-3.5 py-2 text-left text-[10.5px] font-bold uppercase tracking-widest text-foreground-muted">Current</th>
-                    <th className="px-3.5 py-2 text-left text-[10.5px] font-bold uppercase tracking-widest text-primary">Submitted</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {changedFields.map((f) => (
-                    <tr key={f.key}>
-                      <td className="px-3.5 py-2 font-semibold text-foreground">{f.label}</td>
-                      <td className="px-3.5 py-2 text-foreground-muted">{fmtValue(s.currentValues?.[f.key])}</td>
-                      <td className="px-3.5 py-2 font-semibold text-primary">{fmtValue(s.submittedData?.[f.key])}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12.5px]">
+                  <thead>
+                    <tr className="bg-surface-muted">
+                      <th className="px-3.5 py-2 text-left text-[10.5px] font-bold uppercase tracking-widest text-foreground-muted">Field</th>
+                      <th className="px-3.5 py-2 text-left text-[10.5px] font-bold uppercase tracking-widest text-foreground-muted">Current</th>
+                      <th className="px-3.5 py-2 text-left text-[10.5px] font-bold uppercase tracking-widest text-primary">Submitted</th>
                     </tr>
-                  ))}
-                  {changedFields.length === 0 && (
-                    <tr><td colSpan={3} className="px-3.5 py-3 text-center text-foreground-muted">No fields were filled in.</td></tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {changedFields.map((f) => (
+                      <tr key={f.key}>
+                        <td className="px-3.5 py-2 font-semibold text-foreground">{f.label}</td>
+                        <td className="px-3.5 py-2 text-foreground-muted">{fmtValue(s.currentValues?.[f.key])}</td>
+                        <td className="px-3.5 py-2 font-semibold text-primary">{fmtValue(s.submittedData?.[f.key])}</td>
+                      </tr>
+                    ))}
+                    {changedFields.length === 0 && (
+                      <tr><td colSpan={3} className="px-3.5 py-3 text-center text-foreground-muted">No fields were filled in.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         );

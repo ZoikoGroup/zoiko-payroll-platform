@@ -1,0 +1,52 @@
+{
+  "name": "f5_under_26_relief_full",
+  "spec": "ZP-PL-ENG-001 v1.0",
+  "payDate": "2026-03-31",
+  "source": "hand-computed from poland_content values + TEST fixtures in tests/_pl_engine_helpers.py",
+  "description": "Approved under-26 PIT-0 relief within the (TEST) limit: PIT 0 while ZUS, health and PPK are unchanged (PL-008).",
+  "inputs": {
+    "gross": "8000",
+    "declarations": [
+      [
+        "PIT2",
+        {
+          "allocation": "FULL"
+        }
+      ],
+      [
+        "PIT0_UNDER26",
+        {}
+      ]
+    ]
+  },
+  "expected": {
+    "pit": "0.00",
+    "pit_base": "0.00",
+    "zus_employee": {
+      "EMERYTALNE": "780.80",
+      "RENTOWE": "120.00",
+      "CHOROBOWE": "196.00"
+    },
+    "zus_employer": {
+      "EMERYTALNE": "780.80",
+      "RENTOWE": "520.00",
+      "WYPADKOWE": "133.60"
+    },
+    "health": "621.29",
+    "ppk_employee": "160.00",
+    "ppk_employer": "120.00",
+    "funds": {
+      "FP_FS": "196.00",
+      "FGSP": "8.00",
+      "FEP": "0.00"
+    },
+    "employee_total": "1878.09",
+    "employer_total": "1758.40",
+    "net": "6121.91",
+    "exceptions": []
+  },
+  "hand": [
+    "revenue 8120 <= TEST limit 85528 -> exempt 8120; PIT 0",
+    "net = 8000-0-1878.09 = 6121.91"
+  ]
+}

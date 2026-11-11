@@ -114,22 +114,24 @@ export function HKIrdEmpfControlTab() {
         {empf && (
           <>
             <p className="mb-2 rounded-lg bg-surface-muted p-2 text-[12px] text-foreground-secondary">{empf.notice}</p>
-            <table className="w-full" aria-label="eMPF configuration versions">
-              <thead><tr>{["Version", "Status", "Method", "Environment", "Format", "Credentials", "Certificate", "Certification", "Maker / approver", ""].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {empf.versions.length === 0 && <tr><td className={td} colSpan={10}>Not configured — no eMPF configuration has been created.</td></tr>}
-                {empf.versions.map((v) => (
-                  <tr key={v.id} className="border-t border-border">
-                    <td className={td}>v{v.version}</td><td className={td}>{label(v.status)}</td><td className={td}>{label(v.submissionMethod)}</td>
-                    <td className={td}>{label(v.environment)}</td><td className={td}>{[v.fileFormat, v.formatVersion].filter(Boolean).join(" ") || "—"}</td>
-                    <td className={td}>{label(v.credentialStatus)}</td><td className={td}>{label(v.certificateStatus)}</td>
-                    <td className={td}>{label(v.certificationStatus)}</td><td className={td}>{v.createdById} / {v.approvedById ?? "—"}</td>
-                    <td className={td}>{v.status === "DRAFT" && <button type="button" className={btn}
-                      onClick={() => { const r = window.prompt("Activation reason"); if (r) act(() => activateHkEmpfConfiguration(v.id, r), `v${v.version} activated.`, reloadEmpf); }}>Activate</button>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full" aria-label="eMPF configuration versions">
+                <thead><tr>{["Version", "Status", "Method", "Environment", "Format", "Credentials", "Certificate", "Certification", "Maker / approver", ""].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {empf.versions.length === 0 && <tr><td className={td} colSpan={10}>Not configured — no eMPF configuration has been created.</td></tr>}
+                  {empf.versions.map((v) => (
+                    <tr key={v.id} className="border-t border-border">
+                      <td className={td}>v{v.version}</td><td className={td}>{label(v.status)}</td><td className={td}>{label(v.submissionMethod)}</td>
+                      <td className={td}>{label(v.environment)}</td><td className={td}>{[v.fileFormat, v.formatVersion].filter(Boolean).join(" ") || "—"}</td>
+                      <td className={td}>{label(v.credentialStatus)}</td><td className={td}>{label(v.certificateStatus)}</td>
+                      <td className={td}>{label(v.certificationStatus)}</td><td className={td}>{v.createdById} / {v.approvedById ?? "—"}</td>
+                      <td className={td}>{v.status === "DRAFT" && <button type="button" className={btn}
+                        onClick={() => { const r = window.prompt("Activation reason"); if (r) act(() => activateHkEmpfConfiguration(v.id, r), `v${v.version} activated.`, reloadEmpf); }}>Activate</button>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <div className="mt-3 flex flex-wrap items-end gap-2">
               {[["submissionMethod", empf.methods], ["environment", empf.environments], ["credentialStatus", empf.secretStatuses], ["certificateStatus", empf.secretStatuses]].map(([k, opts]) => (
                 <label key={k} className="text-[11px] text-foreground-secondary">{label(k)}
@@ -175,21 +177,23 @@ export function HKRetentionTab() {
           <p className="mb-2 rounded-lg bg-surface-muted p-2 text-[12px] text-foreground-secondary">
             {data.notice} Owner decisions: D-2 {label(data.decisions["D-2"])}, D-3 {label(data.decisions["D-3"])}.
           </p>
-          <table className="w-full" aria-label="Retention policies">
-            <thead><tr>{["Category", "State", "Period", "End of retention", "Basis", "Pending draft", ""].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-            <tbody>
-              {data.categories.map((c) => (
-                <tr key={c.category} className="border-t border-border">
-                  <td className={td}>{c.label}</td>
-                  <td className={td}>{label(c.state)}{c.blocker && <div className="text-[10px] text-foreground-muted">{c.blocker}</div>}</td>
-                  <td className={td}>{c.retentionYears ? `${c.retentionYears} years` : "—"}</td><td className={td}>{label(c.endOfRetention) || "—"}</td>
-                  <td className={td}>{c.legalBasis || "—"}</td>
-                  <td className={td}>{c.draft ? `${c.draft.retentionYears} years (maker ${c.draft.createdById})` : "—"}</td>
-                  <td className={td}>{c.draft && <button type="button" className={btn} onClick={() => act(() => approveHkRetentionPolicy(c.draft.id), "Retention period approved.")}>Approve</button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full" aria-label="Retention policies">
+              <thead><tr>{["Category", "State", "Period", "End of retention", "Basis", "Pending draft", ""].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {data.categories.map((c) => (
+                  <tr key={c.category} className="border-t border-border">
+                    <td className={td}>{c.label}</td>
+                    <td className={td}>{label(c.state)}{c.blocker && <div className="text-[10px] text-foreground-muted">{c.blocker}</div>}</td>
+                    <td className={td}>{c.retentionYears ? `${c.retentionYears} years` : "—"}</td><td className={td}>{label(c.endOfRetention) || "—"}</td>
+                    <td className={td}>{c.legalBasis || "—"}</td>
+                    <td className={td}>{c.draft ? `${c.draft.retentionYears} years (maker ${c.draft.createdById})` : "—"}</td>
+                    <td className={td}>{c.draft && <button type="button" className={btn} onClick={() => act(() => approveHkRetentionPolicy(c.draft.id), "Retention period approved.")}>Approve</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <select aria-label="Record category" className={input} value={form.recordCategory || ""} onChange={(e) => setForm({ ...form, recordCategory: e.target.value })}>
               <option value="">Category…</option>
@@ -231,36 +235,40 @@ export function HKReadinessCenterTab() {
             <button key={s} type="button" className={btn} aria-pressed={filter === s} onClick={() => setFilter(s)}>{label(s)} ({n})</button>
           ))}
         </div>
-        <table className="w-full" aria-label="Readiness items">
-          <thead><tr>{["Category", "Item", "Status", "Owner", "Evidence", "Next action", "Due", "Blocker"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-          <tbody>
-            {rows.map((i) => (
-              <tr key={i.key} className="border-t border-border">
-                <td className={td}>{i.category}</td><td className={td}>{i.item}</td>
-                <td className={`${td} font-semibold ${TONE[i.status] || ""}`}>{label(i.status)}</td>
-                <td className={td}>{i.owner}</td><td className={td}>{i.evidence}</td><td className={td}>{i.nextAction}</td>
-                <td className={td}>{i.dueDate || "not scheduled"}</td><td className={td}>{i.blockerReason || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full" aria-label="Readiness items">
+            <thead><tr>{["Category", "Item", "Status", "Owner", "Evidence", "Next action", "Due", "Blocker"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((i) => (
+                <tr key={i.key} className="border-t border-border">
+                  <td className={td}>{i.category}</td><td className={td}>{i.item}</td>
+                  <td className={`${td} font-semibold ${TONE[i.status] || ""}`}>{label(i.status)}</td>
+                  <td className={td}>{i.owner}</td><td className={td}>{i.evidence}</td><td className={td}>{i.nextAction}</td>
+                  <td className={td}>{i.dueDate || "not scheduled"}</td><td className={td}>{i.blockerReason || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
       {monitoring && (
         <section className={card} aria-labelledby="hk-mon">
           <h3 id="hk-mon" className="mb-1 text-[14px] font-semibold text-foreground">Monitoring signals — {monitoring.alerts} alert(s)</h3>
           <p className="mb-2 text-[12px] text-foreground-secondary">{monitoring.notice}</p>
-          <table className="w-full" aria-label="Monitoring signals">
-            <thead><tr>{["Signal", "Value", "Alert threshold", "Alert"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-            <tbody>
-              {monitoring.signals.map((m) => (
-                <tr key={m.key} className="border-t border-border">
-                  <td className={td}>{m.label}</td><td className={td}>{m.value}</td>
-                  <td className={td}>{m.threshold === null ? "informational" : `> ${m.threshold}`}</td>
-                  <td className={`${td} font-semibold ${m.alert ? "text-error" : "text-foreground-muted"}`}>{m.alert ? "ALERT" : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full" aria-label="Monitoring signals">
+              <thead><tr>{["Signal", "Value", "Alert threshold", "Alert"].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {monitoring.signals.map((m) => (
+                  <tr key={m.key} className="border-t border-border">
+                    <td className={td}>{m.label}</td><td className={td}>{m.value}</td>
+                    <td className={td}>{m.threshold === null ? "informational" : `> ${m.threshold}`}</td>
+                    <td className={`${td} font-semibold ${m.alert ? "text-error" : "text-foreground-muted"}`}>{m.alert ? "ALERT" : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </div>

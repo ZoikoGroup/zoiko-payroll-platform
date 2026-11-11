@@ -179,6 +179,7 @@ def _build_slabs(raw: Optional[list]) -> list:
             rule_type=s.get("rule_type", "MARGINAL_RATE"),
             ni_category=s.get("ni_category"),
             employer_rate_pct=_to_decimal(s.get("employer_rate_pct")),
+            formula_expression=s.get("formula_expression"),
             flat_amount=_to_decimal(s.get("flat_amount")),
             filing_status=s.get("filing_status"),
             jurisdiction_state=s.get("jurisdiction_state"),
@@ -312,7 +313,37 @@ def build_context(case_context: dict) -> PayrollContext:
         # za_* profile, the employer registration and the pay-component split
         # countries/south_africa.py resolves. None elsewhere.
         **_south_africa_context(case_context),
+        # Japan (ZP-JP-ENG-001 §10): registration, worker tax profile,
+        # SI/EI enrolments and approved resident-tax notices. None elsewhere.
+        **_japan_context(case_context),
     )
+
+
+def _japan_context(case_context: dict) -> dict:
+    if case_context.get("country") != "JP":
+        return {}
+    from types import SimpleNamespace
+
+    def row(value):
+        return SimpleNamespace(**value) if isinstance(value, dict) else value
+
+    assessments = [SimpleNamespace(**dict(item))
+                   for item in case_context.get("jp_resident_tax_assessments") or []]
+    profile = row(case_context.get("jp_worker_tax_profile"))
+    if profile is not None and getattr(profile, "dependants_count", None) is not None:
+        profile.dependants_count = int(profile.dependants_count)
+    return {
+        "jp_employer_registration": row(case_context.get("jp_employer_registration")),
+        "jp_worker_tax_profile": profile,
+        "jp_social_insurance_enrollment": row(case_context.get("jp_social_insurance_enrollment")),
+        "jp_employment_insurance_profile": row(case_context.get("jp_employment_insurance_profile")),
+        "jp_resident_tax_assessments": assessments or None,
+        "jp_organization_id": case_context.get("jp_organization_id"),
+        "jp_employee_id": case_context.get("jp_employee_id"),
+        "jp_date_of_birth": _to_date(case_context.get("jp_date_of_birth")),
+        "jp_components": {k: _to_decimal(v) for k, v in
+                          (case_context.get("jp_components") or {}).items()},
+    }
 
 
 def _south_africa_context(case_context: dict) -> dict:
@@ -463,6 +494,7 @@ def run_golden_case(case: dict) -> None:
     sa_result = getattr(result, "sa_result", None) or {}
     br_result = getattr(result, "br_result", None) or {}
     za_result = getattr(result, "za_result", None) or {}
+    jp_result = getattr(result, "jp_result", None) or {}
 
     diffs = []
     for field_name, expected_raw in case["expected"].items():
@@ -475,6 +507,8 @@ def run_golden_case(case: dict) -> None:
             actual = sa_result[field_name]               # the Saudi engine's own dict (PayrollResult.sa_result)
         elif field_name.startswith("br_") and field_name in br_result:
             actual = br_result[field_name]               # the Brazil engine's own dict (PayrollResult.br_result)
+        elif field_name.startswith("jp_") and field_name in jp_result:
+            actual = jp_result[field_name]               # the Japan engine's own dict (PayrollResult.jp_result)
         else:
             actual = getattr(result, field_name, None)
         if actual is None:

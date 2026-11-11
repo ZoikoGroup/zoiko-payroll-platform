@@ -45,7 +45,7 @@ export default function USTaxComponentsTab({ pack, rates, slabs, onReload, onDel
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-4 flex items-center flex-wrap justify-between gap-3">
         <div>
           <h3 className="flex items-center gap-1.5 text-sm font-bold text-foreground"><Percent size={15} /> Tax Components</h3>
           <p className="mt-0.5 text-xs text-foreground-muted">Contribution rates for social security, Medicare, FUTA, and more — grouped into a single view.</p>

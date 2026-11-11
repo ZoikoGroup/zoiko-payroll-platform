@@ -708,7 +708,7 @@ def test_singapore_is_known_but_not_registerable():
     from app.core.jurisdiction import REGISTRATION_COUNTRIES, get_jurisdiction_code, get_jurisdiction_schema
     from app.modules.payroll.service import _normalize_country
 
-    assert "Singapore" not in REGISTRATION_COUNTRIES
+    assert "Singapore" in REGISTRATION_COUNTRIES  # offered at registration (owner decision 2026-10-29)
     assert get_jurisdiction_code("Singapore") == "SG"
     assert get_jurisdiction_schema("SG")["currency"] == "SGD"
     assert _normalize_country("Singapore") == "SG"

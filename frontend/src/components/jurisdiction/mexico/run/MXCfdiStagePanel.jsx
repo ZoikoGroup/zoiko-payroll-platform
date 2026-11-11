@@ -111,20 +111,22 @@ export default function MXCfdiStagePanel({ runId }) {
       {docs.length === 0 ? (
         <p className="text-[12px] text-foreground-muted">No CFDI documents for this run.</p>
       ) : (
-        <table className="w-full max-w-3xl text-[12px]">
-          <thead><tr className="text-left text-foreground-muted"><th className="py-1">Folio</th><th>Payslip</th><th>Status</th><th>UUID</th><th /></tr></thead>
-          <tbody>
-            {docs.map((d) => (
-              <tr key={d.id} className="border-b border-border/50" data-testid="mx-cfdi-row">
-                <td className="py-1">{d.series ? `${d.series}-` : ""}{d.folio}</td>
-                <td>#{d.payslipItemId}</td>
-                <td className={`font-semibold ${TONE[d.status] || "text-foreground"}`}>{d.status}</td>
-                <td className="font-mono text-[11px]">{d.uuid || "—"}</td>
-                <td><button type="button" className="text-primary underline" onClick={() => setOpenDoc(d.id)}>Details</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full max-w-3xl text-[12px]">
+            <thead><tr className="text-left text-foreground-muted"><th className="py-1">Folio</th><th>Payslip</th><th>Status</th><th>UUID</th><th /></tr></thead>
+            <tbody>
+              {docs.map((d) => (
+                <tr key={d.id} className="border-b border-border/50" data-testid="mx-cfdi-row">
+                  <td className="py-1">{d.series ? `${d.series}-` : ""}{d.folio}</td>
+                  <td>#{d.payslipItemId}</td>
+                  <td className={`font-semibold ${TONE[d.status] || "text-foreground"}`}>{d.status}</td>
+                  <td className="font-mono text-[11px]">{d.uuid || "—"}</td>
+                  <td><button type="button" className="text-primary underline" onClick={() => setOpenDoc(d.id)}>Details</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {openDoc && <MXCfdiDetailDrawer docId={openDoc} onClose={() => { setOpenDoc(null); reload(); }} />}
     </section>
@@ -149,22 +151,24 @@ function CfdiPreview({ preview }) {
           <ul className="list-disc pl-5">{preview.awaitingDecisions.map((m) => <li key={m}>{m}</li>)}</ul>
         </div>
       )}
-      <table className="w-full text-[12px]">
-        <thead><tr className="text-left text-foreground-muted"><th className="py-1 pr-3">Payslip</th><th className="pr-3">Result</th><th className="pr-3">Findings</th><th>Payload SHA-256</th></tr></thead>
-        <tbody>
-          {preview.results.map((r) => (
-            <tr key={r.payslipItemId} className="border-b border-border/50 align-top" data-testid="mx-cfdi-preview-row">
-              <td className="py-1 pr-3">#{r.payslipItemId} {r.employeeName}</td>
-              <td className={`pr-3 font-semibold ${r.valid ? "text-success" : "text-error"}`}>{r.valid ? "VALID" : "REFUSED"}</td>
-              <td className="pr-3">
-                {r.code && !r.findings.some((f) => f.rule === r.code) && <code className="text-[11px]">{r.code}</code>}
-                <ul>{r.findings.map((f, i) => <li key={i}><code className="text-[11px]">{f.rule}</code> · {f.message}</li>)}</ul>
-              </td>
-              <td className="font-mono text-[11px]">{r.payloadSha256 ? `${r.payloadSha256.slice(0, 16)}…` : "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[12px]">
+          <thead><tr className="text-left text-foreground-muted"><th className="py-1 pr-3">Payslip</th><th className="pr-3">Result</th><th className="pr-3">Findings</th><th>Payload SHA-256</th></tr></thead>
+          <tbody>
+            {preview.results.map((r) => (
+              <tr key={r.payslipItemId} className="border-b border-border/50 align-top" data-testid="mx-cfdi-preview-row">
+                <td className="py-1 pr-3">#{r.payslipItemId} {r.employeeName}</td>
+                <td className={`pr-3 font-semibold ${r.valid ? "text-success" : "text-error"}`}>{r.valid ? "VALID" : "REFUSED"}</td>
+                <td className="pr-3">
+                  {r.code && !r.findings.some((f) => f.rule === r.code) && <code className="text-[11px]">{r.code}</code>}
+                  <ul>{r.findings.map((f, i) => <li key={i}><code className="text-[11px]">{f.rule}</code> · {f.message}</li>)}</ul>
+                </td>
+                <td className="font-mono text-[11px]">{r.payloadSha256 ? `${r.payloadSha256.slice(0, 16)}…` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

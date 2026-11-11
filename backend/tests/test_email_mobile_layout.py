@@ -89,7 +89,10 @@ def _visible_font_sizes(html):
 
 @pytest.mark.parametrize("template_name", TEMPLATES)
 def test_template_is_mobile_safe(template_name, sent_html):
-    html = sent_html(template_name, requester_email=LONG_EMAIL, admin_email=LONG_EMAIL)
+    # A heading is passed because the shared wrapper only renders one when the
+    # sender supplies it — the check below is that a rendered heading carries
+    # the phone styling hook.
+    html = sent_html(template_name, requester_email=LONG_EMAIL, admin_email=LONG_EMAIL, heading="Sample heading")
 
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
     assert email_service.MOBILE_STYLES_HTML in html

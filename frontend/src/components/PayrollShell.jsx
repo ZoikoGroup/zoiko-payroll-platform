@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   X,
+  ArrowLeft,
   LayoutDashboard,
   Settings,
   ShieldCheck,
@@ -30,6 +31,8 @@ import ThemeToggle from "./ThemeToggle";
 import AssistLauncher from "../modules/assist/AssistLauncher";
 import TrialBanner from "./TrialBanner";
 import DunningBanner from "./DunningBanner";
+import CountryFlag from "./jurisdiction/CountryFlag";
+import { normalizeCountryCode } from "../utils/currency";
 
 // Tenant payroll operators only (ZP-PRIV A05: no platform role here).
 const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN]);
@@ -285,7 +288,7 @@ function NotificationBell() {
             role="menu"
             className="absolute right-0 z-20 mt-2 w-72 rounded-xl border border-border bg-surface py-4 px-4 text-center shadow-lg"
           >
-            <p className="text-sm text-foreground-muted">You&apos;re all caught up — no new notifications.</p>
+            <p className="text-sm text-foreground-muted">You&apos;re all caught up &mdash; no new notifications.</p>
           </div>
         </>
       )}
@@ -303,9 +306,11 @@ function Header({ onOpenMobileSidebar, onToggleCollapse, collapsed, menuButtonRe
   const { role } = useAuth();
   const { organization } = useOrganization();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const companyName = organization?.name || organization?.organization_name || "";
-  const logo = organization?.logo_data_uri;
+  const countryCode = normalizeCountryCode(organization?.country || "");
   const pageLabel = getPageLabel(role, pathname);
+  const isRootDashboard = pathname === "/payroll" || pathname === "/hr-admin/dashboard";
 
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-surface/95 px-4 backdrop-blur sm:px-6">
@@ -328,6 +333,19 @@ function Header({ onOpenMobileSidebar, onToggleCollapse, collapsed, menuButtonRe
         {collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
       </button>
 
+      {!isRootDashboard && (
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          aria-label="Go back"
+          title="Go back"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-xs font-semibold text-foreground-muted hover:bg-surface-muted hover:text-foreground transition-all duration-150 shrink-0"
+        >
+          <ArrowLeft size={14} />
+          <span className="hidden sm:inline">Back</span>
+        </button>
+      )}
+
       <div className="flex min-w-0 items-center gap-2">
         <Link
           to={getMyOrgHref(role)}
@@ -335,13 +353,19 @@ function Header({ onOpenMobileSidebar, onToggleCollapse, collapsed, menuButtonRe
           className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 transition hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-muted text-foreground-muted">
-            {logo ? <img src={logo} alt="" className="h-full w-full object-cover" /> : <Building2 size={16} />}
+            <CountryFlag
+              code={countryCode}
+              className="h-full w-full"
+              fallback={<Building2 size={16} />}
+            />
           </span>
-          {companyName && (
+          {companyName ? (
             <span className="hidden truncate text-sm font-semibold text-foreground sm:inline">{companyName}</span>
-          )}
+          ) : null}
         </Link>
-        <ChevronRight size={14} className="hidden shrink-0 text-border-strong sm:inline" />
+        {companyName ? (
+          <ChevronRight size={14} className="hidden shrink-0 text-border-strong sm:inline" />
+        ) : null}
         <span className="truncate text-sm font-semibold text-foreground">{pageLabel}</span>
       </div>
 
@@ -395,8 +419,8 @@ export default function PayrollShell({ children }) {
       <aside
         role="navigation"
         aria-label="Sidebar"
-        className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/10 bg-gradient-to-b from-brand-navy to-brand-navy-deep px-4 py-6 shadow-[0_8px_28px_rgba(8,43,69,0.28)] transition-[transform,width] duration-200 lg:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/10 bg-gradient-to-b from-brand-navy to-brand-navy-deep px-4 py-6 transition-[transform,width,box-shadow] duration-200 lg:translate-x-0 lg:shadow-[0_8px_28px_rgba(8,43,69,0.28)] ${
+          sidebarOpen ? "translate-x-0 shadow-[0_8px_28px_rgba(8,43,69,0.28)]" : "-translate-x-full"
         } ${collapsed ? "w-72 lg:w-20" : "w-72 lg:w-[272px]"}`}
       >
         <SidebarContent

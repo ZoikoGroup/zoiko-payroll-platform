@@ -13,7 +13,7 @@ PostgreSQL (MX_PG6_TEST_URL → a THROWAWAY database on 127.0.0.1, else skipped)
   - a reader holding the SHARED statutory-profiles table makes the upgrade fail fast
     (~5 s) with nothing applied; a re-run completes;
   - each table keeps its ZP-PRIV row-level-security policy;
-  - the real CLI (env.py) upgrades from 3880223bfaa0 and check_schema_drift passes."""
+  - the real CLI (env.py) upgrades from e7ec6c1933b4 and check_schema_drift passes."""
 
 import os
 import subprocess
@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 
-REVISION, PARENT = "efc56f3235e2", "3880223bfaa0"
+REVISION, PARENT = "efc56f3235e2", "e7ec6c1933b4"
 BACKEND = Path(__file__).resolve().parents[1]
 COLUMNS = (("payroll_mx_terminations", "indemnity_daily_salary"),
            ("payroll_mx_terminations", "indemnity_salary_evidence_ref"),

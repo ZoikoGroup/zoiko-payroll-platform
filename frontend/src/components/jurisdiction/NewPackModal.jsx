@@ -4,10 +4,10 @@ import { useToast } from "../../context/ToastContext";
 import { upsertCompliancePolicy } from "../../service/superAdminService";
 import { inputClass, labelClass, STATUS_OPTIONS, POLICY_STATUS_OPTIONS } from "./constants";
 
-export default function NewPackModal({ country, state, packType, stateOptions = [], onClose, onCreated }) {
+export default function NewPackModal({ country, state, packType, stateOptions = [], onClose, onCreated, defaultPackId }) {
   const { addToast } = useToast() || {};
   const [form, setForm] = useState({
-    packId: "", jurisdictionState: state || "", version: "1.0", status: "Draft",
+    packId: defaultPackId || "", jurisdictionState: state || "", version: "1.0", status: "Draft",
     effectiveFrom: "", effectiveTo: "", taxYear: "", taxRegime: "", currency: "",
     regulatoryAuthority: "", complianceCategory: "", complianceOwner: "", engineeringOwner: "", changeSummary: "",
     nextReviewDate: "", sourceReferences: "",
@@ -43,7 +43,7 @@ export default function NewPackModal({ country, state, packType, stateOptions = 
 
   return (
     <Modal title={`New ${packType === "tax" ? "Tax" : "Policy"} Pack`} onClose={onClose} maxWidth="max-w-2xl">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="col-span-2"><label className={labelClass}>Pack ID</label><input className={inputClass} value={form.packId} onChange={set("packId")} placeholder="e.g. IN-PAYROLL-2026-V1" /></div>
         <div>
           <label className={labelClass}>State (optional)</label>

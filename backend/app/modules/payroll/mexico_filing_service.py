@@ -62,12 +62,12 @@ def _s(value) -> Optional[str]:
 
 
 def guard(db: Session, org_id: int) -> None:
-    from app.modules.payroll import mexico_dormancy, service
+    from app.modules.payroll import mexico_dormancy, mexico_run_service
 
     if not mexico_dormancy.onboarding_enabled(db, org_id):
         raise MXRefuse("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, org_id)
-    if not mexico_dormancy.is_mexico(service._resolve_org_country(db, org_id)):
-        raise MXRefuse("MX_ORG_NOT_MEXICAN", "the organisation's payroll jurisdiction is not Mexico", org_id)
+    if not mexico_run_service._org_runs_mexico(db, org_id):
+        raise MXRefuse("MX_ORG_NOT_MEXICAN", "Mexico is not one of the organisation's payroll countries", org_id)
 
 
 def _filing_pilot_refusal(db: Session, org_id: int) -> None:

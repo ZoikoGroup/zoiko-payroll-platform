@@ -300,7 +300,8 @@ def test_service_health_labels_summary_stale_and_utc(db):
     fresh = _job_health("support_access_sweep", {"last_run_at": now - timedelta(seconds=30)}, now)
     stale = _job_health("support_access_sweep", {"last_run_at": now - timedelta(hours=2)}, now)
     failed = _job_health("dunning_sweep", {"last_run_at": now, "last_error": "boom"}, now)
-    assert (fresh["state"], stale["state"], failed["state"]) == ("healthy", "stale", "error")
+    assert (fresh["state"], stale["state"], failed["state"]) == ("healthy", "unknown", "error")
+    assert stale["detail"] and "stale" in stale["detail"].lower()
     assert fresh["last_run_at"].endswith("Z")
 
 

@@ -6,6 +6,7 @@ import {
 } from "../../../service/payrollService";
 import { card, useLoad } from "../../../components/jurisdiction/southAfrica/zaFormat";
 import { Table } from "../../../components/jurisdiction/southAfrica/zaShared";
+import ZAParallelCyclesSection from "./ZAParallelCyclesSection";
 
 // South Africa SARS filing (ZP-ZA-ENG-001 Phase 8; "ZA" — "SA" is Saudi Arabia).
 // Export-and-evidence only (ZA-002): nothing here talks to SARS. Declarations
@@ -354,6 +355,7 @@ export default function ZAFilingPanel() {
       <ReconciliationSection onRecorded={bump} />
       <CertificatesSection />
       <CoidaSection />
+      <ZAParallelCyclesSection />
     </div>
   );
 }

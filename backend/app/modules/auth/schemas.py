@@ -5,12 +5,32 @@ modules/auth/schemas.py
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+import re
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.modules.auth.models import UserRole
 
 
 # ── Auth ────────────────────────────────────────────────────────────────────
+
+REGISTRATION_PASSWORD_MIN_LENGTH = 12
+REGISTRATION_PASSWORD_RULE = (
+    f"Password must be at least {REGISTRATION_PASSWORD_MIN_LENGTH} characters and include "
+    "a letter, a number and a symbol."
+)
+
+
+def registration_password_error(password: str) -> Optional[str]:
+    """None when `password` meets the registration rule (the sign-up page
+    shows the same rule), else the reason."""
+    if (len(password or "") < REGISTRATION_PASSWORD_MIN_LENGTH
+            or not re.search(r"[A-Za-z]", password)
+            or not re.search(r"[0-9]", password)
+            or not re.search(r"[^A-Za-z0-9]", password)):
+        return REGISTRATION_PASSWORD_RULE
+    return None
+
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -21,7 +41,9 @@ class RegisterRequest(BaseModel):
     organization: str = Field(..., min_length=1, max_length=200)
     name: str = Field(..., min_length=1, max_length=200)
     email: EmailStr
-    password: str = Field(..., min_length=8, max_length=128)
+    # Password is required for email/password signup, omitted when signing up
+    # with Google (auth_provider="google", google_id set).
+    password: Optional[str] = Field(default=None, max_length=128)
     industry: Optional[str] = None
     company_type: Optional[str] = None
     tax_no: Optional[str] = None
@@ -33,6 +55,11 @@ class RegisterRequest(BaseModel):
     timezone: Optional[str] = "UTC"
     phone: Optional[str] = None
     terms_accepted: bool = Field(..., description="Whether the registration terms were accepted")
+    # Google Sign-Up: the Google subject id and provider marker. When set,
+    # password is not required and the account is created with
+    # auth_provider="google" (no usable password).
+    google_id: Optional[str] = None
+    auth_provider: Optional[str] = Field(default="email", description="'email' or 'google'")
     # Jurisdiction-aware tax/registration identifiers collected on the Register
     # Page once a country is selected — keyed by the field keys in
     # app/core/jurisdiction.py (gstin/pan/cin, ein/state_tax_id, crn/vat_number,
@@ -47,6 +74,32 @@ class RegisterRequest(BaseModel):
     # billing/entitlement decisions here — POST /billing/checkout remains
     # the only place a plan is actually committed.
     plan_code: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def _password_rule(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        error = registration_password_error(value)
+        if error:
+            raise ValueError(error)
+        return value
+
+    @field_validator("auth_provider")
+    @classmethod
+    def _auth_provider(cls, value: Optional[str]) -> str:
+        return value or "email"
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone_shape(cls, value: Optional[str]) -> Optional[str]:
+        # An IANA zone name such as "Asia/Kolkata", stored on the organisation.
+        value = (value or "").strip()
+        if not value:
+            return None
+        if len(value) > 64 or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*", value):
+            raise ValueError("Timezone must be an IANA time zone name such as Asia/Kolkata.")
+        return value
 
 
 class TrialRegisterRequest(BaseModel):

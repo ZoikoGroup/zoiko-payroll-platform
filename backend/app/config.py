@@ -60,6 +60,48 @@ class Settings(BaseSettings):
     # organisation can become South African and the ZA APIs refuse. Leave
     # UNSET in production until the ZA release gates are signed.
     ZA_TENANT_ONBOARDING_ENABLED: bool = False
+    # Japan dormancy switch (ZP-JP-ENG-001 Phase 1, japan_dormancy). False = no
+    # organisation can become Japanese. Leave UNSET in production until the
+    # JP release gates G0-G8 are signed.
+    JP_TENANT_ONBOARDING_ENABLED: bool = False
+    # Japan My Number vault (ZP-JP-ENG-001 Phase 2). JSON object mapping key
+    # version -> 32-byte key, e.g. {"1": "<32-byte key>"} from Secret Manager.
+    # Empty = encrypt/decrypt/fingerprint refuse, which is fine while Japan is
+    # dormant; add the key before Phase 5 writes any number.
+    JP_MY_NUMBER_KEYRING: str = ""
+    # Japan My Number duplicate-detection key (32 bytes, Secret Manager). Never
+    # rotated: fingerprints must stay comparable across keyring rotations.
+    JP_MY_NUMBER_FINGERPRINT_KEY: str = ""
+    # New Zealand dormancy switch (ZP-NZ-ENG-001 Phase 0, nz_dormancy). False =
+    # no organisation can become a New Zealand employer and the NZ APIs refuse.
+    # Leave UNSET in production until the NZ release gates G1-G7 are signed.
+    NZ_TENANT_ONBOARDING_ENABLED: bool = False
+    # Option 3 canary (ZP-NZ-ENG-001 Phase 9): comma-separated organisation ids that may use New Zealand
+    # while the flag above is off and New Zealand stays PLANNED for everyone else. Empty by default.
+    NZ_CANARY_ORG_IDS: str = ""
+    # New Zealand IRD-number vault (ZP-NZ-ENG-001 Phase 2, nz_ird_number). JSON
+    # object mapping key version -> 32-byte key from Secret Manager. Empty =
+    # encrypt/decrypt/fingerprint refuse, which is fine while NZ is dormant.
+    NZ_IRD_KEYRING: str = ""
+    # IRD-number duplicate-detection key (32 bytes, Secret Manager). Never
+    # rotated: fingerprints must stay comparable across keyring rotations.
+    NZ_IRD_FINGERPRINT_KEY: str = ""
+    # Poland dormancy switch (ZP-PL-ENG-001 Phase 0, poland_dormancy). False = no
+    # organisation can become Polish and the Poland APIs refuse. Leave UNSET in
+    # production until the PL release gates G1-G7 are signed.
+    PL_TENANT_ONBOARDING_ENABLED: bool = False
+    # Canary (ZP-PL-ENG-001 Phase 9, AC-PL-08): comma-separated organisation ids that may use Poland
+    # while the flag above is off and Poland stays PLANNED for everyone else. Empty by default.
+    PL_CANARY_ORG_IDS: str = ""
+    # Poland identifier vault (ZP-PL-ENG-001 Phase 2, pl_identifiers; spec §13):
+    # PESEL, employee NIP and the employer's ZUS contribution account (NRS) are
+    # encrypted at rest. JSON object mapping key version -> 32-byte key from
+    # Secret Manager. Empty = encrypt/decrypt/fingerprint refuse, which is fine
+    # while Poland is dormant. No fallback to PAYROLL_SECRET_KEY.
+    PL_IDENTIFIER_KEYRING: str = ""
+    # Poland duplicate-detection key (32 bytes, Secret Manager). Never rotated:
+    # fingerprints must stay comparable across keyring rotations.
+    PL_IDENTIFIER_FINGERPRINT_KEY: str = ""
     # HMAC key for Mexican identity tokens (RFC / CURP / NSS) on the statutory
     # profile (Phase 4b, Q7). Required outside development/test once Mexico is
     # enabled — there is NO derived fallback in production. Secret Manager.
@@ -75,6 +117,16 @@ class Settings(BaseSettings):
     # and idle/new-device re-authentication on refresh.
     PRIVILEGED_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     PRIVILEGED_REFRESH_IDLE_MINUTES: int = 30
+    # Refresh-token reuse grace window. 0 = OFF (default): any reuse of a
+    # rotated refresh token revokes the whole family (ZP-PRIV B08 reuse
+    # detection). A positive value lets a retry within that many seconds
+    # succeed instead - a deliberate weakening of B08; enable only with sign-off.
+    REFRESH_TOKEN_ROTATION_GRACE_SECONDS: int = 0
+    # Comma-separated CIDRs of reverse proxies / load balancers whose
+    # CF-Connecting-IP / X-Real-IP / X-Forwarded-For headers are trusted for
+    # the client address (core/correlation.extract_client_ip). Empty = trust
+    # none: the socket peer is the client address (headers are spoofable).
+    TRUSTED_PROXY_CIDRS: str = ""
     MFA_STEP_UP_MAX_AGE_SECONDS: int = 300
     MFA_CHALLENGE_TOKEN_MINUTES: int = 5
     # "enforce": privileged roles must enrol and pass TOTP at login.
@@ -125,6 +177,17 @@ class Settings(BaseSettings):
 
     # ── Public-facing links (e.g. "Send Template" form-fill emails) ────
     FRONTEND_URL: str = "http://localhost:5173"
+
+    # ── Google Sign-In (OAuth 2.0) ─────────────────────────────────────
+    # Client credentials from Google Cloud Console. Authorized redirect URIs
+    # must include the /auth/google/callback route for each environment.
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:5173/auth/google/callback"
+    # Google OAuth endpoints (stable, no env override needed).
+    GOOGLE_AUTH_URL: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    GOOGLE_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
+    GOOGLE_USERINFO_URL: str = "https://www.googleapis.com/oauth2/v2/userinfo"
 
     # ── Email / SMTP ──────────────────────────────────────────────────
     SMTP_HOST: str = ""
@@ -219,15 +282,15 @@ class Settings(BaseSettings):
     TOKEN_CLEANUP_SWEEP_INTERVAL_HOURS: int = 24
 
     # ── Entitlement enforcement rollout (modules/billing/entitlements.py) ──
-    # "off": require_entitlement/require_scope_limit always pass — today's
-    # behavior, safe default. "warn": run the real check but only log +
-    # record a BillingCommercialAuditEvent (ENTITLEMENT_WOULD_HAVE_BLOCKED)
-    # instead of raising, so orgs already over a limit surface in the audit
-    # log before anything actually blocks them. "enforce": raise
+    # "off": require_entitlement/require_scope_limit always pass. "warn"
+    # (default): run the real check but only record a
+    # BillingCommercialAuditEvent (ENTITLEMENT_WOULD_HAVE_BLOCKED) instead
+    # of raising, so orgs already over a limit surface in the audit log
+    # before anything actually blocks them. "enforce": raise
     # ForbiddenException as coded. Flipping "warn" -> "enforce" in
-    # production is a deliberate, separate follow-up — not bundled into the
-    # change that first wires these dependencies into routes.
-    BILLING_ENFORCEMENT_MODE: str = "off"
+    # production is a deliberate, separate step (set the env var) once the
+    # audit log shows no unexpected would-have-blocked events.
+    BILLING_ENFORCEMENT_MODE: str = "warn"
 
     # ── Dunning (modules/billing/dunning.py) — Part 9 ───────────────────
     # PLACEHOLDER defaults, not a confirmed Finance decision — the spec

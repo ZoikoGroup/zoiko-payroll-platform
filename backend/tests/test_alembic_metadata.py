@@ -210,6 +210,9 @@ def test_alembic_heads_is_single_head():
     # e1a3c5e7f9b2 (security events, alerts, machine clients, DSAR, data
     # region). Already applied to the shared database before M8, so it is
     # joined to M8 by merge c3e5a7b9d1f4 rather than re-parented - single head.
+    # b4d6f8a0c2e3 (organization_jurisdictions, country entitlement ledger)
+    # is the second child of the merge point; a final no-op merge migration
+    # joins the country ledger with main's current migration chain.
     # b4d8f2c6a9e3 (2026-10-21, Mexico mx_terminations_m9): terminations - one new
     # table + its RLS policy only, lock_timeout; single child of c3e5a7b9d1f4.
     # c6e1a9d4f2b7 (2026-10-21, Mexico mx_ptu_m10): PTU cycles + allocations - two
@@ -269,9 +272,39 @@ def test_alembic_heads_is_single_head():
     # + its RLS policy, nullable za_authority_type / za_evidence_ref on
     # payroll_court_ordered_deductions and za_journal_accounts on
     # payroll_za_employer_registrations; additive and guarded. Written on
-    # c15d5b87d6f5, re-parented (never applied) onto 92c67cab49fc - single head.
-    # efc56f3235e2 (2026-10-28, Mexico mx_decision_inputs_m21, sweep S1): seven nullable columns the
-    # decision options read (terminations, labour policies, statutory profiles); single child of 3880223bfaa0.
+    # c15d5b87d6f5, re-parented (never applied) onto 92c67cab49fc.
+    # 67c8d7454716 (2026-10-28, South Africa Phase 10): payroll_za_parallel_imports
+    # (TENANT) + payroll_za_parallel_differences (WORKER org) for the G6 parallel
+    # payroll cycles; additive and guarded, single child of 3880223bfaa0.
+    # rugvedh's country entitlement chain (d4c8f1a7b2e9 -> f8d2c6a0b4e1) also
+    # grows from 3880223bfaa0; merge c2e7a4f9b1d8 rejoins the two - single head.
+    # f686d5128f8a (2026-10-30, Japan Phase 2 jp_foundation): eight payroll_jp_*
+    # tables + their RLS policies, jp_calculation_snapshot and
+    # jp_approval_fingerprint; additive and guarded, re-parented onto the
+    # merge c2e7a4f9b1d8 when origin/main was merged into venu - single head.
+    # 668472e4eb72 (2026-10-30): organizations.timezone, single child of f686d5128f8a.
+    # 9c1d7e4a2b6f (2026-11-02, Japan P5): nullable payroll_runs.jp_payment_kind.
+    # a7c4e9d1b2f8 (2026-11-02, Japan P6): payroll_jp_work_conditions + RLS;
+    # single child of 9c1d7e4a2b6f - single head.
+    # a1a748b50902 (2026-11-02, Japan P6 correction): work calendar columns +
+    # payroll_jp_attendance_approvals; single child of a7c4e9d1b2f8.
+    # 41a1fafbbfdc (2026-11-02, Japan P8): run-exception approvals, obligations,
+    # year-end declarations and cases; single child of a1a748b50902.
+    # b8bd939fffca (2026-11-02, Japan P9): parallel cycles; child of 41a1fafbbfdc.
+    # 0e697c2388bf (2026-11-03, New Zealand P2): nz_foundation; child of b8bd939fffca.
+    # ac08988ecd3a (2026-11-04, New Zealand P5): nz_holidays_act; child of 0e697c2388bf.
+    # c6ea8c6c35ce (2026-11-04, New Zealand P6): nz_leave_pay; child of ac08988ecd3a.
+    # 9f1e2d3c4b5a and 7a3c9e1f2b4d add Google OAuth columns and pending state.
+    # 5739c5ccf50c merges the Google OAuth and New Zealand leave-pay heads.
+    # dd8a60634320 (New Zealand P8 nz_filings) is the single child of 5739c5ccf50c;
+    # a8cde2482ef0 (New Zealand P9 nz_parallel_cycles) is its single child;
+    # 1ee3bbde33bb (2026-11-05, Poland P2 pl_foundation) is the single child of a8cde2482ef0;
+    # e11c2c36df17 (Poland P6 pl_incapacity_episodes) is its single child;
+    # e75b9219e1f8 (Poland P8 pl_filing_settlement) is the single child of that;
+    # e7ec6c1933b4 (Poland P9 pl_parallel_cycles) is its single child.
+    # efc56f3235e2 (Mexico mx_decision_inputs_m21, sweep S1): seven nullable columns the
+    # decision options read (terminations, labour policies, statutory profiles); written on
+    # 3880223bfaa0, re-parented (never applied) onto e7ec6c1933b4 - single head.
     assert heads == ["efc56f3235e2"]
 
 
@@ -289,8 +322,8 @@ def test_real_alembic_script_directory_loads_single_head():
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
     """Branch points == revisions with more than one child. Reconciliation
-    adds exactly one new branchpoint (`2b3c4d5e6f70`, where Germany's
-    post-fork history diverges from `main`'s own); every other branchpoint
+    adds the known branchpoints where independently-developed histories fork
+    and later rejoin; every other branchpoint
     here is pre-existing on `main`'s own independently-evolved graph, plus
     the commercial billing fork points on `1dc04f15a9b7` and `a3f5c9d1b2e4`,
     and `d4e5f6a7c8b9` where venu's France/Ireland chain and main's
@@ -301,12 +334,23 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
     children = _children_map(revs)
     branchpoints = sorted(k for k, v in children.items() if len(v) > 1)
     assert branchpoints == [
-        "1dc04f15a9b7", "2b3c4d5e6f70", "40efec6cf8b7", "4b296dbd4181",
+        "1dc04f15a9b7", "2b3c4d5e6f70",
+        # 3880223bfaa0: main's South Africa P10 (67c8d7454716) and rugvedh's
+        # country entitlement merge (d4c8f1a7b2e9) both grow from it; rejoined
+        # by merge c2e7a4f9b1d8.
+        "3880223bfaa0",
+        "40efec6cf8b7", "4b296dbd4181",
         "737e7bfa2d77",
         # 998877665544: main's Singapore chain (c3d9e1f4a7b2) and venu's
         # 7c3e1a9d5f20 both grow from it; rejoined by merge 66072e2d80a9.
         "998877665544",
-        "a3f5c9d1b2e4", "b6c7d8e9f0a1", "c1f5a9d22e10",
+        "a3f5c9d1b2e4", "b6c7d8e9f0a1",
+        # b8bd939fffca: Google OAuth and New Zealand leave-pay both descend
+        # from Japan P9; merge 5739c5ccf50c rejoins their heads.
+        "b8bd939fffca", "c1f5a9d22e10",
+        # Country entitlement and main's M9 both branch from the prior merge;
+        # d4c8f1a7b2e9 reunites them.
+        "c3e5a7b9d1f4",
         # c7d2e9a4f1b6: Mexico's final mile (d3f8b2a6c1e9) and South Africa's
         # 447f57564983 both grow from it; rejoined by merge 92c67cab49fc.
         "c7d2e9a4f1b6",
@@ -326,7 +370,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 235   # + efc56f3235e2 (Mexico mx_decision_inputs_m21) + 3880223bfaa0 (South Africa Phase 9 overrides / deduction authority / journal accounts) + 92c67cab49fc (merge Mexico final mile with South Africa) + d3f8b2a6c1e9 (Mexico mx_final_mile_m20) + c15d5b87d6f5 (South Africa Phase 8 SARS payments/variances) + 447f57564983 (South Africa za_foundation) + c7d2e9a4f1b6 (Mexico mx_imss_rcv_authority_m19) + b9f3d5a1c7e2 (Mexico mx_overtime_dates_m18) + 8f90dde5f7b5 (NL SEPA file storage, payment channel) + 135dbbeb9818 (widen tax_slabs.rate_pct 7,4) + e4ba9fc8c17c (Brazil br_run_approval_fingerprint) + b9f3a7c2e5d1 (Brazil br_employee_m3) + 64424fd61652 (Brazil br_employer_m2) + a6ca8aab2043 (Brazil br_employer_reshape) + b3f7c1e9d5a2 (Mexico mx_journal_m13) + a1d5e8c2f7b4 (Mexico mx_payments_m12) + f84626be0cb1 (NL expat recorded_by) + a8e4c1f7d3b5 (Mexico mx_cfdi_system_concepts_m17) + f6c2a9d1e4b7 (Mexico mx_onboarding_m16) + e5b1d8f3a7c2 (Mexico mx_transfer_m15) + d2a7c9e4f1b8 (Mexico mx_pilot_m14) + e7a2c4f9b1d6 (Mexico mx_annual_adjustment_m11) + c6e1a9d4f2b7 (Mexico mx_ptu_m10) + b4d8f2c6a9e3 (Mexico mx_terminations_m9) + c3e5a7b9d1f4 (merge ZP-PRIV with Mexico M8) + ZP-PRIV a7c3e91f2b60, b2f4d6a8c0e1, c5e7a9b1d3f4, d7f9b1c3e5a6, e1a3c5e7f9b2 + a6d2f9c4b8e1 (Mexico mx_benefits_m8) + f5c1a8d3e9b2 (Mexico mx_corrections_m7) + e3b9c2d7f4a1 (Mexico mx_authorities_m6) + d8b3e5f1a2c7 (Mexico mx_cfdi_m5) + c4f7a2d9e6b1 (Mexico mx_run_m4) + b7a1c9e3d5f2 (Brazil Phase 0 foundation) + 8b2f6d4e1a93 (Mexico mx_employee_m3) + 6e4a1d9c3f27 (Mexico mx_employer_m2) + 5d2c8f1a7b3e (Mexico mx_foundation_m1) + f4b8d2a6c9e1 (HK pre-transition wage overrides) + e3a9c1f7b2d4 (HK contractual overtime) + d1e5a7c3b9f2 (auth audit / immutable audit rows) + 08f0f142574e (reconcile partial NL schema) + Netherlands M8 3b4e5c6d7e8f + M9 4c5d6e7f8a9b + 8b14824fb575 (HK launch readiness) + 7 Netherlands M1-M7 (43662178315b, ac68f3723174, 774eeaf9b33c, 972ecd8c1dba, 1080702411b1, 2ad71ebff6b5, 2f905bb1c296) + 6b5a4c3d2e1f (CH Step 14 ELM payload column) + f898189cb4e3 (merge HK convergence / venu chain) + 2d0cdeeeecc4 (HK uniqueness) + c5981cbcbe13 (attendance gate) + 376bb8637603 (CH Step 5 versioned entity profile + idempotency) + 917a54ed2347 (Italy P2 ledgers) + c9d8e7f6a5b4 (Italy F24 causale catalog) + d7e6f5a4b3c2 (Italy LUL registered content) + cd62503afe26 (Hong Kong) + 3baddbaa011a (Switzerland jurisdiction support) + b08f04497195 (Saudi Arabia foundation) + c7d3e8f1a2b4 (Saudi Arabia approval fingerprint)
+    assert len(revs) == 259   # + efc56f3235e2 (Mexico mx_decision_inputs_m21, child of e7ec6c1933b4) + e7ec6c1933b4 (Poland P9 pl_parallel_cycles, child of e75b9219e1f8)
 
 
 def test_germany_head_chain_wiring_is_intact():

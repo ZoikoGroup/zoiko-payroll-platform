@@ -278,7 +278,8 @@ def test_nl_field_patterns_accept_real_format_only():
 
 
 def test_nl_stays_out_of_registration_countries():
-    assert all(c.lower() != "netherlands" for c in REGISTRATION_COUNTRIES)
+    # Offered at registration (owner decision 2026-10-29), by name.
+    assert "Netherlands" in REGISTRATION_COUNTRIES
     assert "NL" not in REGISTRATION_COUNTRIES
 
 

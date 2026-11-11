@@ -12,13 +12,17 @@ Org admin: /auth/admin/users (list/create/update/deactivate/reset)
 
 import json
 import logging
+import secrets
+from hmac import compare_digest
+from urllib.parse import urlencode, urlsplit
 
 from pydantic import BaseModel
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core.google_oauth import AUTHORIZATION_ENDPOINT
 from app.core.dependencies import get_current_org_admin, get_current_user, oauth2_scheme, require_recent_mfa
 from app.core.exceptions import BadRequestException
 from app.core.rate_limiter import limiter
@@ -118,6 +122,126 @@ def _action_form_page(title: str, token: str, action_path: str) -> HTMLResponse:
 @limiter.limit("10/minute")
 def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
     return service.login_user(db, data.email, data.password, request=request)
+
+
+# ── Google Sign-In (server-side OAuth 2.0 code flow) ──────────────────
+
+GOOGLE_STATE_COOKIE = "zoiko_google_oauth_state"
+GOOGLE_STATE_TTL_SECONDS = 600
+
+
+def _google_auth_url(mode: str, state: str) -> str:
+    """Build Google's consent URL with a per-flow CSRF state value."""
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        raise BadRequestException("Google Sign-In is not configured on this server.")
+    if settings.GOOGLE_AUTH_URL != AUTHORIZATION_ENDPOINT:
+        raise BadRequestException("Google Sign-In has an invalid authorization endpoint.")
+
+    params = {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    }
+    return AUTHORIZATION_ENDPOINT + "?" + urlencode(params)
+
+
+def _google_start_response(mode: str) -> RedirectResponse:
+    state = secrets.token_urlsafe(32)
+    response = RedirectResponse(_google_auth_url(mode, state), status_code=302)
+    response.set_cookie(
+        GOOGLE_STATE_COOKIE,
+        f"{mode}:{state}",
+        max_age=GOOGLE_STATE_TTL_SECONDS,
+        httponly=True,
+        secure=urlsplit(settings.GOOGLE_REDIRECT_URI).scheme.lower() == "https",
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+def _google_state_error_response() -> RedirectResponse:
+    error_url = settings.FRONTEND_URL.rstrip("/") + "/login?" + urlencode(
+        {"error": "google_state_invalid"}
+    )
+    response = RedirectResponse(error_url, status_code=302)
+    response.delete_cookie(GOOGLE_STATE_COOKIE, path="/")
+    return response
+
+
+def _clear_google_state(response: RedirectResponse) -> RedirectResponse:
+    response.delete_cookie(GOOGLE_STATE_COOKIE, path="/")
+    return response
+
+
+@router.get("/google/login", summary="Start Google Sign-In (existing account → session)")
+def google_login(request: Request):
+    """Redirects the user to Google's OAuth consent screen in login mode."""
+    return _google_start_response("login")
+
+
+@router.get("/google/register", summary="Start Google Sign-In (no account yet → registration page)")
+def google_register(request: Request):
+    """Redirects the user to Google's OAuth consent screen in register mode.
+    After consent, if no Zoiko account exists for the Google identity, the
+    callback sends the user to /register?pending=<token> to finish signup."""
+    return _google_start_response("register")
+
+
+@router.get("/google/callback", summary="Google OAuth callback (session or pending registration)")
+def google_callback(request: Request, code: str = Query(...), state: str = Query(...),
+                    db: Session = Depends(get_db)):
+    """Google redirects here after consent. Exchange the code, then either
+    issue a session (existing account) or create a pending registration and
+    send the user to /register?pending=<token> (new account)."""
+    state_cookie = request.cookies.get(GOOGLE_STATE_COOKIE, "")
+    cookie_mode, separator, expected_state = state_cookie.partition(":")
+    if (
+        not separator
+        or cookie_mode not in {"login", "register"}
+        or not compare_digest(state, expected_state)
+    ):
+        return _google_state_error_response()
+    mode = cookie_mode
+    try:
+        result = service.google_sign_in(db, code, request=request, mode=mode)
+    except UnauthorizedException:
+        # Send the user back to the login page with a friendly error.
+        error_url = settings.FRONTEND_URL.rstrip("/") + "/login?" + urlencode({"error": "google_sign_in_failed"})
+        return _clear_google_state(RedirectResponse(error_url, status_code=302))
+
+    if result["action"] == "session":
+        session = result["session"]
+        callback_url = (
+            settings.FRONTEND_URL.rstrip("/")
+            + "/auth/google/callback?"
+            + urlencode({"access_token": session["access_token"], "refresh_token": session["refresh_token"]})
+        )
+        return _clear_google_state(RedirectResponse(callback_url, status_code=302))
+
+    # New Google identity: send to registration page pre-filled via the
+    # pending token (never auto-create an account during Google sign-in).
+    register_url = (
+        settings.FRONTEND_URL.rstrip("/")
+        + "/register?"
+        + urlencode({"pending": result["token"], "email": result["email"]})
+    )
+    return _clear_google_state(RedirectResponse(register_url, status_code=302))
+
+
+@router.get("/google/pending/{token}", summary="Get a pending Google profile (pre-fill registration)")
+def google_pending(token: str, db: Session = Depends(get_db)):
+    """Returns the Google profile held under a pending token without consuming
+    it. The token is consumed only when registration succeeds. 404 when
+    missing/expired/consumed. Used by /register to pre-fill name + email."""
+    profile = service.get_google_pending(db, token)
+    if profile is None:
+        raise NotFoundException("Google pending registration", "token")
+    return profile
 
 
 @router.post("/register", response_model=LoginResponse, summary="Register a new organization")

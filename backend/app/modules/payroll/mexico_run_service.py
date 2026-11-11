@@ -94,14 +94,21 @@ def _audit(db, **kw):
 
 # ── 1. Guard (plan §1) ───────────────────────────────────────────────────────
 
-def guard(db: Session, employee, run=None) -> None:
-    from app.modules.payroll import service
+def _org_runs_mexico(db: Session, org_id) -> bool:
+    from app.modules.billing.jurisdiction_entitlement import org_runs_country
 
+    return org_runs_country(db, org_id, "MX")
+
+
+def guard(db: Session, employee, run=None) -> None:
     org_id = getattr(employee, "organization_id", None)
     if not mexico_dormancy.onboarding_enabled(db, org_id):
         raise MXBlock("MX_DORMANT", mexico_dormancy.DORMANT_MESSAGE, org_id)
-    if not mexico_dormancy.is_mexico(service._resolve_org_country(db, org_id)):
-        raise MXBlock("MX_ORG_NOT_MEXICAN", "the employee's organisation payroll jurisdiction is not Mexico", org_id)
+    # Multi-country orgs: Mexico need not be the org's default country, only
+    # one of its countries (billing/jurisdiction_entitlement.py) — each
+    # employee is calculated by their own country's engine.
+    if not _org_runs_mexico(db, org_id):
+        raise MXBlock("MX_ORG_NOT_MEXICAN", "Mexico is not one of the employee's organisation payroll countries", org_id)
     if run is not None and run.organization_id != org_id:
         raise MXBlock("MX_RUN_ORG_MISMATCH", "the run belongs to another organisation", org_id)
     if run is not None and (run.mx_run_type or "ORDINARY") not in RUN_TYPES:

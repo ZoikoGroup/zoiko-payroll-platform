@@ -310,11 +310,62 @@ function SouthAfrica() {
   );
 }
 
+function Japan() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#fff" />
+      <circle cx="12" cy="8" r="4.8" fill="#BC002D" />
+    </svg>
+  );
+}
+
+function Poland() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="8" fill="#fff" />
+      <rect y="8" width="24" height="8" fill="#DC143C" />
+    </svg>
+  );
+}
+
+function SaudiArabia() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#006C35" />
+      <path d="M5 5.2 H19" stroke="#fff" strokeWidth="1.1" strokeLinecap="round" />
+      <path d="M6 8 H18" stroke="#fff" strokeWidth="0.9" strokeLinecap="round" />
+      <path d="M5 11.5 H15" stroke="#fff" strokeWidth="1" strokeLinecap="round" />
+      <path d="M16.5 11.8 L18.8 11.2" stroke="#fff" strokeWidth="0.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function NewZealand() {
+  const star = (cx, cy, r) => {
+    const points = Array.from({ length: 10 }, (_, i) => {
+      const radius = i % 2 === 0 ? r : r * 0.42;
+      const angle = (Math.PI / 5) * i - Math.PI / 2;
+      return `${(cx + radius * Math.cos(angle)).toFixed(2)},${(cy + radius * Math.sin(angle)).toFixed(2)}`;
+    }).join(" ");
+    return <polygon points={points} fill="#C8102E" stroke="#fff" strokeWidth="0.35" />;
+  };
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#012169" />
+      <path d="M0,0 L12,8 M12,0 L0,8" stroke="#fff" strokeWidth="1.6" />
+      <path d="M0,0 L12,8 M12,0 L0,8" stroke="#C8102E" strokeWidth="0.6" />
+      <path d="M6,0 V8 M0,4 H12" stroke="#fff" strokeWidth="2.4" />
+      <path d="M6,0 V8 M0,4 H12" stroke="#C8102E" strokeWidth="1.4" />
+      {star(18, 12.5, 1.3)}{star(16.2, 7, 1.1)}{star(20.2, 6, 1.1)}{star(18, 2.8, 1.0)}
+    </svg>
+  );
+}
+
 const FLAGS = {
-  IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
+  IN: India, US: UnitedStates, UK: UnitedKingdom, GB: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
 PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
-  NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica,
+  NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica, JP: Japan, NZ: NewZealand, PL: Poland, SA: SaudiArabia,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {

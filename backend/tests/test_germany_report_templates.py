@@ -400,7 +400,7 @@ def test_de_payroll_summary_listed_for_de_org_not_other_jurisdictions(db, organi
     _build_de_payroll_summary_template(db, creator, approver, key="DE-SUMMARY-LIST")
 
     available = service.list_available_reports_for_org(db, organization.id, "2026")
-    assert available == [{"reportType": "DE_PAYROLL_SUMMARY", "name": "Germany Payroll Summary"}]
+    assert available == [{"reportType": "DE_PAYROLL_SUMMARY", "name": "Germany Payroll Summary", "country": "DE"}]
 
     # A different reporting year (matching the India precedent in
     # test_report_templates.py) sees nothing.

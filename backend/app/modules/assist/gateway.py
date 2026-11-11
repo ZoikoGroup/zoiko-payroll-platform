@@ -214,6 +214,12 @@ def build_answer_text(intent_id: str, tool_result: dict | None, run_summary: dic
     """Compose a clear, governed answer from a deterministic tool result."""
     if not tool_result or not tool_result.get("found"):
         reason = (tool_result or {}).get("reason") or "No payroll record is visible in your authorized scope."
+        if reason == "Need two payroll runs to compare.":
+            return (
+                "Comparing pay periods needs at least two payroll runs, and only one is visible in your "
+                "authorized scope so far. Once the next pay period has been run, ask me again. Meanwhile I can "
+                "summarize the current run's status, readiness and exceptions."
+            )
         if reason == "No visible payroll run.":
             reason = (
                 "I don't see any payroll run in your authorized scope yet. "
@@ -412,11 +418,15 @@ def deterministic_answer(
         }
 
     if tool_result and tool_result.get("unsupported_jurisdiction"):
+        from app.modules.assist.public_registry import live_country_names
+
         country = tool_result["unsupported_jurisdiction"]
         return {
             "answer": (
-                f"Approved guidance is not currently available for {country} for this period. "
-                "I don't substitute another jurisdiction's rule for one that isn't covered."
+                f"Zoiko Payroll doesn't currently run payroll in {country}, so I don't have approved "
+                "guidance for it — and I don't substitute another country's rules. "
+                f"Payroll is live today in: {', '.join(live_country_names())}. "
+                "To ask about expansion plans, contact our sales team or book a demo."
             ),
             "facts": [],
             "inferences": [],
@@ -452,8 +462,13 @@ def deterministic_answer(
     kb_requested = intent_id in ("kb.answer", "explain.field")
     if kb_requested:
         if knowledge_items:
+            from app.modules.assist.knowledge import live_country_note
+
             top = knowledge_items[0]
             answer = f"{top.get('summary')}\n\n{top.get('body')}"
+            note = live_country_note(user_text)
+            if note:
+                answer = f"{note}\n\n{answer}"
             sources = [
                 {"evidence_id": 0, "title": top.get("title"), "source_type": "KNOWLEDGE", "authority": top.get("authority")}
             ]

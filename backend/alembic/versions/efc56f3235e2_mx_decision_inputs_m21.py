@@ -1,7 +1,7 @@
 """mx_decision_inputs_m21: the inputs some decision options read (Mexico sweep S1)
 
 Revision ID: efc56f3235e2
-Revises: 3880223bfaa0
+Revises: e7ec6c1933b4
 Create Date: 2026-10-28
 
 Mexico engineering sweep S1 (decisions as configuration). Seven NULLABLE columns, each
@@ -32,7 +32,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "efc56f3235e2"
-down_revision: Union[str, Sequence[str], None] = "3880223bfaa0"
+down_revision: Union[str, Sequence[str], None] = "e7ec6c1933b4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -5,9 +5,11 @@ import {
   getEmployees, getLeaveRecords, getPayrollLeaveRequests, createPayrollLeaveRequest, reviewPayrollLeaveRequest,
   getPayrollHolidays, upsertPayrollHolidays, deletePayrollHoliday,
 } from "../../../service/payrollService";
+import { getMySubscription } from "../../../service/billingService";
 import LeaveRequestsTab from "./LeaveRequestsTab";
 import HolidaysTab from "./HolidaysTab";
 import LeaveBalancesTab from "./LeaveBalancesTab";
+import { NZ_FAMILY_VIOLENCE, NZ_LEAVE_REQUEST_TYPES } from "../../../components/jurisdiction/new_zealand/nzOrgOptions";
 
 const TYPE_PILL = {
   paid:    "bg-info/10 text-info border-info/20",
@@ -122,6 +124,17 @@ function LeaveTypeTab({ typeKey, typeInfo, requests, allocations, employees, onA
             </button>
           )}
         </div>
+        {statusFilter !== "all" || search !== "" ? (
+          <button
+            onClick={() => {
+              setStatusFilter("all");
+              setSearch("");
+            }}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3.5 py-2.5 text-xs font-medium text-foreground-secondary hover:bg-surface-muted transition-colors"
+          >
+            <X size={13} className="shrink-0" /> Clean filters
+          </button>
+        ) : null}
       </div>
 
       <div className="bg-surface border border-border rounded-[18px] overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -223,8 +236,9 @@ export default function PayrollLeavesPage() {
   requestsRef.current = requests;
   const [activeTab, setActiveTab] = useState("requests");
 
-  // Company holidays — the real backend list (payroll_holidays), the same
-  // one Attendance's Bulk Generation "Exclude Holidays" reads from.
+  // Company holidays — filtered by the org's jurisdiction country so a UK org
+  // doesn't show Indian holidays just because it has an Indian employee.
+  const [orgCountry, setOrgCountry] = useState("");
   const [holidays, setHolidays] = useState([]);
   const [holidaysLoading, setHolidaysLoading] = useState(false);
 
@@ -250,12 +264,19 @@ export default function PayrollLeavesPage() {
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   }, [holidays]);
 
-  const jurisdictionCountry = allHolidays[0]?.country || "";
+  const jurisdictionCountry = orgCountry || allHolidays[0]?.country || "";
 
   const loadHolidays = useCallback(async () => {
     setHolidaysLoading(true);
     try {
-      const data = await getPayrollHolidays(currentYear);
+      // Determine the org's jurisdiction country from the subscription's
+      // primary country so we only show that country's holidays.
+      const subData = await getMySubscription();
+      const primaryCountry = (subData?.country_usage?.countries || [])
+        .find((c) => c.isPrimary)?.code || "";
+      setOrgCountry(primaryCountry);
+
+      const data = await getPayrollHolidays(currentYear, primaryCountry || undefined);
       const list = Array.isArray(data) ? data : data?.items || data?.holidays || [];
       setHolidays(list);
     } catch {
@@ -349,6 +370,9 @@ export default function PayrollLeavesPage() {
     setApplyForm({ employeeId: "", leaveType: "paid", startDate: "", endDate: "", reason: "" });
   }
 
+  const applyEmployee = employees.find((emp) => String(emp.id) === String(applyForm.employeeId));
+  const applyIsNz = (applyEmployee?.countryCode || applyEmployee?.country) === "NZ";
+
   async function handleSubmitLeave() {
     if (!applyForm.employeeId) { addToast?.("Select an employee.", "error"); return; }
     if (!applyForm.startDate) { addToast?.("Select a start date.", "error"); return; }
@@ -362,13 +386,14 @@ export default function PayrollLeavesPage() {
         leaveType: applyForm.leaveType,
         startDate: applyForm.startDate,
         endDate: applyForm.endDate,
-        reason: applyForm.reason,
+        // New Zealand family violence leave never records a reason (NZ-023).
+        reason: applyForm.leaveType === NZ_FAMILY_VIOLENCE ? undefined : applyForm.reason,
       });
       setRequests((prev) => [created, ...prev]);
       addToast?.("Leave request submitted.", "success");
       closeApplyModal();
-    } catch {
-      addToast?.("Failed to submit leave request.", "error");
+    } catch (err) {
+      addToast?.(err?.message || "Failed to submit leave request.", "error");
     } finally {
       setSubmitting(false);
     }
@@ -585,7 +610,12 @@ export default function PayrollLeavesPage() {
                 <label className="text-[11px] font-bold text-foreground-muted uppercase tracking-widest mb-1.5 block">Employee</label>
                 <select
                   value={applyForm.employeeId}
-                  onChange={(e) => setApplyForm((f) => ({ ...f, employeeId: e.target.value }))}
+                  onChange={(e) => {
+                    const picked = employees.find((emp) => String(emp.id) === e.target.value);
+                    const nz = (picked?.countryCode || picked?.country) === "NZ";
+                    // New Zealand employees use the Holidays Act leave types.
+                    setApplyForm((f) => ({ ...f, employeeId: e.target.value, leaveType: nz ? "annual" : "paid" }));
+                  }}
                   className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200 cursor-pointer"
                 >
                   <option value="">Select employee…</option>
@@ -599,11 +629,13 @@ export default function PayrollLeavesPage() {
               <div>
                 <label className="text-[11px] font-bold text-foreground-muted uppercase tracking-widest mb-1.5 block">Leave Type</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {LEAVE_TYPES.map((lt) => (
+                  {(applyIsNz ? NZ_LEAVE_REQUEST_TYPES : LEAVE_TYPES).map((lt) => (
                     <button
                       key={lt.key}
                       type="button"
-                      onClick={() => setApplyForm((f) => ({ ...f, leaveType: lt.key }))}
+                      onClick={() => setApplyForm((f) => ({
+                        ...f, leaveType: lt.key, reason: lt.key === NZ_FAMILY_VIOLENCE ? "" : f.reason,
+                      }))}
                       className={`flex items-center justify-center gap-2 rounded-[12px] border-2 py-2.5 text-[13px] font-semibold transition-all duration-200 ${
                         applyForm.leaveType === lt.key
                           ? "border-primary bg-primary/10 text-primary shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
@@ -616,7 +648,9 @@ export default function PayrollLeavesPage() {
                 </div>
                 {/* Pay impact hint */}
                 <p className={`mt-1.5 text-[11px] font-semibold ${applyForm.leaveType === "unpaid" ? "text-error" : "text-primary"}`}>
-                  {applyForm.leaveType === "unpaid" ? "No pay — will be deducted from salary" : "Full pay — no salary deduction"}
+                  {applyForm.leaveType === "unpaid" ? "No pay — will be deducted from salary"
+                    : applyIsNz ? "Paid at the Holidays Act rate — calculated for each approved leave event"
+                      : "Full pay — no salary deduction"}
                 </p>
               </div>
 
@@ -642,7 +676,13 @@ export default function PayrollLeavesPage() {
                 </div>
               </div>
 
-              {/* Reason */}
+              {/* Reason (never for New Zealand family violence leave) */}
+              {applyForm.leaveType === NZ_FAMILY_VIOLENCE ? (
+                <p className="rounded-[12px] border border-border bg-surface-muted px-3.5 py-2.5 text-[12px] text-foreground-muted"
+                  data-testid="nz-fv-no-reason">
+                  Family violence leave never records a reason. Only people with the restricted-access permission can see it.
+                </p>
+              ) : (
               <div>
                 <label className="text-[11px] font-bold text-foreground-muted uppercase tracking-widest mb-1.5 block">Reason</label>
                 <input
@@ -653,6 +693,7 @@ export default function PayrollLeavesPage() {
                   className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200"
                 />
               </div>
+              )}
 
               {/* Actions */}
               <div className="flex gap-2 pt-1">

@@ -33,7 +33,7 @@
 
         <!-- Body -->
         <tr><td class="zk-px" style="padding:28px 32px 8px 32px;">
-          <h1 class="zk-h1" style="color:#0b1f3a; font-size:20px; font-weight:bold; margin:0 0 16px 0;">{{heading}}</h1>
+          {{#if heading}}<h1 class="zk-h1" style="color:#0b1f3a; font-size:20px; font-weight:bold; margin:0 0 16px 0;">{{heading}}</h1>{{/if}}
           {{body_slot}}
         </td></tr>
 

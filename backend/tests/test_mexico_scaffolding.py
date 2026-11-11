@@ -72,12 +72,6 @@ def test_mx_schema_patterns_are_format_only():
     assert not reg.match("Y12345671011")             # 12 chars
 
 
-def test_mx_not_in_enterprise_supported_countries():
-    from app.modules.payroll.enterprise.service import SUPPORTED_COUNTRY_CODES
-
-    assert "MX" not in SUPPORTED_COUNTRY_CODES
-
-
 def test_tax_schema_endpoint_lists_mexico(db):
     with _http(db, None) as c:
         r = c.get("/api/jurisdictions/tax-schemas")
@@ -213,6 +207,12 @@ def test_other_hook_modules_unchanged():
         "BR": "app.modules.payroll.brazil_service",
         # South Africa (ZP-ZA-ENG-001) Phase 5 – fail-closed module.
         "ZA": "app.modules.payroll.south_africa_service",
+        # Japan (ZP-JP-ENG-001) Phase 5 – all 13 hooks, fail-closed module.
+        "JP": "app.modules.payroll.japan_service",
+        # New Zealand (ZP-NZ-ENG-001) Phase 4 – all 13 hooks, fail-closed module.
+        "NZ": "app.modules.payroll.new_zealand_service",
+        # Poland (ZP-PL-ENG-001) Phase 4 – all 13 hooks, fail-closed module.
+        "PL": "app.modules.payroll.poland_service",
     }
 
 

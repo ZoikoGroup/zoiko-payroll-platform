@@ -16,8 +16,36 @@ import RunsTable from "./RunsTable";
 import ApproveRunButton from "./ApproveRunButton";
 import AttendanceReadinessPanel from "./AttendanceReadinessPanel";
 import { CALCULATION_MODE_LABELS, getContributionColumns } from "../../../service/payrollService";
+import CountryTotalsTable from "../../../components/payroll/CountryTotalsTable";
+import { getCurrencyForJurisdiction } from "../../../utils/currency";
 
-function Step1Configure({ config, setConfig, onNext, calculationMode, employees, selectedEmployees, toggleEmployee, setSelectedEmployees }) {
+// Per-country preview totals (POST /runs/preview totalsByCountry) for a run
+// that pays employees in more than one country — `totals` adds currencies
+// together there, so only these per-country figures are shown.
+function previewCountryColumns(isSimple) {
+  return [
+    { key: "count", label: "Employees" },
+    { key: "totalGross", label: "Gross", money: true, accent: "text-primary" },
+    ...(!isSimple ? [
+      { key: "totalTax", label: "Taxes", money: true, accent: "text-error" },
+      { key: "totalContributions", label: "Contributions", money: true, accent: "text-category-teal" },
+    ] : []),
+    { key: "totalNet", label: "Net Pay", money: true, accent: "text-info" },
+  ];
+}
+
+function MultiCountryTotals({ totalsByCountry, isSimple }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-[12px] text-foreground-muted">
+        This run pays employees in {totalsByCountry.length} countries — each total is in that country&apos;s own currency and they are not added together.
+      </p>
+      <CountryTotalsTable rows={totalsByCountry} columns={previewCountryColumns(isSimple)} />
+    </div>
+  );
+}
+
+function Step1Configure({ config, setConfig, onNext, calculationMode, employees, selectedEmployees, toggleEmployee, setSelectedEmployees, onBackToRuns }) {
   const isSimple = calculationMode === "simple";
   const allSelected = employees.length > 0 && selectedEmployees.length === employees.length;
   const [employeeFilterMode, setEmployeeFilterMode] = useState(() => (allSelected ? "all" : "individual"));
@@ -151,7 +179,16 @@ function Step1Configure({ config, setConfig, onNext, calculationMode, employees,
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-0.5 text-[10px] font-bold text-primary">✓ Ready</span>
       </div>
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between pt-1">
+        {onBackToRuns ? (
+          <button
+            type="button"
+            onClick={onBackToRuns}
+            className="flex items-center gap-2 border border-border bg-surface-muted rounded-[12px] px-4 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-error hover:text-error"
+          >
+            <ArrowLeft size={14} /> Back to Runs
+          </button>
+        ) : <div />}
         <button
           onClick={onNext}
           disabled={selectedEmployees.length === 0}
@@ -166,7 +203,23 @@ function Step1Configure({ config, setConfig, onNext, calculationMode, employees,
 
 function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEmployees, previewData, totals, loading, onNext, onBack, onRecalculate, onLoadPreview, fmtCurrency, calculationMode, jurisdictionCountry, attendance }) {
   const isSimple = calculationMode === "simple";
-  const contributionColumns = useMemo(() => getContributionColumns(jurisdictionCountry), [jurisdictionCountry]);
+  const totalsByCountry = useMemo(() => previewData?.totalsByCountry || [], [previewData]);
+  const isMultiCountry = totalsByCountry.length > 1;
+  // Each preview row is formatted in its employee's own country's currency.
+  // Preview rows may not carry a country, so it falls back to the employee
+  // record's country; the currency comes from the preview's totalsByCountry.
+  const currencyForEmployee = useMemo(() => {
+    const currencyByCountry = Object.fromEntries(
+      totalsByCountry.filter((r) => r.country && r.currency).map((r) => [String(r.country).toUpperCase(), r.currency]),
+    );
+    const countryById = Object.fromEntries(
+      employees.map((emp) => [String(emp.id), emp.countryCode || emp.country_code || emp.country]),
+    );
+    return (previewRow) => {
+      const country = previewRow.country || previewRow.countryCode || countryById[String(previewRow.employeeId)];
+      return country ? currencyByCountry[String(country).toUpperCase()] : undefined;
+    };
+  }, [employees, totalsByCountry]);
   // Deliberately NOT filtered down to selectedEmployees — every employee the
   // preview was run for stays visible here so unchecking someone doesn't
   // make their row vanish (which would make the checkboxes impossible to
@@ -177,6 +230,7 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
       return previewData.employees.map((e) => ({
         id: e.employeeId,
         name: e.employeeName,
+        country: e.country || e.countryCode || jurisdictionCountry,
         department: e.department,
         attendanceStatus: e.attendanceStatus,
         monthlyGross: e.monthlyGross,
@@ -187,7 +241,8 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
         payableDays: e.payableDays,
         totalWorkingDays: e.totalWorkingDays,
         prorated: e.prorated,
-        contribComponents: contributionColumns.map((col) => ({
+        currency: currencyForEmployee(e),
+        contribComponents: getContributionColumns(e.country || e.countryCode || jurisdictionCountry).map((col) => ({
           id: col.id, label: col.label, value: e[col.previewField] ?? 0,
         })),
         monthlyExtra: 0,
@@ -195,15 +250,18 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
     }
     return employees.map((emp) => ({
       ...emp,
+      country: emp.countryCode || emp.country_code || emp.country || jurisdictionCountry,
+      currency: getCurrencyForJurisdiction(emp.countryCode || emp.country_code || emp.country || jurisdictionCountry)?.code,
       monthlyGross: Number(emp.ctc) / 12,
       monthlyTax: 0,
       monthlyContributions: 0,
       monthlyNet: Number(emp.ctc) / 12,
       taxSlabRate: "—",
-      contribComponents: contributionColumns.map((col) => ({ id: col.id, label: col.label, value: 0 })),
+      contribComponents: getContributionColumns(emp.countryCode || emp.country_code || emp.country || jurisdictionCountry)
+        .map((col) => ({ id: col.id, label: col.label, value: 0 })),
       monthlyExtra: 0,
     }));
-  }, [employees, previewData, contributionColumns]);
+  }, [employees, previewData, jurisdictionCountry, currencyForEmployee]);
 
   return (
     <div className="space-y-4">
@@ -215,7 +273,10 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
         {loading && <div className="flex items-center gap-2 text-[13px] text-foreground-muted"><Loader2 size={13} className="animate-spin text-info" /> Loading...</div>}
       </div>
 
-      <div className={`grid gap-3 ${isSimple ? "grid-cols-3" : "grid-cols-5"}`}>
+      {isMultiCountry ? (
+        <MultiCountryTotals totalsByCountry={totalsByCountry} isSimple={isSimple} />
+      ) : (
+      <div className={`grid gap-3 ${isSimple ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5"}`}>
         {[
           { label: "Employees", value: totals.count, accent: "text-foreground" },
           { label: "Total Gross", value: fmtCurrency(totals.totalGross), accent: "text-primary" },
@@ -231,6 +292,7 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
           </div>
         ))}
       </div>
+      )}
 
       {attendance && (
         <AttendanceReadinessPanel
@@ -276,9 +338,10 @@ function Step2Review({ employees, selectedEmployees, toggleEmployee, toggleAllEm
   );
 }
 
-function Step3Approve({ config, totals, onBack, onNext, fmtCurrency, runId, calculationMode }) {
+function Step3Approve({ config, totals, totalsByCountry = [], onBack, onNext, fmtCurrency, runId, calculationMode }) {
   const [confirmed, setConfirmed] = useState(false);
   const isSimple = calculationMode === "simple";
+  const isMultiCountry = totalsByCountry.length > 1;
   return (
     <div className="space-y-4">
       <div>
@@ -291,12 +354,15 @@ function Step3Approve({ config, totals, onBack, onNext, fmtCurrency, runId, calc
           { label: "Pay Date", value: config.payDate || "—" },
           { label: "Calculation Mode", value: CALCULATION_MODE_LABELS[calculationMode] || "Standard Payroll" },
           { label: "Total Employees", value: String(totals.count) },
-          { label: "Total Gross Pay", value: fmtCurrency(totals.totalGross), accent: "text-primary" },
-          ...(!isSimple ? [
-            { label: "Total Taxes", value: fmtCurrency(totals.totalTax), accent: "text-error" },
-            { label: "Total Contributions", value: fmtCurrency(totals.totalContributions), accent: "text-category-teal" },
+          // Mixed-country run: money totals are listed per country below.
+          ...(!isMultiCountry ? [
+            { label: "Total Gross Pay", value: fmtCurrency(totals.totalGross), accent: "text-primary" },
+            ...(!isSimple ? [
+              { label: "Total Taxes", value: fmtCurrency(totals.totalTax), accent: "text-error" },
+              { label: "Total Contributions", value: fmtCurrency(totals.totalContributions), accent: "text-category-teal" },
+            ] : []),
+            { label: "Total Net Pay", value: fmtCurrency(totals.totalNet), accent: "text-info" },
           ] : []),
-          { label: "Total Net Pay", value: fmtCurrency(totals.totalNet), accent: "text-info" },
         ].map((row) => (
           <div key={row.label} className="flex items-center justify-between px-5 py-3">
             <span className="text-[13px] text-foreground-muted">{row.label}</span>
@@ -304,6 +370,7 @@ function Step3Approve({ config, totals, onBack, onNext, fmtCurrency, runId, calc
           </div>
         ))}
       </div>
+      {isMultiCountry && <MultiCountryTotals totalsByCountry={totalsByCountry} isSimple={isSimple} />}
       <div className="rounded-[12px] border border-warning/20 bg-warning/5 p-4">
         <div className="flex items-start gap-3">
           <AlertTriangle size={16} className="mt-0.5 flex-shrink-0 text-warning" />
@@ -327,7 +394,7 @@ function Step3Approve({ config, totals, onBack, onNext, fmtCurrency, runId, calc
   );
 }
 
-export default function RunDetailPage({ step, config, setConfig, employees, selectedEmployees, toggleEmployee, toggleAllEmployees, setSelectedEmployees, previewData, totals, loading, onNext, onBack, onRecalculate, onLoadPreview, fmtCurrency, runId, calculationMode = "standard", jurisdictionCountry = "IN", attendance }) {
+export default function RunDetailPage({ step, config, setConfig, employees, selectedEmployees, toggleEmployee, toggleAllEmployees, setSelectedEmployees, previewData, totals, loading, onNext, onBack, onBackToRuns, onRecalculate, onLoadPreview, fmtCurrency, runId, calculationMode = "standard", jurisdictionCountry = "IN", attendance }) {
   const previewAttemptedRef = useRef(false);
   const readinessAttemptedRef = useRef(false);
   // Attendance check runs once when the Calculate step opens (Re-check /
@@ -356,6 +423,7 @@ export default function RunDetailPage({ step, config, setConfig, employees, sele
           config={config}
           setConfig={setConfig}
           onNext={onNext}
+          onBackToRuns={onBackToRuns}
           calculationMode={calculationMode}
           employees={employees}
           selectedEmployees={selectedEmployees}
@@ -364,7 +432,7 @@ export default function RunDetailPage({ step, config, setConfig, employees, sele
         />
       )}
       {step === 2 && <Step2Review employees={employees} selectedEmployees={selectedEmployees} toggleEmployee={toggleEmployee} toggleAllEmployees={toggleAllEmployees} previewData={previewData} totals={totals} loading={loading} onNext={onNext} onBack={onBack} onRecalculate={onRecalculate} onLoadPreview={onLoadPreview} fmtCurrency={fmtCurrency} calculationMode={calculationMode} jurisdictionCountry={jurisdictionCountry} attendance={attendance} />}
-      {step === 3 && <Step3Approve config={config} totals={totals} onBack={onBack} onNext={onNext} fmtCurrency={fmtCurrency} runId={runId} calculationMode={calculationMode} />}
+      {step === 3 && <Step3Approve config={config} totals={totals} totalsByCountry={previewData?.totalsByCountry || []} onBack={onBack} onNext={onNext} fmtCurrency={fmtCurrency} runId={runId} calculationMode={calculationMode} />}
       {step === 4 && (
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 mb-3">
@@ -372,6 +440,15 @@ export default function RunDetailPage({ step, config, setConfig, employees, sele
           </div>
           <h2 className="text-[15px] font-bold text-foreground">Payroll Run Complete</h2>
           <p className="text-[13px] text-foreground-muted mt-1">{totals.count} employees have been processed. Funds will be transferred on the scheduled pay date.</p>
+          {onBackToRuns && (
+            <button
+              type="button"
+              onClick={onBackToRuns}
+              className="mt-6 flex items-center gap-2 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)]"
+            >
+              <ArrowLeft size={15} /> Return to Payroll Runs
+            </button>
+          )}
         </div>
       )}
     </div>
