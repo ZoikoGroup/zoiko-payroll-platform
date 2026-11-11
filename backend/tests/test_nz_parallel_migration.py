@@ -142,8 +142,10 @@ def test_drift_filter_explains():
                                         "payroll_pl_filings", "payroll_pl_settlements",
                                         "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
                                         "payroll_pl_parallel_imports",
-                                        "payroll_pl_parallel_differences"}  # + Poland P9 (e7ec6c1933b4)
-    assert columns == {"payslip_items": {"pl_calculation_snapshot"}, "payroll_runs": {"pl_approval_fingerprint"}}
+                                        "payroll_pl_parallel_differences",
+                                        "payroll_payslip_templates", "payroll_payslip_template_versions",
+                                        "payroll_payslip_template_assignments"}  # + Poland P9 (e7ec6c1933b4)
+    assert columns == {"payslip_items": {"pl_calculation_snapshot", "template_version_id"}, "payroll_runs": {"pl_approval_fingerprint"}}
 
 
 def test_single_child_literal_and_manifest():

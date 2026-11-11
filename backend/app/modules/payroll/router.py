@@ -2229,6 +2229,145 @@ def delete_payslip(
     return {"message": "Payslip deleted."}
 
 
+@payroll_router.get(
+    "/payslips/{payslip_id}/rendered",
+    summary="A payslip rendered through the organisation's payslip template",
+)
+def get_payslip_rendered(
+    payslip_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    # 404 TEMPLATE_NOT_ASSIGNED / 409 TEMPLATE_NOT_REPRESENTABLE: the UI shows
+    # the standard statutory payslip instead.
+    from app.modules.payroll import payslip_template_service as tpl
+    return tpl.render_payslip(db, current_user.organization_id, payslip_id)
+
+
+# ── Payslip Templates (organisation-owned presentation layouts) ─────────
+# Payroll operators only; super_admin is outside the operator gate (ZP-PRIV A05).
+# Static paths are declared before /{template_id}.
+
+_TPL_WRITE = [Depends(get_current_payroll_operator), Depends(require_writeable_workspace())]
+
+
+@payroll_router.get(
+    "/payslip-templates", summary="Payslip templates, starters and assignments",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def list_payslip_templates(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_service as tpl
+    return tpl.list_templates(db, current_user.organization_id)
+
+
+@payroll_router.post(
+    "/payslip-templates", summary="Create a payslip template (from a starter or custom HTML)",
+    status_code=status.HTTP_201_CREATED, dependencies=_TPL_WRITE,
+)
+def create_payslip_template(payload: dict = Body(...), db: Session = Depends(get_db),
+                            current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_service as tpl
+    return tpl.create_template(db, current_user.organization_id, current_user.id, payload)
+
+
+@payroll_router.post(
+    "/payslip-templates/preview", summary="Render template HTML/CSS with sample data",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def preview_payslip_template(payload: dict = Body(...), current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_service as tpl
+    return tpl.preview(payload.get("htmlContent") or "", payload.get("cssContent"),
+                       payload.get("configurationJson"), payload.get("country"))
+
+
+@payroll_router.post(
+    "/payslip-templates/import", summary="Import an HTML payslip template file",
+    status_code=status.HTTP_201_CREATED, dependencies=_TPL_WRITE,
+)
+async def import_payslip_template(
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    code: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    country: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from fastapi import HTTPException
+    from app.modules.payroll import payslip_template_service as tpl
+    raw = await file.read(tpl.MAX_HTML_BYTES + 1)
+    if len(raw) > tpl.MAX_HTML_BYTES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            detail=f"The file is larger than {tpl.MAX_HTML_BYTES // 1000} KB.")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="The file must be UTF-8 encoded HTML.")
+    return tpl.create_template(db, current_user.organization_id, current_user.id, {
+        "name": name, "code": code, "description": description, "country": country,
+        "htmlContent": text, "cssContent": "", "changeSummary": f"Imported from {file.filename or 'file'}",
+    })
+
+
+@payroll_router.post(
+    "/payslip-templates/assignments", summary="Use a published template for one country or all countries",
+    dependencies=_TPL_WRITE,
+)
+def assign_payslip_template(payload: dict = Body(...), db: Session = Depends(get_db),
+                            current_user=Depends(get_current_user)):
+    from fastapi import HTTPException
+    from app.modules.payroll import payslip_template_service as tpl
+    try:
+        template_id = int(payload.get("templateId"))
+    except (TypeError, ValueError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="templateId is required.")
+    return tpl.assign_template(db, current_user.organization_id, current_user.id, template_id, payload.get("country"))
+
+
+@payroll_router.delete(
+    "/payslip-templates/assignments/{country}",
+    summary="Return a country (or ALL) to the standard statutory payslip", dependencies=_TPL_WRITE,
+)
+def unassign_payslip_template(country: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_service as tpl
+    return tpl.unassign(db, current_user.organization_id, country)
+
+
+@payroll_router.get(
+    "/payslip-templates/{template_id}", summary="One payslip template",
+    dependencies=[Depends(get_current_payroll_operator)],
+)
+def get_payslip_template(template_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_service as tpl
+    return tpl.get_template_detail(db, current_user.organization_id, template_id)
+
+
+@payroll_router.put(
+    "/payslip-templates/{template_id}", summary="Save a payslip template draft", dependencies=_TPL_WRITE,
+)
+def update_payslip_template(template_id: int, payload: dict = Body(...), db: Session = Depends(get_db),
+                            current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_service as tpl
+    return tpl.update_template(db, current_user.organization_id, template_id, current_user.id, payload)
+
+
+@payroll_router.post(
+    "/payslip-templates/{template_id}/publish", summary="Publish a payslip template draft",
+    dependencies=_TPL_WRITE,
+)
+def publish_payslip_template(template_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_service as tpl
+    return tpl.publish_template(db, current_user.organization_id, template_id, current_user.id)
+
+
+@payroll_router.delete(
+    "/payslip-templates/{template_id}", summary="Archive a payslip template", dependencies=_TPL_WRITE,
+)
+def archive_payslip_template(template_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    from app.modules.payroll import payslip_template_service as tpl
+    return tpl.archive_template(db, current_user.organization_id, template_id)
+
+
 # ── Leave Allocations ──────────────────────────────────────────────────
 
 @payroll_router.get(

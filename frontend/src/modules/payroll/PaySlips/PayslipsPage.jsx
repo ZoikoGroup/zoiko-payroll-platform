@@ -4,6 +4,7 @@ import { useToast } from "../ToastContext";
 import PayslipFilters from "./PayslipFilters";
 import PayslipStub from "./PayslipStub";
 import PayslipDownloadButton from "./PayslipDownloadButton";
+import PayslipTemplateDashboard from "./templates/PayslipTemplateDashboard";
 import { getPayslips, getEmployees, deletePayslip } from "../../../service/payrollService";
 import { formatCurrency, getCurrencyForJurisdiction, normalizeCountryCode } from "../../../utils/currency";
 import { usePayrollSetup } from "../PayrollSetupContext";
@@ -341,6 +342,9 @@ export default function PayslipsPage() {
 
       {activeTab === "settings" && (
         <>
+          <div className="mb-5">
+            <PayslipTemplateDashboard />
+          </div>
           <div className="bg-surface border border-border rounded-[18px] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] mb-5">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2.5 rounded-[12px] bg-info/10">

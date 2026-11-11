@@ -14762,6 +14762,176 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/payslip-templates",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "payslip-templates",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/payslip-templates",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "payslip-templates",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/payslip-templates/assignments",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "assignments",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/payroll/payslip-templates/assignments/{country}",
+   "data_class": "tenant_config",
+   "action": "delete",
+   "resource": "assignments",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/payslip-templates/import",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "import",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/payslip-templates/preview",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "preview",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/payroll/payslip-templates/{template_id}",
+   "data_class": "tenant_config",
+   "action": "delete",
+   "resource": "payslip-templates",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/payslip-templates/{template_id}",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "payslip-templates",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/payroll/payslip-templates/{template_id}",
+   "data_class": "tenant_config",
+   "action": "update",
+   "resource": "payslip-templates",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/payslip-templates/{template_id}/publish",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "publish",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/payslips",
    "data_class": "worker",
    "action": "read",
@@ -14842,6 +15012,26 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_personal_data_access_events",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/payslips/{payslip_id}/rendered",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "rendered",
+   "principals": [
+    "org_admin",
+    "payroll_admin",
+    "support_temp"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
     "payslip_items"
    ],
    "overridden": false
