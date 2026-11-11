@@ -409,6 +409,9 @@ class EmployeeStatutoryProfileCreate(BaseModel):
     mx_salary_type: Optional[str] = Field(None, validation_alias="mxSalaryType")
     mx_annual_adjustment_exclusion: Optional[str] = Field(None, validation_alias="mxAnnualAdjustmentExclusion")
     mx_annual_adjustment_exclusion_evidence_ref: Optional[str] = Field(None, validation_alias="mxAnnualAdjustmentExclusionEvidenceRef")
+    mx_union_member: Optional[bool] = Field(None, validation_alias="mxUnionMember")     # sweep S1 (C12)
+    mx_sdi_operator_entered: Optional[Decimal] = Field(None, validation_alias="mxSdiOperatorEntered")  # sweep S1 (C4)
+    mx_sdi_evidence_ref: Optional[str] = Field(None, validation_alias="mxSdiEvidenceRef")
 
     # ch_* block (ZP-CH-ENG-001 §13, CH-004) — the worker facts the Swiss resolver
     # reads (cantons, QST, BVG/UVG/KTG schemes, ...). Validated by
@@ -668,6 +671,9 @@ class EmployeeStatutoryProfileResponse(BaseModel):
     mxSalaryType: Optional[str] = Field(None, validation_alias="mx_salary_type", serialization_alias="mxSalaryType")
     mxAnnualAdjustmentExclusion: Optional[str] = Field(None, validation_alias="mx_annual_adjustment_exclusion", serialization_alias="mxAnnualAdjustmentExclusion")
     mxAnnualAdjustmentExclusionEvidenceRef: Optional[str] = Field(None, validation_alias="mx_annual_adjustment_exclusion_evidence_ref", serialization_alias="mxAnnualAdjustmentExclusionEvidenceRef")
+    mxUnionMember: Optional[bool] = Field(None, validation_alias="mx_union_member", serialization_alias="mxUnionMember")
+    mxSdiOperatorEntered: Optional[Decimal] = Field(None, validation_alias="mx_sdi_operator_entered", serialization_alias="mxSdiOperatorEntered")
+    mxSdiEvidenceRef: Optional[str] = Field(None, validation_alias="mx_sdi_evidence_ref", serialization_alias="mxSdiEvidenceRef")
     mxRfcLast4: Optional[str] = Field(None, validation_alias="mx_rfc_last4", serialization_alias="mxRfcLast4")
     mxIdentifierValidationStatus: Optional[str] = Field(None, validation_alias="mx_identifier_validation_status", serialization_alias="mxIdentifierValidationStatus")
     mxIdentifierFindings: Optional[list] = Field(None, validation_alias="mx_identifier_findings", serialization_alias="mxIdentifierFindings")

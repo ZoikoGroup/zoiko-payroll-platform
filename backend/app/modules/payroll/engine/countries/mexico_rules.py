@@ -46,6 +46,7 @@ MX_SPECIAL_PAY_WITHHOLDING_METHOD = None   # D-08: "RLISR_174"
 MX_MONTHLY_ORDINARY_INCOME_DAYS = None     # D-09: "30" | "30.4" | "CALENDAR_MONTH"
 WAGE_REFERENCES = ("UMA", "ZONE_MIN_WAGE")
 WITHHOLDING_METHODS = ("RLISR_174", "ART_96_MONTHLY")    # ART_96_MONTHLY: sweep S1 (D-08 b)
+PER_EMPLOYER = "PER_EMPLOYER"                            # D-08, sweep S1: each employer's labour policy names it
 # D-09 (sweep S1): days per month, or the calendar month of the pay date ("the month's actual ordinary pay").
 MONTHLY_INCOME_BASES = ("30", "30.4", "CALENDAR_MONTH")
 # Every read of a switch below goes through _switch(code, constant): the decision
@@ -248,6 +249,12 @@ class Art93SpecialPayRule:
     def standalone_isr(self, taxable, facts) -> Decimal:
         """RLISR Art. 174 (D-08): a special payment withheld in its own run."""
         method = _switch("D-08", MX_SPECIAL_PAY_WITHHOLDING_METHOD)
+        if method == PER_EMPLOYER:                       # D-08, sweep S1: the employer's labour policy names it
+            method = (facts or {}).get("employer_special_pay_method")
+            if method is None:
+                raise _blocked("MX_SPECIAL_PAY_METHOD_UNDECIDED",
+                               "D-08 leaves the withholding method of a special payment in its own run to each "
+                               "employer, and this employer's labour policy names none")
         if method is None:
             raise _blocked("MX_SPECIAL_PAY_METHOD_UNDECIDED",
                            "which withholding method applies to a special payment paid in its own run (LISR Art. 96 "

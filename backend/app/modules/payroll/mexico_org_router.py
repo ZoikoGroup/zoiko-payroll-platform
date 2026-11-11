@@ -839,7 +839,10 @@ def employee_terminations(employee_id: int, current_user=Depends(get_current_pay
 def record_employee_termination(employee_id: int, body: Dict[str, Any] = Body(...),
                                 current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
     data = {"termination_date": _opt_date(body.get("terminationDate"), "terminationDate"),
-            "reason_code": body.get("reasonCode"), "evidence_ref": body.get("evidenceRef"), "note": body.get("note")}
+            "reason_code": body.get("reasonCode"), "evidence_ref": body.get("evidenceRef"), "note": body.get("note"),
+            # D-12 (c), sweep S1: the indemnity daily salary an operator enters, with its evidence
+            "indemnity_daily_salary": body.get("indemnityDailySalary"),
+            "indemnity_salary_evidence_ref": body.get("indemnitySalaryEvidenceRef")}
     return _terminations().record_termination(db, _org_id(current_user), employee_id, data, _actor(current_user))
 
 

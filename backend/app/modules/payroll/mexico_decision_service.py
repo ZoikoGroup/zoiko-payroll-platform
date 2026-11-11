@@ -262,6 +262,24 @@ def ticket(row) -> Optional[dict]:
     seeds, where, and the citation the row carries. Draft packs only."""
     if row.status not in ("APPROVED", "TRANSCRIBED"):
         return None
+    from app.modules.payroll import mexico_decision_config
+
+    c = mexico_decision_config.spec(row.code)
+    transcription = {"decision": row.code, "version": row.version, "contentKeys": row.content_keys or [],
+                     "value": row.chosen_option, "citation": f"DECISION/{row.code}#{(row.content_hash or '')[:12]}",
+                     "target": "the next Draft version of the pack that carries the key (never an Active pack)",
+                     "transcribed": row.status == "TRANSCRIBED", "transcriptionRef": row.transcription_ref}
+    if c is not None and c["kind"] != "RECORD":
+        # Sweep S1: the answer is configuration — in force on approval, no code change. A pack-row answer
+        # also keeps its transcription hand-off: it fills only a missing row until the Draft pack carries it.
+        if c["target"].startswith("pack_row:"):
+            return {**transcription, "inForce": True, "changes": c["changes"], "stillNeeds": c["needs"],
+                    "then": "applies wherever the pack carries no row for the key; transcribe it into the next "
+                            "Draft pack for G1 sign-off"}
+        return {"decision": row.code, "version": row.version, "value": row.chosen_option,
+                "inForce": True, "target": c["target"], "changes": c["changes"], "stillNeeds": c["needs"],
+                "then": "nothing to transcribe: the code reads the answer",
+                "transcribed": row.status == "TRANSCRIBED", "transcriptionRef": row.transcription_ref}
     return {"decision": row.code, "version": row.version, "contentKeys": row.content_keys or [],
             "value": row.chosen_option, "citation": f"DECISION/{row.code}#{(row.content_hash or '')[:12]}",
             "target": "the next Draft version of the pack that carries the key (never an Active pack)",

@@ -233,6 +233,10 @@ class MXLaborPolicyCreate(_MXIn):
     timeRecordDependency: Optional[Dict[str, Any]] = None
     # Phase 6 D13: CALENDAR / FIXED salary days for quincenal / monthly periods.
     salaryDaysConvention: Optional[str] = None
+    # Sweep S1 (D-17 c): the employer's own daily-hours figure for the overtime hourly rate.
+    hourlyRateDailyHours: Optional[str] = None
+    # Sweep S1 (D-08 PER_EMPLOYER): this employer's withholding method for a special payment in its own run.
+    specialPayWithholdingMethod: Optional[str] = None
 
 
 class MXCredentialCreate(_MXIn):

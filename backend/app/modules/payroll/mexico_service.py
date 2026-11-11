@@ -264,6 +264,11 @@ def transition_mx_service_registry(db: Session, target: str, reason: str, actor_
         unmet = [c for c in mexico_pilot_service.ga_preconditions(db) if not c["met"]]
         return unmet, {u["key"]: u["detail"] for u in unmet}
 
+    from app.modules.payroll import mexico_two_person
+
+    mexico_two_person.require(db, decision="D-26", action="mx_service_registry",                 # sweep S1
+                              entity_type="jurisdiction_service_registry", entity_id=0, actor_id=actor_id,
+                              payload={"country": MX, "target": target}, second="a second Super Admin")
     return service.transition_service_registry(
         db, MX, target, reason, actor_id, label="Mexico", readiness=readiness,
         invalid_target_message=lambda t: (
@@ -327,9 +332,23 @@ def calc_inputs(db: Session, run: Optional[PayrollRun], employee: PayrollEmploye
     """Phase 6: the guarded, read-only input builder (mexico_run_service) —
     refused unless Mexico onboarding is enabled AND the organisation is
     Mexican; every engine input as of the run's pay date."""
+    from app.modules.payroll import mexico_decision_config as decision_config
     from app.modules.payroll import mexico_run_service
 
-    return mexico_run_service.calc_inputs(db, run, employee, resolved_pack, as_of, **kwargs)
+    # Sweep S1: the decision register's APPROVED answers are applied while the inputs are built (after the
+    # dormancy guard) and handed to the engine (mx_decisions); pack-row decisions fill a row the pack does not
+    # carry; the answers used are part of the input components (and so of the input hash).
+    mexico_run_service.guard(db, employee, run)
+    with decision_config.applying(db) as answers:
+        inputs = mexico_run_service.calc_inputs(db, run, employee, resolved_pack, as_of, **kwargs)
+    rate_maps = [(inputs.get("mx_pack_rows") or {}).get("rate_map")]
+    rate_maps += [seg.get("rate_map") for seg in ((inputs.get("mx_period") or {}).get("segments") or [])]
+    decision_config.overlay_pack_rows(rate_maps, answers)
+    inputs["mx_decisions"] = dict(answers or {})
+    components = inputs.get("mx_input_components")
+    if components is not None and answers:
+        components["decisions"] = decision_config.fingerprint(answers)
+    return inputs
 
 
 def _mx_before_run_transition(db: Session, run: PayrollRun, next_status, actor_id) -> None:
@@ -451,7 +470,19 @@ JURISDICTION_HOOKS = {
     "statutory_profile_errors": "_mx_statutory_profile_errors",
     "statutory_profile_values": "_mx_profile_values",
     "payslip_hold_view": "_mx_payslip_hold_view",
+    "before_pack_status": "_mx_before_pack_status",          # sweep S1 (D-27)
 }
+
+
+def _mx_before_pack_status(db: Session, pack, status: str, actor_id: Optional[int] = None) -> None:
+    """D-27 (sweep S1): moving an ACTIVE Mexico pack to Deprecated / Retired /
+    Superseded needs a second Super Admin once D-27 answers FOUR_EYES."""
+    if pack.status == "Active" and status in ("Deprecated", "Retired", "Superseded"):
+        from app.modules.payroll import mexico_two_person
+
+        mexico_two_person.require(db, decision="D-27", action="mx_pack_retire", entity_type="jurisdiction_pack",
+                                  entity_id=pack.id, actor_id=actor_id, payload={"pack": pack.id, "to": status},
+                                  second="a second Super Admin")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1149,6 +1180,12 @@ def archive_classification(db: Session, classification_id: int, actor_id: Option
     if row.status not in ("DRAFT", "ACTIVE"):
         _refuse(db, "mx_earning_classification", row.id, "archive", actor_id,
                 f"a {row.status} classification is retained evidence and cannot be archived")
+    if row.status == "ACTIVE":                            # D-27 (sweep S1): retiring Active content
+        from app.modules.payroll import mexico_two_person
+
+        mexico_two_person.require(db, decision="D-27", action="mx_classification_archive",
+                                  entity_type="mx_earning_classification", entity_id=row.id, actor_id=actor_id,
+                                  payload={"classification": row.id, "to": "ARCHIVED"}, second="a second Super Admin")
     old = row.status
     row.status = "ARCHIVED"
     _audit(db, actor_id=actor_id, action="archive", entity_type="mx_earning_classification", entity_id=row.id,

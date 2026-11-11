@@ -470,31 +470,9 @@ def calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[
                 period: Optional[tuple] = None, allowance_items: Optional[list] = None,
                 attendance_records: Optional[list] = None) -> dict:
     """PayrollContext kwargs for one Mexican employee — read-only. `run` None
-    = preview (pay date = as_of, the preview's period end).
-
-    Sweep S1: the decision register's APPROVED answers are applied while the
-    inputs are built and handed to the engine (mx_decisions); pack-row decisions
-    fill a row the pack does not carry; the answers used are part of the input
-    components (and so of the input hash)."""
-    from app.modules.payroll import mexico_decision_config as decision_config
-
-    guard(db, employee, run)                          # dormancy first: nothing is read for a dormant organisation
-    with decision_config.applying(db) as answers:
-        inputs = _calc_inputs(db, run, employee, resolved_pack, as_of, period=period,
-                              allowance_items=allowance_items, attendance_records=attendance_records)
-    rate_maps = [(inputs.get("mx_pack_rows") or {}).get("rate_map")]
-    rate_maps += [seg.get("rate_map") for seg in ((inputs.get("mx_period") or {}).get("segments") or [])]
-    decision_config.overlay_pack_rows(rate_maps, answers)
-    inputs["mx_decisions"] = dict(answers or {})
-    components = inputs.get("mx_input_components")
-    if components is not None and answers:
-        components["decisions"] = decision_config.fingerprint(answers)
-    return inputs
-
-
-def _calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional[date] = None, *,
-                 period: Optional[tuple] = None, allowance_items: Optional[list] = None,
-                 attendance_records: Optional[list] = None) -> dict:
+    = preview (pay date = as_of, the preview's period end). The decision
+    register's answers are applied by the caller, mexico_service.calc_inputs
+    (sweep S1)."""
     from app.modules.payroll import mexico_employer_service, service
 
     guard(db, employee, run)
@@ -635,6 +613,15 @@ def _calc_inputs(db: Session, run, employee, resolved_pack=None, as_of: Optional
     }
 
 
+def _sbc_in_force(db: Session, employee_id: int, on: date):
+    """The latest committed SBC (sbc_total) effective on or before `on`, or None."""
+    from app.modules.payroll.models import PayrollMxSbcHistory as H
+
+    row = (db.query(H).filter(H.employee_id == employee_id, H.effective_from <= on)
+           .order_by(H.effective_from.desc(), H.id.desc()).first())
+    return None if row is None else row.sbc_total
+
+
 def _aguinaldo_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) -> dict:
     """Phase 9b: the inputs of one AGUINALDO payslip — days from the labour
     policy (never below the statutory floor), × daily salary × the transcribed
@@ -667,6 +654,8 @@ def _aguinaldo_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) ->
     isn_pack = _isn_state_pack(db, prof.mx_work_state, on)
     policy = {"id": policy_row.id, "version": policy_row.version, "aguinaldo_days": policy_row.aguinaldo_days,
               "vacation_policy": policy_row.vacation_policy, "vacation_premium_pct": policy_row.vacation_premium_pct}
+    if getattr(policy_row, "special_pay_withholding_method", None):          # D-08 PER_EMPLOYER (sweep S1)
+        policy["special_pay_withholding_method"] = policy_row.special_pay_withholding_method
     registration = None if reg is None else {"id": reg.id, "status": reg.status,
                                              "employer_profile_id": reg.employer_profile_id}
     employment = {"from": employee.date_of_joining, "to": employee.date_of_leaving, "year": year}
@@ -728,11 +717,17 @@ def _finiquito_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) ->
     zone = mexico_employer_service.min_wage_zone(prof.mx_work_state or "", prof.mx_work_municipality or "")["zone"]
     policy = {"id": policy_row.id, "version": policy_row.version, "aguinaldo_days": policy_row.aguinaldo_days,
               "vacation_policy": policy_row.vacation_policy, "vacation_premium_pct": policy_row.vacation_premium_pct}
+    if getattr(policy_row, "special_pay_withholding_method", None):          # D-08 PER_EMPLOYER (sweep S1)
+        policy["special_pay_withholding_method"] = policy_row.special_pay_withholding_method
     facts = {"termination_date": last_day, "pay_date": on, "daily_salary": _dec(prof.mx_daily_salary),
              "seniority_date": prof.mx_seniority_date, "date_of_joining": employee.date_of_joining,
              "work_state": prof.mx_work_state, "zone": zone, "content": content,
              # W1-3b: what the transcribed termination reasons read (LFT Arts. 50, 89, 162)
-             "contract_type_code": prof.mx_contract_type_code, "labor_policy": policy}
+             "contract_type_code": prof.mx_contract_type_code, "labor_policy": policy,
+             # sweep S1, D-12 (b) / (c): the IMSS SBC in force, and the figure an operator entered
+             "sbc_daily": _sbc_in_force(db, employee.id, last_day),
+             "operator_indemnity_daily_salary": row.indemnity_daily_salary,
+             "operator_indemnity_evidence": row.indemnity_salary_evidence_ref}
     earnings, detail = mexico_termination_service.finiquito_lines(db, row, employee, prof, policy, content, rounder,
                                                                   facts)
     isn_pack = _isn_state_pack(db, prof.mx_work_state, on)
@@ -787,6 +782,8 @@ def _ptu_inputs(db: Session, run, employee, pack, pay_rates, pay_slabs) -> dict:
     isn_pack = _isn_state_pack(db, prof.mx_work_state, on)
     earnings = [{"code": "MX_PTU", "kind": "PTU", "amount": _dec(alloc.final_amount)}]
     policy = None if policy_row is None else {"id": policy_row.id, "version": policy_row.version}
+    if policy is not None and getattr(policy_row, "special_pay_withholding_method", None):   # D-08 (sweep S1)
+        policy["special_pay_withholding_method"] = policy_row.special_pay_withholding_method
     registration = None if reg is None else {"id": reg.id, "status": reg.status,
                                              "employer_profile_id": reg.employer_profile_id}
     profile_facts = {c: getattr(prof, c) for c in ("id", "effective_from", "mx_daily_salary", "mx_work_state",
@@ -981,7 +978,14 @@ def _current_components(db: Session, run, item) -> dict:
     emp = db.get(PayrollEmployee, item.employee_id)
     allowances = [{"key": a.key, "amount": a.amount}
                   for a in db.query(PayslipAllowanceItem).filter(PayslipAllowanceItem.payslip_item_id == item.id).all()]
-    return calc_inputs(db, run, emp, None, allowance_items=allowances)["mx_input_components"]
+    from app.modules.payroll import mexico_decision_config as decision_config
+
+    # the answers applied as the hook applies them (inline: the route registry's call graph is depth-bounded)
+    with decision_config.applying(db) as answers:
+        components = calc_inputs(db, run, emp, None, allowance_items=allowances)["mx_input_components"]
+    if answers:
+        components["decisions"] = decision_config.fingerprint(answers)
+    return components
 
 
 def compute_fingerprint(db: Session, run) -> dict:

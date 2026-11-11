@@ -66,8 +66,32 @@ def _sdi_lft_84(result: dict, prof) -> Optional[Decimal]:
     return Decimal(str(comps["daily_salary"])) * Decimal(str(comps["factor"]))
 
 
+def sindicalizado(prof) -> Optional[str]:
+    """C12 (sweep S1): OMIT (or unanswered) leaves Sindicalizado out — it is
+    optional in nomina12.xsd, read as "not associated"; FROM_PROFILE writes
+    "Sí" / "No" from the worker's Mexican profile, refusing while it is not recorded."""
+    from app.modules.payroll.engine.jurisdictions.mexico.decisions import switch
+
+    if switch("C12") != "FROM_PROFILE":
+        return None
+    member = getattr(prof, "mx_union_member", None)
+    if member is None:
+        _missing(["Sindicalizado (union membership on the Mexican profile)"], "employee")
+    return "Sí" if member else "No"
+
+
+def _sdi_operator_entered(result: dict, prof) -> Optional[Decimal]:
+    """C4 (c), sweep S1 — the counterpart of D-12 (c): the SalarioDiarioIntegrado
+    an operator entered on the worker's Mexican profile, with its evidence."""
+    value = getattr(prof, "mx_sdi_operator_entered", None)
+    if value is None or not getattr(prof, "mx_sdi_evidence_ref", None):
+        _missing(["SalarioDiarioIntegrado entered by an operator, with its evidence (C4 OPERATOR_ENTERED)"],
+                 "employee")
+    return Decimal(str(value))
+
+
 # C4 (sweep S1): the source of SalarioDiarioIntegrado once answered.
-SDI_SOURCES = {"LFT_84_INTEGRATED": _sdi_lft_84, "IMSS_SBC": _sdi_imss_sbc}
+SDI_SOURCES = {"LFT_84_INTEGRATED": _sdi_lft_84, "IMSS_SBC": _sdi_imss_sbc, "OPERATOR_ENTERED": _sdi_operator_entered}
 TIMEZONE_READINGS = ("SAME_LABEL", "SWAPPED")
 
 
@@ -375,15 +399,9 @@ def _document_input(db: Session, run, item, release, base: dict) -> dict:
     missing = [f for f in needed if not receiver.get(f)]
     if missing:
         _missing(missing, "employee")
-    # C12 (sweep S1): OMIT leaves Sindicalizado out (it is optional in nomina12.xsd); FROM_PROFILE writes
-    # "Sí" / "No" from the worker's Mexican profile, refusing while it is not recorded.
     from app.modules.payroll.engine.jurisdictions.mexico.decisions import switch
 
-    if switch("C12") == "FROM_PROFILE":
-        member = getattr(prof, "mx_union_member", None)
-        if member is None:
-            _missing(["Sindicalizado (union membership on the Mexican profile)"], "employee")
-        receiver["unionized"] = "Sí" if member else "No"
+    receiver["unionized"] = sindicalizado(prof)
     sdi_source = SDI_SOURCE
     answered = switch("C4")
     if answered is not None:
