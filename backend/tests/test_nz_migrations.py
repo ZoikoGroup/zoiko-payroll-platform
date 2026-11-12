@@ -216,7 +216,11 @@ def test_deploy_drift_filter_explains_every_nz_object():
                                         "payroll_pl_filings", "payroll_pl_settlements",
                                         "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
                                         "payroll_pl_parallel_imports",
-                                        "payroll_pl_parallel_differences"}  # + Poland P9 (e7ec6c1933b4)
+                                        "payroll_pl_parallel_differences",  # + Poland P9 (e7ec6c1933b4)
+                                        "payroll_my_identifier_vault", "payroll_my_identifier_access_events",
+                                        "payroll_my_employer_registrations", "payroll_my_worker_profiles",
+                                        "payroll_my_work_assignments", "payroll_my_tax_declarations",
+                                        "payroll_my_accumulator_entries"}  # + Malaysia P2 (13574b996ccf)
     assert set(NEW_TABLES) <= tables
     for table, names in SHARED.items():
         assert names <= columns[table], table

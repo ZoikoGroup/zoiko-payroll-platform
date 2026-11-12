@@ -54,6 +54,7 @@ _GUARDED = [
     "e11c2c36df17",  # Poland P6 pl_incapacity_episodes (guarded from day one, lock_timeout)
     "e75b9219e1f8",  # Poland P8 pl_filing_settlement (guarded from day one, lock_timeout)
     "e7ec6c1933b4",  # Poland P9 pl_parallel_cycles (guarded from day one, lock_timeout)
+    "13574b996ccf",  # Malaysia P2 my_foundation (guarded from day one, lock_timeout)
 ]
 
 
