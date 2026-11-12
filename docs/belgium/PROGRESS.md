@@ -18,6 +18,18 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 - Untouched in every commit: `backend/.env.example`, `backend/app/main.py`, `frontend/vite.config.js`, the three
   Singapore docs.
 
+## Merge gates (CI; they gate push / merge, not Block B)
+
+- Frontend production build (`npm run build`) — not verifiable on this machine (out of memory at ~1.3 GB free).
+- PostgreSQL RLS tests (Postgres-gated; Docker cannot start locally).
+- Python 3.12 test run (only 3.11 locally).
+
+## Standing rules added after Block A (2026-11-12)
+
+- After every sub-step: rebuild the route registry in-test and diff it against the committed one. An
+  unintended change to an existing route's classification, permitted roles or data categories is a STOP
+  condition (the A3 `evaluate` incident).
+
 ## A1 — identifiers and statutory setup
 
 - Commit: 02f4891 `feat(belgium): block A1 identifiers and statutory setup`.
