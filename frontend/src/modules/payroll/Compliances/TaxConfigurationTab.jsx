@@ -594,6 +594,9 @@ export default function TaxConfigurationTab(props) {
   // South Africa: PAYE bands, UIF / SDL and ETI are platform pack data
   // (Super Admin → South Africa Compliance); never the US-fallback tab.
   if (["ZA", "SOUTH AFRICA"].includes(String(props.country || "").toUpperCase())) return null;
+  // Mexico: ISR / subsidy tables, IMSS, INFONAVIT and state ISN are platform
+  // pack data (Super Admin → Mexico Compliance); never the US-fallback tab.
+  if (["MX", "MEXICO", "MÉXICO"].includes(String(props.country || "").toUpperCase())) return null;
   return <GenericTaxConfigurationTab {...props} />;
 }
 

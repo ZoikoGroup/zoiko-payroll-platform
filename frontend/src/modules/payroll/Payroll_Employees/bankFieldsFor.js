@@ -93,6 +93,7 @@ const BANKING_COMPLIANCE_KEYS = {
   FR: ["iban", "bic"],
   IE: ["iban", "bic"],
   NL: ["iban", "bic"],
+  MX: ["clabe"],
   BR: ["pix_key", "bank_compe", "bank_agency", "bank_agency_digit", "bank_account", "bank_account_digit", "bank_ispb"],
   CH: ["iban", "bic"],
   SA: ["iban"],

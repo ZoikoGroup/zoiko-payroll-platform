@@ -114,6 +114,16 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "cipc_number", label: "CIPC company registration number", pattern: "^\\d{4}/\\d{6}/\\d{2}$", example: "2026/123456/07", primary: false },
     ],
   },
+  // Mexico — mirrors backend core/jurisdiction.py JURISDICTION_TAX_SCHEMAS.MX
+  // exactly. Schema only: MX stays out of registration until its release
+  // gates G1–G8 are signed (mexico_dormancy).
+  MX: {
+    label: "RFC / Registro Patronal IMSS",
+    fields: [
+      { key: "rfc", label: "RFC (SAT taxpayer registry, legal entity)", pattern: "^[A-ZÑ&]{3}[0-9]{6}[A-Z0-9]{3}$", example: "ABC010101AB1", primary: true },
+      { key: "registro_patronal", label: "Registro Patronal (IMSS employer registration)", pattern: "^[A-Z0-9]{11}$", example: "Y1234567101", primary: false },
+    ],
+  },
 };
 
 const COUNTRY_NAME_TO_CODE = {
@@ -135,6 +145,9 @@ const COUNTRY_NAME_TO_CODE = {
   // South Africa — never "sa", which is Saudi Arabia's code here.
   "south africa": "ZA",
   rsa: "ZA",
+  mexico: "MX",
+  "méxico": "MX",
+  "estados unidos mexicanos": "MX",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -149,6 +162,7 @@ const CODE_TO_COUNTRY_NAME = {
   SA: "Saudi Arabia",
   NL: "Netherlands",
   ZA: "South Africa",
+  MX: "Mexico",
 };
 
 export function getJurisdictionCode(country) {

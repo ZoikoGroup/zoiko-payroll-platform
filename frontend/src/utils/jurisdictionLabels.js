@@ -47,6 +47,10 @@ const INCOME_TAX_LABELS = {
   JP: "Withholding Income Tax",
   // New Zealand — PAYE, which also collects the ACC earner levy (ZP-NZ-ENG-001)
   NZ: "PAYE (incl. ACC earner levy)",
+  // Mexico — ISR withheld after the employment subsidy (countries/mexico.py
+  // returns it as `tds`). IMSS / INFONAVIT ride on mx_employee_total and the
+  // frozen mxCalculationSnapshot, never on the generic pf/esi columns.
+  MX: "ISR (Impuesto sobre la Renta)",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
@@ -175,6 +179,8 @@ const TAX_ID_LABELS = {
   ZA: "SARS PAYE / UIF / SDL Registration",
   JP: "Corporate Number / Labour Insurance Number",
   NZ: "IRD number / NZBN",
+  // Mexico — mirrors backend core/jurisdiction.py JURISDICTION_TAX_SCHEMAS.MX.label.
+  MX: "RFC / Registro Patronal IMSS",
 };
 
 // "Professional Tax" is an India-specific, state-levied deduction — only
@@ -191,6 +197,7 @@ const STATE_RULE_NOTES = {
   HK: "One territory-wide regime: MPF is deducted through payroll; Salaries Tax is assessed by the IRD on the employee and is never withheld from pay.",
   BR: "Core CLT payroll contributions (INSS, FGTS, IRRF) are federal; state rules mainly affect indirect taxes and regional benefits.",
   ZA: "Sectoral bargaining council agreements and COIDA classifications may vary by industry/province.",
+  MX: "ISR, IMSS and INFONAVIT are federal; the state payroll tax (ISN) rate and base vary by state.",
 };
 
 // The one statutory ID that best identifies an employee to their tax
@@ -233,6 +240,9 @@ const IDENTITY_FIELD = {
   // South Africa — SARS income-tax number (ZAEmployeeValidation's tax_number,
   // masked server-side as a SENSITIVE_FIELD).
   ZA: { label: "SARS Tax Number", get: (p) => p.complianceFields?.tax_number },
+  // Mexico — the employee's SAT RFC (MXEmployeeValidation; masked server-side
+  // as a SENSITIVE_FIELD, like CURP / NSS / CLABE).
+  MX: { label: "RFC", get: (p) => p.complianceFields?.rfc },
 };
 
 export function getIdentityField(payslip) {

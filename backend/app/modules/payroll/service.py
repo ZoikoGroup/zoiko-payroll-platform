@@ -38756,6 +38756,9 @@ def get_dashboard_breakdowns(db: Session, organization_id: int = None, year: int
         # with a nonzero value for them.
         "BB": "PAYE", "DO": "ISR", "GY": "PAYE", "JM": "PAYE", "TT": "PAYE",
         "PR": "Hacienda Withholding",
+        # Mexico (ZP-MX-ENG-001): ISR after the employment subsidy arrives as
+        # `tds` (countries/mexico.py) — mirrors jurisdictionLabels.js.
+        "MX": "ISR (Impuesto sobre la Renta)",
     }
     pf_esi_labels = {
         "DE": {"pf": "Pension Insurance", "esi": "Social Insurance (Health / Unemployment / Care)"},
