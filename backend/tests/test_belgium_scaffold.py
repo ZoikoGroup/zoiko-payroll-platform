@@ -339,11 +339,11 @@ def test_type_a_hooks_fail_closed(db):
     assert jh.call("BE", "statutory_profile_errors", SimpleNamespace())
     with pytest.raises(BadRequestException):
         jh.call("BE", "statutory_profile_values", db, None, None, None)
-    pack = SimpleNamespace(jurisdiction_country="BE", pack_type="tax")
-    assert "cannot be activated" in jh.call("BE", "pack_activation_refusal", db, pack)
+    # Phase 3A: an unseeded BE pack is refused; editors are a set (see test_belgium_super_admin.py).
+    pack = _be_pack(db, pack_id="BE-EMPTY")
+    assert "no statutory content" in jh.call("BE", "pack_activation_refusal", db, pack)
     assert jh.call("BE", "template_activation_refusal", db, SimpleNamespace(jurisdiction_country="BE"), 1)
-    with pytest.raises(BadRequestException, match="approval is refused"):
-        jh.call("BE", "statutory_editors", db, pack)
+    assert jh.call("BE", "statutory_editors", db, pack) == set()
     with pytest.raises(HTTPException) as raised:
         jh.call("BE", "payment_treatment", db, 1, SimpleNamespace(id=1), [SimpleNamespace(country_code="BE")])
     assert raised.value.status_code == 409
@@ -353,7 +353,9 @@ def test_specified_inert_values(db):
     from app.modules.payroll import jurisdiction_hooks as jh
 
     assert jh.call("BE", "pack_holidays", db, 2026) == []
-    assert jh.call("BE", "statutory_summary", db) == {"country": "BE", "status": "NOT_BUILT"}
+    summary = jh.call("BE", "statutory_summary", db)            # Phase 3A: pack + gate status, engine NOT_BUILT
+    assert summary["country"] == "BE" and summary["status"] == "NOT_BUILT" and summary["available"] is False
+    assert summary["gates"] == {g: "NOT MET" for g in ("G1", "G2", "G3", "G4", "G5", "G6", "G7")}
     assert jh.call("BE", "payslip_hold_view", SimpleNamespace(country_code="BE")) is None
 
 
@@ -449,15 +451,17 @@ def test_generic_statutory_edits_are_refused_for_a_belgian_pack(db):
             rateLabel="probe"), actor_id=1)
 
 
-def test_pack_approval_is_refused_through_statutory_editors(db):
+def test_pack_activation_is_refused_for_an_unseeded_pack(db):
+    # Phase 3A replaced the Phase 1 "approval always refused" stub with the real
+    # statutory_editors set; activation of an empty pack is still refused.
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
 
     pack = _be_pack(db, pack_id="BE-APPROVE")
-    with pytest.raises(BadRequestException, match="approval is refused"):
-        service.set_jurisdiction_pack_approver(db, pack.id, actor_id=7)
+    with pytest.raises(BadRequestException):
+        service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=7)
     db.refresh(pack)
-    assert pack.approved_by_id is None and pack.status == "Draft"
+    assert pack.status != "Active"
 
 
 # ── registry seed script ───────────────────────────────────────────────────

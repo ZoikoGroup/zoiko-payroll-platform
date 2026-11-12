@@ -1064,6 +1064,13 @@ GET,/api/super-admin/billing/subscriptions,platform,read,subscriptions,super_adm
 POST,/api/super-admin/billing/trial-expiry-run,platform,create,trial-expiry-run,super_admin,platform,,,,no,
 GET,/api/super-admin/commercial/revenue-collections,platform,read,revenue-collections,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/active-tax-configuration,platform,read,active-tax-configuration,super_admin,platform,,,,no,
+PUT,/api/super-admin/compliance/belgium/configuration/rows/{kind}/{row_id},platform,update,rows,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/belgium/decisions,platform,read,decisions,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/belgium/packs,platform,read,packs,super_admin,platform,,,,no,
+POST,/api/super-admin/compliance/belgium/packs/{pack_row_id}/authority-examples,platform,create,authority-examples,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/belgium/packs/{pack_row_id}/configuration,platform,read,configuration,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/belgium/packs/{pack_row_id}/signing-status,platform,read,signing-status,super_admin,platform,,,,no,
+POST,/api/super-admin/compliance/belgium/seed-draft,platform,create,seed-draft,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/brazil/employees,worker,read,employees,,tenant,,worker-level data requires a live JIT support grant (ZP-PRIV A/B),payroll_employees,yes,"lists Brazilian employees (names, codes) of one organization"
 GET,/api/super-admin/compliance/brazil/employees/{employee_id},worker,read,employees,,tenant,,worker-level data requires a live JIT support grant (ZP-PRIV A/B),payroll_employees,yes,"one Brazilian employee's statutory profile, dependants, alimony and VT (Phase 4)"
 GET,/api/super-admin/compliance/brazil/employer-readiness,platform,read,employer-readiness,super_admin,platform,,,,no,

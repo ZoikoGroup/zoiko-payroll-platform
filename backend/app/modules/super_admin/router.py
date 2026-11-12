@@ -4828,6 +4828,75 @@ def poland_golden_check(pack_row_id: int, current_user=Depends(get_current_super
     return pl_super_admin.golden_check(db, pack_row_id)
 
 
+# ── Belgium signing console (ZP-BE-ENG-001 Phase 3A; spec §14 content control) ──
+# Same governance as Poland: governed edit / sign with a source and a reason,
+# editors refused as approver (statutory_editors hook), activation refused while
+# any row is empty, unsourced or unsigned. onss_employer rows are reference only.
+@router.get("/compliance/belgium/packs", summary="Belgium packs with their status")
+def belgium_packs(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    return be_super_admin.list_packs(db)
+
+
+@router.get("/compliance/belgium/packs/{pack_row_id}/configuration",
+            summary="Every canonical row of a Belgium pack, grouped by catalogue group")
+def belgium_configuration(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                          db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    return be_super_admin.configuration(db, pack_row_id)
+
+
+@router.get("/compliance/belgium/packs/{pack_row_id}/signing-status",
+            summary="What still blocks activation of a Belgium pack (pending, empty, unsourced, editors)")
+def belgium_signing_status(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    return be_super_admin.signing_status(db, pack_row_id)
+
+
+@router.put("/compliance/belgium/configuration/rows/{kind}/{row_id}",
+            summary="Governed edit / sign of one Belgium statutory row (editable packs; source + reason; audited)")
+def belgium_configuration_update_row(kind: str, row_id: int, payload: dict = Body(...),
+                                     current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.update_row(db, kind, row_id, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.post("/compliance/belgium/seed-draft",
+             summary="Create the Draft Belgium pack from the catalogue (only while none exists; reason; audited)")
+def belgium_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                       db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.seed_draft(db, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.get("/compliance/belgium/decisions", summary="Belgium owner / specialist decisions (gaps register)")
+def belgium_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_service
+
+    return belgium_service.owner_decisions(db)
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/authority-examples",
+             summary="Register an official / independent worked example on a Belgium pack (reviewed source; G1)")
+def belgium_add_authority_example(pack_row_id: int, payload: dict = Body(...),
+                                  current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.add_authority_example(db, pack_row_id, payload, getattr(current_user, "id", None))
+    db.commit()
+    return result
+
+
 @router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
              summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
 def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,

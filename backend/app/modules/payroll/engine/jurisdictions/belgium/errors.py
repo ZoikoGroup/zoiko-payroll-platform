@@ -32,6 +32,12 @@ def keyed(code: str, detail) -> str:
 # ── block codes ─────────────────────────────────────────────────────────────
 SIMPLE_MODE_UNSUPPORTED = "BE_SIMPLE_MODE_UNSUPPORTED"
 ENGINE_NOT_BUILT = "BE_ENGINE_NOT_BUILT"
+# Phase 3A (pack reader): content not signed, empty, or decided NOT_SUPPORTED.
+CONTENT_PENDING = "BE_CONTENT_PENDING"
+FEATURE_BLOCKED = "BE_FEATURE_BLOCKED"
+ROW_MISSING = "BE_ROW_MISSING"
+TABLE_EMPTY = "BE_TABLE_EMPTY"
+ROUNDING_KEY_INVALID = "BE_ROUNDING_KEY_INVALID"
 
 # ── exception codes (not blocks) ────────────────────────────────────────────
 # Special social security contribution: no spec requirement ID; pending

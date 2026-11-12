@@ -20112,6 +20112,14 @@ def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
     if not pack:
         raise NotFoundException("JurisdictionPack", pack_row_id)
+    if (pack.jurisdiction_country or "").upper() == "BE":
+        # Belgium (ZP-BE-ENG-001 Phase 3A): only an Active Belgian pack may be
+        # assigned. Every other country's assignment behaviour is unchanged.
+        from app.modules.payroll.belgium_service import be_pack_assignment_refusal
+
+        be_refusal = be_pack_assignment_refusal(pack)
+        if be_refusal:
+            raise BadRequestException(be_refusal)
     is_tax = pack.pack_type == "tax"
 
     updated = 0
@@ -42295,6 +42303,16 @@ def upsert_collective_agreement(db: Session, data, actor_id: Optional[int] = Non
     that has left Draft — a change to released content is a NEW version."""
     if _normalize_country(data.jurisdictionCountry) == "CH":
         raise BadRequestException("Swiss wage floors are governed — use /compliance/switzerland/wage-floors.")
+    if _normalize_country(data.jurisdictionCountry) == "BE":
+        # Belgium (ZP-BE-ENG-001 Phase 3A, D3): Joint Committee packs reuse this
+        # registry; agreement_code (BE-PC-<committee>[-<sub>]-<version>) is the
+        # single source of truth for the committee. employee_group keeps its
+        # existing meaning. Approval four-eyes is enforced below unchanged.
+        from app.modules.payroll.belgium_service import be_agreement_refusal
+
+        be_refusal = be_agreement_refusal(data.agreementCode)
+        if be_refusal:
+            raise BadRequestException(be_refusal)
     if data.agreementType not in _CBA_TYPES:
         raise BadRequestException(f"agreementType must be one of {list(_CBA_TYPES)} — there is no national "
                                   "default collective agreement (ZP-SE-ENG-001 §9).")
