@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import {
-  approveBeRegistration, approveBeUnit, createBeRegistration, createBeUnit, getBeOptions, getEmployees,
-  listBeJointCommitteesForOrg, listBeRegistrations, listBeUnits, resolveBeClassification, setBeEmployerOnss,
-  verifyBeRegistration,
+  approveBeComponentMapping, approveBeRegistration, approveBeUnit, createBeComponentMapping, createBeRegistration,
+  createBeSubstituteDay, createBeUnit, getBeOptions, getEmployees, listBeComponentMappings,
+  listBeJointCommitteesForOrg, listBeRegistrations, listBeSubstituteDays, listBeUnits, resolveBeClassification,
+  setBeEmployerOnss, verifyBeRegistration,
 } from "../../../service/payrollService";
 import { card, useLoad } from "../../../components/jurisdiction/japan/jpFormat";
 import JPRecordSection, { btn, isDraft, statusCol } from "../../../components/jurisdiction/japan/JPRecordSection";
@@ -113,6 +114,9 @@ function EmployerRegistrations({ options }) {
           { key: "legal_name", label: "Legal name", required: true },
           { key: "enterprise_number", label: "Enterprise number (KBO/BCE)", required: true },
           { key: "employer_category_code", label: "ONSS employer category" },
+          { key: "onss_special_160_status", label: "Special contribution (workforce test) applies?", type: "select",
+            options: options.special160Statuses },
+          { key: "special_160_evidence_ref", label: "Workforce test evidence" },
           { key: "legal_language", label: "Legal language", type: "select", options: options.legalLanguages },
           { key: "withholding_declaration_frequency", label: "Withholding declaration frequency" },
           { key: "holiday_fund_ref", label: "Holiday fund reference" },
@@ -151,6 +155,70 @@ function EstablishmentUnits() {
         { key: "evidence_ref", label: "Evidence reference" },
         REASON_FIELD,
       ]} />
+  );
+}
+
+function ComponentMappings({ options }) {
+  const keyHint = (options.platformPayFields || []).join(", ");
+  return (
+    <JPRecordSection
+      title="Pay component mappings" testId="be-component-mappings"
+      description={`Map each platform pay field (${keyHint}) or policy allowance key to a Belgian pay component. A component paid without an ACTIVE mapping blocks Belgian payroll (BE-008). Approved by a second user.`}
+      load={listBeComponentMappings} create={createBeComponentMapping}
+      empty="No mapping yet: Belgian payslips are blocked until the platform pay is mapped."
+      columns={[{ label: "In force", render: period }, { label: "Source", key: "platform_component_source" },
+        { label: "Platform key", key: "platform_component_key" }, { label: "Belgian component", key: "be_component" },
+        statusCol]}
+      actions={[{ label: "Approve", show: isDraft, run: (r) => approveBeComponentMapping(r.id), ok: "Mapping approved." }]}
+      fields={[
+        { key: "platform_component_source", label: "Source", type: "select", options: options.componentSources,
+          required: true },
+        { key: "platform_component_key", label: "Platform key", required: true },
+        { key: "be_component", label: "Belgian component", type: "select", options: options.components, required: true },
+        { key: "effective_from", label: "Effective from", type: "date", required: true },
+        { key: "evidence_ref", label: "Evidence reference" },
+        REASON_FIELD,
+      ]} />
+  );
+}
+
+function SubstituteDays() {
+  const [rows, error, , reload] = useLoad(() => listBeSubstituteDays());
+  const [form, setForm] = useState({ date: "", replacesHoliday: "", name: "", reason: "" });
+  const [state, setState] = useState({ error: null, notice: null });
+  const submit = async (e) => {
+    e.preventDefault();
+    try {
+      await createBeSubstituteDay(form);
+      setForm({ date: "", replacesHoliday: "", name: "", reason: "" });
+      setState({ error: null, notice: "Substitute day recorded (audited)." });
+      reload();
+    } catch (err) {
+      setState({ error: errorText(err), notice: null });
+    }
+  };
+  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+  return (
+    <section className={card} data-testid="be-substitute-days">
+      <h3 className="text-[14px] font-semibold text-foreground">Substitute holidays</h3>
+      <p className="mb-2 text-[12px] text-foreground-muted">
+        The employer&apos;s replacement day for a public holiday that falls on a Sunday or a non-working day. Public
+        holidays themselves come only from the signed rule pack.
+      </p>
+      {error && <p role="alert" className="text-[12px] text-error">{error}</p>}
+      <ul className="text-[12px]">{(rows || []).map((r) => <li key={r.id}>{r.date} · {r.name}</li>)}</ul>
+      <form onSubmit={submit} className="mt-2 flex flex-wrap items-end gap-2" aria-label="Record a substitute day">
+        <input className={input} type="date" required value={form.date} onChange={set("date")} aria-label="Substitute day" />
+        <input className={input} type="date" required value={form.replacesHoliday} onChange={set("replacesHoliday")}
+          aria-label="Replaces holiday" />
+        <input className={input} placeholder="Name" value={form.name} onChange={set("name")} aria-label="Name" />
+        <input className={input} placeholder="Reason" required value={form.reason} onChange={set("reason")}
+          aria-label="Reason" />
+        <button type="submit" className={btn}>Record</button>
+        {state.error && <span role="alert" className="text-[12px] text-error">{state.error}</span>}
+        {state.notice && <span role="status" className="text-[12px] text-success">{state.notice}</span>}
+      </form>
+    </section>
   );
 }
 
@@ -267,6 +335,8 @@ export default function BEComplianceCentreTab() {
       {optionsError && <p role="alert" className="text-[12px] text-error">{optionsError}</p>}
       {options && <EmployerRegistrations options={options} />}
       <EstablishmentUnits />
+      {options && <ComponentMappings options={options} />}
+      <SubstituteDays />
       <JointCommitteeCoverage />
       <ResolverBlockers employees={employees} />
       <EmployeeRecords employees={employees} />

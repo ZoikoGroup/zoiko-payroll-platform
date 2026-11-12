@@ -332,3 +332,51 @@ def be_create_substitute_day(body: Dict[str, Any] = Body(...), current_user=Depe
     out = be.record_be_substitute_day(db, _org_id(current_user), body, _actor(current_user))
     db.commit()
     return out
+
+
+# ── B2: absence episodes and holiday certificates ───────────────────────────
+@router.get("/employees/{employee_id}/absence-episodes", summary="An employee's absence episodes (no diagnosis)")
+def be_list_absence_episodes(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                             db: Session = Depends(get_db)):
+    return _list(db, be._models().PayrollBeAbsenceEpisode, _org_id(current_user), employee_id)
+
+
+@router.post("/employees/{employee_id}/absence-episodes", summary="Record a DRAFT absence episode (dates and kind only)")
+def be_create_absence_episode(employee_id: int, body: Dict[str, Any] = Body(...),
+                              current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    payload, reason = _split(body)
+    return _commit(db, be.record_be_absence_episode(db, _org_id(current_user), employee_id, payload,
+                                                    _actor(current_user), reason))
+
+
+@router.post("/absence-episodes/{row_id}/approve", summary="Approve an absence episode (four-eyes)")
+def be_approve_absence_episode(row_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _commit(db, be.approve_be_absence_episode(db, _org_id(current_user), row_id, _actor(current_user)))
+
+
+@router.post("/absence-episodes/{row_id}/cancel", summary="Cancel an absence episode (reason; history kept)")
+def be_cancel_absence_episode(row_id: int, body: Dict[str, Any] = Body(...),
+                              current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _commit(db, be.cancel_be_absence_episode(db, _org_id(current_user), row_id, _actor(current_user),
+                                                    body.get("reason")))
+
+
+@router.get("/employees/{employee_id}/holiday-certificates", summary="An employee's holiday certificates")
+def be_list_holiday_certificates(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                                 db: Session = Depends(get_db)):
+    return _list(db, be._models().PayrollBeHolidayCertificate, _org_id(current_user), employee_id)
+
+
+@router.post("/employees/{employee_id}/holiday-certificates", summary="Record a DRAFT holiday certificate")
+def be_create_holiday_certificate(employee_id: int, body: Dict[str, Any] = Body(...),
+                                  current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    payload, reason = _split(body)
+    return _commit(db, be.record_be_holiday_certificate(db, _org_id(current_user), employee_id, payload,
+                                                        _actor(current_user), reason))
+
+
+@router.post("/holiday-certificates/{row_id}/approve",
+             summary="Approve a holiday certificate (four-eyes; immutable afterwards)")
+def be_approve_holiday_certificate(row_id: int, current_user=Depends(get_current_org_admin),
+                                   db: Session = Depends(get_db)):
+    return _commit(db, be.approve_be_holiday_certificate(db, _org_id(current_user), row_id, _actor(current_user)))

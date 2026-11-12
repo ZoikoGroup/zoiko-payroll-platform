@@ -1350,6 +1350,47 @@ def _be_working_time_inputs(db: Session, organization_id: int, employee, period)
             "be_hours_paid": sum((Decimal(d["hours"]) for d in days), Decimal("0"))}
 
 
+def _be_holiday_absence_inputs(db: Session, organization_id: int, employee, pay_date: date) -> dict:
+    """B2 facts: ACTIVE absence episodes (no diagnosis exists), approved holiday
+    certificates, every worker-profile version, and the holiday service-year
+    facts from the ledger (BE-024: service year = the year before the taking
+    year)."""
+    from sqlalchemy import func
+
+    m = _models()
+    service_year = pay_date.year - 1
+    episodes = (db.query(m.PayrollBeAbsenceEpisode)
+                .filter(m.PayrollBeAbsenceEpisode.organization_id == organization_id,
+                        m.PayrollBeAbsenceEpisode.employee_id == employee.id,
+                        m.PayrollBeAbsenceEpisode.status == STATUS_ACTIVE,
+                        m.PayrollBeAbsenceEpisode.start_date <= pay_date)
+                .order_by(m.PayrollBeAbsenceEpisode.start_date).all())
+    certificates = (db.query(m.PayrollBeHolidayCertificate)
+                    .filter(m.PayrollBeHolidayCertificate.organization_id == organization_id,
+                            m.PayrollBeHolidayCertificate.employee_id == employee.id,
+                            m.PayrollBeHolidayCertificate.status == "APPROVED").all())
+    profiles = (db.query(m.PayrollBeWorkerProfile)
+                .filter(m.PayrollBeWorkerProfile.organization_id == organization_id,
+                        m.PayrollBeWorkerProfile.employee_id == employee.id).order_by(m.PayrollBeWorkerProfile.id).all())
+    Entry = m.PayrollBeAccumulatorEntry
+    base_rows = (db.query(Entry.pay_date, Entry.amount)
+                 .filter(Entry.organization_id == organization_id, Entry.employee_id == employee.id,
+                         Entry.accumulator == "HOLIDAY_PAY_BASE", Entry.year == service_year).all())
+    advance = (db.query(func.sum(Entry.amount))
+               .filter(Entry.organization_id == organization_id, Entry.employee_id == employee.id,
+                       Entry.accumulator == "ADDITIONAL_HOLIDAY_ADVANCE", Entry.pay_date < pay_date).scalar())
+    months = len({(d.year, d.month) for d, _a in base_rows})
+    holiday = {"serviceYear": service_year, "priorYearBase": str(sum((Decimal(str(a)) for _d, a in base_rows),
+                                                                      Decimal("0"))),
+               "advanceOutstanding": str(Decimal(str(advance or 0)))}
+    if months:
+        holiday["monthsWorked"] = months
+    strip = ("certificate_ref",)                     # a reference to the certificate stays in its table
+    return {"be_absence_episodes": [{k: v for k, v in _strip(_facts(e)).items() if k not in strip} for e in episodes],
+            "be_holiday_certificates": [_strip(_facts(c)) for c in certificates],
+            "be_profile_history": [_strip(_facts(p)) for p in profiles], "be_holiday": holiday}
+
+
 def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date: date, pack_version=None,
                            period=None) -> dict:
     """Every Belgian input in force ON THE PAY DATE. Nothing is inferred: a
@@ -1368,6 +1409,7 @@ def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date
         "be_component_mappings": be_component_mapping_index(db, organization_id, pay_date),
         "be_date_of_birth": getattr(employee, "date_of_birth", None),
         **_be_working_time_inputs(db, organization_id, employee, period),
+        **_be_holiday_absence_inputs(db, organization_id, employee, pay_date),
         "be_ytd": be_ytd_snapshot(db, organization_id, employee.id, entity, pay_date),
         "be_pack_version": pack_version, "be_organization_id": organization_id, "be_legal_entity_id": entity,
         "be_employee_id": employee.id,
@@ -1375,13 +1417,15 @@ def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date
 
 
 _BE_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "additional_compensation",
-                    "be_pension_premium", "be_exceptional_reference", "be_hours_paid", "be_hourly_rate")
+                    "be_pension_premium", "be_exceptional_reference", "be_hours_paid", "be_hourly_rate",
+                    "be_daily_rate")
 _BE_CTX_PLAIN = ("pay_frequency", "be_components", "be_source_periods", "be_pay_frequency", "be_pack_version",
                  "be_organization_id", "be_legal_entity_id", "be_employee_id", "trace_id", "be_component_mappings",
-                 "be_allowance_items", "be_working_time", "be_indexation")
+                 "be_allowance_items", "be_working_time", "be_indexation", "be_holiday")
 _BE_CTX_DATES = ("pay_date", "be_pay_date", "period_start", "period_end", "be_date_of_birth")
 _BE_RECORD_KEYS = ("be_registration", "be_profile")
-_BE_LIST_KEYS = ("be_classifications", "be_schedules", "be_declarations")
+_BE_LIST_KEYS = ("be_classifications", "be_schedules", "be_declarations", "be_absence_episodes",
+                 "be_holiday_certificates", "be_profile_history")
 _BE_MAP_KEYS = ("be_units", "be_agreements")
 _BE_RATE_FIELDS = ("component_key", "label", "employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value",
                    "effective_from", "effective_to")
@@ -1550,7 +1594,12 @@ def org_options() -> dict:
     return {"workerCategories": list(content.WORKER_CATEGORIES), "scheduleRegimes": list(content.SCHEDULE_REGIMES),
             "declarationTypes": list(content.DECLARATION_TYPES), "sourceChannels": list(DECLARATION_CHANNELS),
             "residency": ["RESIDENT", "NON_RESIDENT"], "legalLanguages": ["NL", "FR", "DE"],
-            "employeeIdentifierTypes": [bid.NISS, bid.BIS], "verificationOutcomes": ["VERIFIED", "REJECTED"]}
+            "employeeIdentifierTypes": [bid.NISS, bid.BIS], "verificationOutcomes": ["VERIFIED", "REJECTED"],
+            "absenceKinds": list(content.ABSENCE_KINDS), "certificateDirections": ["IN", "OUT"],
+            "payBases": list(content.PAY_BASES), "contractTypes": list(content.CONTRACT_TYPES),
+            "special160Statuses": list(content.SPECIAL_160_STATUSES), "components": list(content.COMPONENTS),
+            "componentSources": ["PLATFORM_FIELD", "POLICY_ALLOWANCE"],
+            "platformPayFields": list(BE_PLATFORM_PAY_FIELDS)}
 
 
 # ── G-28 (Block B): platform pay component -> Belgian component code ─────────
@@ -1631,3 +1680,174 @@ def record_be_substitute_day(db: Session, organization_id: int, payload: dict, a
     _audit(db, actor_id, "created", "be_substitute_day", row.id,
            new={"date": on.isoformat(), "replacesHoliday": replaces.isoformat(), "name": name}, reason=reason)
     return {"id": row.id, "date": on.isoformat(), "name": name, "replacesHoliday": replaces.isoformat()}
+
+
+# ── B2: absence episodes and holiday certificates (four-eyes) ───────────────
+BE_EPISODE_FIELDS = ("kind", "start_date", "end_date", "employment_line", "cause_link_id", "different_cause",
+                     "certificate_ref", "evidence_ref")
+BE_CERTIFICATE_FIELDS = ("direction", "service_year", "issued_on", "gross_base_amount", "simple_pay_amount",
+                         "double_pay_amount", "days_paid", "prior_employer_ref", "evidence_ref", "supersedes_id")
+
+
+def _category_on(db: Session, organization_id: int, employee_id: int, on: date) -> str:
+    P = _models().PayrollBeWorkerProfile
+    row = (_in_force(db.query(P).filter(P.organization_id == organization_id, P.employee_id == employee_id,
+                                        P.status.in_((STATUS_ACTIVE, STATUS_SUPERSEDED))), P, on)
+           .order_by(P.effective_from.desc()).first())
+    if row is None:
+        raise BadRequestException("No approved worker profile is in force on the episode start date "
+                                  "(the worker category at start is required).")
+    return row.worker_category
+
+
+def record_be_absence_episode(db: Session, organization_id: int, employee_id: int, payload: dict, actor_id,
+                              reason=None):
+    """A DRAFT absence episode: dates, kind and the worker category at its start
+    (from the approved profile) - never a diagnosis (the field list has none)."""
+    reason = _reason(reason)
+    employee = _employee(db, organization_id, employee_id)
+    if not isinstance(payload, dict):
+        raise BadRequestException("The request body must be an object.")
+    unknown = sorted(set(payload) - set(BE_EPISODE_FIELDS))
+    if unknown:
+        raise BadRequestException(f"unknown field(s): {', '.join(unknown)}")
+    kind = str(payload.get("kind") or "").strip().upper()
+    if kind not in _content().ABSENCE_KINDS:
+        raise BadRequestException(f"kind must be one of: {', '.join(_content().ABSENCE_KINDS)}.")
+    start = _as_date(payload.get("start_date"), "start_date")
+    end = _as_date(payload["end_date"], "end_date") if payload.get("end_date") not in (None, "") else None
+    if end is not None and end < start:
+        raise BadRequestException("end_date cannot be before start_date.")
+    different = payload.get("different_cause")
+    if different not in (None, True, False):
+        raise BadRequestException("different_cause must be true, false or empty.")
+    Episode = _models().PayrollBeAbsenceEpisode
+    link = payload.get("cause_link_id")
+    if link not in (None, ""):
+        earlier = db.query(Episode).filter(Episode.id == int(link), Episode.organization_id == organization_id,
+                                           Episode.employee_id == employee.id).first()
+        if earlier is None or earlier.start_date >= start:
+            raise BadRequestException("cause_link_id must be an earlier episode of this employee.")
+        link = earlier.id
+    else:
+        link = None
+    row = Episode(organization_id=organization_id, employee_id=employee.id,
+                  legal_entity_id=getattr(employee, "legal_entity_id", None), kind=kind, start_date=start,
+                  end_date=end, employment_line=(str(payload.get("employment_line") or "").strip().upper() or None),
+                  worker_category_at_start=_category_on(db, organization_id, employee.id, start),
+                  cause_link_id=link, different_cause=different,
+                  certificate_ref=(str(payload.get("certificate_ref") or "").strip()[:100] or None),
+                  evidence_ref=(str(payload.get("evidence_ref") or "").strip()[:300] or None), status=STATUS_DRAFT,
+                  created_by_id=actor_id)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "created", "be_absence_episode", row.id,
+           new={"kind": kind, "start": start.isoformat(), "end": end.isoformat() if end else None}, reason=reason)
+    return row
+
+
+def approve_be_absence_episode(db: Session, organization_id: int, row_id: int, actor_id):
+    from app.modules.payroll.service import require_four_eyes
+
+    Episode = _models().PayrollBeAbsenceEpisode
+    row = db.query(Episode).filter(Episode.id == row_id, Episode.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException("Belgium absence episode")
+    if row.status != STATUS_DRAFT:
+        raise BadRequestException("Only a DRAFT absence episode can be approved.")
+    require_four_eyes(row.created_by_id, actor_id, "Approving a Belgium absence episode", db=db,
+                      entity_type="be_absence_episode", entity_id=row.id, current_status=row.status)
+    row.status, row.approved_by_id, row.approved_at = STATUS_ACTIVE, actor_id, datetime.utcnow()
+    db.flush()
+    _audit(db, actor_id, "approved", "be_absence_episode", row.id, old={"status": STATUS_DRAFT},
+           new={"status": STATUS_ACTIVE})
+    return row
+
+
+def cancel_be_absence_episode(db: Session, organization_id: int, row_id: int, actor_id, reason):
+    reason = _reason(reason)
+    Episode = _models().PayrollBeAbsenceEpisode
+    row = db.query(Episode).filter(Episode.id == row_id, Episode.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException("Belgium absence episode")
+    if row.status not in (STATUS_DRAFT, STATUS_ACTIVE):
+        raise BadRequestException("Only a DRAFT or ACTIVE absence episode can be cancelled.")
+    old = row.status
+    row.status, row.cancelled_reason = "CANCELLED", reason
+    db.flush()
+    _audit(db, actor_id, "cancelled", "be_absence_episode", row.id, old={"status": old},
+           new={"status": "CANCELLED"}, reason=reason)
+    return row
+
+
+def record_be_holiday_certificate(db: Session, organization_id: int, employee_id: int, payload: dict, actor_id,
+                                  reason=None):
+    """A DRAFT holiday certificate (IN from a prior employer / OUT on departure).
+    Approved certificates are immutable: a correction is a new version naming
+    the one it supersedes."""
+    reason = _reason(reason)
+    employee = _employee(db, organization_id, employee_id)
+    if not isinstance(payload, dict):
+        raise BadRequestException("The request body must be an object.")
+    unknown = sorted(set(payload) - set(BE_CERTIFICATE_FIELDS))
+    if unknown:
+        raise BadRequestException(f"unknown field(s): {', '.join(unknown)}")
+    direction = str(payload.get("direction") or "").strip().upper()
+    if direction not in ("IN", "OUT"):
+        raise BadRequestException("direction must be IN or OUT.")
+    try:
+        service_year = int(payload.get("service_year"))
+    except (TypeError, ValueError):
+        raise BadRequestException("service_year must be a year.")
+    amounts = {}
+    for name in ("gross_base_amount", "simple_pay_amount", "double_pay_amount", "days_paid"):
+        value = _decimal(payload.get(name), name)
+        if value is not None and value < 0:
+            raise BadRequestException(f"{name} cannot be negative.")
+        amounts[name] = value
+    prior_ref = " ".join(str(payload.get("prior_employer_ref") or "").split())[:200] or None
+    if direction == "IN" and not prior_ref:
+        raise BadRequestException("An IN certificate needs the prior employer reference.")
+    Certificate = _models().PayrollBeHolidayCertificate
+    previous = None
+    if payload.get("supersedes_id") not in (None, ""):
+        previous = db.query(Certificate).filter(Certificate.id == int(payload["supersedes_id"]),
+                                                Certificate.organization_id == organization_id,
+                                                Certificate.employee_id == employee.id).first()
+        if previous is None or previous.status != "APPROVED":
+            raise BadRequestException("supersedes_id must be an APPROVED certificate of this employee.")
+    row = Certificate(organization_id=organization_id, employee_id=employee.id,
+                      legal_entity_id=getattr(employee, "legal_entity_id", None), direction=direction,
+                      service_year=service_year,
+                      issued_on=_as_date(payload["issued_on"], "issued_on") if payload.get("issued_on") else None,
+                      prior_employer_ref=prior_ref,
+                      evidence_ref=(str(payload.get("evidence_ref") or "").strip()[:300] or None),
+                      previous_version_id=getattr(previous, "id", None), status=STATUS_DRAFT,
+                      created_by_id=actor_id, **amounts)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "created", "be_holiday_certificate", row.id,
+           new={"direction": direction, "serviceYear": service_year}, reason=reason)
+    return row
+
+
+def approve_be_holiday_certificate(db: Session, organization_id: int, row_id: int, actor_id):
+    from app.modules.payroll.service import require_four_eyes
+
+    Certificate = _models().PayrollBeHolidayCertificate
+    row = db.query(Certificate).filter(Certificate.id == row_id, Certificate.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException("Belgium holiday certificate")
+    if row.status != STATUS_DRAFT:
+        raise BadRequestException("Only a DRAFT holiday certificate can be approved; an approved one is immutable.")
+    require_four_eyes(row.created_by_id, actor_id, "Approving a Belgium holiday certificate", db=db,
+                      entity_type="be_holiday_certificate", entity_id=row.id, current_status=row.status)
+    if row.previous_version_id:
+        old = db.get(Certificate, row.previous_version_id)
+        if old is not None and old.status == "APPROVED":
+            old.status = STATUS_SUPERSEDED
+    row.status, row.approved_by_id, row.approved_at = "APPROVED", actor_id, datetime.utcnow()
+    db.flush()
+    _audit(db, actor_id, "approved", "be_holiday_certificate", row.id, old={"status": STATUS_DRAFT},
+           new={"status": "APPROVED"})
+    return row

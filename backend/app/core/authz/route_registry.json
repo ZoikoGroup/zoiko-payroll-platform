@@ -3123,6 +3123,42 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/belgium/absence-episodes/{row_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_absence_episodes"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/absence-episodes/{row_id}/cancel",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_absence_episodes"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/belgium/classification/resolve",
    "data_class": "worker",
    "action": "create",
@@ -3251,6 +3287,47 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/belgium/employees/{employee_id}/absence-episodes",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "absence-episodes",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_absence_episodes",
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/employees/{employee_id}/absence-episodes",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "absence-episodes",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_absence_episodes",
+    "payroll_be_worker_profiles",
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/belgium/employees/{employee_id}/classifications",
    "data_class": "worker",
    "action": "read",
@@ -3326,6 +3403,46 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_be_declarations",
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/employees/{employee_id}/holiday-certificates",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "holiday-certificates",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_holiday_certificates",
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/employees/{employee_id}/holiday-certificates",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "holiday-certificates",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_holiday_certificates",
     "payroll_employees"
    ],
    "overridden": false
@@ -3613,6 +3730,24 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/holiday-certificates/{row_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_holiday_certificates"
+   ],
    "overridden": false
   },
   {

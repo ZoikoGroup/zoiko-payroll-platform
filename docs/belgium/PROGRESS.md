@@ -162,7 +162,7 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 
 ## B1 — wages and working time
 
-- Commit: see `feat(belgium): block B1 wages and working time`.
+- Commit: 23c02ac `feat(belgium): block B1 wages and working time`.
 - `engine/jurisdictions/belgium/wages.py`: sector minimum from the line's ACTIVE agreement
   `modules["wage_scales"]` (function class, highest seniority band not above the employee's, optional schedule
   regime, effective dates; part-time pro rata on fullTimeWeeklyHours; hourly rows need the hours paid);
@@ -185,3 +185,30 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 - Registry diff: 3 new routes, no existing route changed.
 - Tests: test_belgium_wages_working_time.py (new, 19); Belgium + shared engine / attendance / Poland service
   suites: 1093 passed, 1 skipped.
+
+## B2 — holiday pay and absence
+
+- Commit: see `feat(belgium): block B2 holiday pay and absence`.
+- `holiday.py`: SEPARATE strategies (BE-025). White-collar: simple pay = continued salary (signed ack),
+  double pay = be_hol_wc_double_pct x reference salary (HOLIDAY_BASE, never the wage floor, BE-028) x months
+  worked / 12 in the SERVICE year, minus approved IN certificates of that year and the additional-holiday advance
+  (BE-026 offset); additional holidays advanced; departure pay by formula. Manual: holiday-fund regime (employer
+  pay = exception), annual debit reconciliation (obligation delta HOLIDAY_FUND_ANNUAL_DEBIT). Service year kept
+  apart from the taking year (BE-024); a category change in the service year is an explicit exception. Pay is
+  verified, never topped up.
+- `absence.py`: episode engine; rules read by a BePack scoped to the incapacity START date (BE-030);
+  white-collar guaranteed days (contract condition) else manual day bands; relapse within the window continues
+  the day count (chains too) with lookback across the year boundary; declared different cause = new period +
+  exception; maternity suspends salary with CBA top-up overlay (BE-032); birth-leave employer vs external days;
+  external benefits never in net (BE-031). GUARANTEED_SALARY_DAYS ledger delta.
+- Service + routes (four-eyes): absence episodes (record / approve / cancel; no diagnosis field; category at
+  start from the approved profile; relapse link validated) and holiday certificates (record / approve;
+  immutable after approval; correction supersedes). Calc inputs: ACTIVE episodes (certificate refs stripped),
+  approved certificates, profile history, service-year facts from the ledger.
+- UI: absence-episode and holiday-certificate sections in BelgiumStatutoryProfilePanel; pay basis / contract
+  fields; Compliance Centre: 1.60% status on the registration form, pay-component mappings, substitute days.
+  Choice lists from /belgium/options. Validation script: content-key check now uses the catalogue KEYS (org
+  files name columns such as be_component) -> 17 checks pass.
+- Registry diff: 7 new routes, no existing route changed.
+- Tests: test_belgium_holiday_absence.py (new, 19, incl. relapse across 31 Dec 2025 / 1 Jan 2026); Belgium +
+  engine standard + Poland service: 957 passed, 1 skipped.

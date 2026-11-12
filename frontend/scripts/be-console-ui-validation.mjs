@@ -157,11 +157,16 @@ check("A4: no hard-coded statutory number in the org files", () => {
   }
 });
 
+// Org files name database columns such as be_component, so only the catalogue's
+// own content keys (the KEYS dict of belgium_content.py) are refused there.
+const contentKeys = new Set([...content.matchAll(/^\s+"(be_[a-z0-9_]+)": \(/gm)].map((m) => m[1]));
+check("A4: the content key list was extracted from the backend catalogue", () =>
+  assert(contentKeys.size > 60, `only ${contentKeys.size}`));
 check("A4: no content key or catalogue vocabulary value in the org files", () => {
   for (const file of ORG_FILES) {
     const code = read(file);
-    const key = code.match(/["'`]be_[a-z0-9_]+["'`]/);
-    assert(!key, `${file}: content key ${key && key[0]}`);
+    const key = [...code.matchAll(/["'`](be_[a-z0-9_]+)["'`]/g)].map((m) => m[1]).find((k) => contentKeys.has(k));
+    assert(!key, `${file}: content key ${key}`);
     for (const m of code.matchAll(/["'`]([A-Z0-9_]{2,})["'`]/g)) {
       assert(!vocabulary.has(m[1]), `${file}: vocabulary value ${m[1]}`);
     }

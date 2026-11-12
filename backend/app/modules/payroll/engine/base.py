@@ -1050,6 +1050,11 @@ class PayrollContext:
     be_hours_paid: Decimal = None             # B1: hours paid (hourly sector minimum)
     be_hourly_rate: Decimal = None            # B1: hourly rate (overtime premium check)
     be_indexation: dict = None                # B1: {"increase", "increasePct"} when an indexation applies
+    be_absence_episodes: list = None          # B2: ACTIVE episodes (dates, kind, category at start; no diagnosis)
+    be_holiday: dict = None                   # B2: service-year facts {serviceYear, monthsWorked, advanceOutstanding, ...}
+    be_holiday_certificates: list = None      # B2: approved holiday certificates (IN / OUT)
+    be_profile_history: list = None           # B2: every worker-profile version (category transitions)
+    be_daily_rate: Decimal = None             # B2: daily rate for employer absence pay checks
     be_pension_premium: Decimal = None        # employer occupational-pension premium (special contribution base)
     be_exceptional_reference: Decimal = None  # annual reference remuneration for exceptional withholding
     be_ytd: dict = None                       # {accumulator: sum before this pay date}

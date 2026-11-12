@@ -34,6 +34,14 @@ B1_EMPLOYEE_RATES = {"be_ot_premium_weekday": "10.00", "be_ot_premium_sunday_hol
 B1_EMPLOYER_RATES = {"be_wage_norm_margin": "10.00"}
 B1_FORMULAS = {"be_ot_compensatory_rest_rule": "overtime * 1", "be_wage_index_centime_rule": "min(increase, 10)"}
 TEST_HOLIDAY = "2026-04-06"
+# B2 (TEST ONLY): double holiday 10 %, fund debit 10 %, guaranteed 10 days at 10 %, contract condition 5 months,
+# relapse window 3 weeks, manual bands day 1-7 at 10 % / day 8-30 at 5 %, birth leave 20 days of which 3 employer.
+B2_TEXT = {"be_hol_wc_simple_rule": "TEST_ONLY", "be_hol_wc_double_contribution_rule": "TEST_ONLY"}
+B2_EMPLOYEE_RATES = {"be_hol_wc_double_pct": "10.00"}
+B2_EMPLOYER_RATES = {"be_hol_manual_annual_debit": "10.00", "be_abs_wc_guaranteed_pct": "10.00"}
+B2_AMOUNTS = {"be_abs_wc_guaranteed_days": "10", "be_abs_wc_min_contract_months": "5",
+              "be_abs_relapse_window_weeks": "3", "be_abs_birth_leave_days": "20", "be_abs_birth_leave_employer_days": "3"}
+B2_FORMULAS = {"be_hol_additional_rule": "days * 10", "be_hol_departure_rule": "reference * months / 100"}
 EMPLOYER_RATES = {"be_onss_wage_moderation": "10.00", "be_onss_special_160": "10.00",
                   "be_onss_pension_special": "10.00", "be_hol_manual_quarterly_contribution": "10.00"}
 SLAB_KEYS = ("be_red_social_work_bonus", "be_onss_employer_base_rate", "be_onss_fund_contributions",
@@ -51,6 +59,9 @@ CLASSES = {
     "HOLIDAY_PAY_DOUBLE": ("WITHHOLDING_EXCEPTIONAL",),
     "ARREARS": ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITHHOLDING_EXCEPTIONAL"),
     "OVERTIME_PREMIUM": ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITHHOLDING_REGULAR"),
+    "GUARANTEED_SALARY": ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITHHOLDING_REGULAR"),
+    "BIRTH_LEAVE_PAY": ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITHHOLDING_REGULAR"),
+    "DEPARTURE_HOLIDAY_PAY": ("WITHHOLDING_EXCEPTIONAL",),
 }
 
 
@@ -80,6 +91,11 @@ def build_pack(rates_over=None, slabs_over=None, drop_slabs=()):
     rate_map.update({k: rate(k, employer=v) for k, v in B1_EMPLOYER_RATES.items()})
     rate_map.update({k: rate(k, text=c.SLAB_ROWS) for k in (*B1_FORMULAS, "be_public_holidays")})
     rate_map["be_ot_threshold_rule"] = rate("be_ot_threshold_rule", text="TEST_ONLY")
+    rate_map.update({k: rate(k, text=v) for k, v in B2_TEXT.items()})
+    rate_map.update({k: rate(k, employee=v) for k, v in B2_EMPLOYEE_RATES.items()})
+    rate_map.update({k: rate(k, employer=v) for k, v in B2_EMPLOYER_RATES.items()})
+    rate_map.update({k: dict(rate(k), flat_amount=v) for k, v in B2_AMOUNTS.items()})
+    rate_map.update({k: rate(k, text=c.SLAB_ROWS) for k in (*B2_FORMULAS, "be_abs_manual_day_bands")})
     rate_map.update({k: rate(k, text=c.SLAB_ROWS) for k in SLAB_KEYS})
     slabs = []
     for component, included in CLASSES.items():
@@ -100,6 +116,9 @@ def build_pack(rates_over=None, slabs_over=None, drop_slabs=()):
     ]
     slabs += [slab(k, formula=v) for k, v in FORMULAS.items()]
     slabs += [slab(k, formula=v) for k, v in B1_FORMULAS.items()]
+    slabs += [slab(k, formula=v) for k, v in B2_FORMULAS.items()]
+    slabs += [slab("be_abs_manual_day_bands", low="1", high="8", pct="10.00"),
+              slab("be_abs_manual_day_bands", low="8", high="31", pct="5.00")]
     slabs.append({"rule_type": c.PUBLIC_HOLIDAY_RULE, "effective_from": TEST_HOLIDAY, "effective_to": TEST_HOLIDAY,
                   "tax_formula": "TEST ONLY holiday", "rate_label": f"{TEST} holiday", "min_amount": "0"})
     slabs = [s for s in slabs if s["rule_type"] not in {c.RULE_TYPES[k] for k in drop_slabs}]

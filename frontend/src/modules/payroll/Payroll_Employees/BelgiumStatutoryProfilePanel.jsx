@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import {
-  approveBeClassification, approveBeDeclaration, approveBeSchedule, approveBeWorkerProfile, createBeClassification,
-  createBeDeclaration, createBeSchedule, createBeWorkerProfile, getBeOptions, listBeClassifications,
-  listBeDeclarations, listBeJointCommitteesForOrg, listBeSchedules, listBeWorkerProfiles, resolveBeClassification,
-  withdrawBeDeclaration,
+  approveBeAbsenceEpisode, approveBeClassification, approveBeDeclaration, approveBeHolidayCertificate,
+  approveBeSchedule, approveBeWorkerProfile, cancelBeAbsenceEpisode, createBeAbsenceEpisode, createBeClassification,
+  createBeDeclaration, createBeHolidayCertificate, createBeSchedule, createBeWorkerProfile, getBeOptions,
+  listBeAbsenceEpisodes, listBeClassifications, listBeDeclarations, listBeHolidayCertificates,
+  listBeJointCommitteesForOrg, listBeSchedules, listBeWorkerProfiles, resolveBeClassification, withdrawBeDeclaration,
 } from "../../../service/payrollService";
 import { card, useLoad } from "../../../components/jurisdiction/japan/jpFormat";
 import JPRecordSection, { btn, isDraft, statusCol } from "../../../components/jurisdiction/japan/JPRecordSection";
@@ -134,6 +135,7 @@ export function BelgiumEmployeeRecords({ employeeId }) {
           { key: "worker_category", label: "Worker category", type: "select", options: options.workerCategories, required: true },
           { key: "onss_worker_code", label: "ONSS worker code" },
           { key: "residency", label: "Residency", type: "select", options: options.residency },
+          { key: "pay_basis", label: "Pay basis (required to calculate)", type: "select", options: options.payBases },
           { key: "tax_status", label: "Tax status" },
           { key: "special_status", label: "Special status (blocks until its regime is certified)" },
           { key: "evidence_ref", label: "Evidence reference" },
@@ -169,6 +171,10 @@ export function BelgiumEmployeeRecords({ employeeId }) {
         fields={[
           { key: "effective_from", label: "Effective from", type: "date", required: true },
           { key: "employment_line", label: "Employment line", required: true },
+          { key: "contract_type", label: "Contract type (required to calculate)", type: "select",
+            options: options.contractTypes },
+          { key: "contract_start_date", label: "Contract start", type: "date" },
+          { key: "contract_end_date", label: "Contract end (fixed term)", type: "date" },
           { key: "joint_committee", label: "Joint Committee", type: "select", options: committeeCodes },
           { key: "sub_committee", label: "Sub-committee" },
           { key: "collective_agreement_id", label: "Joint Committee agreement", type: "select", options: agreements },
@@ -214,6 +220,59 @@ export function BelgiumEmployeeRecords({ employeeId }) {
           { key: "evidence_ref", label: "Evidence reference", required: true },
           { key: "count", label: "Dependants (count, when relevant)", type: "number" },
           { key: "note", label: "Note" },
+        ]} />
+
+      <JPRecordSection
+        title="Absence episodes" testId="be-absence-episodes"
+        description="Dates, kind and the worker category at the start only, never a diagnosis. A relapse names the earlier episode; a declared different cause starts a new guaranteed period for review. Approved by a second user."
+        load={() => listBeAbsenceEpisodes(id)} create={(p) => createBeAbsenceEpisode(id, p)}
+        empty="No absence episodes."
+        columns={[{ label: "From - to", render: (r) => `${r.start_date} to ${r.end_date || "open"}` },
+          { label: "Kind", key: "kind" }, { label: "Category at start", key: "worker_category_at_start" },
+          { label: "Relapse of", render: (r) => r.cause_link_id || "-" }, statusCol]}
+        actions={[
+          { label: "Approve", show: isDraft, run: (r) => approveBeAbsenceEpisode(r.id), ok: "Episode approved." },
+          { label: "Cancel", show: (r) => r.status === "DRAFT" || r.status === "ACTIVE", ok: "Episode cancelled.",
+            run: async (r) => {
+              const reason = ask("Reason for cancelling the episode");
+              if (!reason) throw new Error("A reason is required.");
+              await cancelBeAbsenceEpisode(r.id, reason);
+            } },
+        ]}
+        fields={[
+          { key: "kind", label: "Kind", type: "select", options: options.absenceKinds, required: true },
+          { key: "start_date", label: "From", type: "date", required: true },
+          { key: "end_date", label: "To", type: "date" },
+          { key: "employment_line", label: "Employment line" },
+          { key: "cause_link_id", label: "Relapse of episode id", type: "number" },
+          { key: "different_cause", label: "Declared different cause", type: "bool" },
+          { key: "certificate_ref", label: "Certificate reference" },
+          { key: "evidence_ref", label: "Evidence reference" },
+          REASON_FIELD,
+        ]} />
+
+      <JPRecordSection
+        title="Holiday certificates" testId="be-holiday-certificates"
+        description="IN from a prior employer (offsets the double holiday pay of the same service year) or OUT on departure. Immutable once a second user approves it; a correction is a new version naming the one it supersedes."
+        load={() => listBeHolidayCertificates(id)} create={(p) => createBeHolidayCertificate(id, p)}
+        empty="No holiday certificates."
+        columns={[{ label: "Direction", key: "direction" }, { label: "Service year", key: "service_year" },
+          { label: "Double pay", render: (r) => r.double_pay_amount ?? "-" },
+          { label: "Prior employer", render: (r) => r.prior_employer_ref || "-" }, statusCol]}
+        actions={[{ label: "Approve", show: isDraft, run: (r) => approveBeHolidayCertificate(r.id),
+          ok: "Certificate approved (now immutable)." }]}
+        fields={[
+          { key: "direction", label: "Direction", type: "select", options: options.certificateDirections, required: true },
+          { key: "service_year", label: "Service year", type: "number", required: true },
+          { key: "issued_on", label: "Issued on", type: "date" },
+          { key: "gross_base_amount", label: "Gross base", type: "number" },
+          { key: "simple_pay_amount", label: "Simple holiday pay", type: "number" },
+          { key: "double_pay_amount", label: "Double holiday pay", type: "number" },
+          { key: "days_paid", label: "Days paid", type: "number" },
+          { key: "prior_employer_ref", label: "Prior employer reference" },
+          { key: "supersedes_id", label: "Supersedes certificate id", type: "number" },
+          { key: "evidence_ref", label: "Evidence reference" },
+          REASON_FIELD,
         ]} />
 
       <BEIdentifierField employeeId={id} identifierTypes={options.employeeIdentifierTypes} />

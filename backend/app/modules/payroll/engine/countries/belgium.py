@@ -44,6 +44,8 @@ from app.modules.payroll.engine.jurisdictions.belgium import bases as _bases
 from app.modules.payroll.engine.jurisdictions.belgium import declarations as _declarations
 from app.modules.payroll.engine.jurisdictions.belgium import errors as E
 from app.modules.payroll.engine.jurisdictions.belgium import formula as _formula
+from app.modules.payroll.engine.jurisdictions.belgium import absence as _absence
+from app.modules.payroll.engine.jurisdictions.belgium import holiday as _holiday
 from app.modules.payroll.engine.jurisdictions.belgium import onss as _onss
 from app.modules.payroll.engine.jurisdictions.belgium import wages as _wages
 from app.modules.payroll.engine.jurisdictions.belgium import working_time as _working_time
@@ -103,6 +105,17 @@ def calculate(ctx: PayrollContext) -> dict:
     working = _working_time.compute_be_working_time(
         pack, line.get("schedule"), getattr(ctx, "be_working_time", None), agreement,
         pay.get("OVERTIME_PREMIUM", ZERO), getattr(ctx, "be_hourly_rate", None), period_start)
+    # B2: holiday pay (separate white-collar / manual strategies) and absence episodes.
+    holiday_facts = dict(getattr(ctx, "be_holiday", None) or {})
+    holiday_facts.setdefault("referenceSalary", str(built["bases"]["HOLIDAY_BASE"]))   # never the wage floor
+    holiday = _holiday.compute_be_holiday(pack, decision["worker"], pay, holiday_facts,
+                                          getattr(ctx, "be_holiday_certificates", None),
+                                          getattr(ctx, "be_profile_history", None), pay_date)
+    period_end = as_date(getattr(ctx, "period_end", None)) or pay_date
+    absence = _absence.compute_be_absence(
+        lambda on: BePack(ctx.rate_map, ctx.slabs, organization_id, on), decision["worker"], line,
+        getattr(ctx, "be_absence_episodes", None), agreement, pay, getattr(ctx, "be_daily_rate", None),
+        period_start or pay_date.replace(day=1), period_end)
     onss = _onss.compute(pack, built["bases"], decision, getattr(ctx, "be_pension_premium", None))
     wht = _withholding.compute(pack, pay, built, decision, approved, onss,
                                getattr(ctx, "be_exceptional_reference", None), getattr(ctx, "be_pack_version", None))
@@ -116,6 +129,7 @@ def calculate(ctx: PayrollContext) -> dict:
     exceptions += onss["exceptions"]
     exceptions += [x for x in (wage_floor["exception"], indexation["exception"]) if x]
     exceptions += working["exceptions"]
+    exceptions += holiday["exceptions"] + absence["exceptions"]
     warnings = [w for w in (indexation["warning"],) if w]
     if net < ZERO:
         exceptions.append({"code": E.EXC_NEGATIVE_NET, "detail": "statutory deductions exceed gross pay"})
@@ -133,6 +147,9 @@ def calculate(ctx: PayrollContext) -> dict:
         deltas["OVERTIME_HOURS"] = working["overtimeHours"]
     if working["trace"]["facts"] or working["restTaken"] != ZERO:
         deltas["COMPENSATORY_REST_HOURS"] = working["restEarned"] - working["restTaken"]
+    deltas.update(holiday["deltas"])
+    if absence["employerDays"] != ZERO:
+        deltas["GUARANTEED_SALARY_DAYS"] = absence["employerDays"]
     unknown = set(deltas) - set(content.ACCUMULATORS)
     if unknown:
         raise RuntimeError(f"unknown Belgium accumulator(s): {sorted(unknown)}")
@@ -148,6 +165,10 @@ def calculate(ctx: PayrollContext) -> dict:
         "workingTime": getattr(ctx, "be_working_time", None), "hoursPaid": getattr(ctx, "be_hours_paid", None),
         "hourlyRate": getattr(ctx, "be_hourly_rate", None), "indexation": getattr(ctx, "be_indexation", None),
         "dateOfBirth": getattr(ctx, "be_date_of_birth", None),
+        "holiday": holiday_facts, "absenceEpisodes": list(getattr(ctx, "be_absence_episodes", None) or []),
+        "holidayCertificates": list(getattr(ctx, "be_holiday_certificates", None) or []),
+        "profileHistory": list(getattr(ctx, "be_profile_history", None) or []),
+        "dailyRate": getattr(ctx, "be_daily_rate", None),
         "ytd": {k: str(v) for k, v in sorted((getattr(ctx, "be_ytd", None) or {}).items())},
     }
     used = pack.used()
@@ -157,7 +178,8 @@ def calculate(ctx: PayrollContext) -> dict:
              "packVersion": getattr(ctx, "be_pack_version", None), "employmentLine": line["employmentLine"],
              "bases": _bases.trace(built), "sourcePeriods": inputs["sourcePeriods"], "onss": onss["trace"],
              "withholding": wht["trace"], "wages": {"floor": wage_floor["trace"], "indexation": indexation["trace"]},
-             "workingTime": working["trace"], "rounding": pack.rounding_events, "contentUsed": used, "hashes": hashes}
+             "workingTime": working["trace"], "holiday": holiday["trace"], "absence": absence["episodes"],
+             "rounding": pack.rounding_events, "contentUsed": used, "hashes": hashes}
     result = {
         "be_withholding": _money(wht["total"]),
         "be_withholding_regular": _money(wht["regular"]),
@@ -178,7 +200,11 @@ def calculate(ctx: PayrollContext) -> dict:
                      "employmentLines": decision["employmentLines"]},
         "employmentLine": line["employmentLine"],
         "sourcePeriods": inputs["sourcePeriods"],
-        "obligationDeltas": {k: _money(v) for k, v in onss["obligationDeltas"].items()},
+        "obligationDeltas": {k: _money(v) for k, v in {**onss["obligationDeltas"], **holiday["obligations"]}.items()},
+        "be_holiday": {"strategy": holiday["strategy"], "due": {k: _money(v) for k, v in holiday["due"].items()}},
+        "be_absence": {"employerDays": _money(absence["employerDays"]), "externalDays": _money(absence["externalDays"]),
+                       "employerDue": _money(absence["employerDue"] + absence["topupDue"]),
+                       "birthLeaveDue": _money(absence["birthLeaveDue"]), "episodes": absence["episodes"]},
         "accumulatorDeltas": {k: _money(v) for k, v in sorted(deltas.items())},
         "exceptions": exceptions,
         "warnings": warnings,

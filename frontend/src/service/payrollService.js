@@ -3169,6 +3169,21 @@ export const approveBeIdentifierReveal = (vaultId) => api.post(`${BE}/identifier
 export const revealBeIdentifier = async (vaultId) => beOne(await api.post(`${BE}/identifiers/${vaultId}/reveal`, {}));
 export const deleteBeIdentifier = (vaultId, reason) => api.post(`${BE}/identifiers/${vaultId}/delete`, { reason });
 export const getBeEmployeeSummary = async (employeeId) => beOne(await api.get(`${BE}/employees/${employeeId}/summary`));
+export const listBeAbsenceEpisodes = async (employeeId) =>
+  beList(await api.get(`${BE}/employees/${employeeId}/absence-episodes`));
+export const createBeAbsenceEpisode = (employeeId, body) => api.post(`${BE}/employees/${employeeId}/absence-episodes`, body);
+export const approveBeAbsenceEpisode = (id) => api.post(`${BE}/absence-episodes/${id}/approve`, {});
+export const cancelBeAbsenceEpisode = (id, reason) => api.post(`${BE}/absence-episodes/${id}/cancel`, { reason });
+export const listBeHolidayCertificates = async (employeeId) =>
+  beList(await api.get(`${BE}/employees/${employeeId}/holiday-certificates`));
+export const createBeHolidayCertificate = (employeeId, body) =>
+  api.post(`${BE}/employees/${employeeId}/holiday-certificates`, body);
+export const approveBeHolidayCertificate = (id) => api.post(`${BE}/holiday-certificates/${id}/approve`, {});
+export const listBeComponentMappings = async () => beList(await api.get(`${BE}/component-mappings`));
+export const createBeComponentMapping = (body) => api.post(`${BE}/component-mappings`, body);
+export const approveBeComponentMapping = (id) => api.post(`${BE}/component-mappings/${id}/approve`, {});
+export const listBeSubstituteDays = async (year) => beList(await api.get(`${BE}/substitute-days`, { params: { year } }));
+export const createBeSubstituteDay = (body) => api.post(`${BE}/substitute-days`, body);
 export const resolveBeClassification = async (employeeId, payDate, extra = {}) =>
   beOne(await api.post(`${BE}/classification/resolve`, { employeeId, payDate, ...extra }));
 

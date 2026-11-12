@@ -168,6 +168,11 @@ _STRUCTURAL_NUMBERS = {
         0: "list index", 1: "list index / inclusive day span (+1)", 6: "date.weekday() of a Sunday (calendar)",
 
     },
+    "engine/jurisdictions/belgium/absence.py": {
+        0: "list index / zero days", 1: "day numbering (day 1 = start) / inclusive day count",
+        7: "days per week (calendar)", 12: "months per year (calendar)",
+    },
+    "engine/jurisdictions/belgium/holiday.py": {0: "default year index", 1: "service year = the year before the taking year (BE-024)"},
     "be_identifiers.py": {
         1: "regex group index; key versions start at 1", 2: "two hex characters per key byte",
         4: "base64 padding block", 12: "AES-GCM nonce length in bytes", 32: "AES-256 key length in bytes",
