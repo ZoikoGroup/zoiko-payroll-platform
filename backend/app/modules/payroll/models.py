@@ -14040,8 +14040,27 @@ _BE_ACCUMULATORS = (
     "WORK_BONUS_SOCIAL",                # BE-012: social work bonus
     "WORK_BONUS_FISCAL",                # BE-012: fiscal work bonus
     "HOLIDAY_PAY_BASE",                 # BE-024: holiday base, keyed by holiday service year
+    # Block B (be_absence_holiday_payment):
+    "OVERTIME_HOURS",                   # BE-022: overtime hours worked (working-time limits)
+    "COMPENSATORY_REST_HOURS",          # BE-022: compensatory rest earned (+) / taken (-) — ledger facts
+    "HOLIDAY_SIMPLE_PAID",              # BE-025: white-collar simple holiday pay paid, by service year
+    "HOLIDAY_DOUBLE_PAID",              # BE-025: double holiday pay paid, by service year
+    "ADDITIONAL_HOLIDAY_ADVANCE",       # BE-026: additional-holiday pay advanced (offset later)
+    "GUARANTEED_SALARY_DAYS",           # BE-029 / BE-030: employer-paid incapacity days used
 )
 _BE_SCHEDULE_REGIMES = ("EFFECTIVE", "AVERAGE")  # BE-022
+# Block B decisions (G-22 / G-23 / G-25 / G-28) and absence kinds — engineering
+# vocabularies only; which values are SUPPORTED is signed pack content.
+_BE_PAY_BASES = ("SALARIED", "HOURLY")
+_BE_CONTRACT_TYPES = ("INDEFINITE", "FIXED_TERM", "SPECIFIC_WORK", "REPLACEMENT", "STUDENT", "FLEXI", "OCCASIONAL",
+                      "APPRENTICESHIP", "NOT_SUPPORTED")
+_BE_SPECIAL_160_STATUSES = ("APPLIES", "NOT_APPLICABLE", "UNKNOWN")
+_BE_ABSENCE_KINDS = ("SICKNESS", "WORK_ACCIDENT", "OCCUPATIONAL_DISEASE", "MATERNITY", "BIRTH_LEAVE", "OTHER_LEAVE")
+_BE_COMPONENTS = ("SALARY", "HOURLY_PAY", "OVERTIME_PREMIUM", "SUNDAY_HOLIDAY_PREMIUM", "SECTOR_PREMIUM", "BONUS",
+                  "THIRTEENTH_MONTH", "HOLIDAY_PAY_SIMPLE", "HOLIDAY_PAY_DOUBLE", "DEPARTURE_HOLIDAY_PAY",
+                  "GUARANTEED_SALARY", "BIRTH_LEAVE_PAY", "BENEFIT_IN_KIND", "MEAL_VOUCHER_EMPLOYER", "ECOCHEQUE",
+                  "REIMBURSEMENT", "ARREARS", "PROFIT_SHARING")
+_BE_COMPONENT_SOURCES = ("PLATFORM_FIELD", "POLICY_ALLOWANCE")
 
 
 class _BeCommon(_NzCommon):
@@ -14152,8 +14171,16 @@ class PayrollBeEmployerRegistration(_BeCommon, Base):
                                                 nullable=True)
     status                             = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
 
+    # G-25 (Block B): whether the special contribution (workforce test) applies
+    # to this employer — UNKNOWN blocks; the rate itself is signed content.
+    onss_special_160_status            = Column(String(16), nullable=False, default="UNKNOWN",
+                                                server_default="UNKNOWN")
+    special_160_evidence_ref           = Column(String(300), nullable=True)
+
     __table_args__ = (
         *_be_versioned_checks("employer"),
+        sa.CheckConstraint(f"onss_special_160_status IN {_nz_in(_BE_SPECIAL_160_STATUSES)}",
+                           name="ck_be_employer_special_160_status"),
         sa.CheckConstraint("legal_language IS NULL OR legal_language IN ('NL', 'FR', 'DE')",
                            name="ck_be_employer_legal_language"),
         sa.CheckConstraint("verification_state IN ('UNVERIFIED', 'VERIFIED', 'REJECTED')",
@@ -14221,8 +14248,13 @@ class PayrollBeWorkerProfile(_BeCommon, Base):
                                nullable=True)
     status            = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
 
+    # G-22 (Block B): the recorded pay basis; NULL blocks the calculation.
+    pay_basis         = Column(String(10), nullable=True)
+
     __table_args__ = (
         *_be_versioned_checks("worker_profile"),
+        sa.CheckConstraint(f"pay_basis IS NULL OR pay_basis IN {_nz_in(_BE_PAY_BASES)}",
+                           name="ck_be_worker_pay_basis"),
         sa.CheckConstraint(f"worker_category IN {_nz_in(_BE_WORKER_CATEGORIES)}", name="ck_be_worker_category"),
         sa.CheckConstraint("residency IS NULL OR residency IN ('RESIDENT', 'NON_RESIDENT')",
                            name="ck_be_worker_residency"),
@@ -14291,8 +14323,18 @@ class PayrollBeEmploymentClassification(_BeCommon, Base):
     effective_to             = Column(Date, nullable=True)
     status                   = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
 
+    # G-23 (Block B): the contract of this employment line; NULL blocks. The
+    # dates feed the Dimona events of Block C.
+    contract_type            = Column(String(16), nullable=True)
+    contract_start_date      = Column(Date, nullable=True)
+    contract_end_date        = Column(Date, nullable=True)
+
     __table_args__ = (
         *_be_versioned_checks("classification"),
+        sa.CheckConstraint(f"contract_type IS NULL OR contract_type IN {_nz_in(_BE_CONTRACT_TYPES)}",
+                           name="ck_be_classification_contract_type"),
+        sa.CheckConstraint("contract_end_date IS NULL OR contract_start_date IS NULL OR "
+                           "contract_end_date >= contract_start_date", name="ck_be_classification_contract_dates"),
         sa.CheckConstraint("seniority_months IS NULL OR seniority_months >= 0", name="ck_be_classification_seniority"),
         Index("ix_be_classification_employee_period", "employee_id", "effective_from"),
         Index("uq_be_classification_one_active_line", "organization_id", "employee_id", "employment_line", unique=True,
@@ -14404,3 +14446,169 @@ class PayrollBeAccumulatorEntry(_BeCommon, Base):
 
     def __repr__(self):
         return f"<PayrollBeAccumulatorEntry employee={self.employee_id} {self.year} {self.accumulator} {self.amount}>"
+
+
+class PayrollBeAbsenceEpisode(_BeCommon, Base):
+    """An absence episode (spec §9, BE-029 .. BE-032; Block B): kind, dates, the
+    worker category at its start, the episode it relapses from (cause_link_id)
+    or a declared different cause, and the day-band responsibility the engine
+    resolved (employer / external days by band). NO diagnosis or medical field:
+    only a certificate REFERENCE. Four-eyes; a correction is a new version."""
+    __tablename__ = "payroll_be_absence_episodes"
+
+    updated_at               = Column(DateTime(timezone=True), nullable=True)
+    employee_id              = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False,
+                                      index=True)
+    employment_line          = Column(String(40), nullable=True)
+    kind                     = Column(String(24), nullable=False)
+    start_date               = Column(Date, nullable=False)
+    end_date                 = Column(Date, nullable=True)
+    worker_category_at_start = Column(String(12), nullable=False)
+    cause_link_id            = Column(Integer, ForeignKey("payroll_be_absence_episodes.id", ondelete="SET NULL"),
+                                      nullable=True)
+    different_cause          = Column(Boolean, nullable=True)
+    day_band_responsibility  = Column(JSON, nullable=True)
+    certificate_ref          = Column(String(100), nullable=True)
+    status                   = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    cancelled_reason         = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"kind IN {_nz_in(_BE_ABSENCE_KINDS)}", name="ck_be_absence_kind"),
+        sa.CheckConstraint(f"worker_category_at_start IN {_nz_in(_BE_WORKER_CATEGORIES)}",
+                           name="ck_be_absence_worker_category"),
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED', 'CANCELLED')", name="ck_be_absence_status"),
+        sa.CheckConstraint("end_date IS NULL OR end_date >= start_date", name="ck_be_absence_dates"),
+        sa.CheckConstraint("status <> 'ACTIVE' OR (approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_be_absence_four_eyes"),
+        sa.CheckConstraint("status <> 'CANCELLED' OR cancelled_reason IS NOT NULL", name="ck_be_absence_cancelled"),
+        Index("ix_be_absence_employee_start", "employee_id", "start_date"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBeAbsenceEpisode employee={self.employee_id} {self.kind} {self.start_date}>"
+
+
+class PayrollBeHolidayCertificate(_BeCommon, Base):
+    """Holiday certificate (vakantieattest / attestation de vacances; BE-024 /
+    BE-027): direction IN (received from a prior employer) or OUT (issued on
+    departure), the holiday service year it covers, the amounts and the prior
+    employer reference. Immutable after approval (four-eyes); a correction is a
+    new version that supersedes it."""
+    __tablename__ = "payroll_be_holiday_certificates"
+
+    updated_at          = Column(DateTime(timezone=True), nullable=True)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False,
+                                 index=True)
+    direction           = Column(String(3), nullable=False)
+    service_year        = Column(SmallInteger, nullable=False)
+    issued_on           = Column(Date, nullable=True)
+    gross_base_amount   = Column(Numeric(14, 2), nullable=True)
+    simple_pay_amount   = Column(Numeric(14, 2), nullable=True)
+    double_pay_amount   = Column(Numeric(14, 2), nullable=True)
+    days_paid           = Column(Numeric(6, 2), nullable=True)
+    prior_employer_ref  = Column(String(200), nullable=True)
+    status              = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        sa.CheckConstraint("direction IN ('IN', 'OUT')", name="ck_be_holiday_cert_direction"),
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUPERSEDED')", name="ck_be_holiday_cert_status"),
+        sa.CheckConstraint("status = 'DRAFT' OR (approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_be_holiday_cert_four_eyes"),
+        sa.CheckConstraint("direction <> 'IN' OR prior_employer_ref IS NOT NULL", name="ck_be_holiday_cert_prior"),
+        sa.CheckConstraint("(gross_base_amount IS NULL OR gross_base_amount >= 0) AND "
+                           "(simple_pay_amount IS NULL OR simple_pay_amount >= 0) AND "
+                           "(double_pay_amount IS NULL OR double_pay_amount >= 0) AND "
+                           "(days_paid IS NULL OR days_paid >= 0)", name="ck_be_holiday_cert_amounts"),
+        Index("ix_be_holiday_cert_employee_year", "employee_id", "service_year"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBeHolidayCertificate employee={self.employee_id} {self.direction} {self.service_year}>"
+
+
+class PayrollBePaymentBatch(Base):
+    """Salary payment batch (D13): mirrors payroll_nl_payment_batches (pain.001
+    built by bank_export/sepa_pain001.py, unchanged), plus a four-eyes approval
+    before submission."""
+    __tablename__ = "payroll_be_payment_batches"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    organization_id   = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payroll_run_id    = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    pain001_sha256    = Column(String(64), nullable=False, unique=True, index=True)
+    message_id        = Column(String(100), nullable=False, index=True)
+    status            = Column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    pain001_xml       = Column(Text, nullable=True)
+    created_at_utc    = Column(DateTime(timezone=True), nullable=True)
+    batch_kind        = Column(String(20), nullable=True)
+    submitted_at      = Column(DateTime(timezone=True), nullable=True)
+    reconciled_at     = Column(DateTime(timezone=True), nullable=True)
+    created_by_id     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at       = Column(DateTime(timezone=True), nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    idempotency_key   = Column(String(100), nullable=False, unique=True, index=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('DRAFT', 'APPROVED', 'SUBMITTED', 'ACCEPTED', 'SETTLED', 'REJECTED', "
+                           "'RETURNED', 'UNKNOWN')", name="ck_be_payment_batch_status"),
+        sa.CheckConstraint("status = 'DRAFT' OR (approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_be_payment_batch_four_eyes"),
+        Index("ix_be_payment_batch_org_run", "organization_id", "payroll_run_id"),
+    )
+
+
+class PayrollBePaymentItem(Base):
+    """One salary transfer of a BE payment batch (mirrors payroll_nl_payment_items):
+    a tokenised IBAN, never the plain account number."""
+    __tablename__ = "payroll_be_payment_items"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    batch_id         = Column(Integer, ForeignKey("payroll_be_payment_batches.id", ondelete="CASCADE"), nullable=False,
+                              index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=True, index=True)
+    payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    iban_token       = Column(String(200), nullable=False)
+    amount           = Column(Numeric(14, 2), nullable=False)
+    end_to_end_id    = Column(String(100), nullable=False)
+    status           = Column(String(20), nullable=False, default="PENDING", server_default="PENDING")
+    return_reason    = Column(String(200), nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PENDING', 'SENT', 'SETTLED', 'RETURNED', 'REJECTED')",
+                           name="ck_be_payment_item_status"),
+        sa.CheckConstraint("amount > 0", name="ck_be_payment_item_amount"),
+        Index("ix_be_payment_item_batch_emp", "batch_id", "employee_id"),
+    )
+
+
+class PayrollBeComponentMapping(_BeCommon, Base):
+    """G-28 (Block B): an organisation's mapping of one platform pay component
+    (a platform pay field or a policy allowance key) to a Belgian component code
+    of the content vocabulary. Versioned, four-eyes; an unmapped component
+    blocks the calculation (BE-008)."""
+    __tablename__ = "payroll_be_component_mappings"
+
+    updated_at                = Column(DateTime(timezone=True), nullable=True)
+    platform_component_source = Column(String(20), nullable=False)
+    platform_component_key    = Column(String(50), nullable=False)
+    be_component              = Column(String(32), nullable=False)
+    effective_from            = Column(Date, nullable=False)
+    effective_to              = Column(Date, nullable=True)
+    status                    = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        *_be_versioned_checks("component_mapping"),
+        sa.CheckConstraint(f"platform_component_source IN {_nz_in(_BE_COMPONENT_SOURCES)}",
+                           name="ck_be_component_mapping_source"),
+        sa.CheckConstraint(f"be_component IN {_nz_in(_BE_COMPONENTS)}", name="ck_be_component_mapping_component"),
+        Index("uq_be_component_mapping_one_active", "organization_id", "platform_component_source",
+              "platform_component_key", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL")),
+    )

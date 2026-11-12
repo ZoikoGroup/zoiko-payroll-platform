@@ -51,6 +51,14 @@ WORKER = (
 )
 NEW_TABLES = TENANT + WORKER
 SHARED = {"payslip_items": {"be_calculation_snapshot"}, "payroll_runs": {"be_approval_fingerprint"}}
+# Columns a LATER Belgium revision (Block B, 2943a0490b5b be_absence_holiday_payment)
+# adds to this revision's tables; tests/test_belgium_block_b_migration.py covers them.
+LATER = {"payroll_be_worker_profiles": {"pay_basis"},
+         "payroll_be_employment_classifications": {"contract_type", "contract_start_date", "contract_end_date"},
+         "payroll_be_employer_registrations": {"onss_special_160_status", "special_160_evidence_ref"}}
+LATER_REVISION = "2943a0490b5b"
+LATER_TABLES = ("payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches",
+                "payroll_be_payment_items", "payroll_be_component_mappings")
 
 
 def _load(prefix=REVISION):
@@ -144,6 +152,14 @@ def _run(engine, fn_name):
             getattr(module, fn_name)()
 
 
+def _run_later(engine, fn_name):
+    module = _load(LATER_REVISION)
+    with engine.begin() as conn:
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            getattr(module, fn_name)()
+
+
 def _cols(engine, table):
     return {c["name"] for c in sa.inspect(engine).get_columns(table)}
 
@@ -160,7 +176,8 @@ def test_new_tables_match_the_models_exactly(model_engine):
             conn.execute(sa.text(f'DROP TABLE "{table}"'))
     _run(engine, "upgrade")
     for table in NEW_TABLES:
-        assert _cols(engine, table) == {c.name for c in metadata.tables[table].columns}, table
+        model_cols = {c.name for c in metadata.tables[table].columns} - LATER.get(table, set())
+        assert _cols(engine, table) == model_cols, table
         assert model_indexes[table] <= _indexes(engine, table), table
 
 
@@ -172,6 +189,7 @@ def test_autogenerate_sees_no_difference_for_belgium(model_engine):
     engine, metadata = model_engine
     _run(engine, "downgrade")
     _run(engine, "upgrade")
+    _run_later(engine, "upgrade")                    # restores the Block B columns on these tables
 
     def touches_belgium(diff):
         flat = diff if isinstance(diff, tuple) else ()
@@ -257,8 +275,11 @@ def test_deploy_drift_filter_explains_every_be_object():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES)
-    assert columns == SHARED
+    # Everything since this revision's parent: its own objects plus Block B's
+    # (tables, and the Block B columns on this revision's tables).
+    assert tables == set(NEW_TABLES) | set(LATER_TABLES)
+    assert {t: c for t, c in columns.items() if t in SHARED} == SHARED
+    assert {t: c for t, c in columns.items() if t not in SHARED} in ({}, LATER)
 
 
 def test_revision_is_the_single_child_of_the_previous_head():
@@ -269,12 +290,12 @@ def test_revision_is_the_single_child_of_the_previous_head():
     assert children == [FILENAME]
 
 
-def test_single_head():
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-
-    script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert list(script.get_heads()) == [REVISION]
+def test_the_only_child_is_the_block_b_revision():
+    """The single-head check moved to tests/test_belgium_block_b_migration.py when
+    Block B chained 2943a0490b5b onto this revision."""
+    children = [p.name for p in VERSIONS.glob("*.py")
+                if re.search(rf'down_revision[^\n]*"{REVISION}"', p.read_text(encoding="utf-8"))]
+    assert children == [f"{LATER_REVISION}_be_absence_holiday_payment.py"]
 
 
 def test_create_table_names_are_literal_in_the_migration():
@@ -307,7 +328,8 @@ def test_vocabularies_match_between_models_and_migration():
     module = _load()
     assert module.WORKER_CATEGORIES == models._BE_WORKER_CATEGORIES
     assert module.DECLARATION_TYPES == models._BE_DECLARATION_TYPES
-    assert module.ACCUMULATORS == models._BE_ACCUMULATORS
+    assert module.ACCUMULATORS == _load(LATER_REVISION).OLD_ACCUMULATORS          # Block B extends the list
+    assert models._BE_ACCUMULATORS == _load(LATER_REVISION).NEW_ACCUMULATORS
     assert module.SCHEDULE_REGIMES == models._BE_SCHEDULE_REGIMES
     assert models._BE_IDENTIFIER_TYPES == ("NISS", "BIS", "ONSS")              # no ENTERPRISE (Q3)
     assert {"WITHHOLDING", "WITHHOLDING_EXCEPTIONAL"} <= set(models._BE_ACCUMULATORS)  # BE-011 separate

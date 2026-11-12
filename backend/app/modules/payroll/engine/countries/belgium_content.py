@@ -114,7 +114,13 @@ SOURCE_CODES = tuple(code for code, *_ in SOURCE_REFERENCES)
 # ── Vocabularies (no statutory values) ────────────────────────────────────
 WORKER_CATEGORIES = ("MANUAL", "EMPLOYEE", "APPRENTICE", "STUDENT", "FLEXI", "OCCASIONAL", "OTHER")  # BE-002
 PAY_FREQUENCIES = ("MONTHLY", "SEMI_MONTHLY", "FORTNIGHTLY", "WEEKLY")                               # BE-004, G-11
-SCHEDULE_REGIMES = ("EFFECTIVE", "AVERAGE")                                                          # BE-022
+SCHEDULE_REGIMES = ("EFFECTIVE", "AVERAGE")
+# G-23 (Block B): engineering contract-type vocabulary; the specialist signs the
+# supported subset in be_supported_contract_types (NOT_SUPPORTED always allowed).
+CONTRACT_TYPES = ("INDEFINITE", "FIXED_TERM", "SPECIFIC_WORK", "REPLACEMENT", "STUDENT", "FLEXI", "OCCASIONAL",
+                  "APPRENTICESHIP")
+SPECIAL_160_STATUSES = ("APPLIES", "NOT_APPLICABLE", "UNKNOWN")                                     # G-25
+ABSENCE_KINDS = ("SICKNESS", "WORK_ACCIDENT", "OCCUPATIONAL_DISEASE", "MATERNITY", "BIRTH_LEAVE", "OTHER_LEAVE")                                                          # BE-022
 PAY_BASES = ("SALARIED", "HOURLY")                                                                   # BE-004
 # Rounding rule vocabulary (unit + mode); WHICH rule applies is G-02 / G-19.
 ROUNDING_RULES = ("CENT_HALF_UP", "CENT_DOWN", "EURO_HALF_UP", "EURO_DOWN")
@@ -123,7 +129,10 @@ DECLARATION_TYPES = ("FAMILY_SITUATION", "DEPENDANTS", "NON_RESIDENT_STATUS", "W
 # Must equal models._BE_ACCUMULATORS (tests/test_belgium_content.py).
 ACCUMULATORS = ("WITHHOLDING_TAXABLE", "WITHHOLDING", "WITHHOLDING_EXCEPTIONAL_TAXABLE", "WITHHOLDING_EXCEPTIONAL",
                 "ONSS_EMPLOYEE_BASE", "ONSS_EMPLOYEE", "ONSS_EMPLOYER_BASE", "ONSS_MANUAL_108_BASE",
-                "WORK_BONUS_SOCIAL", "WORK_BONUS_FISCAL", "HOLIDAY_PAY_BASE")
+                "WORK_BONUS_SOCIAL", "WORK_BONUS_FISCAL", "HOLIDAY_PAY_BASE",
+                # Block B (working time, holiday pay, absence)
+                "OVERTIME_HOURS", "COMPENSATORY_REST_HOURS", "HOLIDAY_SIMPLE_PAID", "HOLIDAY_DOUBLE_PAID",
+                "ADDITIONAL_HOLIDAY_ADVANCE", "GUARANTEED_SALARY_DAYS")
 
 # Earning classification (BE-006 / BE-007 / BE-008 / BE-009): one row per
 # (obligation, component); treatment INCLUDED / EXCLUDED / REVIEW. Every row is
@@ -274,6 +283,7 @@ LIST_VOCABULARIES = {
     "be_supported_pay_frequencies": PAY_FREQUENCIES,
     "be_supported_pay_bases": PAY_BASES,
     "be_supported_worker_categories": WORKER_CATEGORIES,
+    "be_supported_contract_types": CONTRACT_TYPES,                       # G-23
 }
 CHOICE_VOCABULARIES = {
     "be_rounding_onss": ROUNDING_RULES,

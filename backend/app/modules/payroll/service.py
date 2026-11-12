@@ -20490,6 +20490,9 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             jurisdiction_hooks.call("BE", "calc_inputs", db, None, emp, None, as_of=pay_date)
             if emp_country == "BE" else None
         )
+        if be_inputs is not None:      # G-28: named allowances map to Belgian components
+            be_inputs = {**be_inputs, "be_allowance_items": [
+                {"key": i["key"], "amount": i["amount"]} for i in (allowance_items or [])]}
         # Mexico (ZP-MX-ENG-001 Phase 6): guarded + read-only (MX-039). The pay
         # date is the run's own pay date, passed explicitly — never the period
         # end or today's date (MX-004); without it the preview refuses. A
@@ -25742,6 +25745,9 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("BE", "calc_inputs", db, run, employee, resolved_pack)
         if country == "BE" else None
     )
+    if be_inputs is not None:          # G-28: named allowances map to Belgian components
+        be_inputs = {**be_inputs, "be_allowance_items": [
+            {"key": i["key"], "amount": i["amount"]} for i in (allowance_items or [])]}
     # Mexico (ZP-MX-ENG-001 Phase 6): guarded, read-only inputs as of the run's
     # pay date; the payslip's money columns come from the Mexican earning lines
     # (D2) — the engine refuses any other gross (MX_GROSS_MISMATCH).

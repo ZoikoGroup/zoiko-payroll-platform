@@ -27,20 +27,38 @@ ENGINE_OBLIGATIONS = ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITH
                       "WITHHOLDING_EXCEPTIONAL", "HOLIDAY_BASE")
 # Components whose amount relates to an earlier period (BE-009).
 SOURCE_PERIOD_COMPONENTS = ("ARREARS",)
-# Platform pay fields that are not plain salary: without explicit Belgian
-# components they cannot be classified, so they refuse (BE-008).
-_PLATFORM_NON_SALARY = ("overtime", "additional_compensation")
+# The platform's own pay fields (PayrollContext attributes) a PLATFORM_FIELD
+# mapping names; named policy allowances arrive as be_allowance_items (G-28).
+PLATFORM_PAY_FIELDS = ("basic", "hra", "special_allowance", "overtime", "additional_compensation")
+
+
+def _mapped_pay(ctx, pack: BePack) -> dict:
+    """{BE component: amount} from the platform pay through the organisation's
+    ACTIVE mappings (G-28). Any non-zero platform amount without a mapping
+    blocks (BE-008) — nothing is assumed to be salary."""
+    mappings = getattr(ctx, "be_component_mappings", None) or {}
+    sources = [("PLATFORM_FIELD", name, getattr(ctx, name, None)) for name in PLATFORM_PAY_FIELDS]
+    sources += [("POLICY_ALLOWANCE", str(i.get("key")), i.get("amount"))
+                for i in (getattr(ctx, "be_allowance_items", None) or [])]
+    pay: dict = {}
+    for source, key, amount in sources:
+        value = dec(amount)
+        if value == ZERO:
+            continue
+        code = mappings.get(f"{source}:{key}")
+        if code is None:
+            pack.block(E.COMPONENT_UNMAPPED, f"{source}:{key}",
+                       "this platform pay component has no ACTIVE Belgian component mapping (G-28, BE-008)")
+        pay[code] = pay.get(code, ZERO) + value
+    return pay
 
 
 def components(ctx, pack: BePack) -> dict:
     """{component: Decimal} for this payslip, validated against gross."""
     gross = dec(getattr(ctx, "gross", None))
-    raw = getattr(ctx, "be_components", None)
+    raw = getattr(ctx, "be_components", None)        # explicit Belgian earning lines, when supplied
     if raw is None:
-        if any(dec(getattr(ctx, name, None)) != ZERO for name in _PLATFORM_NON_SALARY):
-            pack.block(E.COMPONENT_UNKNOWN, "PLATFORM_PAY",
-                       "overtime / additional pay must be supplied as Belgian pay components (BE-008)")
-        raw = {"SALARY": gross}
+        raw = _mapped_pay(ctx, pack)
     pay: dict = {}
     for code, amount in raw.items():
         code = upper(code)
@@ -52,6 +70,9 @@ def components(ctx, pack: BePack) -> dict:
         pay[code] = pay.get(code, ZERO) + value
     if sum(pay.values(), ZERO) != gross:
         pack.block(E.COMPONENTS_MISMATCH, "gross", "the Belgian pay components do not add up to gross pay")
+    if pay.get("BENEFIT_IN_KIND", ZERO) != ZERO:
+        pack.block(E.BENEFIT_IN_KIND_UNSUPPORTED, "BENEFIT_IN_KIND",
+                   "benefits in kind (company car and other BIK valuation) are not calculated in release 1 (G-27)")
     periods = getattr(ctx, "be_source_periods", None) or {}
     for code in SOURCE_PERIOD_COMPONENTS:
         if pay.get(code, ZERO) != ZERO:

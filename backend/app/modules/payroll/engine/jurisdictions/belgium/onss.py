@@ -21,11 +21,32 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from app.modules.payroll.engine.countries import belgium_content as content
 from app.modules.payroll.engine.jurisdictions.belgium import errors as E
 from app.modules.payroll.engine.jurisdictions.belgium.pack import ZERO, BePack, dec, field
 
 _PERCENT = Decimal("100")              # rate_pct values are percentages (structural unit)
-SPECIAL_160_RULES = ("APPLIES", "DOES_NOT_APPLY")
+# G-27: reductions the release does not calculate. The key's signed marker says
+# whether one applies in this pack: SLAB_ROWS = it applies (so the calculation
+# blocks), NOT_SUPPORTED = recorded as not applied; unsigned blocks as pending.
+_UNBUILT_REDUCTIONS = ("be_red_structural", "be_red_target_group")
+
+
+def _reductions(pack: BePack) -> dict:
+    out = {}
+    for key in _UNBUILT_REDUCTIONS:
+        try:
+            marker = pack.row(key)
+        except E.BECalculationBlockedError as blocked:
+            if blocked.key == E.keyed(E.FEATURE_BLOCKED, key):
+                out[key] = "NOT_APPLIED"
+                continue
+            raise
+        if str(field(marker, "text_value") or "").strip().upper() == content.SLAB_ROWS:
+            pack.block(E.REDUCTION_UNSUPPORTED, key, "this employer reduction applies but is not calculated in "
+                                                     "release 1 (G-27)")
+        pack.block(E.CONTENT_PENDING, key, "the reduction key is neither SLAB_ROWS nor NOT_SUPPORTED")
+    return out
 
 
 def _share(amount: Decimal, pct: Decimal) -> Decimal:
@@ -63,9 +84,10 @@ def compute(pack: BePack, bases: dict, decision: dict, pension_premium) -> dict:
     base_row = pack.band_for("be_onss_employer_base_rate", base_rows, employer_base)
     lines = {"BASE": rnd(pack.band_value("be_onss_employer_base_rate", base_row, employer_base))}
     lines["WAGE_MODERATION"] = rnd(_share(employer_base, pack.pct("be_onss_wage_moderation", "employer")))
-    special_rule = pack.text("be_onss_special_160_threshold_rule", allowed=SPECIAL_160_RULES)
+    special_rule = employer.get("special160Status")          # G-25: recorded per employer, four-eyes
     lines["SPECIAL_160"] = (rnd(_share(employer_base, pack.pct("be_onss_special_160", "employer")))
                             if special_rule == "APPLIES" else ZERO)
+    reductions = _reductions(pack)
     funds = {}
     for row in pack.band("be_onss_fund_contributions", EC=ec, WC=wc):
         name = str(field(row, "tax_formula") or "FUND").strip().upper()
@@ -91,7 +113,7 @@ def compute(pack: BePack, bases: dict, decision: dict, pension_premium) -> dict:
              "employerBase": str(employer_base), "employerCategory": ec, "workerCode": wc,
              "employerLines": {k: str(v) for k, v in lines.items()}, "funds": {k: str(v) for k, v in funds.items()},
              "pensionSpecial": str(pension), "special160Rule": special_rule,
-             "reductions": "structural / target-group reductions are not applied (not in Block A3 scope)",
+             "reductions": reductions,
              "obligationDeltas": {k: str(v) for k, v in obligations.items()}}
     return {"employeeBase": employee_base, "employeeContribution": contribution, "socialWorkBonus": bonus,
             "employeeNet": employee_net, "employerBase": employer_base, "employerLines": lines, "funds": funds,

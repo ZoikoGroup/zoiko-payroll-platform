@@ -81,9 +81,8 @@ def test_employer_lines_stay_separate():
     b = _calc(context()).be_result
     assert b["be_onss_employer"] == {"BASE": "100.00", "WAGE_MODERATION": "100.00", "SPECIAL_160": "0"}
     assert b["be_funds"] == {"FUND_A": "10.00"}
-    pack = build_pack(rates_over={"be_onss_special_160_threshold_rule": rate("be_onss_special_160_threshold_rule",
-                                                                             text="APPLIES")})
-    applies = _calc(context(pack=pack))
+    registration = dict(records()["be_registration"], onss_special_160_status="APPLIES")      # G-25
+    applies = _calc(context(be_registration=registration))
     assert applies.be_result["be_onss_employer"]["SPECIAL_160"] == "100.00" and applies.employer_esi == Decimal("310.00")
     pension = _calc(context(be_pension_premium=Decimal("1000")))
     assert pension.employer_pension == Decimal("100.00") and pension.employer_esi == Decimal("210.00")
@@ -171,8 +170,33 @@ def test_a_review_treatment_blocks():
     assert _blocked(context(pack=(rate_map, slabs))) == "BE_EARNING_CLASS_REVIEW:ONSS_EMPLOYEE:SALARY"
 
 
-def test_platform_overtime_without_belgian_components_blocks():
-    assert _blocked(context(overtime=Decimal("50"))) == "BE_COMPONENT_UNKNOWN:PLATFORM_PAY"
+def test_platform_pay_maps_through_the_active_mappings_and_unmapped_pay_blocks():
+    """G-28: every non-zero platform amount needs an ACTIVE mapping (BE-008)."""
+    assert _blocked(context(overtime=Decimal("50"))) == "BE_COMPONENT_UNMAPPED:PLATFORM_FIELD:overtime"
+    assert _blocked(context(be_allowance_items=[{"key": "transport", "amount": "50"}])) == \
+        "BE_COMPONENT_UNMAPPED:POLICY_ALLOWANCE:transport"
+    mapped = {"PLATFORM_FIELD:basic": "SALARY", "PLATFORM_FIELD:overtime": "OVERTIME_PREMIUM"}
+    from tests._be_engine_helpers import CLASSES
+    assert "OVERTIME_PREMIUM" not in CLASSES                    # no signed earning class -> it blocks next
+    ctx = context(gross="1050", overtime=Decimal("50"), be_component_mappings=mapped)
+    ctx.basic = Decimal("1000")                                      # basic 1000 + overtime 50 = gross 1050
+    assert _blocked(ctx) == "BE_EARNING_CLASS_MISSING:ONSS_EMPLOYEE:OVERTIME_PREMIUM"
+    ok = _calc(context(gross="1000", be_component_mappings={"PLATFORM_FIELD:basic": "SALARY"})).be_result
+    assert ok["trace"]["bases"]["ONSS_EMPLOYEE"]["components"] == ["SALARY"]
+
+
+def test_benefits_in_kind_and_applicable_reductions_block():
+    """G-27: company car / BIK valuation and structural / target-group reductions
+    block whenever they apply; NOT_SUPPORTED is recorded as not applied."""
+    assert _blocked(context(gross="1100", components={"SALARY": "1000", "BENEFIT_IN_KIND": "100"})) == \
+        "BE_BENEFIT_IN_KIND_UNSUPPORTED:BENEFIT_IN_KIND"
+    applies = build_pack(rates_over={"be_red_structural": rate("be_red_structural", text="SLAB_ROWS")})
+    assert _blocked(context(pack=applies)) == "BE_REDUCTION_UNSUPPORTED:be_red_structural"
+    pending = build_pack(rates_over={"be_red_target_group": rate("be_red_target_group", text="NOT_SUPPORTED",
+                                                                 label="x [PENDING G1]")})
+    assert _blocked(context(pack=pending)) == "BE_CONTENT_PENDING:be_red_target_group"
+    assert _calc(context()).be_result["trace"]["onss"]["reductions"] == {
+        "be_red_structural": "NOT_APPLIED", "be_red_target_group": "NOT_APPLIED"}
 
 
 # ── pending / NOT_SUPPORTED / missing dimension ────────────────────────────
@@ -206,15 +230,40 @@ def test_an_invalid_signed_formula_blocks():
 
 def test_the_resolver_blocks_before_any_money_rule():
     assert _blocked(context(be_registration=None)) == "BE_REGISTRATION_MISSING"
-    assert _blocked(context(be_pay_basis=None)) == "BE_FACT_MISSING:pay_basis"
-    profile = dict(records()["be_profile"], residency="NON_RESIDENT")
-    assert _blocked(context(be_profile=profile)) == "BE_NON_RESIDENT_UNSUPPORTED:be_wht_nonresident_rule"
+
+
+@pytest.mark.parametrize("over, code", [
+    ({"be_profile": dict(records()["be_profile"], pay_basis=None)}, "BE_FACT_MISSING:pay_basis"),          # G-22
+    ({"be_profile": dict(records()["be_profile"], pay_basis="HOURLY")}, "BE_PAY_BASIS_UNSUPPORTED:HOURLY"),
+    ({"be_classifications": [dict(records()["be_classifications"][0], contract_type=None)]},
+     "BE_FACT_MISSING:contract_type"),                                                                      # G-23
+    ({"be_classifications": [dict(records()["be_classifications"][0], contract_type="STUDENT")]},
+     "BE_CONTRACT_UNSUPPORTED:STUDENT"),
+    ({"be_registration": dict(records()["be_registration"], onss_special_160_status="UNKNOWN")},
+     "BE_SPECIAL_160_UNKNOWN"),                                                                              # G-25
+    ({"be_registration": dict(records()["be_registration"], onss_special_160_status=None)},
+     "BE_SPECIAL_160_UNKNOWN"),
+    ({"be_profile": dict(records()["be_profile"], residency="NON_RESIDENT")}, "BE_NON_RESIDENT_UNSUPPORTED"),  # G-27
+])
+def test_each_block_b_decision_blocks_the_calculation(over, code):
+    assert _blocked(context(**over)) == code
 
 
 def test_several_employment_lines_block():
     lines = records()["be_classifications"] + [dict(records()["be_classifications"][0], id=4,
                                                     employment_line="SECOND", work_schedule_id=40)]
-    assert _blocked(context(be_classifications=lines)) == "BE_MULTI_LINE_UNSUPPORTED:employment_line"
+    assert _blocked(context(be_classifications=lines)) == "BE_MULTI_LINE_UNSUPPORTED"
+
+
+def test_a_second_line_inside_the_pay_period_blocks_too():
+    """G-27: one Active line per employee per PAY PERIOD — a line that ended
+    inside the period still counts."""
+    ended = dict(records()["be_classifications"][0], id=5, employment_line="SECOND", effective_to="2026-03-10",
+                 work_schedule_id=40)
+    ctx = context(be_classifications=records()["be_classifications"] + [ended])
+    assert _calc(ctx).be_result["employmentLine"] == "MAIN"                   # no period: the pay date decides
+    ctx.period_start = date(2026, 3, 1)
+    assert _blocked(ctx) == "BE_MULTI_LINE_UNSUPPORTED"
 
 
 def test_no_pay_date_blocks():
@@ -315,16 +364,22 @@ def _setup_records(w):
 
     reg = two_step(be.record_be_employer_registration, be.approve_be_employer_registration, w.db, w.org,
                    {"effective_from": "2026-01-01", "legal_name": "Engine BV", "enterprise_number": "0999999999",
-                    "employer_category_code": "X1"}, w.a, "setup")
+                    "employer_category_code": "X1", "onss_special_160_status": "NOT_APPLICABLE",
+                    "special_160_evidence_ref": "TEST ONLY workforce count"}, w.a, "setup")
     be.verify_be_employer_registration(w.db, w.org, reg.id, w.b, "VERIFIED", "checked")
     two_step(be.record_be_worker_profile, be.approve_be_worker_profile, w.db, w.org, w.employee.id,
              {"effective_from": "2026-01-01", "worker_category": "EMPLOYEE", "onss_worker_code": "W1",
-              "residency": "RESIDENT"}, w.a, "hire")
+              "residency": "RESIDENT", "pay_basis": "SALARIED"}, w.a, "hire")
     two_step(be.record_be_work_schedule, be.approve_be_work_schedule, w.db, w.org, w.employee.id,
              {"effective_from": "2026-01-01", "regime": "EFFECTIVE", "weekly_hours": "38"}, w.a, "hire")
     two_step(be.record_be_employment_classification, be.approve_be_employment_classification, w.db, w.org,
              w.employee.id, {"effective_from": "2026-01-01", "employment_line": "MAIN", "joint_committee": "200",
-                             "function_class": "B", "seniority_months": 0}, w.a, "hire")
+                             "function_class": "B", "seniority_months": 0, "contract_type": "INDEFINITE",
+                             "contract_start_date": "2026-01-01"}, w.a, "hire")
+    for field_name in ("basic", "hra", "special_allowance"):           # G-28: the platform pay fields used
+        two_step(be.record_be_component_mapping, be.approve_be_component_mapping, w.db, w.org,
+                 {"platform_component_source": "PLATFORM_FIELD", "platform_component_key": field_name,
+                  "be_component": "SALARY", "effective_from": "2026-01-01"}, w.a, "mapping")
     w.db.commit()
 
 
@@ -338,23 +393,24 @@ def test_calc_inputs_come_from_the_records_and_need_a_pay_date(world):
         be.calc_inputs(w.db, None, w.employee, None)
     inputs = be.calc_inputs(w.db, None, w.employee, None, as_of=PAY)
     assert inputs["be_pay_date"] == PAY and inputs["be_profile"]["worker_category"] == "EMPLOYEE"
-    assert inputs["be_pay_basis"] is None                              # G-22: no recorded source -> blocks
-    assert inputs["be_contract_type"] == "Full-time" and inputs["be_ytd"]["WITHHOLDING"] == Decimal("0")
+    assert inputs["be_profile"]["pay_basis"] == "SALARIED"                                        # G-22
+    assert inputs["be_classifications"][0]["contract_type"] == "INDEFINITE"                          # G-23
+    assert inputs["be_registration"]["onss_special_160_status"] == "NOT_APPLICABLE"                  # G-25
+    assert inputs["be_component_mappings"] == {f"PLATFORM_FIELD:{f}": "SALARY"
+                                               for f in ("basic", "hra", "special_allowance")}         # G-28
+    assert inputs["be_ytd"]["WITHHOLDING"] == Decimal("0")
     assert "niss_vault_id" not in json.dumps(inputs, default=str)
     rate_map, slabs = build_pack()
     from app.modules.payroll.engine.base import PayrollContext
     ctx = PayrollContext(gross=Decimal("1000"), basic=Decimal("1000"), country="BE", rate_map=rate_map,
                          slabs=slabs, pay_date=PAY, **inputs)
-    assert _blocked(ctx) == "BE_FACT_MISSING:pay_basis"
-    ctx.be_pay_basis = "SALARIED"
     assert _calc(ctx).be_result["be_net"] == "852.00"
 
 
 def _patch_pack_and_basis(monkeypatch):
-    """Test seams only: the synthetic pack instead of the canonical resolver
-    (the real Draft pack is never signed or activated), and the pay basis that
-    has no recorded source yet (gap G-22)."""
-    from app.modules.payroll import belgium_service as be
+    """Test seam only: the synthetic pack instead of the canonical resolver (the
+    real Draft pack is never signed or activated). The pay basis comes from the
+    recorded worker profile (G-22) — no shortcut."""
     from app.modules.payroll import service
 
     rate_map, slabs = build_pack()
@@ -381,9 +437,6 @@ def _patch_pack_and_basis(monkeypatch):
     counter = iter(range(1, 10_000))
     monkeypatch.setattr(code_generation, "generate_business_code",
                         lambda db, org, prefix, *a, **k: f"TEST{prefix}{next(counter):05d}")
-    real_inputs = be.resolve_be_calc_inputs
-    monkeypatch.setattr(be, "resolve_be_calc_inputs",
-                        lambda *a, **k: {**real_inputs(*a, **k), "be_pay_basis": "SALARIED"})
 
 
 def test_preview_and_generate_agree_and_the_ledger_is_posted_once(world, monkeypatch):

@@ -281,7 +281,7 @@ def be_resolve_classification(body: Dict[str, Any] = Body(...), current_user=Dep
                               db: Session = Depends(get_db)):
     body = dict(body or {})
     return be.resolve_be_classification(db, _org_id(current_user), body.get("employeeId"), body.get("payDate"),
-                                        period_start=body.get("periodStart"), pay_basis=body.get("payBasis"))
+                                        period_start=body.get("periodStart"))
 
 
 # ── Joint Committee picker (D3): platform definitions, read-only ────────────
@@ -297,3 +297,23 @@ def be_list_joint_committees(current_user=Depends(get_current_payroll_operator),
 def be_org_options(current_user=Depends(get_current_payroll_operator)):
     _org_id(current_user)
     return be.org_options()
+
+
+# ── G-28: platform pay component -> Belgian component mappings ──────────────
+@router.get("/component-mappings", summary="Every version of your platform -> Belgian pay component mappings")
+def be_list_component_mappings(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _list(db, be._models().PayrollBeComponentMapping, _org_id(current_user))
+
+
+@router.post("/component-mappings", summary="Record a DRAFT pay component mapping (org admin)")
+def be_create_component_mapping(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                                db: Session = Depends(get_db)):
+    payload, reason = _split(body)
+    return _commit(db, be.record_be_component_mapping(db, _org_id(current_user), payload, _actor(current_user),
+                                                      reason))
+
+
+@router.post("/component-mappings/{row_id}/approve", summary="Approve a pay component mapping (four-eyes)")
+def be_approve_component_mapping(row_id: int, current_user=Depends(get_current_org_admin),
+                                 db: Session = Depends(get_db)):
+    return _commit(db, be.approve_be_component_mapping(db, _org_id(current_user), row_id, _actor(current_user)))

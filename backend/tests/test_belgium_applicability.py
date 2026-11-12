@@ -17,7 +17,7 @@ SCOPE = {
     "be_onss_supported_employer_categories": "X1",
     "be_onss_supported_worker_codes": "W1,W2",
     "be_supported_worker_categories": "MANUAL,EMPLOYEE",
-    "be_supported_contract_types": "FULL_TIME,PART_TIME",
+    "be_supported_contract_types": "INDEFINITE,FIXED_TERM",
     "be_supported_pay_frequencies": "MONTHLY",
     "be_supported_pay_bases": "SALARIED",
     "be_onss_manual_base_categories": "MANUAL",
@@ -42,7 +42,8 @@ def _pack(on=PAY, **over):
 
 def _registration(**over):
     row = {"id": 1, "legal_entity_id": None, "status": "ACTIVE", "verification_state": "VERIFIED",
-           "employer_category_code": "X1", "effective_from": "2026-01-01", "effective_to": None,
+           "employer_category_code": "X1", "onss_special_160_status": "NOT_APPLICABLE",
+           "effective_from": "2026-01-01", "effective_to": None,
            "evidence_ref": "kbo-extract"}
     row.update(over)
     return row
@@ -50,7 +51,8 @@ def _registration(**over):
 
 def _profile(**over):
     row = {"id": 2, "status": "ACTIVE", "worker_category": "EMPLOYEE", "onss_worker_code": "W1",
-           "residency": "RESIDENT", "special_status": None, "effective_from": "2026-01-01", "effective_to": None}
+           "residency": "RESIDENT", "special_status": None, "pay_basis": "SALARIED", "effective_from": "2026-01-01",
+           "effective_to": None}
     row.update(over)
     return row
 
@@ -59,7 +61,8 @@ def _classification(line="MAIN", **over):
     row = {"id": 3, "employment_line": line, "status": "ACTIVE", "joint_committee": "200", "sub_committee": None,
            "collective_agreement_id": 30, "function_class": "B", "seniority_months": 24,
            "establishment_unit_id": None, "work_schedule_id": None, "effective_from": "2026-01-01",
-           "effective_to": None}
+           "effective_to": None, "contract_type": "INDEFINITE", "contract_start_date": "2026-01-01",
+           "contract_end_date": None}
     row.update(over)
     return row
 
@@ -83,7 +86,7 @@ def _resolve(pack=None, **over):
 
     kwargs = dict(registration=_registration(), profile=_profile(), classifications=[_classification()],
                   schedules=[_schedule()], units={}, agreements={30: _agreement()}, declarations=[],
-                  contract_type="Full-time", pay_frequency="Monthly", pay_basis="salaried")
+                  pay_frequency="Monthly")
     kwargs.update(over)
     return applicability.resolve(pack if pack is not None else _pack(), PAY, **kwargs)
 
@@ -99,7 +102,8 @@ def test_a_complete_evidenced_setup_resolves():
     assert result["employer"]["employerCategory"] == "X1"
     worker = result["worker"]
     assert (worker["workerCategory"], worker["workerCode"], worker["contractType"], worker["payFrequency"],
-            worker["payBasis"]) == ("EMPLOYEE", "W1", "FULL_TIME", "MONTHLY", "SALARIED")
+            worker["payBasis"]) == ("EMPLOYEE", "W1", "INDEFINITE", "MONTHLY", "SALARIED")
+    assert result["employer"]["special160Status"] == "NOT_APPLICABLE"
     (line,) = result["employmentLines"]
     assert line["jointCommittee"] == "200" and line["agreement"]["agreementCode"] == "BE-PC-200-1.0"
     assert line["schedule"]["id"] == 40
@@ -129,6 +133,7 @@ def test_unknown_or_expired_employer_category_blocks(registration, code):
     (_profile(onss_worker_code="W9"), "BE_WORKER_CODE_UNSUPPORTED:W9"),
     (_profile(onss_worker_code=None), "BE_FACT_MISSING:worker_code"),
     (_profile(residency=None), "BE_FACT_MISSING:residency"),
+    (_profile(residency="NON_RESIDENT"), "BE_NON_RESIDENT_UNSUPPORTED"),                      # G-27
 ])
 def test_worker_category_and_code_must_be_signed_and_evidenced(profile, code):
     assert code in _codes(_resolve(profile=profile))
@@ -148,17 +153,25 @@ def test_a_special_status_never_uses_ordinary_rules(status):
     assert f"BE_SPECIAL_STATUS_UNSUPPORTED:{status}" in _codes(result)
 
 
-# ── contract / pay frequency / pay basis (scope rows) ──────────────────────
+# ── contract (G-23, on the line) / pay frequency / pay basis (G-22, on the profile)
 @pytest.mark.parametrize("over, code", [
-    ({"contract_type": "Intern"}, "BE_CONTRACT_UNSUPPORTED:INTERN"),
-    ({"contract_type": None}, "BE_FACT_MISSING:contract_type"),
+    ({"classifications": [_classification(contract_type="STUDENT")]}, "BE_CONTRACT_UNSUPPORTED:STUDENT"),
+    ({"classifications": [_classification(contract_type=None)]}, "BE_FACT_MISSING:contract_type"),
     ({"pay_frequency": "FourWeekly"}, "BE_FREQUENCY_UNSUPPORTED:FOURWEEKLY"),
     ({"pay_frequency": "Weekly"}, "BE_FREQUENCY_UNSUPPORTED:WEEKLY"),
-    ({"pay_basis": "HOURLY"}, "BE_PAY_BASIS_UNSUPPORTED:HOURLY"),
-    ({"pay_basis": None}, "BE_FACT_MISSING:pay_basis"),
+    ({"profile": _profile(pay_basis="HOURLY")}, "BE_PAY_BASIS_UNSUPPORTED:HOURLY"),
+    ({"profile": _profile(pay_basis=None)}, "BE_FACT_MISSING:pay_basis"),
+    ({"registration": _registration(onss_special_160_status="UNKNOWN")}, "BE_SPECIAL_160_UNKNOWN"),     # G-25
 ])
-def test_unsupported_contract_frequency_or_basis_blocks(over, code):
+def test_unsupported_contract_frequency_basis_or_unknown_special_status_blocks(over, code):
     assert code in _codes(_resolve(**over))
+
+
+def test_the_contract_and_its_dates_travel_on_the_line():
+    (line,) = _resolve(classifications=[_classification(contract_type="FIXED_TERM",
+                                                        contract_end_date="2026-12-31")])["employmentLines"]
+    assert (line["contractType"], line["contractStart"], line["contractEnd"]) == \
+        ("FIXED_TERM", "2026-01-01", "2026-12-31")
 
 
 # ── §2 row: Joint Committee / sub-committee ─────────────────────────────────
@@ -210,20 +223,26 @@ def test_schedule_missing_or_ambiguous_blocks_and_a_linked_one_is_used():
     assert "BE_SCHEDULE_MISSING:MAIN" in _codes(_resolve(classifications=[_classification(work_schedule_id=99)]))
 
 
-def test_lines_are_kept_separate_across_several_establishment_units():
+def test_several_establishment_units_and_the_one_line_scope():
+    """Units of the registration are resolved per line; release 1 calculates
+    exactly one employment line per employee per pay period (G-27), so two
+    lines on two units block while each line on its own unit resolves."""
     units = {50: {"id": 50, "registration_id": 1, "unit_number": "2000", "status": "ACTIVE",
                   "effective_from": "2026-01-01", "effective_to": None},
              51: {"id": 51, "registration_id": 1, "unit_number": "2001", "status": "ACTIVE",
                   "effective_from": "2026-01-01", "effective_to": None}}
     lines = [_classification("MAIN", establishment_unit_id=50, work_schedule_id=40),
              _classification("SECOND", id=4, establishment_unit_id=51, work_schedule_id=41)]
-    result = _resolve(classifications=lines, units=units, schedules=[_schedule(), _schedule(id=41)])
-    assert result["decision"] == "RESOLVED"
-    assert [(l["employmentLine"], l["unit"]["unitNumber"]) for l in result["employmentLines"]] == \
-        [("MAIN", "2000"), ("SECOND", "2001")]
+    two = _resolve(classifications=lines, units=units, schedules=[_schedule(), _schedule(id=41)])
+    assert "BE_MULTI_LINE_UNSUPPORTED" in _codes(two)
+    assert [(l["employmentLine"], l["unit"]["unitNumber"]) for l in two["employmentLines"]] == \
+        [("MAIN", "2000"), ("SECOND", "2001")]                                 # each line keeps its own unit
+    for line, unit in ((lines[0], "2000"), (lines[1], "2001")):
+        one = _resolve(classifications=[line], units=units, schedules=[_schedule(), _schedule(id=41)])
+        assert one["decision"] == "RESOLVED" and one["employmentLines"][0]["unit"]["unitNumber"] == unit
     foreign = dict(units[51], registration_id=99)
-    assert "BE_UNIT_INVALID:SECOND" in _codes(_resolve(classifications=lines, units={50: units[50], 51: foreign},
-                                                       schedules=[_schedule(), _schedule(id=41)]))
+    assert "BE_UNIT_INVALID:SECOND" in _codes(_resolve(classifications=lines[1:], units={51: foreign},
+                                                       schedules=[_schedule(id=41)]))
     assert "BE_UNIT_INVALID:MAIN" in _codes(_resolve(classifications=lines[:1], units={},
                                                      schedules=[_schedule()]))
 
@@ -235,8 +254,7 @@ def test_a_mid_period_classification_change():
                           collective_agreement_id=None)
     new = _classification(id=5, effective_from="2026-03-15")
     common = dict(registration=_registration(), profile=_profile(), schedules=[_schedule()],
-                  agreements={30: _agreement()}, contract_type="Full-time", pay_frequency="Monthly",
-                  pay_basis="SALARIED")
+                  agreements={30: _agreement()}, pay_frequency="Monthly")
     early = applicability.resolve(_pack(on=date(2026, 3, 10)), date(2026, 3, 10), classifications=[old, new],
                                   **common)
     assert early["employmentLines"][0]["jointCommittee"] == "124"           # the pay date picks the version
@@ -314,16 +332,17 @@ def _setup(w):
 
     reg = two_step(be.record_be_employer_registration, be.approve_be_employer_registration, w.db, w.org,
                    {"effective_from": "2026-01-01", "legal_name": "Resolve BV", "enterprise_number": "0999999999",
-                    "employer_category_code": "X1"}, w.a, "setup")
+                    "employer_category_code": "X1", "onss_special_160_status": "NOT_APPLICABLE",
+                    "special_160_evidence_ref": "TEST ONLY workforce count"}, w.a, "setup")
     be.verify_be_employer_registration(w.db, w.org, reg.id, w.b, "VERIFIED", "checked")
     two_step(be.record_be_worker_profile, be.approve_be_worker_profile, w.db, w.org, w.employee.id,
              {"effective_from": "2026-01-01", "worker_category": "EMPLOYEE", "onss_worker_code": "W1",
-              "residency": "RESIDENT"}, w.a, "hire")
+              "residency": "RESIDENT", "pay_basis": "SALARIED"}, w.a, "hire")
     two_step(be.record_be_work_schedule, be.approve_be_work_schedule, w.db, w.org, w.employee.id,
              {"effective_from": "2026-01-01", "regime": "EFFECTIVE", "weekly_hours": "38"}, w.a, "hire")
     two_step(be.record_be_employment_classification, be.approve_be_employment_classification, w.db, w.org,
              w.employee.id, {"effective_from": "2026-01-01", "employment_line": "MAIN", "joint_committee": "200",
-                             "function_class": "B", "seniority_months": 0}, w.a, "hire")
+                             "function_class": "B", "seniority_months": 0, "contract_type": "INDEFINITE"}, w.a, "hire")
     w.db.commit()
 
 
@@ -337,13 +356,13 @@ def test_the_endpoint_reads_the_records_and_writes_nothing(world, monkeypatch):
     _setup(w)
     monkeypatch.setattr(be, "_be_pack_for", lambda db, org, on: _pack(on=on))
     before = w.db.query(TaxConfigurationAudit).count()
-    out = be_resolve_classification({"employeeId": w.employee.id, "payDate": "2026-03-31", "payBasis": "SALARIED"},
+    out = be_resolve_classification({"employeeId": w.employee.id, "payDate": "2026-03-31", "payBasis": "HOURLY"},
                                     principal(w.org), w.db)
     assert out["decision"] == "RESOLVED", out["blocking"]
-    assert out["employeeId"] == w.employee.id and out["worker"]["contractType"] == "FULL_TIME"
+    # the recorded profile and classification are the sources (G-22 / G-23): a payBasis in the body is ignored
+    assert out["worker"]["payBasis"] == "SALARIED" and out["worker"]["contractType"] == "INDEFINITE"
+    assert out["employeeId"] == w.employee.id
     assert {e["code"] for e in out["exceptions"]} == {"BE_SECTOR_AGREEMENT_MISSING:MAIN"}
-    no_basis = be.resolve_be_classification(w.db, w.org, w.employee.id, "2026-03-31")
-    assert "BE_FACT_MISSING:pay_basis" in _codes(no_basis)
     assert w.db.query(TaxConfigurationAudit).count() == before and not w.db.new and not w.db.dirty
     json.dumps(out)
 
@@ -353,8 +372,7 @@ def test_the_endpoint_blocks_without_an_active_pack(world):
 
     w = world
     _setup(w)
-    assert _codes(be.resolve_be_classification(w.db, w.org, w.employee.id, "2026-03-31", pay_basis="SALARIED")) \
-        == ["BE_PACK_MISSING"]
+    assert _codes(be.resolve_be_classification(w.db, w.org, w.employee.id, "2026-03-31")) == ["BE_PACK_MISSING"]
 
 
 def test_the_endpoint_validates_its_input(world):

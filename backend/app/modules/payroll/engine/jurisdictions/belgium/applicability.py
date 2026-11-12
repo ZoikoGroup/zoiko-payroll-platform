@@ -115,12 +115,16 @@ def _employer(c: _Collector, pack: BePack, registration, on: date) -> Optional[d
     category = upper(field(registration, "employer_category_code"))
     _check_list(c, pack, "be_onss_supported_employer_categories", category, E.EMPLOYER_CATEGORY_UNSUPPORTED,
                 "employer_category")
+    special_160 = upper(field(registration, "onss_special_160_status")) or "UNKNOWN"
+    if special_160 not in ("APPLIES", "NOT_APPLICABLE"):
+        c.block(E.SPECIAL_160_UNKNOWN, "whether the special contribution (workforce test) applies to this employer "
+                                       "is not recorded (G-25): set APPLIES or NOT_APPLICABLE with evidence")
     return {"registrationId": field(registration, "id"), "legalEntityId": field(registration, "legal_entity_id"),
-            "employerCategory": category or None,
+            "employerCategory": category or None, "special160Status": special_160,
             "verificationState": upper(field(registration, "verification_state")) or None}
 
 
-def _worker(c: _Collector, pack: BePack, profile, on: date, contract_type, pay_frequency, pay_basis) -> Optional[dict]:
+def _worker(c: _Collector, pack: BePack, profile, on: date, pay_frequency) -> Optional[dict]:
     if profile is None:
         c.block(E.PROFILE_MISSING, "no Belgian worker statutory profile is on record")
         return None
@@ -139,16 +143,16 @@ def _worker(c: _Collector, pack: BePack, profile, on: date, contract_type, pay_f
     residency = upper(field(profile, "residency"))
     if not residency:
         c.block(E.keyed(E.FACT_MISSING, "residency"), "the tax residency is not recorded (spec §5 stage 1)")
-    contract = normalise_code(contract_type)
-    _check_list(c, pack, "be_supported_contract_types", contract, E.CONTRACT_UNSUPPORTED, "contract_type")
+    elif residency != "RESIDENT":
+        c.block(E.NON_RESIDENT_UNSUPPORTED, "release 1 calculates residents only (G-27)")
     frequency = normalise_frequency(pay_frequency)
     _check_list(c, pack, "be_supported_pay_frequencies", frequency, E.FREQUENCY_UNSUPPORTED, "pay_frequency")
-    basis = normalise_code(pay_basis)
+    basis = normalise_code(field(profile, "pay_basis"))                       # G-22: the recorded pay basis
     _check_list(c, pack, "be_supported_pay_bases", basis, E.PAY_BASIS_UNSUPPORTED, "pay_basis")
     manual = c.run(pack.text_list, "be_onss_manual_base_categories")
     return {"profileId": field(profile, "id"), "workerCategory": category or None, "workerCode": worker_code or None,
             "specialStatus": special or None, "residency": residency or None, "taxStatus": field(profile, "tax_status"),
-            "contractType": contract or None, "payFrequency": frequency or None, "payBasis": basis or None,
+            "contractType": None, "payFrequency": frequency or None, "payBasis": basis or None,
             "onssManualBase": None if manual is None else category in manual}
 
 
@@ -228,6 +232,16 @@ def _lines(c: _Collector, classifications: list, on: date, period_start: Optiona
         if not active:
             continue
         chosen[line] = active[0]
+    others = [line for line, rows in by_line.items() if line not in chosen
+              and period_start is not None and any(_active_in_force(r, period_start) for r in rows)]
+    if len(chosen) + len(others) > 1:
+        c.block(E.MULTI_LINE_UNSUPPORTED, "release 1 calculates exactly one employment line per employee per pay "
+                                          "period (G-27); this employee has "
+                                          f"{', '.join(sorted(set(chosen) | set(others)))}")
+    for line, rows in sorted(by_line.items()):
+        if line not in chosen:
+            continue
+        active = [chosen[line]]
         if period_start is not None:
             changed = [r for r in rows if r is not active[0] and _active_in_force(r, period_start)]
             if changed:
@@ -238,8 +252,8 @@ def _lines(c: _Collector, classifications: list, on: date, period_start: Optiona
 
 
 def resolve(pack: Optional[BePack], pay_date: date, *, registration=None, profile=None, classifications=(),
-            schedules=(), units=None, agreements=None, declarations=(), contract_type=None, pay_frequency=None,
-            pay_basis=None, period_start: Optional[date] = None) -> dict:
+            schedules=(), units=None, agreements=None, declarations=(), pay_frequency=None,
+            period_start: Optional[date] = None) -> dict:
     """The resolved decision for one employee on one pay date (spec §2).
 
     ``units`` / ``agreements``: {id: row} of the rows the classifications link.
@@ -251,7 +265,8 @@ def resolve(pack: Optional[BePack], pay_date: date, *, registration=None, profil
         c.block(E.PACK_MISSING, "no active Belgium rule pack is in force on the pay date")
         return _result(c, None, pay_date, None, None, [], {}, [])
     employer = _employer(c, pack, registration, pay_date)
-    worker = _worker(c, pack, profile, pay_date, contract_type, pay_frequency, pay_basis)
+    worker = _worker(c, pack, profile, pay_date, pay_frequency)
+    supported_contracts = c.run(pack.text_list, "be_supported_contract_types")
 
     lines = []
     chosen = _lines(c, list(classifications), pay_date, period_start)
@@ -264,11 +279,21 @@ def resolve(pack: Optional[BePack], pay_date: date, *, registration=None, profil
         if not field(row, "function_class") or field(row, "seniority_months") is None:
             c.exception(E.keyed(E.SCALE_INPUT_MISSING, line),
                         "function class or seniority is missing: the sector scale cannot be checked (spec §2)")
+        contract = normalise_code(field(row, "contract_type"))            # G-23: the line's own contract
+        if supported_contracts is not None:
+            if not contract:
+                c.block(E.keyed(E.FACT_MISSING, "contract_type"), f"line {line} has no contract type recorded (G-23)")
+            elif contract not in supported_contracts:
+                c.block(E.keyed(E.CONTRACT_UNSUPPORTED, contract),
+                        f"contract type {contract} is not in the signed supported list (be_supported_contract_types)")
+        if worker is not None and worker["contractType"] is None:
+            worker["contractType"] = contract or None
         agreement = agreements.get(field(row, "collective_agreement_id"))
         lines.append({
             "employmentLine": line, "classificationId": field(row, "id"), "jointCommittee": committee or None,
             "subCommittee": upper(field(row, "sub_committee")) or None, "functionClass": field(row, "function_class"),
-            "seniorityMonths": field(row, "seniority_months"),
+            "seniorityMonths": field(row, "seniority_months"), "contractType": contract or None,
+            "contractStart": field(row, "contract_start_date"), "contractEnd": field(row, "contract_end_date"),
             "agreement": _agreement(c, agreement, row, pay_date, line) if committee else None,
             "unit": _unit(c, units.get(field(row, "establishment_unit_id")), row, registration, pay_date, line),
             "schedule": _schedule(c, list(schedules), row, pay_date, line),

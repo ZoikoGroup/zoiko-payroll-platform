@@ -577,21 +577,22 @@ def _enum(data: dict, key: str, allowed) -> None:
 BE_REGISTRATION_FIELDS = (
     "effective_from", "effective_to", "legal_entity_id", "legal_name", "enterprise_number", "employer_category_code",
     "withholding_declaration_frequency", "holiday_fund_ref", "legal_language", "mandate_refs",
-    "filing_credential_ref", "source_document_id", "evidence_ref")
+    "filing_credential_ref", "source_document_id", "evidence_ref", "onss_special_160_status", "special_160_evidence_ref")
 BE_UNIT_FIELDS = ("registration_id", "unit_number", "name", "address", "region", "effective_from", "effective_to",
                   "legal_entity_id", "evidence_ref")
 BE_PROFILE_FIELDS = ("effective_from", "effective_to", "legal_entity_id", "worker_category", "onss_worker_code",
-                     "tax_status", "residency", "special_status", "niss_vault_id", "evidence_ref")
+                     "tax_status", "residency", "special_status", "niss_vault_id", "evidence_ref", "pay_basis")
 BE_SCHEDULE_FIELDS = ("effective_from", "effective_to", "legal_entity_id", "regime", "weekly_hours", "days_pattern",
                       "reference_period", "supersedes_id", "evidence_ref")
 BE_CLASSIFICATION_FIELDS = ("effective_from", "effective_to", "legal_entity_id", "employment_line",
                             "establishment_unit_id", "joint_committee", "sub_committee", "collective_agreement_id",
-                            "function_class", "seniority_months", "work_schedule_id", "evidence_ref")
+                            "function_class", "seniority_months", "work_schedule_id", "evidence_ref",
+                            "contract_type", "contract_start_date", "contract_end_date")
 BE_DECLARATION_FIELDS = ("declaration_type", "value", "received_at", "effective_from", "effective_to",
                          "source_channel", "legal_entity_id", "evidence_ref")
 DECLARATION_CHANNELS = ("PAPER", "ELECTRONIC", "EMPLOYEE_PORTAL", "IMPORT")
 
-_DATE_FIELDS = {"effective_from", "effective_to"}
+_DATE_FIELDS = {"effective_from", "effective_to", "contract_start_date", "contract_end_date"}
 _DECIMAL_FIELDS = {"weekly_hours"}
 _INT_FIELDS = {"legal_entity_id", "source_document_id", "registration_id", "niss_vault_id", "establishment_unit_id",
                "collective_agreement_id", "seniority_months", "work_schedule_id", "supersedes_id"}
@@ -723,6 +724,9 @@ def record_be_employer_registration(db: Session, organization_id: int, payload: 
     _legal_entity(db, organization_id, data.get("legal_entity_id"))
     data["enterprise_number"] = _enterprise_number(data["enterprise_number"])
     _enum(data, "legal_language", ("NL", "FR", "DE"))
+    _enum(data, "onss_special_160_status", _content().SPECIAL_160_STATUSES)                    # G-25
+    if data.get("onss_special_160_status") in ("APPLIES", "NOT_APPLICABLE") and not data.get("special_160_evidence_ref"):
+        raise BadRequestException("The special-contribution status needs its evidence (special_160_evidence_ref).")
     if data.get("employer_category_code") is not None:
         data["employer_category_code"] = data["employer_category_code"].upper()
         if not _CODE.fullmatch(data["employer_category_code"]):
@@ -792,6 +796,7 @@ def record_be_worker_profile(db: Session, organization_id: int, employee_id: int
     data = _clean(payload, BE_PROFILE_FIELDS, required=("effective_from", "worker_category"))
     _enum(data, "worker_category", content.WORKER_CATEGORIES)
     _enum(data, "residency", ("RESIDENT", "NON_RESIDENT"))
+    _enum(data, "pay_basis", content.PAY_BASES)                                                    # G-22
     if data.get("onss_worker_code") is not None:
         data["onss_worker_code"] = data["onss_worker_code"].upper()
         if not _re.fullmatch(r"[A-Z0-9]{1,4}", data["onss_worker_code"]):
@@ -863,6 +868,10 @@ def record_be_employment_classification(db: Session, organization_id: int, emplo
                 raise BadRequestException(f"{key} has an invalid format.")
     if data.get("sub_committee") and not data.get("joint_committee"):
         raise BadRequestException("A sub-committee needs its Joint Committee.")
+    _enum(data, "contract_type", _content().CONTRACT_TYPES + ("NOT_SUPPORTED",))                   # G-23
+    if data.get("contract_start_date") and data.get("contract_end_date") \
+            and data["contract_end_date"] < data["contract_start_date"]:
+        raise BadRequestException("contract_end_date cannot be before contract_start_date.")
     if data.get("seniority_months") is not None and data["seniority_months"] < 0:
         raise BadRequestException("seniority_months cannot be negative.")
     if data.get("establishment_unit_id") is not None:
@@ -1206,7 +1215,7 @@ def _be_pack_for(db: Session, organization_id: int, on: date):
 
 
 def resolve_be_classification(db: Session, organization_id: int, employee_id: int, pay_date, *,
-                              period_start=None, pay_basis=None) -> dict:
+                              period_start=None) -> dict:
     """POST /classification/resolve: the decision, its evidence and every
     blocking reason for one employee on one pay date. Reads only; writes
     nothing and never calculates (spec §13)."""
@@ -1239,8 +1248,7 @@ def resolve_be_classification(db: Session, organization_id: int, employee_id: in
         classifications=[_facts(c) for c in classifications],
         schedules=[_facts(s) for s in rows(m.PayrollBeWorkSchedule)], units=units, agreements=agreements,
         declarations=[_facts(d) for d in rows(m.PayrollBeDeclaration)],
-        contract_type=getattr(employee, "employment_type", None), pay_frequency=getattr(employee, "pay_frequency", None),
-        pay_basis=pay_basis, period_start=start)
+        pay_frequency=getattr(employee, "pay_frequency", None), period_start=start)
     return _json_safe({"employeeId": employee.id, **result})
 
 
@@ -1301,8 +1309,10 @@ def be_ytd_snapshot(db: Session, organization_id: int, employee_id: int, legal_e
 
 def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date: date, pack_version=None) -> dict:
     """Every Belgian input in force ON THE PAY DATE. Nothing is inferred: a
-    missing record stays None and the engine refuses with its own reason. The
-    pay basis has no recorded source yet (gap G-22), so it stays None."""
+    missing record stays None and the engine refuses with its own reason. Pay
+    basis (G-22) and contract (G-23) come from the worker profile and the
+    classification; pay components map through the ACTIVE component mappings
+    (G-28)."""
     records = _be_records(db, organization_id, employee, pay_date)
     entity = getattr(employee, "legal_entity_id", None)
     return {
@@ -1310,8 +1320,8 @@ def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date
         "be_classifications": records["classifications"], "be_schedules": records["schedules"],
         "be_units": records["units"], "be_agreements": records["agreements"],
         "be_declarations": records["declarations"],
-        "be_contract_type": getattr(employee, "employment_type", None),
-        "be_pay_frequency": getattr(employee, "pay_frequency", None), "be_pay_basis": None,
+        "be_pay_frequency": getattr(employee, "pay_frequency", None),
+        "be_component_mappings": be_component_mapping_index(db, organization_id, pay_date),
         "be_ytd": be_ytd_snapshot(db, organization_id, employee.id, entity, pay_date),
         "be_pack_version": pack_version, "be_organization_id": organization_id, "be_legal_entity_id": entity,
         "be_employee_id": employee.id,
@@ -1320,9 +1330,9 @@ def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date
 
 _BE_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "additional_compensation",
                     "be_pension_premium", "be_exceptional_reference")
-_BE_CTX_PLAIN = ("pay_frequency", "be_components", "be_source_periods", "be_contract_type", "be_pay_frequency",
-                 "be_pay_basis", "be_pack_version", "be_organization_id", "be_legal_entity_id", "be_employee_id",
-                 "trace_id")
+_BE_CTX_PLAIN = ("pay_frequency", "be_components", "be_source_periods", "be_pay_frequency", "be_pack_version",
+                 "be_organization_id", "be_legal_entity_id", "be_employee_id", "trace_id", "be_component_mappings",
+                 "be_allowance_items")
 _BE_CTX_DATES = ("pay_date", "be_pay_date", "period_start", "period_end")
 _BE_RECORD_KEYS = ("be_registration", "be_profile")
 _BE_LIST_KEYS = ("be_classifications", "be_schedules", "be_declarations")
@@ -1495,3 +1505,45 @@ def org_options() -> dict:
             "declarationTypes": list(content.DECLARATION_TYPES), "sourceChannels": list(DECLARATION_CHANNELS),
             "residency": ["RESIDENT", "NON_RESIDENT"], "legalLanguages": ["NL", "FR", "DE"],
             "employeeIdentifierTypes": [bid.NISS, bid.BIS], "verificationOutcomes": ["VERIFIED", "REJECTED"]}
+
+
+# ── G-28 (Block B): platform pay component -> Belgian component code ─────────
+BE_MAPPING_FIELDS = ("platform_component_source", "platform_component_key", "be_component", "effective_from",
+                     "effective_to", "evidence_ref")
+# The platform's own pay fields a mapping may name (PLATFORM_FIELD source).
+BE_PLATFORM_PAY_FIELDS = ("basic", "hra", "special_allowance", "overtime", "additional_compensation")
+
+
+def record_be_component_mapping(db: Session, organization_id: int, payload: dict, actor_id, reason=None):
+    content = _content()
+    reason = _reason(reason)
+    data = _clean(payload, BE_MAPPING_FIELDS,
+                  required=("platform_component_source", "platform_component_key", "be_component", "effective_from"))
+    _enum(data, "platform_component_source", ("PLATFORM_FIELD", "POLICY_ALLOWANCE"))
+    _enum(data, "be_component", content.COMPONENTS)
+    key = data["platform_component_key"].strip()
+    if data["platform_component_source"] == "PLATFORM_FIELD":
+        key = key.lower()
+        if key not in BE_PLATFORM_PAY_FIELDS:
+            raise BadRequestException(f"platform_component_key must be one of: {', '.join(BE_PLATFORM_PAY_FIELDS)}.")
+    elif not _re.fullmatch(r"[a-z0-9_-]{1,50}", key):
+        raise BadRequestException("platform_component_key must be the policy allowance key (slug).")
+    data["platform_component_key"] = key
+    return _create_version(db, _models().PayrollBeComponentMapping, organization_id, data, actor_id,
+                           "be_component_mapping", reason,
+                           {"platform_component_source": data["platform_component_source"],
+                            "platform_component_key": key})
+
+
+def approve_be_component_mapping(db: Session, organization_id: int, row_id: int, actor_id):
+    return _approve_version(db, _models().PayrollBeComponentMapping, organization_id, row_id, actor_id,
+                            "be_component_mapping", ("platform_component_source", "platform_component_key"))
+
+
+def be_component_mapping_index(db: Session, organization_id: int, on: date) -> dict:
+    """{"SOURCE:key": BE component code} of the mappings in force on `on`."""
+    M = _models().PayrollBeComponentMapping
+    rows = (_in_force(db.query(M).filter(M.organization_id == organization_id,
+                                         M.status.in_((STATUS_ACTIVE, STATUS_SUPERSEDED))), M, on)
+            .order_by(M.id).all())
+    return {f"{r.platform_component_source}:{r.platform_component_key}": r.be_component for r in rows}

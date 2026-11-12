@@ -416,3 +416,67 @@ def test_joint_committee_picker_lists_platform_definitions_only(world):
     w.db.commit()
     rows = be_list_joint_committees(principal(w.org), w.db)
     assert [(r["agreementCode"], r["jointCommittee"]) for r in rows] == [("BE-PC-200-1.0", "200")]
+
+
+# ── Block B decisions recorded through the four-eyes records ───────────────
+def test_decision_fields_are_validated_on_their_records(world):
+    be, w = _svc(), world
+    with pytest.raises(BadRequestException, match="special_160_evidence_ref"):                      # G-25
+        _registration(w, approve=False, onss_special_160_status="APPLIES")
+    with pytest.raises(BadRequestException, match="onss_special_160_status"):
+        _registration(w, approve=False, onss_special_160_status="MAYBE")
+    reg = _registration(w, approve=False, onss_special_160_status="applies",
+                        special_160_evidence_ref="TEST ONLY workforce count")
+    assert reg.onss_special_160_status == "APPLIES"
+    default = _registration(w, approve=False, effective_from="2026-02-01", legal_entity_id=None)
+    assert default.onss_special_160_status == "UNKNOWN"
+    with pytest.raises(BadRequestException, match="pay_basis"):                                     # G-22
+        be.record_be_worker_profile(w.db, w.org, w.employee.id, {"effective_from": "2026-01-01",
+                                                                 "worker_category": "EMPLOYEE", "pay_basis": "DAILY"},
+                                    w.a, "x")
+    assert _profile(w, pay_basis="hourly").pay_basis == "HOURLY"
+    base = {"effective_from": "2026-01-01", "employment_line": "MAIN"}
+    with pytest.raises(BadRequestException, match="contract_type"):                                 # G-23
+        be.record_be_employment_classification(w.db, w.org, w.employee.id, {**base, "contract_type": "PERMANENT"},
+                                               w.a, "x")
+    with pytest.raises(BadRequestException, match="contract_end_date"):
+        be.record_be_employment_classification(w.db, w.org, w.employee.id, {
+            **base, "contract_type": "FIXED_TERM", "contract_start_date": "2026-06-01",
+            "contract_end_date": "2026-01-01"}, w.a, "x")
+    row = be.record_be_employment_classification(w.db, w.org, w.employee.id, {
+        **base, "contract_type": "fixed_term", "contract_start_date": "2026-01-01", "contract_end_date": "2026-12-31"},
+        w.a, "x")
+    assert (row.contract_type, row.contract_end_date) == ("FIXED_TERM", date(2026, 12, 31))
+
+
+def test_component_mappings_are_versioned_with_four_eyes(world):
+    be, w = _svc(), world
+    payload = {"platform_component_source": "policy_allowance", "platform_component_key": "transport",
+               "be_component": "reimbursement", "effective_from": "2026-01-01"}
+    row = be.record_be_component_mapping(w.db, w.org, payload, w.a, "map transport")
+    w.db.commit()
+    assert (row.platform_component_source, row.be_component, row.status) == ("POLICY_ALLOWANCE", "REIMBURSEMENT",
+                                                                              "DRAFT")
+    assert be.be_component_mapping_index(w.db, w.org, date(2026, 3, 31)) == {}                     # DRAFT never counts
+    with pytest.raises(Exception, match="(?i)four|approv|same"):
+        be.approve_be_component_mapping(w.db, w.org, row.id, w.a)
+    w.db.rollback()
+    be.approve_be_component_mapping(w.db, w.org, row.id, w.b)
+    assert be.be_component_mapping_index(w.db, w.org, date(2026, 3, 31)) == {
+        "POLICY_ALLOWANCE:transport": "REIMBURSEMENT"}
+    newer = be.record_be_component_mapping(w.db, w.org, {**payload, "be_component": "BONUS",
+                                                         "effective_from": "2026-06-01"}, w.a, "remap")
+    w.db.commit()
+    be.approve_be_component_mapping(w.db, w.org, newer.id, w.b)
+    assert row.status == "SUPERSEDED" and row.effective_to == date(2026, 5, 31)
+    assert be.be_component_mapping_index(w.db, w.org, date(2026, 3, 31))["POLICY_ALLOWANCE:transport"] == "REIMBURSEMENT"
+    assert be.be_component_mapping_index(w.db, w.org, date(2026, 7, 1))["POLICY_ALLOWANCE:transport"] == "BONUS"
+    for bad, message in (({"be_component": "TIPS"}, "be_component"),
+                         ({"platform_component_source": "SPREADSHEET"}, "platform_component_source"),
+                         ({"platform_component_source": "PLATFORM_FIELD", "platform_component_key": "bonus"},
+                          "platform_component_key"),
+                         ({"platform_component_key": "Has Spaces"}, "platform_component_key")):
+        with pytest.raises(BadRequestException, match=message):
+            be.record_be_component_mapping(w.db, w.org, {**payload, **bad}, w.a, "x")
+    with pytest.raises(NotFoundException):
+        be.approve_be_component_mapping(w.db, w.org + 999, newer.id, w.b)

@@ -138,3 +138,24 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
   acceptance x5, overtime edge cases x1), 5 test_engine_jurisdiction_db_integration ordering, 1 HK
   configuration CSV, 3 route registry (health routes from the uncommitted main.py). No Belgium test fails.
 - Skipped include the Postgres-gated RLS tests: the PostgreSQL gate is still OPEN (merge / push blocked on it).
+
+## B0 — decisions G-22..G-29 and migration be_absence_holiday_payment (2943a0490b5b)
+
+- Commit: see `feat(belgium): block B0 decisions and migration be_absence_holiday_payment` (+ a separate
+  `test: re-pin ... for BE` commit).
+- Migration 2943a0490b5b (child of 1d76678ef1a1, single head): payroll_be_absence_episodes,
+  payroll_be_holiday_certificates, payroll_be_payment_batches / items (NL mirror + four-eyes),
+  payroll_be_component_mappings; pay_basis, contract_type / dates, onss_special_160_status / evidence;
+  six new ledger accumulators (PostgreSQL CHECK replaced; SQLite keeps the old CHECK, schema from models);
+  RLS as classify() derives; manifest; literal add_column calls for the drift filter.
+- Decisions implemented: resolver blocks NULL / unsupported pay basis (profile), NULL / unsupported
+  contract (line), UNKNOWN 1.60% status, a second line in the pay period, non-resident; engine maps platform
+  pay through ACTIVE mappings (unmapped blocks), 1.60% line from the employer status, reductions / BIK block
+  when they apply. Org routes: GET/POST /component-mappings, POST /component-mappings/{id}/approve
+  (registry +3, no existing route changed). E2E test shortcut for pay basis removed.
+- G-18 / wage scales: user decisions recorded in the gaps register Notes. G-29 (ledger at commit) is B3.
+- Tests: test_belgium_block_b_migration.py (new), test_belgium_migrations.py adapted (head pin moved),
+  engine / applicability / setup updated + decision tests; Belgium suite 400+ passed.
+- Re-pins (standing rule, separate commit): test_alembic_metadata (head, count 261), drift-filter pending
+  sets + Block B columns in test_deploy_migrate_script and the NZ x4 / PL / ZA migration tests.
+- Registry diff: only the 3 new routes; health routes stripped as before.

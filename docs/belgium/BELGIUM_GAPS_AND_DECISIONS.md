@@ -74,3 +74,21 @@ This register is authoritative for open gaps and approved decisions. A gap is cl
 - (Phase 3B) formula_expression for BE keys is stored as specialist-entered text. Phase 5 must define a restricted expression grammar with a parser/whitelist. Python eval/exec on stored text is forbidden (tests/test_belgium_slab_rows.py asserts no belgium*.py / be_*.py file calls eval or exec).
 - (Phase 3B) Band dimensions are stored in payroll_tax_slabs.filing_status ONLY for BE_* rule types, as "NAME=value;NAME=value" (EC / WC for ONSS employer bands, validated against the signed be_onss_supported_employer_categories / be_onss_supported_worker_codes lists; CHILDREN for multiple-birth maternity). Every reader of TaxSlab.filing_status was reviewed: none selects or filters BE_* rows (country engines read only their own packs; sync_org_rates_from_canonical copies verbatim and BE is canonical-pack-only; the generic matcher shared._calculate_annual_tax is unreachable for BE). BePack.band() never falls back to a dimensionless row.
 - (Phase 3B) Slab-row retire is a hard delete on Draft packs only; the audit before-image keeps every value field, dates, source, signed state and signer.
+
+- (Block B, 2026-11-12, user decision) G-18: the shared run lifecycle enforces neither commit idempotency nor
+  four-eyes. Belgium gets both inside its own before_run_transition hook (like Switzerland): approver differs
+  from the run preparer and from anyone who created the payslips' inputs; the approval fingerprint is
+  re-verified at Authorize / Paid; ledger posting is idempotent per payslip + accumulator (database unique
+  index). The shared lifecycle is not changed.
+- (Block B, 2026-11-12, user decision) Sector wage scales reuse payroll_collective_agreements.modules (the
+  Swiss wage-floor precedent stores a dict there): modules = {"wage_scales": [rows by function class,
+  seniority and schedule regime]}, written by a Belgium-only Super Admin route on Draft agreements; the
+  existing agreement four-eyes approval / activation applies. No new table.
+- (Block B) G-27 reductions: the signed marker of be_red_structural / be_red_target_group decides
+  applicability — SLAB_ROWS = applies (blocks: not built), NOT_SUPPORTED = recorded as not applied, unsigned
+  blocks as pending. Benefits in kind (incl. company car) block whenever a BENEFIT_IN_KIND component is paid.
+- (Block B) G-28: no platform component category exists (payroll_policy_allowance_components.key is a free
+  slug), so payroll_be_component_mappings maps PLATFORM_FIELD (basic, hra, special_allowance, overtime,
+  additional_compensation) and POLICY_ALLOWANCE (allowance key) to the BE component vocabulary.
+- (Block B) G-22: no salaried-vs-hourly field exists on payroll_employees (only HK's hk_pay_basis), so
+  pay_basis was added to payroll_be_worker_profiles.

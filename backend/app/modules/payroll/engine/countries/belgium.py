@@ -13,11 +13,13 @@ Order (implementation plan §8; G-01 awaits specialist confirmation):
   lines kept separate -> net, employer cost, obligation deltas, exceptions,
   hashes.
 
-Supported scope (BE-004): ordinary resident payroll on ONE employment line.
-Anything else still blocks with an actionable reason. Sector minimum checks,
-overtime / premium engines, holiday-pay engines, reductions other than the
-social / fiscal work bonus and the BSSC are NOT calculated here (the BSSC only
-ever raises BE_BSSC_PENDING, D7).
+Supported scope (BE-004, release-1 scope G-27): ordinary RESIDENT payroll on
+exactly ONE employment line per pay period; structural / target-group
+reductions and benefits in kind (company car) block whenever they apply; the
+BSSC only ever raises BE_BSSC_PENDING (D7). Pay basis (G-22) and contract (G-23)
+come from the recorded profile / classification; platform pay maps to Belgian
+components through the organisation's ACTIVE mappings (G-28); the 1.60% line
+follows the employer's recorded status (G-25).
 
 Platform mapping (standard.py):
   tds                 regular + exceptional withholding
@@ -79,12 +81,8 @@ def calculate(ctx: PayrollContext) -> dict:
         schedules=getattr(ctx, "be_schedules", None) or (), units=getattr(ctx, "be_units", None) or {},
         agreements=getattr(ctx, "be_agreements", None) or {},
         declarations=getattr(ctx, "be_declarations", None) or (),
-        contract_type=getattr(ctx, "be_contract_type", None), pay_frequency=getattr(ctx, "be_pay_frequency", None),
-        pay_basis=getattr(ctx, "be_pay_basis", None), period_start=period_start), organization_id)
-    if len(decision["employmentLines"]) != 1:
-        pack.block(E.MULTI_LINE_UNSUPPORTED, "employment_line",
-                   "several employment lines need a line-level pay split, which is not modelled yet")
-    line = decision["employmentLines"][0]
+        pay_frequency=getattr(ctx, "be_pay_frequency", None), period_start=period_start), organization_id)
+    line = decision["employmentLines"][0]          # the resolver admits exactly one line (G-27)
 
     pay = _bases.components(ctx, pack)
     manual = decision["worker"]["onssManualBase"] is True

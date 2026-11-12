@@ -1042,9 +1042,9 @@ class PayrollContext:
     be_declarations: list = None              # declarations (only APPROVED in force count)
     be_components: dict = None                # {"SALARY": ..., "BONUS": ...}; must add up to gross (BE-008)
     be_source_periods: dict = None            # {component: {"start", "end"}} (BE-009)
-    be_contract_type: str = None
     be_pay_frequency: str = None
-    be_pay_basis: str = None
+    be_component_mappings: dict = None        # G-28: {"SOURCE:key": BE component} of ACTIVE mappings
+    be_allowance_items: list = None           # G-28: [{key, amount}] named policy allowances of this payslip
     be_pension_premium: Decimal = None        # employer occupational-pension premium (special contribution base)
     be_exceptional_reference: Decimal = None  # annual reference remuneration for exceptional withholding
     be_ytd: dict = None                       # {accumulator: sum before this pay date}

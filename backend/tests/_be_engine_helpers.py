@@ -15,13 +15,14 @@ SCOPE = {
     "be_onss_supported_employer_categories": "X1",
     "be_onss_supported_worker_codes": "W1,W2",
     "be_supported_worker_categories": "MANUAL,EMPLOYEE",
-    "be_supported_contract_types": "FULL_TIME",
+    "be_supported_contract_types": "INDEFINITE,FIXED_TERM",
     "be_supported_pay_frequencies": "MONTHLY",
     "be_supported_pay_bases": "SALARIED",
     "be_onss_manual_base_categories": "MANUAL",
 }
 TEXT = {"be_rounding_onss": "CENT_HALF_UP", "be_rounding_withholding": "CENT_HALF_UP",
-        "be_rounding_holiday": "CENT_HALF_UP", "be_onss_special_160_threshold_rule": "DOES_NOT_APPLY",
+        "be_rounding_holiday": "CENT_HALF_UP", "be_red_structural": "NOT_SUPPORTED",
+        "be_red_target_group": "NOT_SUPPORTED",
         "be_wht_applicability_rule": "TEST_ONLY", "be_wht_taxable_basis_rule": "TEST_ONLY",
         "be_wht_period_strategy": "TEST_ONLY", "be_wht_nonresident_rule": "TEST_ONLY"}
 EMPLOYEE_RATES = {"be_onss_employee_rate": "10.00", "be_onss_manual_base_uplift": "10.00"}
@@ -96,20 +97,22 @@ def build_pack(rates_over=None, slabs_over=None, drop_slabs=()):
 def records(**over):
     rows = {
         "be_registration": {"id": 1, "legal_entity_id": None, "status": "ACTIVE", "verification_state": "VERIFIED",
-                            "employer_category_code": "X1", "effective_from": START, "effective_to": None},
+                            "employer_category_code": "X1", "onss_special_160_status": "NOT_APPLICABLE",
+                            "effective_from": START, "effective_to": None},
         "be_profile": {"id": 2, "status": "ACTIVE", "worker_category": "EMPLOYEE", "onss_worker_code": "W1",
-                       "residency": "RESIDENT", "special_status": None, "effective_from": START,
+                       "residency": "RESIDENT", "special_status": None, "pay_basis": "SALARIED", "effective_from": START,
                        "effective_to": None},
         "be_classifications": [{"id": 3, "employment_line": "MAIN", "status": "ACTIVE", "joint_committee": "200",
                                 "sub_committee": None, "collective_agreement_id": 30, "function_class": "B",
                                 "seniority_months": 24, "establishment_unit_id": None, "work_schedule_id": None,
+                                "contract_type": "INDEFINITE",
                                 "effective_from": START, "effective_to": None}],
         "be_schedules": [{"id": 40, "status": "ACTIVE", "regime": "EFFECTIVE", "weekly_hours": "38",
                           "effective_from": START, "effective_to": None}],
         "be_agreements": {30: {"id": 30, "agreement_code": "BE-PC-200-1.0", "jurisdiction_country": "BE",
                                "status": "Active", "effective_from": START, "effective_to": None}},
         "be_units": {}, "be_declarations": [],
-        "be_contract_type": "Full-time", "be_pay_frequency": "Monthly", "be_pay_basis": "SALARIED",
+        "be_pay_frequency": "Monthly", "be_component_mappings": {"PLATFORM_FIELD:basic": "SALARY"},
         "be_ytd": {}, "be_pack_version": "TEST-PACK@1.0", "be_organization_id": 1,
     }
     rows.update(over)

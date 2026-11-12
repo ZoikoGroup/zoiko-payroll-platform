@@ -89,3 +89,9 @@ DECLARATION_INVALID = "BE_DECLARATION_INVALID"
 # exceptions (not blocks)
 EXC_NEGATIVE_NET = "BE_NEGATIVE_NET"
 EXC_REDUCTION_CAPPED = "BE_REDUCTION_CAPPED"
+
+# ── Block B decisions (G-22 .. G-28) ────────────────────────────────────────
+SPECIAL_160_UNKNOWN = "BE_SPECIAL_160_UNKNOWN"          # G-25: the employer status is UNKNOWN
+COMPONENT_UNMAPPED = "BE_COMPONENT_UNMAPPED"            # G-28: platform pay with no ACTIVE mapping (BE-008)
+REDUCTION_UNSUPPORTED = "BE_REDUCTION_UNSUPPORTED"      # G-27: a reduction applies but is not built
+BENEFIT_IN_KIND_UNSUPPORTED = "BE_BENEFIT_IN_KIND_UNSUPPORTED"  # G-27: company car / BIK valuation not built
