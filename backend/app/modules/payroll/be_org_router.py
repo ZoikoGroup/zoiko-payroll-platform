@@ -272,3 +272,13 @@ def be_delete_identifier(vault_id: int, body: Dict[str, Any] = Body(...), curren
 def be_employee_summary(employee_id: int, current_user=Depends(get_current_payroll_operator),
                         db: Session = Depends(get_db)):
     return be.employee_summary(db, _org_id(current_user), employee_id)
+
+
+# ── applicability resolver (spec §2, §13): read-only ────────────────────────
+@router.post("/classification/resolve",
+             summary="Resolve employer / worker category, Joint Committee and blocking reasons for a pay date")
+def be_resolve_classification(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_payroll_operator),
+                              db: Session = Depends(get_db)):
+    body = dict(body or {})
+    return be.resolve_be_classification(db, _org_id(current_user), body.get("employeeId"), body.get("payDate"),
+                                        period_start=body.get("periodStart"), pay_basis=body.get("payBasis"))

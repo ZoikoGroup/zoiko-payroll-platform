@@ -1156,3 +1156,83 @@ def employee_summary(db: Session, organization_id: int, employee_id: int) -> dic
             "workSchedules": versions(m.PayrollBeWorkSchedule),
             "classifications": versions(m.PayrollBeEmploymentClassification),
             "declarations": versions(m.PayrollBeDeclaration)}
+
+
+# ── Block A2: applicability resolver (spec §2; read-only, no side effects) ──
+def _latest_for(db: Session, model, organization_id: int, on: date, **scope):
+    """The version in force on `on` (ACTIVE, or SUPERSEDED inside its own
+    window for a past date); otherwise the latest version of any status, so the
+    resolver can say "not ACTIVE" instead of "missing"."""
+    query = db.query(model).filter(model.organization_id == organization_id)
+    for key, value in scope.items():
+        query = query.filter(getattr(model, key).is_(None) if value is None else getattr(model, key) == value)
+    in_force = (_in_force(query, model, on).filter(model.status.in_((STATUS_ACTIVE, STATUS_SUPERSEDED)))
+                .order_by(model.effective_from.desc(), model.id.desc()).all())
+    if len(in_force) > 1:
+        raise BadRequestException(f"Two Belgium {model.__tablename__} versions overlap on {on.isoformat()}.")
+    if in_force:
+        return in_force[0]
+    return query.order_by(model.effective_from.desc(), model.id.desc()).first()
+
+
+def _be_registration_for(db: Session, organization_id: int, legal_entity_id, on: date):
+    R = _models().PayrollBeEmployerRegistration
+    row = None
+    if legal_entity_id is not None:
+        row = _latest_for(db, R, organization_id, on, legal_entity_id=legal_entity_id)
+    return row or _latest_for(db, R, organization_id, on, legal_entity_id=None)
+
+
+def _be_pack_for(db: Session, organization_id: int, on: date):
+    from app.modules.payroll.engine.jurisdictions.belgium.pack import BePack
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    try:
+        rates, slabs, pack = resolve_tax_configuration(db, BE, payroll_date=on)
+    except Exception:  # an unresolvable pack is "no pack" (the resolver blocks on it)
+        return None
+    if pack is None:
+        return None
+    rate_map: dict = {}
+    for r in rates:
+        rate_map.setdefault(r.component_key, []).append(r)
+    return BePack(rate_map, slabs, organization_id, on)
+
+
+def resolve_be_classification(db: Session, organization_id: int, employee_id: int, pay_date, *,
+                              period_start=None, pay_basis=None) -> dict:
+    """POST /classification/resolve: the decision, its evidence and every
+    blocking reason for one employee on one pay date. Reads only; writes
+    nothing and never calculates (spec §13)."""
+    from app.modules.payroll.engine.jurisdictions.belgium import applicability
+
+    m = _models()
+    on = _as_date(pay_date, "payDate")
+    start = _as_date(period_start, "periodStart") if period_start not in (None, "") else None
+    if start is not None and start > on:
+        raise BadRequestException("periodStart cannot be after payDate.")
+    employee = _employee(db, organization_id, employee_id)
+
+    def rows(model):
+        return db.query(model).filter(model.organization_id == organization_id,
+                                      model.employee_id == employee.id).order_by(model.id).all()
+
+    classifications = rows(m.PayrollBeEmploymentClassification)
+    unit_ids = {c.establishment_unit_id for c in classifications if c.establishment_unit_id is not None}
+    agreement_ids = {c.collective_agreement_id for c in classifications if c.collective_agreement_id is not None}
+    U, A = m.PayrollBeEstablishmentUnit, m.CollectiveAgreement
+    units = {u.id: _facts(u) for u in (db.query(U).filter(U.organization_id == organization_id,
+                                                         U.id.in_(unit_ids)).all() if unit_ids else [])}
+    agreements = {a.id: _facts(a) for a in (db.query(A).filter(A.id.in_(agreement_ids)).all()
+                                            if agreement_ids else [])
+                  if a.organization_id in (None, organization_id)}
+    registration = _be_registration_for(db, organization_id, getattr(employee, "legal_entity_id", None), on)
+    profile = _latest_for(db, m.PayrollBeWorkerProfile, organization_id, on, employee_id=employee.id)
+    result = applicability.resolve(
+        _be_pack_for(db, organization_id, on), on, registration=_facts(registration), profile=_facts(profile),
+        classifications=[_facts(c) for c in classifications],
+        schedules=[_facts(s) for s in rows(m.PayrollBeWorkSchedule)], units=units, agreements=agreements,
+        declarations=[_facts(d) for d in rows(m.PayrollBeDeclaration)],
+        contract_type=getattr(employee, "employment_type", None), pay_frequency=getattr(employee, "pay_frequency", None),
+        pay_basis=pay_basis, period_start=start)
+    return _json_safe({"employeeId": employee.id, **result})

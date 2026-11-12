@@ -31,6 +31,9 @@ This register is authoritative for open gaps and approved decisions. A gap is cl
 | G-19 | OPEN (expected) | (D8) be_rounding_* rows have no published source and stay blocked until a specialist signs them. This is expected. |
 | G-20 | OPEN | The spec §3 figures are Draft seed content only, labelled "[PENDING G1]", and are never used as code constants. |
 | G-21 | OPEN | Belgian statutory retention periods for payroll/social documents not in spec; BE employee deletion blocked until specialist-approved retention rules exist. |
+| G-22 | OPEN | Pay basis (salaried / hourly) has no recorded source for a Belgian employee: the resolver takes it from the caller (`payBasis`) and blocks with BE_FACT_MISSING:pay_basis when absent. Needs an owner decision on where it is recorded (e.g. an additive worker-profile column in a later migration). |
+| G-23 | OPEN | `be_supported_contract_types` has no signed vocabulary (only NOT_SUPPORTED can be signed), so every contract type blocks. The resolver reads the contract type from `PayrollEmployee.employment_type` normalised (FULL_TIME, PART_TIME, CONTRACT, INTERN); the specialist must confirm that vocabulary or supply the Belgian one. |
+| G-24 | OPEN | Special statuses (student, flexi, occasional, ...) have no supported-list key: any recorded special_status blocks (spec §2, D6) until a certified regime and its key exist. A missing Joint Committee agreement link and missing function class / seniority are exceptions (stop approval), not blocks, because §2 lists them as compliance exceptions. |
 
 ## Decisions
 

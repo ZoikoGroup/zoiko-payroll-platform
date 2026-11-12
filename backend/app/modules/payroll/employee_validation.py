@@ -2050,7 +2050,7 @@ class BEEmployeeValidation(EmployeeValidationStrategy):
         "iban": {"required": False, "upper": True, "strip_chars": " "},
     }
     _VAULT_ONLY = ("national_id", "niss", "insz", "nn", "rijksregisternummer", "registre_national",
-                   "national_register_number", "tax_number", "tax_id")
+                   "national_register_number", "tax_number", "tax_id", "bis", "bis_number")
 
     @classmethod
     def validate(cls, compliance: dict) -> dict:

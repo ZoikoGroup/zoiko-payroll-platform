@@ -152,6 +152,9 @@ _STRUCTURAL_NUMBERS = {
         100: "ContributionRate.label column width", 150: "TaxSlab.rate_label column width",
         200: "SourceArtifact.agency column width", 300: "SourceArtifact.title column width",
     },
+    "engine/jurisdictions/belgium/applicability.py": {
+        0: "list index", 1: "list index / count of the other blocking reasons",
+    },
     "be_identifiers.py": {
         1: "regex group index; key versions start at 1", 2: "two hex characters per key byte",
         4: "base64 padding block", 12: "AES-GCM nonce length in bytes", 32: "AES-256 key length in bytes",

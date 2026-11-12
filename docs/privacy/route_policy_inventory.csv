@@ -174,6 +174,7 @@ POST,/api/payroll/australia/schedule5/calculate,worker,create,calculate,org_admi
 POST,/api/payroll/bahamas/reports/c10,worker,create,c10,org_admin|payroll_admin,tenant,,,payroll_employees|payroll_generated_reports|payslip_items,no,
 POST,/api/payroll/barbados/reports/nis-earnings-schedule,worker,create,nis-earnings-schedule,org_admin|payroll_admin,tenant,,,payroll_employees|payroll_generated_reports|payslip_items,no,
 POST,/api/payroll/barbados/reports/tamis-monthly-paye,worker,create,tamis-monthly-paye,org_admin|payroll_admin,tenant,,,payroll_employees|payroll_generated_reports|payslip_items,no,
+POST,/api/payroll/belgium/classification/resolve,worker,create,resolve,org_admin|payroll_admin,tenant,,,payroll_be_declarations|payroll_be_employment_classifications|payroll_be_work_schedules|payroll_be_worker_profiles|payroll_employees,no,
 POST,/api/payroll/belgium/classifications/{row_id}/approve,worker,approve,approve,org_admin,tenant,,,payroll_be_employment_classifications,no,
 POST,/api/payroll/belgium/declarations/{row_id}/approve,worker,approve,approve,org_admin,tenant,,,payroll_be_declarations,no,
 POST,/api/payroll/belgium/declarations/{row_id}/withdraw,worker,create,withdraw,org_admin,tenant,,,payroll_be_declarations,no,

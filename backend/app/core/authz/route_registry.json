@@ -3123,6 +3123,29 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/belgium/classification/resolve",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "resolve",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_declarations",
+    "payroll_be_employment_classifications",
+    "payroll_be_work_schedules",
+    "payroll_be_worker_profiles",
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/belgium/classifications/{row_id}/approve",
    "data_class": "worker",
    "action": "approve",
