@@ -163,6 +163,11 @@ _STRUCTURAL_NUMBERS = {
         2000: "maximum formula length (guard against pathological input)",
         60: "maximum nesting depth (guard against pathological input)",
     },
+    "engine/jurisdictions/belgium/wages.py": {0: "default seniority / index"},
+    "engine/jurisdictions/belgium/working_time.py": {
+        0: "list index", 1: "list index / inclusive day span (+1)", 6: "date.weekday() of a Sunday (calendar)",
+
+    },
     "be_identifiers.py": {
         1: "regex group index; key versions start at 1", 2: "two hex characters per key byte",
         4: "base64 padding block", 12: "AES-GCM nonce length in bytes", 32: "AES-256 key length in bytes",

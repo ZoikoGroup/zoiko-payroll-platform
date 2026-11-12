@@ -4919,6 +4919,17 @@ def belgium_retire_slab_row(row_id: int, reason: Optional[str] = Query(None),
     return result
 
 
+@router.put("/compliance/belgium/joint-committees/{agreement_id}/wage-modules",
+            summary="Set the wage scales / overtime override of a DRAFT Belgian Joint Committee agreement (audited)")
+def belgium_set_agreement_wage_modules(agreement_id: int, payload: dict = Body(...),
+                                       current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.set_agreement_wage_modules(db, agreement_id, payload, current_user.id)
+    db.commit()
+    return result
+
+
 @router.get("/compliance/belgium/joint-committees",
             summary="Belgian Joint Committee packs with committee / sub-committee parsed from the agreement code")
 def belgium_joint_committees(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):

@@ -1045,6 +1045,11 @@ class PayrollContext:
     be_pay_frequency: str = None
     be_component_mappings: dict = None        # G-28: {"SOURCE:key": BE component} of ACTIVE mappings
     be_allowance_items: list = None           # G-28: [{key, amount}] named policy allowances of this payslip
+    be_date_of_birth: date = None             # B1: the minimum-age condition of the interprofessional minimum
+    be_working_time: dict = None              # B1: {"days": [{date, hours}], "substituteDays": [...], "restTakenHours"}
+    be_hours_paid: Decimal = None             # B1: hours paid (hourly sector minimum)
+    be_hourly_rate: Decimal = None            # B1: hourly rate (overtime premium check)
+    be_indexation: dict = None                # B1: {"increase", "increasePct"} when an indexation applies
     be_pension_premium: Decimal = None        # employer occupational-pension premium (special contribution base)
     be_exceptional_reference: Decimal = None  # annual reference remuneration for exceptional withholding
     be_ytd: dict = None                       # {accumulator: sum before this pay date}

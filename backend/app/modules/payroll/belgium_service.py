@@ -64,8 +64,9 @@ def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of=
     pack = resolved_pack[2] if resolved_pack else None
     version = (f"{getattr(pack, 'pack_id', None) or getattr(pack, 'id', None)}@{getattr(pack, 'version', None)}"
                if pack is not None else None)
+    run_period = (getattr(run, "period_start", None), getattr(run, "period_end", None)) if run is not None else period
     return resolve_be_calc_inputs(db, employee.organization_id, employee, _as_date(pay_date, "payDate"),
-                                  pack_version=version)
+                                  pack_version=version, period=run_period)
 
 
 # ── 2. before_run_transition (loop, but only for runs with BE payslips) ─────
@@ -419,9 +420,19 @@ def _be_template_activation_refusal(db: Session, template, actor_id=None) -> Opt
 
 # ── 11. pack_holidays (type a) ──────────────────────────────────────────────
 def _be_pack_holidays(db: Session, year: int) -> list:
-    # Belgian public holidays and substitute days arrive as signed content
-    # (Phase 6, D15); nothing is seeded from a guessed list.
-    return []
+    """Block B1: the SIGNED BE_PUBLIC_HOLIDAY rows of `year` from the active pack
+    (BePack.public_holidays). Nothing is seeded from a guessed list: no active
+    pack, or unsigned / NOT_SUPPORTED holidays, seed nothing. Employer
+    substitute days (D15) are recorded separately (category "Substitute")."""
+    from app.modules.payroll.engine.jurisdictions.belgium.errors import BECalculationBlockedError
+
+    pack = _be_pack_for(db, None, date(int(year), 1, 1))
+    if pack is None:
+        return []
+    try:
+        return [{"date": day.isoformat(), "name": name} for day, name in pack.public_holidays(int(year))]
+    except BECalculationBlockedError:
+        return []
 
 
 # ── 12. payment_treatment (loop, but only for runs with BE items) ───────────
@@ -1307,7 +1318,40 @@ def be_ytd_snapshot(db: Session, organization_id: int, employee_id: int, legal_e
     return {name: totals.get(name, Decimal("0")) for name in _content().ACCUMULATORS}
 
 
-def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date: date, pack_version=None) -> dict:
+def _be_working_time_inputs(db: Session, organization_id: int, employee, period) -> dict:
+    """B1 working-time facts for the run period: attendance hours per day (the
+    platform's attendance records) and the employer's recorded substitute days
+    (payroll_holidays category "Substitute", D15). No period, no facts."""
+    from app.modules.payroll.models import PayrollAttendanceRecord, PayrollHoliday
+
+    if not period or period[0] is None or period[1] is None:
+        return {"be_working_time": None, "be_hours_paid": None}
+    start, end = period
+    rows = (db.query(PayrollAttendanceRecord)
+            .filter(PayrollAttendanceRecord.organization_id == organization_id,
+                    PayrollAttendanceRecord.employee_id == employee.id,
+                    PayrollAttendanceRecord.date >= start, PayrollAttendanceRecord.date <= end)
+            .order_by(PayrollAttendanceRecord.date).all())
+    days = []
+    for r in rows:
+        try:
+            hours = Decimal(str(r.hours)) if r.hours not in (None, "") else None
+        except (InvalidOperation, ValueError):
+            hours = None
+        if hours is not None:
+            days.append({"date": r.date.isoformat(), "hours": str(hours)})
+    substitutes = [h.date.isoformat() for h in db.query(PayrollHoliday).filter(
+        PayrollHoliday.organization_id == organization_id, PayrollHoliday.country == BE,
+        PayrollHoliday.category == SUBSTITUTE_CATEGORY, PayrollHoliday.date >= start,
+        PayrollHoliday.date <= end).order_by(PayrollHoliday.date)]
+    if not days:
+        return {"be_working_time": None, "be_hours_paid": None}
+    return {"be_working_time": {"days": days, "substituteDays": substitutes},
+            "be_hours_paid": sum((Decimal(d["hours"]) for d in days), Decimal("0"))}
+
+
+def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date: date, pack_version=None,
+                           period=None) -> dict:
     """Every Belgian input in force ON THE PAY DATE. Nothing is inferred: a
     missing record stays None and the engine refuses with its own reason. Pay
     basis (G-22) and contract (G-23) come from the worker profile and the
@@ -1322,6 +1366,8 @@ def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date
         "be_declarations": records["declarations"],
         "be_pay_frequency": getattr(employee, "pay_frequency", None),
         "be_component_mappings": be_component_mapping_index(db, organization_id, pay_date),
+        "be_date_of_birth": getattr(employee, "date_of_birth", None),
+        **_be_working_time_inputs(db, organization_id, employee, period),
         "be_ytd": be_ytd_snapshot(db, organization_id, employee.id, entity, pay_date),
         "be_pack_version": pack_version, "be_organization_id": organization_id, "be_legal_entity_id": entity,
         "be_employee_id": employee.id,
@@ -1329,11 +1375,11 @@ def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date
 
 
 _BE_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "additional_compensation",
-                    "be_pension_premium", "be_exceptional_reference")
+                    "be_pension_premium", "be_exceptional_reference", "be_hours_paid", "be_hourly_rate")
 _BE_CTX_PLAIN = ("pay_frequency", "be_components", "be_source_periods", "be_pay_frequency", "be_pack_version",
                  "be_organization_id", "be_legal_entity_id", "be_employee_id", "trace_id", "be_component_mappings",
-                 "be_allowance_items")
-_BE_CTX_DATES = ("pay_date", "be_pay_date", "period_start", "period_end")
+                 "be_allowance_items", "be_working_time", "be_indexation")
+_BE_CTX_DATES = ("pay_date", "be_pay_date", "period_start", "period_end", "be_date_of_birth")
 _BE_RECORD_KEYS = ("be_registration", "be_profile")
 _BE_LIST_KEYS = ("be_classifications", "be_schedules", "be_declarations")
 _BE_MAP_KEYS = ("be_units", "be_agreements")
@@ -1547,3 +1593,41 @@ def be_component_mapping_index(db: Session, organization_id: int, on: date) -> d
                                          M.status.in_((STATUS_ACTIVE, STATUS_SUPERSEDED))), M, on)
             .order_by(M.id).all())
     return {f"{r.platform_component_source}:{r.platform_component_key}": r.be_component for r in rows}
+
+
+# ── B1: public holidays (signed rows) and employer substitute days (D15) ────
+SUBSTITUTE_CATEGORY = "Substitute"
+
+
+def be_substitute_days(db: Session, organization_id: int, year=None) -> list:
+    from app.modules.payroll.models import PayrollHoliday
+
+    q = db.query(PayrollHoliday).filter(PayrollHoliday.organization_id == organization_id,
+                                        PayrollHoliday.country == BE, PayrollHoliday.category == SUBSTITUTE_CATEGORY)
+    rows = q.order_by(PayrollHoliday.date).all()
+    if year is not None:
+        rows = [r for r in rows if r.date.year == int(year)]
+    return [{"id": r.id, "date": r.date.isoformat(), "name": r.name} for r in rows]
+
+
+def record_be_substitute_day(db: Session, organization_id: int, payload: dict, actor_id) -> dict:
+    """An employer substitute day (D15) for a public holiday that falls on a
+    Sunday / non-working day: stored in payroll_holidays (category
+    "Substitute") and audited in payroll_tax_configuration_audit."""
+    from app.modules.payroll.models import PayrollHoliday
+
+    if not isinstance(payload, dict):
+        raise BadRequestException("The request body must be an object.")
+    reason = _reason(payload.get("reason"))
+    on = _as_date(payload.get("date"), "date")
+    replaces = _as_date(payload.get("replacesHoliday"), "replacesHoliday")
+    name = " ".join(str(payload.get("name") or "").split())[:200] or f"Substitute for {replaces.isoformat()}"
+    if db.query(PayrollHoliday.id).filter(PayrollHoliday.organization_id == organization_id,
+                                         PayrollHoliday.country == BE, PayrollHoliday.date == on).first():
+        raise BadRequestException("A holiday is already recorded on that date for Belgium.")
+    row = PayrollHoliday(organization_id=organization_id, country=BE, category=SUBSTITUTE_CATEGORY, date=on, name=name)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "created", "be_substitute_day", row.id,
+           new={"date": on.isoformat(), "replacesHoliday": replaces.isoformat(), "name": name}, reason=reason)
+    return {"id": row.id, "date": on.isoformat(), "name": name, "replacesHoliday": replaces.isoformat()}

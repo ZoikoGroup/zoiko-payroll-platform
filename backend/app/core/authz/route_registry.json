@@ -3726,6 +3726,39 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/belgium/substitute-days",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "substitute-days",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/substitute-days",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "substitute-days",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/belgium/work-schedules/{row_id}/approve",
    "data_class": "worker",
@@ -21181,6 +21214,22 @@
    "data_class": "platform",
    "action": "read",
    "resource": "joint-committees",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "PUT",
+   "path": "/api/super-admin/compliance/belgium/joint-committees/{agreement_id}/wage-modules",
+   "data_class": "platform",
+   "action": "update",
+   "resource": "wage-modules",
    "principals": [
     "super_admin"
    ],

@@ -24,7 +24,7 @@ from app.modules.payroll.engine.jurisdictions.belgium.pack import ZERO, BePack, 
 
 # Obligations the engine builds a base for (others are not calculated in A3).
 ENGINE_OBLIGATIONS = ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITHHOLDING_REGULAR",
-                      "WITHHOLDING_EXCEPTIONAL", "HOLIDAY_BASE")
+                      "WITHHOLDING_EXCEPTIONAL", "HOLIDAY_BASE", "SECTOR_MIN_WAGE")
 # Components whose amount relates to an earlier period (BE-009).
 SOURCE_PERIOD_COMPONENTS = ("ARREARS",)
 # The platform's own pay fields (PayrollContext attributes) a PLATFORM_FIELD

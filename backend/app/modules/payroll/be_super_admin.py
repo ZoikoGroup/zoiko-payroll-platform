@@ -591,3 +591,96 @@ def add_authority_example(db: Session, pack_row_id: int, data: dict, actor_id) -
     _finish(db, pack, actor_id, "be_statutory_slab", row.id, {},
             {"ruleType": content.AUTHORITY_EXAMPLE_RULE, "name": name}, reason)
     return slab_view(row)
+
+
+# ── Block B1: Joint Committee wage scales / overtime override (D3) ──────────
+_SCALE_FIELDS = ("functionClass", "seniorityFromMonths", "scheduleRegime", "monthlyMinimum", "hourlyMinimum",
+                 "fullTimeWeeklyHours", "effectiveFrom", "effectiveTo")
+
+
+def _scale_row(row, index: int) -> dict:
+    if not isinstance(row, dict):
+        raise BadRequestException(f"wageScales[{index}] must be an object.")
+    unknown = sorted(set(row) - set(_SCALE_FIELDS))
+    if unknown:
+        raise BadRequestException(f"wageScales[{index}]: unknown field(s) {', '.join(unknown)}")
+    function_class = " ".join(str(row.get("functionClass") or "").split())
+    if not function_class:
+        raise BadRequestException(f"wageScales[{index}]: functionClass is required.")
+    try:
+        seniority = int(row.get("seniorityFromMonths") or 0)
+    except (TypeError, ValueError):
+        raise BadRequestException(f"wageScales[{index}]: seniorityFromMonths must be a whole number.")
+    if seniority < 0:
+        raise BadRequestException(f"wageScales[{index}]: seniorityFromMonths cannot be negative.")
+    regime = row.get("scheduleRegime")
+    if regime not in (None, "") and str(regime).upper() not in _content().SCHEDULE_REGIMES:
+        raise BadRequestException(f"wageScales[{index}]: scheduleRegime must be one of "
+                                  f"{', '.join(_content().SCHEDULE_REGIMES)}.")
+    monthly = _decimal(row.get("monthlyMinimum"), f"wageScales[{index}].monthlyMinimum")
+    hourly = _decimal(row.get("hourlyMinimum"), f"wageScales[{index}].hourlyMinimum")
+    full_time = _decimal(row.get("fullTimeWeeklyHours"), f"wageScales[{index}].fullTimeWeeklyHours")
+    if monthly is None and hourly is None:
+        raise BadRequestException(f"wageScales[{index}]: a monthlyMinimum or an hourlyMinimum is required.")
+    if any(v is not None and v <= 0 for v in (monthly, hourly)):
+        raise BadRequestException(f"wageScales[{index}]: a minimum must be above zero.")
+    if monthly is not None and (full_time is None or full_time <= 0):
+        raise BadRequestException(f"wageScales[{index}]: a monthly minimum needs fullTimeWeeklyHours (pro rata).")
+    out = {"functionClass": function_class, "seniorityFromMonths": seniority,
+           "scheduleRegime": str(regime).upper() if regime not in (None, "") else None,
+           "monthlyMinimum": None if monthly is None else str(monthly),
+           "hourlyMinimum": None if hourly is None else str(hourly),
+           "fullTimeWeeklyHours": None if full_time is None else str(full_time)}
+    for name in ("effectiveFrom", "effectiveTo"):
+        if row.get(name) not in (None, ""):
+            try:
+                out[name] = date.fromisoformat(str(row[name])[:10]).isoformat()
+            except ValueError:
+                raise BadRequestException(f"wageScales[{index}].{name} must be an ISO date.")
+    return out
+
+
+def set_agreement_wage_modules(db: Session, agreement_id: int, data: dict, actor_id) -> dict:
+    """Write the sector wage scales and the overtime-premium override of a DRAFT
+    Belgian Joint Committee agreement into payroll_collective_agreements.modules
+    (user decision 2026-11-12, the Swiss wage-floor precedent). Released content
+    is never edited: a change is a new agreement version, approved by a second
+    person through the existing agreement four-eyes. Reason required; audited."""
+    from app.modules.payroll.models import CollectiveAgreement
+    from app.modules.payroll.service import record_tax_audit
+
+    if not isinstance(data, dict):
+        raise BadRequestException("The request body must be an object.")
+    reason = _reason(data)
+    row = db.query(CollectiveAgreement).filter(CollectiveAgreement.id == agreement_id).first()
+    if row is None or (row.jurisdiction_country or "").upper() != bes.BE:
+        raise NotFoundException("Belgian Joint Committee agreement")
+    if row.status != "Draft":
+        raise BadRequestException(f"Agreement {row.agreement_code} v{row.version} is {row.status} — create a new "
+                                  "version to change released wage scales.")
+    scales = data.get("wageScales")
+    if not isinstance(scales, list) or not scales:
+        raise BadRequestException("wageScales must be a non-empty list.")
+    rows = [_scale_row(r, i) for i, r in enumerate(scales)]
+    keys = [(r["functionClass"].upper(), r["seniorityFromMonths"], r["scheduleRegime"], r.get("effectiveFrom"))
+            for r in rows]
+    if len(set(keys)) != len(keys):
+        raise BadRequestException("wageScales has two rows for the same function class / seniority / regime / date.")
+    modules = {"wage_scales": rows}
+    overtime = data.get("overtime")
+    if overtime not in (None, {}):
+        if not isinstance(overtime, dict) or set(overtime) - {"weekdayPct", "sundayHolidayPct"}:
+            raise BadRequestException("overtime holds weekdayPct and sundayHolidayPct only.")
+        weekday = _decimal(overtime.get("weekdayPct"), "overtime.weekdayPct")
+        sunday = _decimal(overtime.get("sundayHolidayPct"), "overtime.sundayHolidayPct")
+        if weekday is None or sunday is None or weekday < 0 or sunday < 0:
+            raise BadRequestException("overtime needs both premiums, not negative.")
+        modules["overtime"] = {"weekdayPct": str(weekday), "sundayHolidayPct": str(sunday)}
+    old = row.modules
+    row.modules = modules
+    row.updated_by_id = actor_id
+    db.flush()
+    record_tax_audit(db, actor_id=actor_id, action="updated", entity_type="be_agreement_modules", entity_id=row.id,
+                     old_value={"modules": old}, new_value={"modules": modules}, reason=reason,
+                     legal_reference="ZP-BE-ENG-001 §4 / D3", auto_commit=False)
+    return {"id": row.id, "agreementCode": row.agreement_code, "status": row.status, "modules": modules}

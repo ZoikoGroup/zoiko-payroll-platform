@@ -26,6 +26,14 @@ TEXT = {"be_rounding_onss": "CENT_HALF_UP", "be_rounding_withholding": "CENT_HAL
         "be_wht_applicability_rule": "TEST_ONLY", "be_wht_taxable_basis_rule": "TEST_ONLY",
         "be_wht_period_strategy": "TEST_ONLY", "be_wht_nonresident_rule": "TEST_ONLY"}
 EMPLOYEE_RATES = {"be_onss_employee_rate": "10.00", "be_onss_manual_base_uplift": "10.00"}
+# B1 (TEST ONLY): interprofessional fallback 1000, minimum age 10, limits 12 h / 50 h.
+AMOUNTS = {"be_wage_rmmmg": "1000", "be_wage_rmmmg_min_age": "10", "be_wt_daily_limit_hours": "12",
+           "be_wt_weekly_limit_hours": "50", "be_wage_index_centime_threshold": "1000"}
+# B1 (TEST ONLY): overtime premiums 10 / 20 %, wage-norm margin 10 %, one public holiday.
+B1_EMPLOYEE_RATES = {"be_ot_premium_weekday": "10.00", "be_ot_premium_sunday_holiday": "20.00"}
+B1_EMPLOYER_RATES = {"be_wage_norm_margin": "10.00"}
+B1_FORMULAS = {"be_ot_compensatory_rest_rule": "overtime * 1", "be_wage_index_centime_rule": "min(increase, 10)"}
+TEST_HOLIDAY = "2026-04-06"
 EMPLOYER_RATES = {"be_onss_wage_moderation": "10.00", "be_onss_special_160": "10.00",
                   "be_onss_pension_special": "10.00", "be_hol_manual_quarterly_contribution": "10.00"}
 SLAB_KEYS = ("be_red_social_work_bonus", "be_onss_employer_base_rate", "be_onss_fund_contributions",
@@ -37,10 +45,12 @@ FORMULAS = {"be_wht_annex3_amendment_2026": "tax", "be_wht_fiscal_work_bonus": "
             "be_wht_overtime_rule": "tax"}
 # component -> obligations where it is INCLUDED (every other obligation: EXCLUDED)
 CLASSES = {
-    "SALARY": ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITHHOLDING_REGULAR", "HOLIDAY_BASE"),
+    "SALARY": ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITHHOLDING_REGULAR", "HOLIDAY_BASE",
+               "SECTOR_MIN_WAGE"),
     "BONUS": ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITHHOLDING_EXCEPTIONAL"),
     "HOLIDAY_PAY_DOUBLE": ("WITHHOLDING_EXCEPTIONAL",),
     "ARREARS": ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITHHOLDING_EXCEPTIONAL"),
+    "OVERTIME_PREMIUM": ("ONSS_EMPLOYEE", "ONSS_EMPLOYER", "ONSS_MANUAL_108", "WITHHOLDING_REGULAR"),
 }
 
 
@@ -65,6 +75,11 @@ def build_pack(rates_over=None, slabs_over=None, drop_slabs=()):
     rate_map = {k: rate(k, text=v) for k, v in {**SCOPE, **TEXT}.items()}
     rate_map.update({k: rate(k, employee=v) for k, v in EMPLOYEE_RATES.items()})
     rate_map.update({k: rate(k, employer=v) for k, v in EMPLOYER_RATES.items()})
+    rate_map.update({k: dict(rate(k), flat_amount=v) for k, v in AMOUNTS.items()})
+    rate_map.update({k: rate(k, employee=v) for k, v in B1_EMPLOYEE_RATES.items()})
+    rate_map.update({k: rate(k, employer=v) for k, v in B1_EMPLOYER_RATES.items()})
+    rate_map.update({k: rate(k, text=c.SLAB_ROWS) for k in (*B1_FORMULAS, "be_public_holidays")})
+    rate_map["be_ot_threshold_rule"] = rate("be_ot_threshold_rule", text="TEST_ONLY")
     rate_map.update({k: rate(k, text=c.SLAB_ROWS) for k in SLAB_KEYS})
     slabs = []
     for component, included in CLASSES.items():
@@ -84,6 +99,9 @@ def build_pack(rates_over=None, slabs_over=None, drop_slabs=()):
         slab("be_wht_exceptional_rule", pct="10.00"),
     ]
     slabs += [slab(k, formula=v) for k, v in FORMULAS.items()]
+    slabs += [slab(k, formula=v) for k, v in B1_FORMULAS.items()]
+    slabs.append({"rule_type": c.PUBLIC_HOLIDAY_RULE, "effective_from": TEST_HOLIDAY, "effective_to": TEST_HOLIDAY,
+                  "tax_formula": "TEST ONLY holiday", "rate_label": f"{TEST} holiday", "min_amount": "0"})
     slabs = [s for s in slabs if s["rule_type"] not in {c.RULE_TYPES[k] for k in drop_slabs}]
     for key, value in (rates_over or {}).items():
         if value is None:
@@ -114,6 +132,7 @@ def records(**over):
         "be_units": {}, "be_declarations": [],
         "be_pay_frequency": "Monthly", "be_component_mappings": {"PLATFORM_FIELD:basic": "SALARY"},
         "be_ytd": {}, "be_pack_version": "TEST-PACK@1.0", "be_organization_id": 1,
+        "be_date_of_birth": "1990-01-01",
     }
     rows.update(over)
     return rows

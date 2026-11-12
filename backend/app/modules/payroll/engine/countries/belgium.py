@@ -45,6 +45,8 @@ from app.modules.payroll.engine.jurisdictions.belgium import declarations as _de
 from app.modules.payroll.engine.jurisdictions.belgium import errors as E
 from app.modules.payroll.engine.jurisdictions.belgium import formula as _formula
 from app.modules.payroll.engine.jurisdictions.belgium import onss as _onss
+from app.modules.payroll.engine.jurisdictions.belgium import wages as _wages
+from app.modules.payroll.engine.jurisdictions.belgium import working_time as _working_time
 from app.modules.payroll.engine.jurisdictions.belgium import withholding as _withholding
 from app.modules.payroll.engine.jurisdictions.belgium.errors import BECalculationBlockedError
 from app.modules.payroll.engine.jurisdictions.belgium.pack import ZERO, BePack, as_date, dec
@@ -88,6 +90,19 @@ def calculate(ctx: PayrollContext) -> dict:
     manual = decision["worker"]["onssManualBase"] is True
     built = _bases.build(pay, pack.earning_classes(), pack, manual)
     approved = _declarations.approved(pack, getattr(ctx, "be_declarations", None) or (), pay_date)
+    # B1: sector minimum first (RMMMG fallback only when no sector minimum applies), working time.
+    agreement = None
+    if line.get("agreement"):
+        agreement = (getattr(ctx, "be_agreements", None) or {}).get(line["agreement"]["id"])
+    wage_floor = _wages.compute_be_wage_floor(
+        pack, line, agreement, line.get("schedule"), decision["worker"]["payBasis"],
+        built["bases"]["SECTOR_MIN_WAGE"], getattr(ctx, "be_hours_paid", None),
+        getattr(ctx, "be_date_of_birth", None), pay_date)
+    indexation = _wages.compute_be_indexation(pack, getattr(ctx, "be_indexation", None),
+                                              built["bases"]["SECTOR_MIN_WAGE"])
+    working = _working_time.compute_be_working_time(
+        pack, line.get("schedule"), getattr(ctx, "be_working_time", None), agreement,
+        pay.get("OVERTIME_PREMIUM", ZERO), getattr(ctx, "be_hourly_rate", None), period_start)
     onss = _onss.compute(pack, built["bases"], decision, getattr(ctx, "be_pension_premium", None))
     wht = _withholding.compute(pack, pay, built, decision, approved, onss,
                                getattr(ctx, "be_exceptional_reference", None), getattr(ctx, "be_pack_version", None))
@@ -99,6 +114,9 @@ def calculate(ctx: PayrollContext) -> dict:
 
     exceptions = [{"code": e["code"], "detail": e["reason"]} for e in decision["exceptions"]]
     exceptions += onss["exceptions"]
+    exceptions += [x for x in (wage_floor["exception"], indexation["exception"]) if x]
+    exceptions += working["exceptions"]
+    warnings = [w for w in (indexation["warning"],) if w]
     if net < ZERO:
         exceptions.append({"code": E.EXC_NEGATIVE_NET, "detail": "statutory deductions exceed gross pay"})
 
@@ -111,6 +129,10 @@ def calculate(ctx: PayrollContext) -> dict:
               "WORK_BONUS_FISCAL": wht["fiscalWorkBonus"], "HOLIDAY_PAY_BASE": bases["HOLIDAY_BASE"]}
     if manual:
         deltas["ONSS_MANUAL_108_BASE"] = onss["employeeBase"]
+    if working["trace"]["facts"]:
+        deltas["OVERTIME_HOURS"] = working["overtimeHours"]
+    if working["trace"]["facts"] or working["restTaken"] != ZERO:
+        deltas["COMPENSATORY_REST_HOURS"] = working["restEarned"] - working["restTaken"]
     unknown = set(deltas) - set(content.ACCUMULATORS)
     if unknown:
         raise RuntimeError(f"unknown Belgium accumulator(s): {sorted(unknown)}")
@@ -123,6 +145,9 @@ def calculate(ctx: PayrollContext) -> dict:
         "decision": {k: decision[k] for k in ("employer", "worker", "employmentLines", "declarations")},
         "pensionPremium": getattr(ctx, "be_pension_premium", None),
         "exceptionalReference": getattr(ctx, "be_exceptional_reference", None),
+        "workingTime": getattr(ctx, "be_working_time", None), "hoursPaid": getattr(ctx, "be_hours_paid", None),
+        "hourlyRate": getattr(ctx, "be_hourly_rate", None), "indexation": getattr(ctx, "be_indexation", None),
+        "dateOfBirth": getattr(ctx, "be_date_of_birth", None),
         "ytd": {k: str(v) for k, v in sorted((getattr(ctx, "be_ytd", None) or {}).items())},
     }
     used = pack.used()
@@ -131,7 +156,8 @@ def calculate(ctx: PayrollContext) -> dict:
     trace = {"jurisdiction": "BE", "spec": content.SPEC, "payDate": pay_date.isoformat(),
              "packVersion": getattr(ctx, "be_pack_version", None), "employmentLine": line["employmentLine"],
              "bases": _bases.trace(built), "sourcePeriods": inputs["sourcePeriods"], "onss": onss["trace"],
-             "withholding": wht["trace"], "rounding": pack.rounding_events, "contentUsed": used, "hashes": hashes}
+             "withholding": wht["trace"], "wages": {"floor": wage_floor["trace"], "indexation": indexation["trace"]},
+             "workingTime": working["trace"], "rounding": pack.rounding_events, "contentUsed": used, "hashes": hashes}
     result = {
         "be_withholding": _money(wht["total"]),
         "be_withholding_regular": _money(wht["regular"]),
@@ -155,6 +181,12 @@ def calculate(ctx: PayrollContext) -> dict:
         "obligationDeltas": {k: _money(v) for k, v in onss["obligationDeltas"].items()},
         "accumulatorDeltas": {k: _money(v) for k, v in sorted(deltas.items())},
         "exceptions": exceptions,
+        "warnings": warnings,
+        "be_wage_floor": {"source": wage_floor["source"],
+                          "required": None if wage_floor["required"] is None else _money(wage_floor["required"]),
+                          "paid": _money(wage_floor["paid"])},
+        "be_working_time": {"overtimeHours": _money(working["overtimeHours"]),
+                            "compensatoryRestEarned": _money(working["restEarned"])},
         "usedRows": used,
         "hashes": hashes,
         "trace": trace,

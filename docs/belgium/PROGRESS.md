@@ -141,8 +141,8 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 
 ## B0 — decisions G-22..G-29 and migration be_absence_holiday_payment (2943a0490b5b)
 
-- Commit: see `feat(belgium): block B0 decisions and migration be_absence_holiday_payment` (+ a separate
-  `test: re-pin ... for BE` commit).
+- Commit: 8432510 `feat(belgium): block B0 decisions and migration be_absence_holiday_payment` (+ re-pins
+  e4065bc and 7d1f735).
 - Migration 2943a0490b5b (child of 1d76678ef1a1, single head): payroll_be_absence_episodes,
   payroll_be_holiday_certificates, payroll_be_payment_batches / items (NL mirror + four-eyes),
   payroll_be_component_mappings; pay_basis, contract_type / dates, onss_special_160_status / evidence;
@@ -159,3 +159,29 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 - Re-pins (standing rule, separate commit): test_alembic_metadata (head, count 261), drift-filter pending
   sets + Block B columns in test_deploy_migrate_script and the NZ x4 / PL / ZA migration tests.
 - Registry diff: only the 3 new routes; health routes stripped as before.
+
+## B1 — wages and working time
+
+- Commit: see `feat(belgium): block B1 wages and working time`.
+- `engine/jurisdictions/belgium/wages.py`: sector minimum from the line's ACTIVE agreement
+  `modules["wage_scales"]` (function class, highest seniority band not above the employee's, optional schedule
+  regime, effective dates; part-time pro rata on fullTimeWeeklyHours; hourly rows need the hours paid);
+  RMMMG fallback ONLY when the agreement defines no scale (reason in the trace; minimum-age condition; pro
+  rata on be_wt_weekly_limit_hours); no agreement linked = no fallback; a breach is BE_MINIMUM_WAGE_BREACH
+  (exception, never a top-up); compared with the SECTOR_MIN_WAGE base (new engine obligation). Index-centime
+  limitation (be_wage_index_centime_threshold + formula) and wage norm (warning only) run only when an
+  indexation input is supplied; pending content blocks.
+- `working_time.py`: overtime against the governing schedule (EFFECTIVE per ISO week; AVERAGE over the weeks
+  covered); daily / weekly limits as exceptions; Sunday / signed public holiday / employer substitute day
+  hours use the holiday premium; premiums from content or the agreement `modules["overtime"]` override;
+  compensatory rest via be_ot_compensatory_rest_rule; OVERTIME_HOURS and COMPENSATORY_REST_HOURS ledger
+  deltas; premium checked against the hourly rate when known (else an exception); paid overtime without facts
+  blocks. Facts come from the platform attendance hours of the run period.
+- Public holidays: the pack_holidays hook returns the SIGNED BE_PUBLIC_HOLIDAY rows of the active pack
+  (nothing when unsigned / no pack). Substitute days (D15): payroll_holidays category "Substitute", audited in
+  payroll_tax_configuration_audit; org routes GET/POST /belgium/substitute-days.
+- Super Admin: PUT /compliance/belgium/joint-committees/{id}/wage-modules writes wage scales / overtime
+  override on DRAFT Belgian agreements only (validated, audited; approval = existing agreement four-eyes).
+- Registry diff: 3 new routes, no existing route changed.
+- Tests: test_belgium_wages_working_time.py (new, 19); Belgium + shared engine / attendance / Poland service
+  suites: 1093 passed, 1 skipped.

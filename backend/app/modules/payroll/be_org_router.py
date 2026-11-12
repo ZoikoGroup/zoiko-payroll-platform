@@ -317,3 +317,18 @@ def be_create_component_mapping(body: Dict[str, Any] = Body(...), current_user=D
 def be_approve_component_mapping(row_id: int, current_user=Depends(get_current_org_admin),
                                  db: Session = Depends(get_db)):
     return _commit(db, be.approve_be_component_mapping(db, _org_id(current_user), row_id, _actor(current_user)))
+
+
+# ── B1: employer substitute days (D15) ──────────────────────────────────────
+@router.get("/substitute-days", summary="Your recorded Belgian substitute holidays")
+def be_list_substitute_days(year: Optional[int] = None, current_user=Depends(get_current_payroll_operator),
+                            db: Session = Depends(get_db)):
+    return be.be_substitute_days(db, _org_id(current_user), year)
+
+
+@router.post("/substitute-days", summary="Record an employer substitute day for a public holiday (audited)")
+def be_create_substitute_day(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                             db: Session = Depends(get_db)):
+    out = be.record_be_substitute_day(db, _org_id(current_user), body, _actor(current_user))
+    db.commit()
+    return out

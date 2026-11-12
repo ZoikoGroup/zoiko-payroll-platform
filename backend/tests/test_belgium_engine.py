@@ -175,12 +175,12 @@ def test_platform_pay_maps_through_the_active_mappings_and_unmapped_pay_blocks()
     assert _blocked(context(overtime=Decimal("50"))) == "BE_COMPONENT_UNMAPPED:PLATFORM_FIELD:overtime"
     assert _blocked(context(be_allowance_items=[{"key": "transport", "amount": "50"}])) == \
         "BE_COMPONENT_UNMAPPED:POLICY_ALLOWANCE:transport"
-    mapped = {"PLATFORM_FIELD:basic": "SALARY", "PLATFORM_FIELD:overtime": "OVERTIME_PREMIUM"}
+    mapped = {"PLATFORM_FIELD:basic": "SALARY", "PLATFORM_FIELD:overtime": "SUNDAY_HOLIDAY_PREMIUM"}
     from tests._be_engine_helpers import CLASSES
-    assert "OVERTIME_PREMIUM" not in CLASSES                    # no signed earning class -> it blocks next
+    assert "SUNDAY_HOLIDAY_PREMIUM" not in CLASSES              # no signed earning class -> it blocks next
     ctx = context(gross="1050", overtime=Decimal("50"), be_component_mappings=mapped)
     ctx.basic = Decimal("1000")                                      # basic 1000 + overtime 50 = gross 1050
-    assert _blocked(ctx) == "BE_EARNING_CLASS_MISSING:ONSS_EMPLOYEE:OVERTIME_PREMIUM"
+    assert _blocked(ctx) == "BE_EARNING_CLASS_MISSING:ONSS_EMPLOYEE:SUNDAY_HOLIDAY_PREMIUM"
     ok = _calc(context(gross="1000", be_component_mappings={"PLATFORM_FIELD:basic": "SALARY"})).be_result
     assert ok["trace"]["bases"]["ONSS_EMPLOYEE"]["components"] == ["SALARY"]
 
