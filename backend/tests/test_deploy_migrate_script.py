@@ -27,6 +27,10 @@ def _code_lines():
 MX_X4_TABLES = ("payroll_mx_parallel_imports", "payroll_mx_parallel_differences")
 
 
+
+# Belgium Block B (2943a0490b5b) adds these columns to Belgium tables (standing re-pin rule).
+BE_BLOCK_B_COLUMNS = {"payroll_be_worker_profiles": {"pay_basis"}, "payroll_be_employment_classifications": {"contract_type", "contract_start_date", "contract_end_date"}, "payroll_be_employer_registrations": {"onss_special_160_status", "special_160_evidence_ref"}}
+
 def test_the_deploy_script_never_runs_the_mutating_sync_schema():
     code = "\n".join(_code_lines())
     assert "sync_schema" not in code
@@ -154,7 +158,8 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                                         "payroll_be_employer_registrations", "payroll_be_establishment_units",
                                         "payroll_be_worker_profiles", "payroll_be_work_schedules",
                                         "payroll_be_employment_classifications", "payroll_be_declarations",
-                                        "payroll_be_accumulator_entries"}  # + Belgium P2 (1d76678ef1a1)
+                                        "payroll_be_accumulator_entries",  # + Belgium P2 (1d76678ef1a1)
+                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings"}  # + Belgium Block B (2943a0490b5b)
         nz_run_columns = {"nz_approval_fingerprint", "nz_payment_kind", "nz_run_options",   # + P6 options
                           "pl_approval_fingerprint",                                        # + Poland P2
                           "be_approval_fingerprint"}                                        # + Belgium P2
@@ -238,6 +243,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert tables == mx_final_mile | country | jp_tables | google_tables | {"payroll_za_payroll_overrides",
                                                       "payroll_za_parallel_imports",
                                                       "payroll_za_parallel_differences"}
+        assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
         assert columns == {"payroll_court_ordered_deductions": {"za_authority_type", "za_evidence_ref"},
                            "payroll_za_employer_registrations": {"za_journal_accounts"}, **jp_columns,
                            **tz_columns, **google_columns, **mx_m21}
@@ -250,12 +256,14 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert_google_pending(tables, columns)
         assert tables == ({"payroll_za_parallel_imports", "payroll_za_parallel_differences"}
                           | country | jp_tables | google_tables)
+        assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
         assert columns == {**jp_columns, **tz_columns, **google_columns, **mx_m21}
         # A database already at Japan Phase 2 has the registration timezone and
         # Japan P5/P6 pending.
         tables, columns = pending_objects("f686d5128f8a")
         assert_google_pending(tables, columns)
         assert tables == jp_p6_tables | google_tables
+        assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
         assert columns == {**tz_columns, **jp_p6_columns, **google_columns, **mx_m21,
                            "payroll_runs": {"jp_payment_kind", *nz_run_columns},
                            "payslip_items": {"nz_calculation_snapshot", "nz_correction_of_id", "pl_calculation_snapshot",
@@ -270,7 +278,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                         "payroll_be_employment_classifications", "payroll_be_declarations",
                         "payroll_be_accumulator_entries"}
         tables, columns = pending_objects("e7ec6c1933b4")
-        assert tables == be_p2_tables and columns == {**mx_m21, "payslip_items": {"be_calculation_snapshot"},
+        be_block_b_tables = {"payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings"}  # + Belgium Block B (2943a0490b5b)
+        assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
+        assert tables == be_p2_tables | be_block_b_tables and columns == {**mx_m21, "payslip_items": {"be_calculation_snapshot"},
                                                       "payroll_runs": {"be_approval_fingerprint"}}
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")

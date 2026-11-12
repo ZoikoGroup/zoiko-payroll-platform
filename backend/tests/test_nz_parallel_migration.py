@@ -52,6 +52,10 @@ class _CaptureBind:
         self.sql.append(" ".join(str(clause).split()))
 
 
+
+# Belgium Block B (2943a0490b5b) adds these columns to Belgium tables (standing re-pin rule).
+BE_BLOCK_B_COLUMNS = {"payroll_be_worker_profiles": {"pay_basis"}, "payroll_be_employment_classifications": {"contract_type", "contract_start_date", "contract_end_date"}, "payroll_be_employer_registrations": {"onss_special_160_status", "special_160_evidence_ref"}}
+
 def test_rls_policies_derived():
     metadata = _metadata()
     rls = _load("d7f9b1c3e5a6")
@@ -153,7 +157,9 @@ def test_drift_filter_explains():
                                         "payroll_be_employer_registrations", "payroll_be_establishment_units",
                                         "payroll_be_worker_profiles", "payroll_be_work_schedules",
                                         "payroll_be_employment_classifications", "payroll_be_declarations",
-                                        "payroll_be_accumulator_entries"}  # + Belgium P2 (1d76678ef1a1)
+                                        "payroll_be_accumulator_entries",  # + Belgium P2 (1d76678ef1a1)
+                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings"}  # + Belgium Block B (2943a0490b5b)
+    assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
     assert columns == {"payslip_items": {"pl_calculation_snapshot", "be_calculation_snapshot"},
                        "payroll_runs": {"pl_approval_fingerprint", "be_approval_fingerprint"},
                        **MX_M21}
