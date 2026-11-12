@@ -14,15 +14,41 @@ from app.modules.payroll.engine.jurisdictions.malaysia import errors as E
 from app.modules.payroll.engine.jurisdictions.malaysia.pack import ZERO, MyPack, dec, money, upper
 
 
+def platform_components(ctx) -> dict:
+    """The platform's salary structure as Malaysian pay components (Phase 11),
+    used when no explicit ``my_components`` are supplied. Gross is built as
+    basic + HRA + special allowance + configured allowances + overtime +
+    attendance extras (service._compute_payslip_values), so:
+
+      basic                                   -> BASIC_SALARY
+      the fixed salary-structure remainder     -> FIXED_ALLOWANCE
+        (HRA, special and configured allowances: fixed monthly pay)
+      overtime                                -> OVERTIME (needs approved events)
+      attendance extras (variable)            -> VARIABLE_ALLOWANCE
+
+    Each is then classified per obligation by the signed earning classes; a
+    REVIEW treatment with an amount blocks that obligation — never a guess.
+    Returns None when the parts do not reconcile (a negative remainder)."""
+    gross, basic = dec(ctx.gross), dec(ctx.basic)
+    overtime = dec(getattr(ctx, "overtime", ZERO))
+    extras = dec(getattr(ctx, "additional_compensation", ZERO))
+    fixed = gross - basic - overtime - extras
+    if min(basic, overtime, extras, fixed) < ZERO:
+        return None
+    parts = {"BASIC_SALARY": basic, "FIXED_ALLOWANCE": fixed, "OVERTIME": overtime, "VARIABLE_ALLOWANCE": extras}
+    return {k: v for k, v in parts.items() if v != ZERO or k == "BASIC_SALARY"}
+
+
 def components(ctx, pack: MyPack) -> dict:
     """{component: amount}. Explicit ``my_components`` must reconcile to gross;
-    without them only a pure basic-salary gross is mapped."""
+    without them the platform's salary structure is mapped (platform_components)."""
     raw = getattr(ctx, "my_components", None)
     gross = dec(ctx.gross)
     if raw is None:
-        if dec(ctx.basic) != gross or dec(getattr(ctx, "overtime", ZERO)) != ZERO:
-            pack.block(E.COMPONENTS_UNMAPPED, "gross contains pay that is not mapped to a Malaysian pay component")
-        return {"BASIC_SALARY": gross}
+        mapped = platform_components(ctx)
+        if mapped is None:
+            pack.block(E.COMPONENTS_UNMAPPED, "gross does not reconcile to the platform salary structure")
+        return mapped
     out = {}
     for name, amount in raw.items():
         component = upper(name)

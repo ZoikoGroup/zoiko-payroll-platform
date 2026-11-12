@@ -9822,6 +9822,29 @@ _MX_CONCEPT_KINDS = (
     ("PTU", "PTU"), ("SEPARATION_SENIORITY_PREMIUM", "Seniority Premium"),
     ("SEPARATION_PAYMENT", "Separation Payment"), ("SEPARATION_INDEMNITY", "Indemnity"),
 )
+# Malaysia (ZP-MY-ENG-001 Phase 11): paths into the frozen my_calculation_snapshot
+# (engine/countries/malaysia.py my_result; amounts are decimal strings). The
+# national obligations are reported separately — never one "statutory" figure.
+_MY_SNAP = "my_calculation_snapshot."
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["MY"] = {
+    _MY_SNAP + "my_pcb": ("PCB / MTD", "currency", True),
+    _MY_SNAP + "my_epf.employee": ("EPF (Employee)", "currency", True),
+    _MY_SNAP + "my_epf.employer": ("EPF (Employer)", "currency", True),
+    _MY_SNAP + "my_socso.employee": ("SOCSO (Employee)", "currency", True),
+    _MY_SNAP + "my_socso.employer": ("SOCSO (Employer)", "currency", True),
+    _MY_SNAP + "my_eis.employee": ("EIS (Employee)", "currency", True),
+    _MY_SNAP + "my_eis.employer": ("EIS (Employer)", "currency", True),
+    _MY_SNAP + "my_hrd": ("HRD Levy (Employer)", "currency", True),
+    _MY_SNAP + "my_employee_total": ("Total Employee Contributions", "currency", True),
+    _MY_SNAP + "my_employer_total": ("Total Employer Cost", "currency", True),
+    _MY_SNAP + "my_net": ("Net Pay (statutory)", "currency", True),
+    _MY_SNAP + "trace.bases.EPF.base": ("EPF Wage", "currency", True),
+    _MY_SNAP + "trace.bases.SOCSO.base": ("SOCSO Wage", "currency", True),
+    _MY_SNAP + "trace.bases.EIS.base": ("EIS Wage", "currency", True),
+    _MY_SNAP + "trace.bases.HRD.base": ("HRD Levy Base", "currency", True),
+    _MY_SNAP + "trace.labour.territory.territory": ("Labour Territory", "text", False),
+    _MY_SNAP + "trace.labour.territory.holidayState": ("Holiday State", "text", False),
+}
 _PAYSLIP_ITEM_JSON_FIELD_CATALOG["MX"] = {
     _MX_SNAP + "gross": ("Gross Pay", "currency", True),
     _MX_SNAP + "days_paid": ("Days Paid", "text", False),
@@ -10101,6 +10124,12 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     "SA": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "gross_pay", "employee_pension", "social_security", "total_deductions",
            "employer_pension", "employer_social_security", "employer_occupational_hazard", "net_pay"],
+    # Malaysia (ZP-MY-ENG-001 Phase 11): PCB -> tds; EPF employer ->
+    # employer_pension; SOCSO + EIS employer -> employer_esi; HRD levy ->
+    # employer_payroll_tax. Employee EPF / SOCSO / EIS are in catalog "MY".
+    "MY": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "basic_salary", "gross_pay", "tds", "total_deductions",
+           "employer_pension", "employer_esi", "employer_payroll_tax", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -10111,6 +10140,12 @@ _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 # changes which PayslipItem column is read, only the label shown in the
 # Report Template field picker.
 _PAYSLIP_FIELD_LABEL_OVERRIDES = {
+    "MY": {
+        "tds": "PCB / MTD",
+        "employer_pension": "EPF (Employer)",
+        "employer_esi": "SOCSO + EIS (Employer)",
+        "employer_payroll_tax": "HRD Levy (Employer)",
+    },
     "CA": {
         "esi": "Employment Insurance (Employee)",
         "employer_esi": "Employment Insurance (Employer)",
@@ -34193,6 +34228,9 @@ def payslip_line_items(data: dict, country: str):
         # being read as "this country's income tax happened to be zero".
         "BB": "PAYE", "DO": "ISR", "GY": "PAYE", "JM": "PAYE", "TT": "PAYE",
         "PR": "Hacienda Withholding",
+        # Poland / Malaysia route the monthly income-tax advance through `tds`
+        # (engine/countries/poland.py, malaysia.py): PIT advance / PCB (MTD).
+        "PL": "PIT Advance (zaliczka)", "MY": "PCB / MTD",
     }
     # US: federal/state/local are stored (and shown here) as three separate
     # lines instead of one combined "Federal Withholding" figure — `tds`
@@ -34302,6 +34340,11 @@ def payslip_line_items(data: dict, country: str):
             v = float(data.get(key, 0) or 0)
             if v > 0:
                 deduction_items.append((lbl, v))
+    # Poland / Malaysia: the employee social contributions travel in the
+    # frozen calculation snapshot (pl_employee_total / my_employee_total), not
+    # in the generic pf / esi / pension fields — itemise them from it, so the
+    # lines add up to the stored total deductions (PCB / PIT is the tds line).
+    deduction_items.extend(_snapshot_deduction_lines(data, country))
     # Employer-side contributions (Employer PF/ESI/Social Security/Medicare/
     # Pension/NI) are deliberately NOT shown here — this is the employee's
     # own payslip, and none of these are amounts deducted from the
@@ -34311,6 +34354,35 @@ def payslip_line_items(data: dict, country: str):
     # visible to admins on the Payroll Register / Run Detail views, which
     # are internal cost-review screens, not the payslip document itself.
     return earnings_items, deduction_items
+
+
+_PL_ZUS_EMPLOYEE_LABELS = {"EMERYTALNE": "ZUS Pension (emerytalne)", "RENTOWE": "ZUS Disability (rentowe)",
+                           "CHOROBOWE": "ZUS Sickness (chorobowe)"}
+
+
+def _snapshot_deduction_lines(data: dict, country: str) -> list:
+    """[(label, amount)] of the employee contributions a Poland / Malaysia
+    payslip keeps in its frozen snapshot (zero lines omitted). Read as stored —
+    never recomputed. Empty for every other country or without a snapshot."""
+    def amount(value) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    lines = []
+    if country == "MY":
+        snap = data.get("myCalculationSnapshot") or {}
+        for label, key in (("EPF (Employee)", "my_epf"), ("SOCSO (Employee)", "my_socso"),
+                           ("EIS (Employee)", "my_eis")):
+            lines.append((label, amount((snap.get(key) or {}).get("employee"))))
+    elif country == "PL":
+        snap = data.get("plCalculationSnapshot") or {}
+        for key, value in sorted((snap.get("pl_zus_employee") or {}).items()):
+            lines.append((_PL_ZUS_EMPLOYEE_LABELS.get(str(key).upper(), f"ZUS ({key})"), amount(value)))
+        lines.append(("Health contribution (zdrowotna)", amount(snap.get("pl_health"))))
+        lines.append(("PPK (Employee)", sum(amount(v) for v in (snap.get("pl_ppk_employee") or {}).values())))
+    return [(label, value) for label, value in lines if value > 0]
 
 
 def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: int = None) -> bytes:
