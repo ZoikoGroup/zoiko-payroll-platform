@@ -173,6 +173,8 @@ _STRUCTURAL_NUMBERS = {
         7: "days per week (calendar)", 12: "months per year (calendar)",
     },
     "engine/jurisdictions/belgium/holiday.py": {0: "default year index", 1: "service year = the year before the taking year (BE-024)"},
+    "belgium_payment_service.py": {0: "list index / zero amount", 1: "batch sequence (+1)",
+                                   100: "idempotency key / column width 100", 200: "return reason column width"},
     "be_identifiers.py": {
         1: "regex group index; key versions start at 1", 2: "two hex characters per key byte",
         4: "base64 padding block", 12: "AES-GCM nonce length in bytes", 32: "AES-256 key length in bytes",

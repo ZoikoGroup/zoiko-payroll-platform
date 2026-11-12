@@ -132,7 +132,10 @@ check("no payroll arithmetic in Belgium UI files", () => {
 // ── Block A4: organisation and employee screens ────────────────────────────
 const ORG_FILES = ["modules/payroll/Compliances/BEComplianceCentreTab.jsx",
   "modules/payroll/Payroll_Employees/BelgiumStatutoryProfilePanel.jsx",
-  "modules/payroll/Payroll_Employees/BEIdentifierField.jsx", "modules/payroll/Payroll_Employees/beOrgPayloads.js"];
+  "modules/payroll/Payroll_Employees/BEIdentifierField.jsx", "modules/payroll/Payroll_Employees/beOrgPayloads.js",
+  // Block B3: run preflight, payslip breakdown, payment
+  "modules/payroll/PayRollRuns/BERunPreflightPanel.jsx", "modules/payroll/PayRollRuns/BEPayslipBreakdown.jsx",
+  "modules/payroll/PayRollRuns/BEPaymentPanel.jsx", "modules/payroll/PayRollRuns/bePayslipLines.js"];
 
 check("A4: the Compliance Centre tab and the employee button are wired for BE", () => {
   const page = read("modules/payroll/Compliances/CompliancePage.jsx");
@@ -143,6 +146,28 @@ check("A4: the Compliance Centre tab and the employee button are wired for BE", 
   const panel = read("modules/payroll/Payroll_Employees/EmployeeDetailPanel.jsx");
   assert(panel.includes('employee.countryCode === "BE"') && panel.includes("setShowBeStatutory(true)"), "Manage button");
   assert(panel.includes("<BelgiumStatutoryProfilePanel employee={employee}"), "panel rendered");
+});
+
+check("B3: the run panels and the payslip are wired for BE only", () => {
+  const panel = read("modules/payroll/PayRollRuns/RunDetailPanel.jsx");
+  for (const name of ["BEPayslipBreakdown", "BERunPreflightPanel", "BEPaymentPanel"]) {
+    assert(panel.includes(`import ${name} from "./${name}";`), `${name} import`);
+  }
+  assert(panel.includes('(item.country || item.countryCode) === "BE" && item.beCalculationSnapshot && <BEPayslipBreakdown'),
+    "breakdown per BE payslip");
+  assert(panel.includes('items.some((i) => (i.country || i.countryCode) === "BE") && <BERunPreflightPanel'), "preflight");
+  assert(/=== "BE"\)\s*&& \["Approved", "Authorized", "Paid", "Closed"\]\.includes\(\(detail \|\| run\)\.status\)\s*&& <BEPaymentPanel/
+    .test(panel), "payment panel only for a committed run");
+  const stub = read("modules/payroll/PaySlips/PayslipStub.jsx");
+  assert(stub.includes('=== "BE" ? payslip.beCalculationSnapshot : null') && stub.includes("beEmployeeLines(beSnapshot)"),
+    "payslip stub BE branch");
+  assert(stub.includes("beSnapshot.identifierMasked"), "masked national number on the payslip");
+});
+
+check("B3: net pay is never an input on a Belgian run screen", () => {
+  for (const file of ["modules/payroll/PayRollRuns/BEPayslipBreakdown.jsx", "modules/payroll/PayRollRuns/BEPaymentPanel.jsx"]) {
+    assert(!/<input/.test(read(file)), `${file}: an input field`);
+  }
 });
 
 check("A4: no hard-coded statutory number in the org files", () => {
@@ -175,7 +200,8 @@ check("A4: no content key or catalogue vocabulary value in the org files", () =>
 
 check("A4: no payroll arithmetic in the org files", () => {
   for (const file of ORG_FILES) {
-    assert(!/\b(gross|net|withholding|contribution|onss)\s*[*+\-/]/i.test(read(file)), `${file}: arithmetic on a payroll value`);
+    const code = read(file).replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");      // comments are prose
+    assert(!/\b(gross|net|withholding|contribution|onss)\s*[*+\-/]/i.test(code), `${file}: arithmetic on a payroll value`);
   }
 });
 

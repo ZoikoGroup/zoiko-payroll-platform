@@ -188,7 +188,7 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 
 ## B2 — holiday pay and absence
 
-- Commit: see `feat(belgium): block B2 holiday pay and absence`.
+- Commit: 6933789 `feat(belgium): block B2 holiday pay and absence`.
 - `holiday.py`: SEPARATE strategies (BE-025). White-collar: simple pay = continued salary (signed ack),
   double pay = be_hol_wc_double_pct x reference salary (HOLIDAY_BASE, never the wage floor, BE-028) x months
   worked / 12 in the SERVICE year, minus approved IN certificates of that year and the additional-holiday advance
@@ -212,3 +212,38 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 - Registry diff: 7 new routes, no existing route changed.
 - Tests: test_belgium_holiday_absence.py (new, 19, incl. relapse across 31 Dec 2025 / 1 Jan 2026); Belgium +
   engine standard + Poland service: 957 passed, 1 skipped.
+
+## B3 — run lifecycle, payslip, corrections, payment
+
+- Commit: see `feat(belgium): block B3 run lifecycle, payslip, corrections and payment`.
+- G-29: ledger posting moved to run COMMIT (APPROVED in before_run_transition); the generation / add-item /
+  regenerate / delete posting added in A3 is removed (service.py back to no ledger calls). Draft runs post
+  nothing; correction runs post CORRECTION entries linked (reverses_id) to the original RUN entries.
+- before_run_transition replaces the Phase 1 refusal. APPROVED: preflight (resolver blockers, pack /
+  content pending, engine exceptions, Dimona IN placeholder) must have no BLOCK item; G-18 four-eyes inside
+  the BE hook (user decision): approver != run preparer and != creator of any Belgian input the payslips
+  use; approval fingerprint stored on payroll_runs.be_approval_fingerprint. AUTHORIZED / PAID: fingerprint
+  re-verified; AUTHORIZED needs a person other than the approver, so a retried approval never advances the
+  run twice (commit idempotency); ledger post idempotent per payslip + accumulator.
+- Engine exceptions (e.g. BE_BSSC_PENDING, always present per D7) stop approval until an org admin
+  acknowledges each (employee + code) with a reason (POST /runs/{id}/exceptions/acknowledge; audited;
+  stored in the approval record). Blocking reasons can never be acknowledged.
+- Corrections: POST /payslips/{id}/corrections (reason + evidence + inputDelta) replays the frozen context
+  and creates a CORRECTION run with one payslip carrying the deltas and correctionOf; the original is never
+  mutated; one open correction at a time; a correction of a correction / of a draft run is refused.
+- Payment (D13): belgium_payment_service.py builds the pain.001.001.09 batch with bank_export/sepa_pain001.py
+  UNCHANGED (debtor = company settlement account, creditor = employee IBAN), four-eyes approval before the
+  file / submission, bank result, reconciliation, returns; payment_treatment keeps BE payslips out of the
+  generic bank file; payslip_hold_view stays None (Phase 1 Q2).
+- Payslip §11: snapshot carries documentVersion BE-PAYSLIP-1, the masked NISS / BIS (no digit), sector fields;
+  PayslipStub BE branch + BEPayslipBreakdown render bases, employee lines, employer composition (base /
+  special / holiday / reduction) and obligations with nl / fr / de content keys (D10); net never editable.
+  Individual account: seed_be_individual_account_template (EMPLOYEE scope, Draft, refused activation).
+- Frontend: BERunPreflightPanel (acknowledge exceptions, fingerprint), BEPayslipBreakdown, BEPaymentPanel in
+  RunDetailPanel; payrollService BE functions; validation 19 checks; npm test all pass; lint clean on new
+  files (RunDetailPanel set-state-in-effect error is pre-existing at HEAD); BUILD PASSED locally (14.5 s).
+- Registry diff: 13 new BE routes; 11 existing payslip routes LOSE payroll_be_accumulator_entries from
+  scan_worker_tables (intended: the G-29 removal of generation-time posting); nothing else changed.
+- Tests: test_belgium_run_lifecycle.py (new, 10: preflight, acknowledgements, four-eyes, retried approval,
+  fingerprint, corrections lineage, payment batch + XSD, white-collar + manual month end to end, template);
+  engine ledger tests rewritten for G-29. Belgium + NL payment / SEPA + shared: 1018 passed, 1 skipped.

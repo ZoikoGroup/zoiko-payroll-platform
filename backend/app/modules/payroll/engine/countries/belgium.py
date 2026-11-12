@@ -56,6 +56,7 @@ from app.modules.payroll.engine.jurisdictions.belgium.pack import ZERO, BePack, 
 __all__ = ["BECalculationBlockedError", "calculate", "ENGINE_BUILD"]
 
 ENGINE_BUILD = "BE-ENGINE-A3-2026.11"
+PAYSLIP_DOCUMENT_VERSION = "BE-PAYSLIP-1"     # spec §11 payslip layout version (labels: content keys, D10)
 
 
 def _canonical(value) -> str:
@@ -199,6 +200,11 @@ def calculate(ctx: PayrollContext) -> dict:
                      "employer": decision["employer"], "worker": decision["worker"],
                      "employmentLines": decision["employmentLines"]},
         "employmentLine": line["employmentLine"],
+        "documentVersion": PAYSLIP_DOCUMENT_VERSION,
+        "identifierMasked": getattr(ctx, "be_identifier_masked", None),
+        "sector": {"jointCommittee": line.get("jointCommittee"), "subCommittee": line.get("subCommittee"),
+                   "functionClass": line.get("functionClass"), "seniorityMonths": line.get("seniorityMonths"),
+                   "agreementCode": (line.get("agreement") or {}).get("agreementCode")},
         "sourcePeriods": inputs["sourcePeriods"],
         "obligationDeltas": {k: _money(v) for k, v in {**onss["obligationDeltas"], **holiday["obligations"]}.items()},
         "be_holiday": {"strategy": holiday["strategy"], "due": {k: _money(v) for k, v in holiday["due"].items()}},

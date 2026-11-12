@@ -27615,14 +27615,6 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
             continue
         seq += 1
 
-    # Belgium (ZP-BE-ENG-001 Block A3): RUN accumulator entries (employment line
-    # + source period) for this run's BE payslips; idempotent per payslip +
-    # accumulator. Runs without BE payslips are untouched.
-    if any(getattr(i, "country_code", None) == "BE" for i in db.new) or db.query(PayslipItem.id).filter(
-            PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == "BE").first() is not None:
-        from app.modules.payroll import belgium_service as _be_service
-        db.flush()
-        _be_service.post_be_accumulators(db, run, getattr(run, "created_by", None))
     db.commit()
     return _recompute_run_aggregates(db, run)
 
@@ -28003,12 +27995,6 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     # and the reproduction snapshot (no-op when there are none).
     _reapply_attached_germany_overtime_deltas(db, existing_item, organization_id, attached_ot, actor_id=actor_id)
 
-    # Belgium (ZP-BE-ENG-001 Block A3): a linked CORRECTION brings the ledger in
-    # line with the recalculated payslip (never an edit). Other countries skip.
-    if (existing_item.country_code or "").upper() == "BE":
-        from app.modules.payroll import belgium_service as _be_service
-        db.flush()
-        _be_service.post_be_accumulators(db, run, actor_id)
     db.commit()
     run = _recompute_run_aggregates(db, run)
     _sg_ir21_after_correction(db, ir21_case, actor_id=actor_id)
@@ -32739,12 +32725,6 @@ def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
         db.rollback()
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Cannot delete this payslip: {exc}")
     db.delete(item)
-    # Belgium (ZP-BE-ENG-001 Block A3): the deleted payslip's ledger entries are
-    # reversed by linked CORRECTION entries (never deleted). Other countries skip.
-    if (item.country_code or "").upper() == "BE" and run is not None:
-        from app.modules.payroll import belgium_service as _be_service
-        db.flush()
-        _be_service.post_be_accumulators(db, run, None)
     db.commit()
     _notify_payslip_deleted(db, item, run, organization_id)
 
@@ -33357,11 +33337,6 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jm_heart_increment = calc.jm_heart_ytd_remuneration_after - ctx.jm_heart_ytd_remuneration_before
         _upsert_jm_heart_ytd(db, organization_id, run.pay_date, jm_heart_increment, payslip_id=item.id)
     _ytd_record_postings(db, item, ytd_pre_state)
-    # Belgium (ZP-BE-ENG-001 Block A3): RUN ledger entries for the added payslip.
-    if country == "BE":
-        from app.modules.payroll import belgium_service as _be_service
-        db.flush()
-        _be_service.post_be_accumulators(db, run, getattr(run, "created_by", None))
     db.commit()
     db.refresh(item)
     _recompute_run_aggregates(db, run)

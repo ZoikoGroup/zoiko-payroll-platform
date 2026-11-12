@@ -3862,6 +3862,253 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/belgium/payment-batches",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "payment-batches",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/payment-batches/{batch_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "payment-batches",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/payment-batches/{batch_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/payment-batches/{batch_id}/bank-result",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "bank-result",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/payment-batches/{batch_id}/file",
+   "data_class": "worker",
+   "action": "export",
+   "resource": "file",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/payment-batches/{batch_id}/reconcile",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reconcile",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/payment-batches/{batch_id}/returns",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "returns",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/payment-batches/{batch_id}/submit",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "submit",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_payment_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/payslips/{payslip_item_id}/corrections",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "corrections",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/runs/{run_id}/exceptions/acknowledge",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "acknowledge",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_declarations",
+    "payroll_be_employment_classifications",
+    "payroll_be_work_schedules",
+    "payroll_be_worker_profiles",
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/runs/{run_id}/payment-batches",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "payment-batches",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_payment_items",
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/runs/{run_id}/payment-preview",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "payment-preview",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/runs/{run_id}/preflight",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "preflight",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_declarations",
+    "payroll_be_employment_classifications",
+    "payroll_be_work_schedules",
+    "payroll_be_worker_profiles",
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/belgium/substitute-days",
    "data_class": "tenant_config",
    "action": "read",
@@ -10323,7 +10570,6 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
-    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -12334,7 +12580,6 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
-    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -12552,7 +12797,6 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
-    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -12818,7 +13062,6 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
-    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -15076,7 +15319,6 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
-    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -15356,7 +15598,6 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
-    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -15610,7 +15851,6 @@
    "note": null,
    "scan_worker_tables": [
     "organization_ytd_accumulators",
-    "payroll_be_accumulator_entries",
     "payroll_employees",
     "payroll_ytd_accumulators",
     "payslip_allowance_items",
@@ -17152,7 +17392,6 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
-    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -17401,7 +17640,6 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
-    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -17442,7 +17680,6 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
-    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -17505,7 +17742,6 @@
    "note": null,
    "scan_worker_tables": [
     "organization_ytd_accumulators",
-    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",

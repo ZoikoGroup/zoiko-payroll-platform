@@ -439,7 +439,9 @@ def _patch_pack_and_basis(monkeypatch):
                         lambda db, org, prefix, *a, **k: f"TEST{prefix}{next(counter):05d}")
 
 
-def test_preview_and_generate_agree_and_the_ledger_is_posted_once(world, monkeypatch):
+def test_preview_and_generate_agree_and_nothing_is_posted_before_commit(world, monkeypatch):
+    """G-29: generation writes the payslip and its frozen snapshot only; the
+    ledger is posted at run commit (tests/test_belgium_run_lifecycle.py)."""
     from app.modules.payroll import belgium_service as be
     from app.modules.payroll import service
     from app.modules.payroll.models import PayrollBeAccumulatorEntry, PayrollRun, PayslipItem
@@ -462,24 +464,14 @@ def test_preview_and_generate_agree_and_the_ledger_is_posted_once(world, monkeyp
     snapshot = item.be_calculation_snapshot
     assert snapshot["frozenContext"]["version"] == 1
     assert be.be_replay(snapshot["frozenContext"]).be_result["hashes"] == snapshot["hashes"]
-    entries = w.db.query(PayrollBeAccumulatorEntry).filter_by(payslip_item_id=item.id).all()
-    by_name = {e.accumulator: e for e in entries}
-    assert {k: str(v.amount) for k, v in by_name.items()} == {
-        k: str(Decimal(v).quantize(Decimal("0.01"))) for k, v in snapshot["accumulatorDeltas"].items()}
-    assert all(e.entry_kind == "RUN" and e.employment_line == "MAIN" and e.run_id == run.id for e in entries)
-    assert (by_name["ONSS_EMPLOYEE"].source_period_start, by_name["ONSS_EMPLOYEE"].source_period_end) == \
-        (date(2026, 3, 1), PAY)
-    assert by_name["ONSS_EMPLOYEE"].quarter == 1 and by_name["WITHHOLDING"].quarter is None
-    assert be.post_be_accumulators(w.db, run) == 0                      # idempotent
+    assert w.db.query(PayrollBeAccumulatorEntry).count() == 0                    # nothing before commit
     view = service._serialize_payslip(item, run)
     assert view["beCalculationSnapshot"]["be_net"] == "852.00"
     assert "frozenContext" not in view["beCalculationSnapshot"]
-    ytd = be.be_ytd_snapshot(w.db, w.org, w.employee.id, None, date(2026, 4, 30))
-    assert ytd["WITHHOLDING"] == Decimal("78.00") and ytd["ONSS_EMPLOYEE"] == Decimal("70.00")
+    assert be.be_ytd_snapshot(w.db, w.org, w.employee.id, None, date(2026, 4, 30))["WITHHOLDING"] == Decimal("0")
 
 
-def test_a_changed_or_deleted_payslip_is_corrected_in_the_ledger_never_edited(world, monkeypatch):
-    from app.modules.payroll import belgium_service as be
+def test_draft_regeneration_and_deletion_post_nothing(world, monkeypatch):
     from app.modules.payroll import service
     from app.modules.payroll.models import PayrollBeAccumulatorEntry, PayrollRun, PayslipItem
 
@@ -491,28 +483,8 @@ def test_a_changed_or_deleted_payslip_is_corrected_in_the_ledger_never_edited(wo
     w.db.add(run)
     w.db.commit()
     service.generate_payslips_for_run(w.db, run, w.org)
+    service.regenerate_employee_payslip(w.db, run.id, w.employee.id, w.org, actor_id=w.a)
+    assert w.db.query(PayrollBeAccumulatorEntry).count() == 0
     item = w.db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id).one()
-    E = PayrollBeAccumulatorEntry
-    first_ids = {e.id: str(e.amount) for e in w.db.query(E).all()}
-
-    def ytd():
-        return be.be_ytd_snapshot(w.db, w.org, w.employee.id, None, date(2026, 4, 30))["WITHHOLDING"]
-
-    # a recalculation with different figures (what regenerate_employee_payslip stores)
-    snapshot = dict(item.be_calculation_snapshot)
-    snapshot["accumulatorDeltas"] = {**snapshot["accumulatorDeltas"], "WITHHOLDING": "100.00"}
-    item.be_calculation_snapshot = snapshot
-    w.db.commit()
-    assert be.post_be_accumulators(w.db, run) == 1
-    correction = w.db.query(E).filter_by(entry_kind="CORRECTION").one()
-    root = w.db.get(E, correction.reverses_id)
-    assert (root.accumulator, str(correction.amount), correction.payslip_item_id) == ("WITHHOLDING", "22.00", item.id)
-    assert ytd() == Decimal("100.00") and be.post_be_accumulators(w.db, run) == 0
-    assert {e.id: str(e.amount) for e in w.db.query(E).filter(E.id.in_(first_ids))} == first_ids   # never edited
-
-    # deleting the payslip reverses everything it posted (entries are kept)
     service.delete_payslip(w.db, item.id, w.org)
-    assert ytd() == Decimal("0") and all(
-        v == Decimal("0") for v in be.be_ytd_snapshot(w.db, w.org, w.employee.id, None, date(2026, 4, 30)).values())
-    assert w.db.query(E).filter(E.id.in_(first_ids)).count() == len(first_ids)
-    assert be.post_be_accumulators(w.db, run) == 0
+    assert w.db.query(PayrollBeAccumulatorEntry).count() == 0

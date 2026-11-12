@@ -347,9 +347,10 @@ def test_type_a_hooks_fail_closed(db):
     assert "no statutory content" in jh.call("BE", "pack_activation_refusal", db, pack)
     assert jh.call("BE", "template_activation_refusal", db, SimpleNamespace(jurisdiction_country="BE"), 1)
     assert jh.call("BE", "statutory_editors", db, pack) == set()
-    with pytest.raises(HTTPException) as raised:
-        jh.call("BE", "payment_treatment", db, 1, SimpleNamespace(id=1), [SimpleNamespace(country_code="BE")])
-    assert raised.value.status_code == 409
+    # Block B3 (D13): Belgian payslips leave the generic bank file; they are paid
+    # only through an approved Belgian payment batch.
+    assert jh.call("BE", "payment_treatment", db, 1, SimpleNamespace(id=1),
+                   [SimpleNamespace(id=7, country_code="BE"), SimpleNamespace(id=8, country_code="NL")]) ==         {7: "BE_PAYMENT_BATCH"}
 
 
 def test_specified_inert_values(db):

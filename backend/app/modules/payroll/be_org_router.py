@@ -380,3 +380,128 @@ def be_create_holiday_certificate(employee_id: int, body: Dict[str, Any] = Body(
 def be_approve_holiday_certificate(row_id: int, current_user=Depends(get_current_org_admin),
                                    db: Session = Depends(get_db)):
     return _commit(db, be.approve_be_holiday_certificate(db, _org_id(current_user), row_id, _actor(current_user)))
+
+
+# ── B3: run preflight, corrections, payment batches (D13) ───────────────────
+@router.get("/runs/{run_id}/preflight", summary="Belgian run preflight: blocking items, pending items, fingerprint")
+def be_run_preflight(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return be.be_run_preflight_view(db, _org_id(current_user), run_id)
+
+
+@router.post("/payslips/{payslip_item_id}/corrections",
+             summary="Linked correction of a committed Belgian payslip (reason + evidence; original untouched)")
+def be_create_correction(payslip_item_id: int, body: Dict[str, Any] = Body(...),
+                         current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    out = be.create_be_correction(db, _org_id(current_user), payslip_item_id, body, _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.get("/runs/{run_id}/payment-preview", summary="Payable Belgian payslips and exceptions (nothing built)")
+def be_payment_preview(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_payment_service as pay
+
+    out = pay.salary_payment_preview(db, _org_id(current_user), run_id)
+    for row in out["payable"]:
+        row["iban"] = pay.mask_iban(row["iban"])
+        row["amount"] = str(row["amount"])
+    return out
+
+
+@router.post("/runs/{run_id}/payment-batches", summary="Build the DRAFT SEPA salary batch of a committed run")
+def be_create_payment_batch(run_id: int, body: Dict[str, Any] = Body(default={}),
+                            current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_payment_service as pay
+
+    body = dict(body or {})
+    execution = be._as_date(body["executionDate"], "executionDate") if body.get("executionDate") else None
+    row = pay.create_salary_payment_batch(db, _org_id(current_user), run_id, _actor(current_user),
+                                          requested_execution_date=execution,
+                                          idempotency_key=body.get("idempotencyKey"),
+                                          exclusions=body.get("exclusions"))
+    db.commit()
+    return pay.batch_view(db, _org_id(current_user), row.id)
+
+
+@router.get("/payment-batches", summary="Your Belgian payment batches")
+def be_list_payment_batches(runId: Optional[int] = None, current_user=Depends(get_current_payroll_operator),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_payment_service as pay
+
+    return pay.list_payment_batches(db, _org_id(current_user), runId)
+
+
+@router.get("/payment-batches/{batch_id}", summary="A Belgian payment batch (IBANs masked)")
+def be_get_payment_batch(batch_id: int, current_user=Depends(get_current_payroll_operator),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_payment_service as pay
+
+    return pay.batch_view(db, _org_id(current_user), batch_id)
+
+
+@router.post("/payment-batches/{batch_id}/approve", summary="Approve a payment batch (four-eyes)")
+def be_approve_payment_batch(batch_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_payment_service as pay
+
+    pay.approve_payment_batch(db, _org_id(current_user), batch_id, _actor(current_user))
+    db.commit()
+    return pay.batch_view(db, _org_id(current_user), batch_id)
+
+
+@router.post("/payment-batches/{batch_id}/submit", summary="Mark an approved batch as submitted to the bank")
+def be_submit_payment_batch(batch_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_payment_service as pay
+
+    pay.submit_payment_batch(db, _org_id(current_user), batch_id, _actor(current_user))
+    db.commit()
+    return pay.batch_view(db, _org_id(current_user), batch_id)
+
+
+@router.post("/payment-batches/{batch_id}/bank-result", summary="Record the bank's outcome for a submitted batch")
+def be_payment_bank_result(batch_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_payment_service as pay
+
+    pay.record_bank_result(db, _org_id(current_user), batch_id, body.get("outcome"))
+    db.commit()
+    return pay.batch_view(db, _org_id(current_user), batch_id)
+
+
+@router.post("/payment-batches/{batch_id}/reconcile", summary="Reconcile an accepted batch with the bank statement")
+def be_reconcile_payment_batch(batch_id: int, current_user=Depends(get_current_org_admin),
+                               db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_payment_service as pay
+
+    pay.reconcile_payment_batch(db, _org_id(current_user), batch_id)
+    db.commit()
+    return pay.batch_view(db, _org_id(current_user), batch_id)
+
+
+@router.post("/payment-batches/{batch_id}/returns", summary="Record a returned transfer (reason)")
+def be_payment_return(batch_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_payment_service as pay
+
+    pay.handle_payment_return(db, _org_id(current_user), batch_id, body.get("endToEndId"), body.get("reason"))
+    db.commit()
+    return pay.batch_view(db, _org_id(current_user), batch_id)
+
+
+@router.get("/payment-batches/{batch_id}/file", summary="Download the pain.001 file of an approved batch")
+def be_payment_batch_file(batch_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from app.modules.payroll import belgium_payment_service as pay
+
+    name, xml = pay.batch_file(db, _org_id(current_user), batch_id)
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.post("/runs/{run_id}/exceptions/acknowledge",
+             summary="Acknowledge one employee's engine exception before approval (reason; audited)")
+def be_acknowledge_exception(run_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                             db: Session = Depends(get_db)):
+    out = be.acknowledge_be_run_exception(db, _org_id(current_user), run_id, body, _actor(current_user))
+    db.commit()
+    return out

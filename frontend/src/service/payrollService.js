@@ -3184,6 +3184,31 @@ export const createBeComponentMapping = (body) => api.post(`${BE}/component-mapp
 export const approveBeComponentMapping = (id) => api.post(`${BE}/component-mappings/${id}/approve`, {});
 export const listBeSubstituteDays = async (year) => beList(await api.get(`${BE}/substitute-days`, { params: { year } }));
 export const createBeSubstituteDay = (body) => api.post(`${BE}/substitute-days`, body);
+export const getBeRunPreflight = async (runId) => beOne(await api.get(`${BE}/runs/${runId}/preflight`));
+export const acknowledgeBeRunException = (runId, body) => api.post(`${BE}/runs/${runId}/exceptions/acknowledge`, body);
+export const createBeCorrection = (payslipItemId, body) => api.post(`${BE}/payslips/${payslipItemId}/corrections`, body);
+export const getBePaymentPreview = async (runId) => beOne(await api.get(`${BE}/runs/${runId}/payment-preview`));
+export const listBePaymentBatches = async (runId) => beList(await api.get(`${BE}/payment-batches`, { params: { runId } }));
+export const createBePaymentBatch = (runId, body) => api.post(`${BE}/runs/${runId}/payment-batches`, body);
+export const approveBePaymentBatch = (batchId) => api.post(`${BE}/payment-batches/${batchId}/approve`, {});
+export const submitBePaymentBatch = (batchId) => api.post(`${BE}/payment-batches/${batchId}/submit`, {});
+export const recordBePaymentBankResult = (batchId, outcome) =>
+  api.post(`${BE}/payment-batches/${batchId}/bank-result`, { outcome });
+export const reconcileBePaymentBatch = (batchId) => api.post(`${BE}/payment-batches/${batchId}/reconcile`, {});
+export const downloadBePaymentFile = async (batchId) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}${BE}/payment-batches/${batchId}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error("The payment file is released only after a second person approves the batch.");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `be-payment-${batchId}.xml`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
 export const resolveBeClassification = async (employeeId, payDate, extra = {}) =>
   beOne(await api.post(`${BE}/classification/resolve`, { employeeId, payDate, ...extra }));
 

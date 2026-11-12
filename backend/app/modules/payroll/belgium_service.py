@@ -69,12 +69,7 @@ def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of=
                                   pack_version=version, period=run_period)
 
 
-# ── 2. before_run_transition (loop, but only for runs with BE payslips) ─────
-def before_run_transition(db: Session, run, next_status, actor_id) -> None:
-    if not _run_has_belgian_items(db, run):
-        return
-    raise _conflict(f"Belgium: the run cannot move to {getattr(next_status, 'value', next_status)} — "
-                    + NOT_BUILT_MESSAGE)
+# ── 2. before_run_transition: Block B3 (see before_run_transition below) ────
 
 
 # ── 3./4. shared statutory profile (type a) ─────────────────────────────────
@@ -437,9 +432,9 @@ def _be_pack_holidays(db: Session, year: int) -> list:
 
 # ── 12. payment_treatment (loop, but only for runs with BE items) ───────────
 def _be_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:
-    if not any((getattr(i, "country_code", None) or "").upper() == BE for i in items):
-        return {}
-    raise _conflict("Belgium: no payment file can include Belgian payslips — " + NOT_BUILT_MESSAGE)
+    # Block B3 (D13): Belgian payslips leave the generic bank file and are paid
+    # only through an approved Belgian payment batch.
+    return _be_payment_treatment_hold(db, organization_id, run, items)
 
 
 # ── 13. payslip_hold_view (type a; read-only display) ───────────────────────
@@ -1410,6 +1405,7 @@ def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date
         "be_date_of_birth": getattr(employee, "date_of_birth", None),
         **_be_working_time_inputs(db, organization_id, employee, period),
         **_be_holiday_absence_inputs(db, organization_id, employee, pay_date),
+        "be_identifier_masked": _be_identifier_masked(db, organization_id, employee.id),
         "be_ytd": be_ytd_snapshot(db, organization_id, employee.id, entity, pay_date),
         "be_pack_version": pack_version, "be_organization_id": organization_id, "be_legal_entity_id": entity,
         "be_employee_id": employee.id,
@@ -1421,7 +1417,7 @@ _BE_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "a
                     "be_daily_rate")
 _BE_CTX_PLAIN = ("pay_frequency", "be_components", "be_source_periods", "be_pay_frequency", "be_pack_version",
                  "be_organization_id", "be_legal_entity_id", "be_employee_id", "trace_id", "be_component_mappings",
-                 "be_allowance_items", "be_working_time", "be_indexation", "be_holiday")
+                 "be_allowance_items", "be_working_time", "be_indexation", "be_holiday", "be_identifier_masked")
 _BE_CTX_DATES = ("pay_date", "be_pay_date", "period_start", "period_end", "be_date_of_birth")
 _BE_RECORD_KEYS = ("be_registration", "be_profile")
 _BE_LIST_KEYS = ("be_classifications", "be_schedules", "be_declarations", "be_absence_episodes",
@@ -1514,16 +1510,11 @@ _ONSS_QUARTER_ACCUMULATORS = ("ONSS_EMPLOYEE_BASE", "ONSS_EMPLOYEE", "ONSS_EMPLO
 
 
 def post_be_accumulators(db: Session, run, actor_id=None) -> int:
-    """Bring the append-only ledger in line with the run's BE payslips
-    (BE-009, BE-017). Mirrors Poland's post_accumulators; called when payslips
-    are generated, regenerated or deleted.
-
-    * A payslip + accumulator with no RUN entry gets one (the database refuses
-      a second RUN entry), carrying the employment line and the run's period.
-    * When a payslip was regenerated (different deltas) or deleted (its RUN
-      entries lose their payslip link), a CORRECTION entry linked to the RUN
-      entry (reverses_id) posts the difference — entries are never edited.
-    Idempotent: a second call adds nothing."""
+    """G-29 (Block B3): the ledger is posted at RUN COMMIT (the APPROVED
+    transition) only — never at generation. One entry per payslip +
+    accumulator (the database refuses a second RUN entry): RUN entries for a
+    regular payslip, CORRECTION entries (linked to the original's RUN entry by
+    reverses_id) for a correction payslip. Idempotent."""
     from app.modules.payroll.models import PayrollEmployee, PayslipItem
 
     Entry = _models().PayrollBeAccumulatorEntry
@@ -1533,56 +1524,301 @@ def post_be_accumulators(db: Session, run, actor_id=None) -> int:
     start, end = getattr(run, "period_start", None), getattr(run, "period_end", None)
     if start is None or end is None:
         start = end = None
-    items = {i.id: i for i in db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id,
-                                                           PayslipItem.country_code == BE).all()}
-    entries = db.query(Entry).filter(Entry.run_id == run.id).order_by(Entry.id).all()
-    roots = [e for e in entries if e.entry_kind == "RUN"]
-    net = {r.id: Decimal(str(r.amount)) for r in roots}
-    for e in entries:
-        if e.entry_kind == "CORRECTION" and e.reverses_id in net:
-            net[e.reverses_id] += Decimal(str(e.amount))
-
-    def deltas(item) -> dict:
-        snapshot = (item.be_calculation_snapshot or {}) if item is not None else {}
-        return {k: Decimal(str(v)) for k, v in (snapshot.get("accumulatorDeltas") or {}).items()}
-
-    def result_hash(item):
-        return (((item.be_calculation_snapshot or {}).get("hashes") or {}).get("input")) if item is not None else None
-
     added = 0
-    rooted = set()
-    for root in roots:
-        item = items.get(root.payslip_item_id)
-        rooted.add((root.payslip_item_id, root.accumulator))
-        target = deltas(item).get(root.accumulator, Decimal("0"))
-        difference = (target - net[root.id]).quantize(Decimal("0.01"))
-        if difference == 0:
-            continue
-        db.add(Entry(organization_id=root.organization_id, legal_entity_id=root.legal_entity_id,
-                     employee_id=root.employee_id, employment_line=root.employment_line, year=root.year,
-                     quarter=root.quarter, accumulator=root.accumulator, pay_date=root.pay_date,
-                     source_period_start=root.source_period_start, source_period_end=root.source_period_end,
-                     amount=difference, entry_kind="CORRECTION", run_id=run.id, payslip_item_id=root.payslip_item_id,
-                     reverses_id=root.id, result_hash=result_hash(item), created_by_id=actor_id))
-        added += 1
-    for item_id, item in sorted(items.items()):
+    for item in (db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == BE)
+                 .order_by(PayslipItem.id).all()):
         snapshot = item.be_calculation_snapshot or {}
-        employee = None
-        for accumulator, amount in sorted(deltas(item).items()):
-            if (item_id, accumulator) in rooted:
+        deltas = snapshot.get("accumulatorDeltas") or {}
+        if not deltas:
+            continue
+        employee = db.get(PayrollEmployee, item.employee_id)
+        result_hash = (snapshot.get("hashes") or {}).get("input")
+        correction_of = snapshot.get("correctionOf")
+        kind = "CORRECTION" if correction_of else "RUN"
+        for accumulator, amount in sorted(deltas.items()):
+            if db.query(Entry.id).filter(Entry.payslip_item_id == item.id, Entry.accumulator == accumulator,
+                                         Entry.entry_kind == kind).first():
                 continue
-            employee = employee or db.get(PayrollEmployee, item.employee_id)
+            reverses = None
+            if correction_of:
+                original = db.query(Entry).filter(Entry.payslip_item_id == correction_of,
+                                                  Entry.accumulator == accumulator, Entry.entry_kind == "RUN").first()
+                reverses = getattr(original, "id", None)
             quarter = (pay_date.month - 1) // 3 + 1 if accumulator in _ONSS_QUARTER_ACCUMULATORS else None
             db.add(Entry(organization_id=run.organization_id,
                          legal_entity_id=getattr(employee, "legal_entity_id", None), employee_id=item.employee_id,
                          employment_line=snapshot.get("employmentLine"), year=pay_date.year, quarter=quarter,
-                         accumulator=accumulator, pay_date=pay_date, source_period_start=start,
-                         source_period_end=end, amount=amount, entry_kind="RUN", run_id=run.id,
-                         payslip_item_id=item_id, result_hash=result_hash(item), created_by_id=actor_id))
+                         accumulator=accumulator, pay_date=pay_date, source_period_start=start, source_period_end=end,
+                         amount=Decimal(str(amount)), entry_kind=kind, run_id=run.id, payslip_item_id=item.id,
+                         reverses_id=reverses, result_hash=result_hash, created_by_id=actor_id))
             added += 1
     db.flush()
     return added
 
+
+# ── B3: run preflight, approval fingerprint, four-eyes (G-18) ───────────────
+BLOCKING_EXCEPTION_PREFIXES = ()        # every engine exception stops approval (spec §12)
+PREFLIGHT_PENDING = "PENDING"           # a placeholder that does not block (Block C items)
+
+
+def _be_run_items(db: Session, run) -> list:
+    from app.modules.payroll.models import PayslipItem
+
+    return (db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == BE)
+            .order_by(PayslipItem.employee_id, PayslipItem.id).all())
+
+
+def be_approval_fingerprint(db: Session, run) -> Optional[str]:
+    """sha256 over every BE payslip's frozen hashes and net pay — any change to
+    an input, the content used or the result changes it."""
+    import hashlib
+    import json as _json
+
+    items = _be_run_items(db, run)
+    if not items:
+        return None
+    payload = [{"item": i.id, "employeeId": i.employee_id, "hashes": (i.be_calculation_snapshot or {}).get("hashes"),
+                "net": (i.be_calculation_snapshot or {}).get("be_net"), "status": str(getattr(i.status, "value", i.status))}
+               for i in items]
+    return hashlib.sha256(_json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _input_creators(db: Session, organization_id: int, employee_ids: list, on: date) -> set:
+    """Users who created a Belgian record a payslip of the run depends on (in
+    force on the pay date): they may not approve the run (G-18)."""
+    m = _models()
+    creators = set()
+    for model in (m.PayrollBeWorkerProfile, m.PayrollBeEmploymentClassification, m.PayrollBeWorkSchedule):
+        rows = _in_force(db.query(model.created_by_id).filter(model.organization_id == organization_id,
+                                                              model.employee_id.in_(employee_ids),
+                                                              model.status.in_((STATUS_ACTIVE, STATUS_SUPERSEDED))),
+                         model, on).all()
+        creators |= {r[0] for r in rows if r[0] is not None}
+    R = m.PayrollBeEmployerRegistration
+    creators |= {r[0] for r in _in_force(db.query(R.created_by_id).filter(
+        R.organization_id == organization_id, R.status.in_((STATUS_ACTIVE, STATUS_SUPERSEDED))), R, on).all()
+        if r[0] is not None}
+    D = m.PayrollBeDeclaration
+    creators |= {r[0] for r in db.query(D.created_by_id).filter(D.organization_id == organization_id,
+                                                                D.employee_id.in_(employee_ids),
+                                                                D.status == "APPROVED").all() if r[0] is not None}
+    return creators
+
+
+def be_run_preflight(db: Session, run) -> list:
+    """[{code, employeeId, severity, message}] — BLOCK items refuse approval;
+    PENDING items are placeholders for Block C (Dimona IN) and do not block."""
+    problems = []
+    items = _be_run_items(db, run)
+    pay_date = getattr(run, "pay_date", None)
+    if pay_date is not None and _be_pack_for(db, run.organization_id, pay_date) is None:
+        problems.append({"code": "BE_PACK_MISSING", "employeeId": None, "severity": "BLOCK",
+                         "message": "No active Belgium rule pack is in force on the pay date (content pending)."})
+    for item in items:
+        snapshot = item.be_calculation_snapshot or {}
+        if not snapshot:
+            problems.append({"code": "BE_PAYSLIP_BLOCKED", "employeeId": item.employee_id, "severity": "BLOCK",
+                             "message": item.notes or "The Belgian calculation is blocked for this employee."})
+            continue
+        if pay_date is not None and not snapshot.get("correctionOf"):
+            try:
+                decision = resolve_be_classification(db, run.organization_id, item.employee_id, pay_date,
+                                                     period_start=getattr(run, "period_start", None))
+                for blocked in decision["blocking"]:
+                    problems.append({"code": blocked["code"], "employeeId": item.employee_id, "severity": "BLOCK",
+                                     "message": blocked["reason"]})
+            except (BadRequestException, NotFoundException) as error:
+                problems.append({"code": "BE_RESOLVER_FAILED", "employeeId": item.employee_id, "severity": "BLOCK",
+                                 "message": getattr(error, "detail", str(error))})
+        acknowledged = {(a["employeeId"], a["code"]) for a in _acknowledgements(run)}
+        for exception in snapshot.get("exceptions") or []:
+            done = (item.employee_id, exception["code"]) in acknowledged
+            problems.append({"code": exception["code"], "employeeId": item.employee_id,
+                             "severity": "ACKNOWLEDGED" if done else "BLOCK", "exception": True,
+                             "message": exception.get("detail") or exception["code"]})
+        problems.append({"code": "BE_DIMONA_IN_PENDING", "employeeId": item.employee_id, "severity": PREFLIGHT_PENDING,
+                         "message": "The Dimona IN declaration is checked once Block C (Dimona) exists."})
+    return problems
+
+
+def be_run_preflight_view(db: Session, organization_id: int, run_id: int) -> dict:
+    from app.modules.payroll.models import PayrollRun
+
+    run = db.query(PayrollRun).filter(PayrollRun.id == run_id, PayrollRun.organization_id == organization_id).first()
+    if run is None:
+        raise NotFoundException("Payroll run")
+    problems = be_run_preflight(db, run)
+    stored = (run.be_approval_fingerprint or {}).get("fingerprint") if isinstance(run.be_approval_fingerprint, dict) \
+        else None
+    current = be_approval_fingerprint(db, run)
+    return {"runId": run.id, "status": str(getattr(run.status, "value", run.status)),
+            "blocking": [p for p in problems if p["severity"] == "BLOCK"],
+            "acknowledged": [p for p in problems if p["severity"] == "ACKNOWLEDGED"],
+            "pending": [p for p in problems if p["severity"] == PREFLIGHT_PENDING],
+            "approvable": not any(p["severity"] == "BLOCK" for p in problems),
+            "fingerprint": {"approved": stored, "current": current,
+                            "matches": stored is not None and stored == current}}
+
+
+def before_run_transition(db: Session, run, next_status, actor_id) -> None:
+    """Block B3 (replaces the Phase 1 refusal). APPROVED (= commit): the
+    preflight must have no BLOCK item; the approver is neither the run's
+    preparer nor anyone who created a Belgian input the payslips use (G-18
+    four-eyes); the approval fingerprint is stored and the ledger is posted
+    (G-29). AUTHORIZED / PAID: the fingerprint is re-verified and a second
+    person authorizes — so a retried approval can never advance the run twice
+    (G-18 commit idempotency); the ledger post itself is idempotent."""
+    from app.modules.payroll.models import PayrollStatus
+
+    items = _be_run_items(db, run)
+    if not items:
+        return
+    status_name = getattr(next_status, "value", next_status)
+    if next_status == PayrollStatus.APPROVED:
+        blocking = [p for p in be_run_preflight(db, run) if p["severity"] == "BLOCK"]
+        if blocking:
+            listing = "; ".join(f"{p['code']}" + (f" (employee #{p['employeeId']})" if p["employeeId"] else "")
+                                for p in blocking[:10])
+            raise _conflict(f"Belgium: the run cannot be approved: {listing}")
+        if actor_id is None or actor_id == getattr(run, "created_by", None):
+            raise _conflict("Belgium: the run must be approved by a user other than its preparer (four-eyes).")
+        if actor_id in _input_creators(db, run.organization_id, [i.employee_id for i in items], run.pay_date):
+            raise _conflict("Belgium: the approver created a Belgian record these payslips use; a second person "
+                            "must approve (four-eyes).")
+        run.be_approval_fingerprint = {"fingerprint": be_approval_fingerprint(db, run), "approvedBy": actor_id,
+                                       "approvedAt": datetime.utcnow().isoformat(),
+                                       "acknowledgements": _acknowledgements(run)}
+        post_be_accumulators(db, run, actor_id)
+        _audit(db, actor_id, "approved", "be_payroll_run", run.id,
+               new={"fingerprint": run.be_approval_fingerprint["fingerprint"]})
+        return
+    if next_status in (PayrollStatus.AUTHORIZED, PayrollStatus.PAID):
+        stored = run.be_approval_fingerprint if isinstance(run.be_approval_fingerprint, dict) else {}
+        if not stored.get("fingerprint") or stored["fingerprint"] != be_approval_fingerprint(db, run):
+            raise _conflict(f"Belgium: the run cannot move to {status_name}: the payslips no longer match the "
+                            "approved calculation (approval fingerprint).")
+        if next_status == PayrollStatus.AUTHORIZED and actor_id == stored.get("approvedBy"):
+            raise _conflict("Belgium: the run must be authorized by a user other than its approver (four-eyes); "
+                            "a repeated approval never advances the run.")
+
+
+def _be_payment_treatment_hold(db: Session, organization_id: int, run, items: list) -> dict:
+    """D13: Belgian payslips are paid only through an approved Belgian payment
+    batch (belgium_payment_service); the generic bank file leaves them out so
+    they can never be paid twice."""
+    return {i.id: "BE_PAYMENT_BATCH" for i in items if (getattr(i, "country_code", None) or "").upper() == BE}
+
+
+# ── B3: corrections (a committed payslip is never mutated) ──────────────────
+CORRECTABLE_INPUTS = ("gross", "basic", "hra", "special_allowance", "overtime", "additional_compensation",
+                      "be_components")
+
+
+def _run_status(run) -> str:
+    status = getattr(run, "status", None)
+    return str(getattr(status, "value", status))
+
+
+def create_be_correction(db: Session, organization_id: int, payslip_item_id: int, payload: dict, actor_id):
+    """A linked correction of a COMMITTED Belgian payslip: the frozen context is
+    replayed with the corrected inputs; a CORRECTION run carries one payslip
+    with the DELTAS (and the reason / evidence); the original is untouched.
+    Its ledger CORRECTION entries post when the correction run is approved
+    (four-eyes), each linked to the original RUN entry."""
+    import hashlib
+    import json as _json
+
+    from app.core.code_generation import generate_business_code
+    from app.modules.payroll.engine.countries.belgium import calculate as be_calculate
+    from app.modules.payroll.engine.jurisdictions.belgium.errors import BECalculationBlockedError
+    from app.modules.payroll.models import PayrollRun, PayrollStatus, PayslipItem
+
+    if not isinstance(payload, dict):
+        raise BadRequestException("The request body must be an object.")
+    reason = _reason(payload.get("reason"))
+    evidence = " ".join(str(payload.get("evidenceRef") or "").split())[:300]
+    if not evidence:
+        raise BadRequestException("A correction needs its evidence reference.")
+    original = (db.query(PayslipItem).filter(PayslipItem.id == payslip_item_id,
+                                            PayslipItem.organization_id == organization_id,
+                                            PayslipItem.country_code == BE).first())
+    if original is None or not original.be_calculation_snapshot:
+        raise NotFoundException("Belgian payslip with a calculation")
+    if original.be_calculation_snapshot.get("correctionOf"):
+        raise BadRequestException("Correct the original payslip, not a correction.")
+    source_run = db.get(PayrollRun, original.payroll_run_id)
+    if str(getattr(source_run.status, "value", source_run.status)) not in ("Approved", "Authorized", "Paid", "Closed"):
+        raise BadRequestException("Only a committed (approved) payslip is corrected; regenerate a draft run instead.")
+    open_corrections = [i for i in db.query(PayslipItem).filter(PayslipItem.organization_id == organization_id,
+                                                                PayslipItem.country_code == BE,
+                                                                PayslipItem.employee_id == original.employee_id).all()
+                        if (i.be_calculation_snapshot or {}).get("correctionOf") == original.id
+                        and _run_status(db.get(PayrollRun, i.payroll_run_id)) in ("Draft", "Review")]
+    if open_corrections:
+        raise BadRequestException("A correction of this payslip is still open; approve or delete it first.")
+    delta_inputs = dict(payload.get("inputDelta") or {})
+    unknown = sorted(set(delta_inputs) - set(CORRECTABLE_INPUTS))
+    if not delta_inputs or unknown:
+        raise BadRequestException(f"inputDelta may change only: {', '.join(CORRECTABLE_INPUTS)}.")
+    frozen = original.be_calculation_snapshot.get("frozenContext")
+    ctx = be_thaw_context(frozen)
+    for key, value in delta_inputs.items():
+        setattr(ctx, key, value if key == "be_components" else Decimal(str(value)))
+    try:
+        corrected = be_calculate(ctx)["be_result"]
+    except BECalculationBlockedError as error:
+        raise BadRequestException(f"The correction cannot be calculated ({error.key}): {error.reason}")
+    before = original.be_calculation_snapshot
+    prior = [i.be_calculation_snapshot for i in db.query(PayslipItem).filter(
+        PayslipItem.organization_id == organization_id, PayslipItem.country_code == BE,
+        PayslipItem.employee_id == original.employee_id).all()
+        if (i.be_calculation_snapshot or {}).get("correctionOf") == original.id]
+
+    def dec_(value):
+        return Decimal(str(value or 0))
+
+    def already(key):                         # what the original plus earlier corrections already posted
+        return dec_((before.get("accumulatorDeltas") or {}).get(key)) + sum(
+            (dec_((s.get("accumulatorDeltas") or {}).get(key)) for s in prior), Decimal("0"))
+
+    keys = set(corrected["accumulatorDeltas"]) | set(before.get("accumulatorDeltas") or {})
+    for s in prior:
+        keys |= set(s.get("accumulatorDeltas") or {})
+    accumulator_delta = {k: str(dec_(corrected["accumulatorDeltas"].get(k)) - already(k)) for k in sorted(keys)}
+    accumulator_delta = {k: v for k, v in accumulator_delta.items() if Decimal(v) != 0}
+    original_gross = dec_(((frozen or {}).get("ctx") or {}).get("gross"))
+    gross_delta = dec_(ctx.gross) - original_gross - sum((dec_(s.get("grossDelta")) for s in prior), Decimal("0"))
+    net_delta = dec_(corrected["be_net"]) - dec_(before.get("be_net")) - sum(
+        (dec_(s.get("netDelta")) for s in prior), Decimal("0"))
+    tds_delta = dec_(corrected["be_withholding"]) - dec_(before.get("be_withholding")) - sum(
+        (dec_(s.get("withholdingDelta")) for s in prior), Decimal("0"))
+    on = _as_date(payload.get("payDate") or date.today().isoformat(), "payDate")
+    run = PayrollRun(organization_id=organization_id, created_by=actor_id, calculation_mode="standard",
+                     period_label=f"BE Correction {on.isoformat()}", period_start=source_run.period_start,
+                     period_end=source_run.period_end, pay_date=on, status=PayrollStatus.REVIEW)
+    run.run_code = generate_business_code(db, organization_id, "PY", PayrollRun, "run_code", "%Y%m")
+    db.add(run)
+    db.flush()
+    snapshot = {"paymentKind": "CORRECTION", "correctionOf": original.id, "reason": reason, "evidenceRef": evidence,
+                "inputDelta": _json_safe(delta_inputs), "grossDelta": str(gross_delta), "netDelta": str(net_delta),
+                "withholdingDelta": str(tds_delta), "be_net": str(net_delta),
+                "employmentLine": before.get("employmentLine"), "accumulatorDeltas": accumulator_delta,
+                "exceptions": [e for e in corrected.get("exceptions") or [] if e.get("code") != "BE_BSSC_PENDING"],
+                "corrected": {k: corrected[k] for k in ("be_net", "be_withholding", "be_employee_total", "hashes")},
+                "frozenContext": be_freeze_context(ctx, (frozen or {}).get("calculationMode") or "standard")}
+    snapshot["hashes"] = {"input": hashlib.sha256(_json.dumps(_json_safe(snapshot), sort_keys=True,
+                                                              separators=(",", ":")).encode()).hexdigest()}
+    item = PayslipItem(payroll_run_id=run.id, employee_id=original.employee_id, organization_id=organization_id,
+                       employee_name=original.employee_name, country_code=BE, gross_pay=gross_delta,
+                       tds=tds_delta, total_deductions=gross_delta - net_delta, net_pay=net_delta,
+                       be_calculation_snapshot=_json_safe(snapshot),
+                       notes=f"Correction of payslip #{original.id}: {reason}"[:300])
+    db.add(item)
+    db.flush()
+    _audit(db, actor_id, "created", "be_correction", item.id, new={"correctionOf": original.id, "run": run.id},
+           reason=reason)
+    return {"runId": run.id, "payslipItemId": item.id, "correctionOf": original.id,
+            "netDelta": str(net_delta), "accumulatorDeltas": accumulator_delta}
 
 # ── Block A4: organisation UI choice lists (from the catalogue, never typed in the UI)
 def org_options() -> dict:
@@ -1600,6 +1836,7 @@ def org_options() -> dict:
             "special160Statuses": list(content.SPECIAL_160_STATUSES), "components": list(content.COMPONENTS),
             "componentSources": ["PLATFORM_FIELD", "POLICY_ALLOWANCE"],
             "platformPayFields": list(BE_PLATFORM_PAY_FIELDS)}
+
 
 
 # ── G-28 (Block B): platform pay component -> Belgian component code ─────────
@@ -1850,4 +2087,83 @@ def approve_be_holiday_certificate(db: Session, organization_id: int, row_id: in
     db.flush()
     _audit(db, actor_id, "approved", "be_holiday_certificate", row.id, old={"status": STATUS_DRAFT},
            new={"status": "APPROVED"})
+    return row
+
+
+# ── B3: exception acknowledgement before approval (spec §12) ────────────────
+def _acknowledgements(run) -> list:
+    data = run.be_approval_fingerprint if isinstance(run.be_approval_fingerprint, dict) else {}
+    return list(data.get("acknowledgements") or [])
+
+
+def acknowledge_be_run_exception(db: Session, organization_id: int, run_id: int, payload: dict, actor_id) -> dict:
+    """An engine EXCEPTION (not a blocking reason) of one employee stops the
+    run's approval until an org admin acknowledges it with a reason — e.g. the
+    BSSC that is never computed (D7) is settled outside the engine. Audited;
+    the acknowledgements are part of the approval record. Only before approval."""
+    from app.modules.payroll.models import PayrollRun
+
+    if not isinstance(payload, dict):
+        raise BadRequestException("The request body must be an object.")
+    reason = _reason(payload.get("reason"))
+    run = db.query(PayrollRun).filter(PayrollRun.id == run_id, PayrollRun.organization_id == organization_id).first()
+    if run is None:
+        raise NotFoundException("Payroll run")
+    if str(getattr(run.status, "value", run.status)) not in ("Draft", "Review"):
+        raise BadRequestException("Exceptions are acknowledged before the run is approved.")
+    try:
+        employee_id = int(payload.get("employeeId"))
+    except (TypeError, ValueError):
+        raise BadRequestException("employeeId is required.")
+    code = str(payload.get("code") or "").strip()
+    present = {(p["employeeId"], p["code"]) for p in be_run_preflight(db, run) if p.get("exception")}
+    if (employee_id, code) not in present:
+        raise BadRequestException("That exception is not raised for this employee in this run.")
+    entry = {"employeeId": employee_id, "code": code, "reason": reason, "by": actor_id,
+             "at": datetime.utcnow().isoformat()}
+    current = dict(run.be_approval_fingerprint) if isinstance(run.be_approval_fingerprint, dict) else {}
+    current["acknowledgements"] = [a for a in _acknowledgements(run)
+                                   if (a["employeeId"], a["code"]) != (employee_id, code)] + [entry]
+    run.be_approval_fingerprint = current
+    db.flush()
+    _audit(db, actor_id, "acknowledged", "be_run_exception", run.id, new={"employeeId": employee_id, "code": code},
+           reason=reason)
+    return entry
+
+
+def _be_identifier_masked(db: Session, organization_id: int, employee_id: int) -> Optional[str]:
+    """The masked NISS / BIS for the payslip — never a digit (BE-040)."""
+    from app.modules.payroll import be_identifiers as bid
+
+    V = _models().PayrollBeIdentifierVault
+    row = (db.query(V).filter(V.organization_id == organization_id, V.employee_id == employee_id,
+                              V.identifier_type.in_((bid.NISS, bid.BIS)), V.status == "ACTIVE")
+           .order_by(V.id.desc()).first())
+    return bid.masked(row.identifier_type) if row is not None else None
+
+# ── B3: the individual account (individuele rekening / compte individuel) ──
+BE_INDIVIDUAL_ACCOUNT_KEY = "BE-INDIVIDUAL-ACCOUNT"
+
+
+def seed_be_individual_account_template(db: Session, reporting_year: str, actor_id=None):
+    """The Belgian individual account as an EMPLOYEE-scope report template
+    (payroll_report_templates), created DRAFT only when missing. It stays
+    inactive: template_activation_refusal refuses every Belgian template until
+    the layout is approved (gate G3). Labels are content keys (nl / fr / de, D10)."""
+    from app.modules.payroll.models import ReportTemplate
+
+    existing = (db.query(ReportTemplate).filter(ReportTemplate.template_key == BE_INDIVIDUAL_ACCOUNT_KEY,
+                                                ReportTemplate.reporting_year == str(reporting_year)).first())
+    if existing is not None:
+        return existing
+    row = ReportTemplate(template_key=BE_INDIVIDUAL_ACCOUNT_KEY, name="Individual account (BE)",
+                         report_type="INDIVIDUAL_ACCOUNT", jurisdiction_country=BE,
+                         reporting_year=str(reporting_year), version="1.0", status="Draft",
+                         document_scope="EMPLOYEE",
+                         description="Per-employee annual account of every payslip line (spec §11). Inactive until "
+                                     "the layout is approved; labels nl / fr / de are content keys (D10).")
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "created", "be_report_template", row.id, new={"key": BE_INDIVIDUAL_ACCOUNT_KEY,
+                                                                      "year": str(reporting_year)})
     return row
