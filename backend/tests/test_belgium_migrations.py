@@ -59,6 +59,9 @@ LATER = {"payroll_be_worker_profiles": {"pay_basis"},
 LATER_REVISION = "2943a0490b5b"
 LATER_TABLES = ("payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches",
                 "payroll_be_payment_items", "payroll_be_component_mappings")
+# Tables the Block C revision (8a1f5ef9fa5d be_filing_parallel) creates.
+BLOCK_C_TABLES = ("payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances",
+                  "payroll_be_parallel_imports", "payroll_be_parallel_differences")
 
 
 def _load(prefix=REVISION):
@@ -277,7 +280,7 @@ def test_deploy_drift_filter_explains_every_be_object():
         os.chdir(here)
     # Everything since this revision's parent: its own objects plus Block B's
     # (tables, and the Block B columns on this revision's tables).
-    assert tables == set(NEW_TABLES) | set(LATER_TABLES)
+    assert tables == set(NEW_TABLES) | set(LATER_TABLES) | set(BLOCK_C_TABLES)
     assert {t: c for t, c in columns.items() if t in SHARED} == SHARED
     assert {t: c for t, c in columns.items() if t not in SHARED} in ({}, LATER)
 

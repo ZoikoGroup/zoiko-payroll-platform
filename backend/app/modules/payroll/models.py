@@ -14061,6 +14061,17 @@ _BE_COMPONENTS = ("SALARY", "HOURLY_PAY", "OVERTIME_PREMIUM", "SUNDAY_HOLIDAY_PR
                   "GUARANTEED_SALARY", "BIRTH_LEAVE_PAY", "BENEFIT_IN_KIND", "MEAL_VOUCHER_EMPLOYER", "ECOCHEQUE",
                   "REIMBURSEMENT", "ARREARS", "PROFIT_SHARING")
 _BE_COMPONENT_SOURCES = ("PLATFORM_FIELD", "POLICY_ALLOWANCE")
+# Block C (be_filing_parallel): filings, obligations, parallel cycles.
+_BE_FILING_AUTHORITIES = ("ONSS", "SPF_FINANCE")
+_BE_FILING_FORMS = ("DIMONA", "DMFA", "FINPROF", "BELCOTAX")
+_BE_FILING_KINDS = ("ORIGINAL", "CORRECTION", "CANCELLATION")
+_BE_FILING_STATUSES = ("DRAFT", "VALIDATED", "APPROVED", "TRANSMITTED", "ACCEPTED", "REJECTED", "SETTLED",
+                       "SUPERSEDED")
+_BE_OBLIGATION_TYPES = ("ONSS_QUARTER", "ONSS_ADVANCE", "WITHHOLDING", "HOLIDAY_FUND")
+_BE_OBLIGATION_STATUSES = ("DUE", "PART_PAID", "PAID", "OVERPAID", "RECONCILED")
+_BE_ACCEPTANCE_STATES = ("NOT_FILED", "FILED", "ACCEPTED", "REJECTED")
+_BE_VARIANCE_KINDS = ("UNDERPAID", "OVERPAID", "CHANGED_AFTER_PAYMENT", "DECLARED_DIFFERS")
+_BE_PARALLEL_CONCEPTS = ("gross", "withholding", "onss_employee", "work_bonus_social", "net", "employer_onss")
 
 
 class _BeCommon(_NzCommon):
@@ -14611,4 +14622,191 @@ class PayrollBeComponentMapping(_BeCommon, Base):
               "platform_component_key", unique=True,
               postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL"),
               sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL")),
+    )
+
+
+class PayrollBeFiling(Base):
+    """A Belgian authority filing (Block C, BE-033 .. BE-037): Dimona and DmfA
+    (ONSS), Finprof withholding and Belcotax 281.10 (SPF Finance). The payload
+    hash, the readable rendition, the response, the timestamps, the actor and
+    the mandate reference are kept (BE-037). An approved / transmitted filing is
+    never edited: a change is a CORRECTION (or a Belcotax CANCELLATION) linked
+    by corrects_id. Four-eyes before approval; idempotency_key is UNIQUE and
+    carries no personal data."""
+    __tablename__ = "payroll_be_filings"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    authority            = Column(String(12), nullable=False)
+    form_code            = Column(String(10), nullable=False)
+    period_key           = Column(String(10), nullable=False)
+    subject_key          = Column(String(40), nullable=True)
+    kind                 = Column(String(12), nullable=False, default="ORIGINAL", server_default="ORIGINAL")
+    version              = Column(Integer, nullable=False, default=1, server_default="1")
+    schema_version       = Column(String(20), nullable=True)
+    run_ids              = Column(_NZ_JSON, nullable=True)
+    payload              = Column(_NZ_JSON, nullable=False)
+    payload_hash         = Column(String(64), nullable=False)
+    rendition            = Column(Text, nullable=True)
+    validation_note      = Column(String(300), nullable=True)
+    idempotency_key      = Column(String(64), nullable=False)
+    due_on               = Column(Date, nullable=True)
+    status               = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+    corrects_id          = Column(Integer, ForeignKey("payroll_be_filings.id", ondelete="SET NULL"), nullable=True)
+    previous_version_id  = Column(Integer, ForeignKey("payroll_be_filings.id", ondelete="SET NULL"), nullable=True)
+    submission_ref       = Column(String(100), nullable=True)
+    receipt_ref          = Column(String(100), nullable=True)
+    response             = Column(_NZ_JSON, nullable=True)
+    rejection            = Column(_NZ_JSON, nullable=True)
+    mandate_ref          = Column(String(100), nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at          = Column(DateTime(timezone=True), nullable=True)
+    transmitted_by_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    transmitted_at       = Column(DateTime(timezone=True), nullable=True)
+    responded_at         = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"authority IN {_nz_in(_BE_FILING_AUTHORITIES)}", name="ck_be_filing_authority"),
+        sa.CheckConstraint(f"form_code IN {_nz_in(_BE_FILING_FORMS)}", name="ck_be_filing_form"),
+        sa.CheckConstraint(f"kind IN {_nz_in(_BE_FILING_KINDS)}", name="ck_be_filing_kind"),
+        sa.CheckConstraint(f"status IN {_nz_in(_BE_FILING_STATUSES)}", name="ck_be_filing_status"),
+        sa.CheckConstraint("kind = 'ORIGINAL' OR corrects_id IS NOT NULL", name="ck_be_filing_correction"),
+        sa.CheckConstraint("status IN ('DRAFT', 'VALIDATED', 'SUPERSEDED') OR (approved_by_id IS NOT NULL AND "
+                           "schema_version IS NOT NULL AND (created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_be_filing_four_eyes"),
+        sa.CheckConstraint("status NOT IN ('TRANSMITTED', 'ACCEPTED', 'REJECTED', 'SETTLED') OR "
+                           "submission_ref IS NOT NULL", name="ck_be_filing_submission"),
+        Index("ix_be_filing_period", "organization_id", "form_code", "period_key"),
+        Index("uq_be_filing_idempotency", "idempotency_key", unique=True),
+    )
+
+
+class PayrollBeObligation(Base):
+    """A Belgian payment obligation (BE-018 / BE-036): the ONSS quarter, each
+    ONSS advance as its OWN obligation, withholding, the manual-worker holiday
+    fund. Acceptance (the authority accepted the declaration) is tracked apart
+    from settlement (the money is paid): accepted-but-unpaid stays open."""
+    __tablename__ = "payroll_be_obligations"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    obligation_type      = Column(String(16), nullable=False)
+    period_key           = Column(String(10), nullable=False)
+    obligation_key       = Column(String(80), nullable=False)
+    filing_id            = Column(Integer, ForeignKey("payroll_be_filings.id", ondelete="SET NULL"), nullable=True)
+    acceptance_status    = Column(String(10), nullable=False, default="NOT_FILED", server_default="NOT_FILED")
+    accepted_at          = Column(DateTime(timezone=True), nullable=True)
+    due_on               = Column(Date, nullable=True)
+    amount_due           = Column(Numeric(14, 2), nullable=False)
+    paid_amount          = Column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    payments             = Column(_NZ_JSON, nullable=True)
+    run_ids              = Column(_NZ_JSON, nullable=True)
+    components           = Column(_NZ_JSON, nullable=True)
+    status               = Column(String(10), nullable=False, default="DUE", server_default="DUE")
+    reconciled_by_id     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reconciled_at        = Column(DateTime(timezone=True), nullable=True)
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"obligation_type IN {_nz_in(_BE_OBLIGATION_TYPES)}", name="ck_be_obligation_type"),
+        sa.CheckConstraint(f"status IN {_nz_in(_BE_OBLIGATION_STATUSES)}", name="ck_be_obligation_status"),
+        sa.CheckConstraint(f"acceptance_status IN {_nz_in(_BE_ACCEPTANCE_STATES)}", name="ck_be_obligation_acceptance"),
+        sa.CheckConstraint("amount_due >= 0 AND paid_amount >= 0", name="ck_be_obligation_amounts"),
+        sa.CheckConstraint("status <> 'RECONCILED' OR reconciled_by_id IS NOT NULL", name="ck_be_obligation_reconciled"),
+        Index("uq_be_obligation_key", "obligation_key", unique=True),
+    )
+
+
+class PayrollBeReconciliationVariance(Base):
+    """A variance between an obligation and what was declared / paid; resolved
+    by a person other than the one who raised it."""
+    __tablename__ = "payroll_be_reconciliation_variances"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    legal_entity_id      = Column(Integer, ForeignKey("legal_entities.id", ondelete="SET NULL"), nullable=True, index=True)
+    obligation_id        = Column(Integer, ForeignKey("payroll_be_obligations.id", ondelete="CASCADE"), nullable=False,
+                                  index=True)
+    variance_kind        = Column(String(24), nullable=False)
+    expected_amount      = Column(Numeric(14, 2), nullable=False)
+    actual_amount        = Column(Numeric(14, 2), nullable=False)
+    difference           = Column(Numeric(14, 2), nullable=False)
+    status               = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+    resolution           = Column(String(300), nullable=True)
+    raised_by_id         = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"variance_kind IN {_nz_in(_BE_VARIANCE_KINDS)}", name="ck_be_variance_kind"),
+        sa.CheckConstraint("status IN ('OPEN', 'RESOLVED')", name="ck_be_variance_status"),
+        sa.CheckConstraint("status <> 'RESOLVED' OR (resolved_by_id IS NOT NULL AND resolution IS NOT NULL "
+                           "AND (raised_by_id IS NULL OR resolved_by_id <> raised_by_id))",
+                           name="ck_be_variance_four_eyes"),
+    )
+
+
+class PayrollBeParallelImport(_BeCommon, Base):
+    """An independent payroll output imported for a parallel cycle (Block C2,
+    gate G4): per employee / concept matching; accepted four-eyes."""
+    __tablename__ = "payroll_be_parallel_imports"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    run_id            = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    pay_date          = Column(Date, nullable=False)
+    cycle_month       = Column(Date, nullable=False)
+    source_name       = Column(String(100), nullable=False)
+    file_hash         = Column(String(64), nullable=False)
+    row_count         = Column(Integer, nullable=False, default=0, server_default="0")
+    matched_count     = Column(Integer, nullable=False, default=0, server_default="0")
+    unmatched_count   = Column(Integer, nullable=False, default=0, server_default="0")
+    column_map        = Column(_NZ_JSON, nullable=False)
+    status            = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+    withdrawn_reason  = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("row_count >= 0 AND matched_count >= 0 AND unmatched_count >= 0",
+                           name="ck_be_parallel_import_counts"),
+        sa.CheckConstraint("status IN ('OPEN', 'ACCEPTED', 'WITHDRAWN')", name="ck_be_parallel_import_status"),
+        sa.CheckConstraint("status <> 'ACCEPTED' OR (approved_by_id IS NOT NULL AND approved_by_id <> created_by_id)",
+                           name="ck_be_parallel_import_four_eyes"),
+        Index("ix_be_parallel_import_cycle", "status", "cycle_month"),
+        Index("uq_be_parallel_import_file", "organization_id", "run_id", "file_hash", unique=True,
+              postgresql_where=text("status <> 'WITHDRAWN'"), sqlite_where=text("status <> 'WITHDRAWN'")),
+    )
+
+
+class PayrollBeParallelDifference(_BeCommon, Base):
+    """One employee / concept difference of a parallel import: explained, then
+    accepted by a person other than the one who explained it."""
+    __tablename__ = "payroll_be_parallel_differences"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    import_id         = Column(Integer, ForeignKey("payroll_be_parallel_imports.id", ondelete="CASCADE"), nullable=False)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    payslip_item_id   = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    concept           = Column(String(24), nullable=False)
+    incumbent_amount  = Column(Numeric(14, 2), nullable=False)
+    zoiko_amount      = Column(Numeric(14, 2), nullable=False)
+    difference        = Column(Numeric(14, 2), nullable=False)
+    explanation       = Column(String(300), nullable=True)
+    explained_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status            = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+
+    __table_args__ = (
+        sa.CheckConstraint(f"concept IN {_nz_in(_BE_PARALLEL_CONCEPTS)}", name="ck_be_parallel_difference_concept"),
+        sa.CheckConstraint("status IN ('OPEN', 'EXPLAINED', 'ACCEPTED')", name="ck_be_parallel_difference_status"),
+        sa.CheckConstraint("status = 'OPEN' OR explanation IS NOT NULL", name="ck_be_parallel_difference_explained"),
+        sa.CheckConstraint("status <> 'ACCEPTED' OR (approved_by_id IS NOT NULL AND approved_by_id <> explained_by_id)",
+                           name="ck_be_parallel_difference_four_eyes"),
+        Index("ix_be_parallel_difference_import", "import_id"),
+        Index("uq_be_parallel_difference", "import_id", "employee_id", "concept", unique=True),
     )

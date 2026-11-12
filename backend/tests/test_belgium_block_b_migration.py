@@ -25,6 +25,11 @@ FILENAME = f"{REVISION}_be_absence_holiday_payment.py"
 TENANT = ("payroll_be_payment_batches", "payroll_be_component_mappings")
 WORKER = ("payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_items")
 NEW_TABLES = TENANT + WORKER
+# Tables the LATER Block C revision (8a1f5ef9fa5d be_filing_parallel) creates;
+# tests/test_belgium_block_c_migration.py covers them.
+LATER_REVISION = "8a1f5ef9fa5d"
+LATER_TABLES = ("payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances",
+                "payroll_be_parallel_imports", "payroll_be_parallel_differences")
 COLUMNS = {"payroll_be_worker_profiles": {"pay_basis"},
            "payroll_be_employment_classifications": {"contract_type", "contract_start_date", "contract_end_date"},
            "payroll_be_employer_registrations": {"onss_special_160_status", "special_160_evidence_ref"}}
@@ -124,21 +129,24 @@ def test_deploy_drift_filter_explains_every_object():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES)
+    assert tables == set(NEW_TABLES) | set(LATER_TABLES)
     assert columns == COLUMNS
 
 
-def test_revision_is_the_single_child_and_the_single_head():
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-
+def test_revision_is_the_single_child_of_its_parent():
     module = _load(REVISION)
     assert (module.revision, module.down_revision) == (REVISION, PARENT)
     children = [p.name for p in VERSIONS.glob("*.py")
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
     assert children == [FILENAME]
-    script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert list(script.get_heads()) == [REVISION]
+
+
+def test_the_only_child_is_the_block_c_revision():
+    """The single-head check moved to tests/test_belgium_block_c_migration.py when
+    Block C chained 8a1f5ef9fa5d onto this revision."""
+    children = [p.name for p in VERSIONS.glob("*.py")
+                if re.search(rf'down_revision[^\n]*"{REVISION}"', p.read_text(encoding="utf-8"))]
+    assert children == [f"{LATER_REVISION}_be_filing_parallel.py"]
 
 
 def test_names_are_literal_and_the_migration_is_in_the_manifest():
