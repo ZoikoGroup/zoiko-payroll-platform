@@ -54,7 +54,7 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 
 ## A3 — core engine
 
-- Commit: see the A3 commit (`feat(belgium): block A3 core engine`); hash recorded in the A4 entry.
+- Commit: 800c464 `feat(belgium): block A3 core engine`.
 - Added (pure, engine/jurisdictions/belgium/): `formula.py` (AST whitelist; Decimal literals from the source
   text; never eval / exec; interpreter BE-FORMULA-1), `declarations.py`, `bases.py` (closed components,
   signed earning-class matrix, REVIEW / missing class blocks, exceptional never in the regular base, source
@@ -90,7 +90,7 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 
 ## A4 — frontend (organisation and employee)
 
-- Commit: see the A4 commit (`feat(belgium): block A4 organisation and employee screens`).
+- Commit: 8abb230 `feat(belgium): block A4 organisation and employee screens`.
 - A3 commit: 800c464 `feat(belgium): block A3 core engine`.
 - Frontend: `Compliances/BEComplianceCentreTab.jsx` (setup status, employer registrations with approve / verify /
   reject, mandates as references, employer ONSS number (vault, masked), establishment units, Joint Committee
@@ -112,3 +112,17 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 - Build: NOT VERIFIED on this machine — `npm run build` (NODE_OPTIONS=--max-old-space-size=8192) died twice
   with V8 "out of memory" at ~1.3 GB free physical RAM (it passed in Phase 3B with ~2 GB free). Must be re-run
   with more free memory (or in CI) before merge.
+
+## End of Block A — full backend suite (chunked, reconciled)
+
+- Environment: PAYROLL_DATABASE_URL=sqlite:///<scratchpad>/testdb_<timestamp>/zp_test.db (fresh file per chunk),
+  ZP_TEST_POSTGRES_URL unset, Python 3.11 (CI must run 3.12). 472 top-level test files in 12 chunks of 40
+  (files that set PAYROLL_DATABASE_URL at import collected first), plus the golden / privacy test dirs in
+  chunk 11. One sequential run (an earlier run overlapped with leftover runners from a lost session and was
+  discarded).
+- Collected 9947 = executed 9947: 9798 passed, 15 failed, 132 skipped, 2 xfailed. Every chunk reconciles
+  exactly (collected = passed + failed + skipped + xfailed).
+- The 15 failures are all pre-existing and were not investigated: 6 Germany ordering (full business
+  acceptance x5, overtime edge cases x1), 5 test_engine_jurisdiction_db_integration ordering, 1 HK
+  configuration CSV, 3 route registry (health routes from the uncommitted main.py). No Belgium test fails.
+- Skipped include the Postgres-gated RLS tests: the PostgreSQL gate is still OPEN (merge / push blocked on it).
