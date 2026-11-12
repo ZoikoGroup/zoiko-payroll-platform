@@ -194,6 +194,29 @@ check("the filing / settlement panel and the journal are wired and never send an
   assert(events.includes("buildMyEventFiling(r.id)"), "event form action");
 });
 
+// ── Phase 10: release gates, golden check, parallel cycles ─────────────────
+check("the release-gates tab is on the Super Admin page and never decides a gate", () => {
+  const config = read("config/jurisdictions/malaysiaComplianceConfig.jsx");
+  assert(/tab\("my-readiness", "Release gates"/.test(config) && config.includes("<MYReadinessTab pack={pack} />"),
+    "release-gates tab");
+  const service = read("service/superAdminService.js");
+  assert(service.includes("${MY_SA}/packs/${packRowId}/golden-check")
+    && service.includes("${MY_SA}/packs/${packRowId}/authority-examples"), "golden-check / example client calls");
+  const router = saRouter();
+  ["/compliance/malaysia/packs/{pack_row_id}/golden-check", "/compliance/malaysia/packs/{pack_row_id}/authority-examples"]
+    .forEach((path) => assert(router.includes(`"${path}"`), `no backend route ${path}`));
+  const tab = read("components/jurisdiction/malaysia/MYReadinessTab.jsx");
+  assert(!/passed\s*=\s*true|allPassed\s*=/.test(tab), "the UI must never decide a gate");
+  assert(/pack\.status === "Draft" && <AddExample/.test(tab), "examples are added to a Draft pack only");
+});
+check("the parallel-cycle screen is wired and names the Malaysian identifiers it refuses", () => {
+  const centre = read("modules/payroll/Compliances/MYComplianceCentreTab.jsx");
+  assert(centre.includes("<MYParallelCyclesSection />"), "parallel section in the centre");
+  const section = read("modules/payroll/Compliances/MYParallelCyclesSection.jsx");
+  assert(/WITHOUT NRIC/.test(section) && /release gate G5/.test(section), "identifier warning and gate");
+  assert(/"hrd_levy"/.test(section) && /"pcb"/.test(section), "Malaysian concepts");
+});
+
 if (failures.length) {
   console.error(`my-compliance-ui-validation: ${failures.length} failed, ${passed} passed`);
   failures.forEach((f) => console.error(`  - ${f}`));

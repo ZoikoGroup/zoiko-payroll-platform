@@ -1,7 +1,8 @@
-import { Banknote, BriefcaseBusiness, CalendarDays, FileCheck2, FileSpreadsheet, Gauge, Landmark, ListChecks, Map, Receipt, Settings2, Table2, Users } from "lucide-react";
+import { BadgeCheck, Banknote, BriefcaseBusiness, CalendarDays, FileCheck2, FileSpreadsheet, Gauge, Landmark, ListChecks, Map, Receipt, Settings2, Table2, Users } from "lucide-react";
 import MYOverviewDashboard from "../../components/jurisdiction/malaysia/MYOverviewDashboard";
 import { MYEarningClassTab, MYParametersTab, MYTablesTab, MYTerritoryTab } from "../../components/jurisdiction/malaysia/MYPackTabs";
 import MYSigningStatusTab from "../../components/jurisdiction/malaysia/MYSigningStatusTab";
+import MYReadinessTab from "../../components/jurisdiction/malaysia/MYReadinessTab";
 import MYWorkbookTab from "../../components/jurisdiction/malaysia/MYWorkbookTab";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
 
@@ -32,7 +33,8 @@ export function malaysiaExtraTabs() {
     tab("my-policy", "Scope & operations", Settings2, "my-events", group("policy")),
     tab("my-workbook", "Import & verify", FileSpreadsheet, "my-policy", ({ pack }) => <MYWorkbookTab pack={pack} />),
     tab("my-signing", "Signing status", Gauge, "my-workbook", ({ pack }) => <MYSigningStatusTab pack={pack} />),
-    tab("sources", "Sources", FileCheck2, "my-signing", () => <SourceEvidencePanel />),
+    tab("my-readiness", "Release gates", BadgeCheck, "my-signing", ({ pack }) => <MYReadinessTab pack={pack} />),
+    tab("sources", "Sources", FileCheck2, "my-readiness", () => <SourceEvidencePanel />),
   ];
 }
 

@@ -4903,6 +4903,26 @@ def malaysia_seed_draft(payload: dict = Body(...), current_user=Depends(get_curr
     return result
 
 
+@router.post("/compliance/malaysia/packs/{pack_row_id}/authority-examples",
+             summary="Add an official / independent worked example to a Malaysia pack (reviewed source; gate G1)")
+def malaysia_add_authority_example(pack_row_id: int, payload: dict = Body(...),
+                                   current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    result = my_super_admin.add_golden_example(db, pack_row_id, payload, getattr(current_user, "id", None))
+    db.commit()
+    return result
+
+
+@router.post("/compliance/malaysia/packs/{pack_row_id}/golden-check",
+             summary="Replay a Malaysia pack's authority examples through the engine (read-only; gate G1)")
+def malaysia_golden_check(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                          db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    return my_super_admin.golden_check(db, pack_row_id)
+
+
 @router.get("/compliance/malaysia/decisions", summary="Malaysia owner decisions D-1 to D-8")
 def malaysia_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
     from app.modules.payroll import malaysia_service

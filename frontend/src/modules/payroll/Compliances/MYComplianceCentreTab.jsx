@@ -8,6 +8,7 @@ import { REASON_FIELD, period } from "../../../components/jurisdiction/new_zeala
 import { HRD_CATEGORIES } from "../../../components/jurisdiction/malaysia/myOrgOptions";
 import { MalaysiaEmployeeRecords } from "../Payroll_Employees/MalaysiaStatutoryProfilePanel";
 import MYFilingSettlementPanel from "./MYFilingSettlementPanel";
+import MYParallelCyclesSection from "./MYParallelCyclesSection";
 
 // Malaysia Compliance Centre (ZP-MY-ENG-001 "Malaysia country setup"). The
 // employer registration per legal employer (HASiL employer number, EPF /
@@ -123,6 +124,7 @@ export default function MYComplianceCentreTab() {
       <SetupStatus />
       <EmployerRegistrations />
       <MYFilingSettlementPanel />
+      <MYParallelCyclesSection />
       <EmployeeRecords />
     </div>
   );

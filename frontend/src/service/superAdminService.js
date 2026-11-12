@@ -1158,3 +1158,7 @@ const uploadMyWorkbook = async (packRowId, step, file, reason) => {
 };
 export const previewMyWorkbook = (packRowId, file) => uploadMyWorkbook(packRowId, "preview", file);
 export const applyMyWorkbook = (packRowId, file, reason) => uploadMyWorkbook(packRowId, "apply", file, reason);
+// Malaysia Phase 10 — authority examples and the golden check (gate G1).
+export const addMyAuthorityExample = (packRowId, payload) =>
+  apiFetch(`${MY_SA}/packs/${packRowId}/authority-examples`, { method: "POST", body: payload });
+export const runMyGoldenCheck = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/golden-check`, { method: "POST" });

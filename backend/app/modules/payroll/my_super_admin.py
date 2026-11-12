@@ -572,3 +572,50 @@ def workbook_import(db: Session, pack_row_id: int, data: bytes, actor_id, *, app
         raise BadRequestException("Upload the filled workbook (.xlsx).")
     return statutory_workbook.import_workbook(db, _pack(db, pack_row_id), data, _adapter(), actor_id,
                                               reason=reason, apply=apply, filename=filename)
+
+
+# ── Phase 10: authority examples and the golden check (gate G1) ───────────
+def add_golden_example(db: Session, pack_row_id: int, data: dict, actor_id) -> dict:
+    """Add one official / independently prepared worked example to an editable
+    pack. It needs its reviewed source document (the same rule as signing) and
+    a reason; the compact formula is validated, never truncated."""
+    from app.modules.payroll import malaysia_golden
+    from app.modules.payroll.models import TaxSlab
+    from app.modules.payroll.service import _require_editable_pack
+
+    pack = _pack(db, pack_row_id)
+    _require_editable_pack(pack)
+    data = dict(data or {})
+    unknown = set(data) - {"name", "taxFormula", "sourceDocumentId", "reason"}
+    if unknown:
+        raise BadRequestException(f"not a field of an authority example: {', '.join(sorted(unknown))}")
+    reason = _reason(data)
+    source = _source(db, data.get("sourceDocumentId"), verify=True)
+    name = " ".join(str(data.get("name") or "").split())[:20]
+    if not name:
+        raise BadRequestException("An authority example needs a short name (at most 20 characters).")
+    formula = str(data.get("taxFormula") or "").strip()
+    try:
+        malaysia_golden.parse_example(formula)
+    except ValueError as exc:
+        raise BadRequestException(f"MY_AUTHORITY_EXAMPLE taxFormula: {exc}.")
+    rule = _content().MY_AUTHORITY_EXAMPLE_RULE
+    if db.query(TaxSlab.id).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.rule_type == rule,
+                                   TaxSlab.filing_status == name).first():
+        raise BadRequestException(f"The pack already has an authority example named {name!r}.")
+    row = TaxSlab(jurisdiction_pack_id=pack.id, organization_id=None, jurisdiction_country=MY, rule_type=rule,
+                  min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("0"), filing_status=name,
+                  rate_label=f"Authority example {name}"[:150], tax_formula=formula,
+                  source_document_id=source.id, sort_order=9000)
+    db.add(row)
+    db.flush()
+    _audit(db, pack, actor_id, "my_statutory_slab", row.id, {}, {"ruleType": rule, "name": name,
+                                                                  "taxFormula": formula}, reason)
+    return slab_view(row)
+
+
+def golden_check(db: Session, pack_row_id: int) -> dict:
+    """Replay the pack's authority examples through the engine (read-only)."""
+    from app.modules.payroll import malaysia_golden
+
+    return malaysia_golden.my_golden_check(db, _pack(db, pack_row_id))

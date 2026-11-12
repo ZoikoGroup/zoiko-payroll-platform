@@ -438,6 +438,72 @@ def my_run_journal(run_id: int, current_user=Depends(get_current_payroll_operato
     return myj.build_my_journal(db, _org_id(current_user), run_id)
 
 
+# ── Phase 10: parallel payroll cycles (gate G5) ─────────────────────────────
+@router.get("/parallel-imports", summary="Incumbent-payroll comparison files of your organisation")
+def my_list_parallel_imports(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_parallel as myp
+
+    return myp.list_parallel_imports(db, _org_id(current_user))
+
+
+@router.post("/parallel-imports", summary="Import an incumbent payroll's figures for a committed run (no identifiers)")
+def my_create_parallel_import(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_parallel as myp
+
+    out = myp.import_parallel(db, _org_id(current_user), dict(body or {}), _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.get("/parallel-imports/{import_id}", summary="One parallel cycle with its differences")
+def my_get_parallel_import(import_id: int, current_user=Depends(get_current_payroll_operator),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_parallel as myp
+
+    return myp.parallel_summary(db, _org_id(current_user), import_id)
+
+
+@router.post("/parallel-imports/{import_id}/accept", summary="Accept a clean parallel cycle (four-eyes)")
+def my_accept_parallel_import(import_id: int, current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_parallel as myp
+
+    out = myp.accept_import(db, _org_id(current_user), import_id, _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.post("/parallel-imports/{import_id}/withdraw", summary="Withdraw an OPEN parallel cycle (reason required)")
+def my_withdraw_parallel_import(import_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_parallel as myp
+
+    out = myp.withdraw_import(db, _org_id(current_user), import_id, body.get("reason"), _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.post("/parallel-differences/{difference_id}/explain", summary="Explain a parallel-run difference")
+def my_explain_parallel_difference(difference_id: int, body: Dict[str, Any] = Body(...),
+                                   current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_parallel as myp
+
+    out = myp.explain_difference(db, _org_id(current_user), difference_id, body.get("reason"), _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.post("/parallel-differences/{difference_id}/accept", summary="Accept an explained difference (four-eyes)")
+def my_accept_parallel_difference(difference_id: int, current_user=Depends(get_current_org_admin),
+                                  db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_parallel as myp
+
+    out = myp.accept_difference(db, _org_id(current_user), difference_id, _actor(current_user))
+    db.commit()
+    return out
+
+
 # ── employee summary, run preflight ─────────────────────────────────────────
 @router.get("/employees/{employee_id}/summary", summary="An employee's Malaysia records (identifiers masked)")
 def my_employee_summary(employee_id: int, current_user=Depends(get_current_payroll_operator),

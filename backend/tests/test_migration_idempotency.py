@@ -58,6 +58,7 @@ _GUARDED = [
     "13574b996ccf",  # Malaysia P2 my_foundation (guarded from day one, lock_timeout)
     "5f314f975ac3",  # Malaysia P7 my_events_holds (guarded from day one, lock_timeout)
     "efdc07f97eb5",  # Malaysia P9 my_filing_settlement (guarded from day one, lock_timeout)
+    "f793f6074257",  # Malaysia P10 my_parallel_cycles (guarded from day one, lock_timeout)
 ]
 
 

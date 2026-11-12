@@ -160,6 +160,7 @@ def test_drift_filter_explains():
                                         "payroll_my_employer_events", "payroll_my_clearance_holds",
                                         "payroll_my_clearance_hold_lines",  # + Malaysia P7 (5f314f975ac3)
                                         "payroll_my_filings", "payroll_my_settlements", "payroll_my_reconciliation_variances",  # + Malaysia P9 (efdc07f97eb5)
+                                        "payroll_my_parallel_imports", "payroll_my_parallel_differences",  # + Malaysia P10 (f793f6074257)
                                         "payroll_payslip_templates", "payroll_payslip_template_versions",
                                         "payroll_payslip_template_assignments"}  # + payslip templates (f3a9c1d7e2b4)
     pl_shared = {"payslip_items": {"pl_calculation_snapshot", "my_calculation_snapshot", "template_version_id"}, "payroll_runs": {"pl_approval_fingerprint", "my_approval_fingerprint"}}

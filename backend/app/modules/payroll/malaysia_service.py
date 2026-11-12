@@ -1302,6 +1302,7 @@ MY_RETENTION_CATEGORIES = (
     ("WORK_LOCATION", "Work assignments (labour territory, holiday state)"),
     ("EMPLOYER_EVENTS", "CP22 / CP22A / CP21 / death notices, receipts and tax-clearance holds"),
     ("FILING_RECORDS", "Authority payloads, submissions, receipts, settlements and reconciliation variances"),
+    ("PARALLEL_RUN", "Incumbent-payroll comparison files and their accepted differences (gate G5)"),
 )
 MY_DECISIONS = {
     "D-1": ("Poland template: split engine, versioned four-eyes records, vault, signing console", False),
@@ -1383,15 +1384,33 @@ def _my_retention_settings():
 
 
 def my_unmet_requirements(db: Session) -> list:
-    """Every unmet launch requirement. The G1-G7 release-gate evaluation is
-    built in Phase 10; until then Malaysia can never leave PLANNED."""
-    out = [{"key": "MY-GATES", "label": "Release gates G1-G7",
-            "detail": "The Malaysia release-gate evaluation is not built yet (Phase 10)."},
-           {"key": "MY-PCB", "label": "PCB / MTD engine",
-            "detail": "PCB is blocked until the HASiL 2026 computerised specification is archived (Phase 4)."}]
-    out += [{"key": f"MY-DECISION-{d['key']}", "label": d["label"], "detail": d["state"]}
-            for d in owner_decisions(db) if d["blocksLaunch"] and d["state"] != "RECORDED"]
-    return out
+    """[{key, label, detail}] of every unmet release gate G1-G7 and launch-
+    blocking owner decision, re-derived now (malaysia_readiness, Phase 10)."""
+    from app.modules.payroll import malaysia_readiness
+
+    return malaysia_readiness.my_unmet_requirements(db)
+
+
+def _my_readiness_overview(db: Session) -> dict:
+    from app.modules.payroll import malaysia_readiness
+
+    state = malaysia_readiness.my_readiness(db)
+    return {"allPassed": state["allPassed"], "gates": state["gates"]}
+
+
+def my_vault_stale_rows(db: Session) -> Optional[int]:
+    """ACTIVE vault rows not under the newest key version, or None when no
+    keyring is configured (presence only; no key is read into a result)."""
+    from app.modules.payroll import my_identifiers as mid
+
+    try:
+        keyring = mid._keyring()
+    except mid.MyIdentifierError:
+        return None
+    if not keyring:
+        return None
+    V = _models().PayrollMyIdentifierVault
+    return db.query(V.id).filter(V.status == "ACTIVE", V.key_version != max(keyring)).count()
 
 
 def statutory_summary(db: Session) -> dict:
@@ -1425,6 +1444,7 @@ def statutory_summary(db: Session) -> dict:
         "approvedDeclarations": db.query(m.PayrollMyTaxDeclaration).filter(
             m.PayrollMyTaxDeclaration.status == "APPROVED").count(),
         "decisions": owner_decisions(db),
+        "readiness": _my_readiness_overview(db),
         "unmet": my_unmet_requirements(db),
         "note": "Malaysia stays PLANNED until every release gate G1-G7 and owner decision passes.",
     }

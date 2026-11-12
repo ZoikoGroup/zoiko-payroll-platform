@@ -3306,3 +3306,12 @@ export const reconcileMySettlement = async (id) => myOne(await api.post(`${MYP}/
 export const listMyVariances = async (params = {}) => myList(await api.get(`${MYP}/variances`, { params }));
 export const resolveMyVariance = (id, reason) => api.post(`${MYP}/variances/${id}/resolve`, { reason });
 export const getMyRunJournal = async (runId) => myOne(await api.get(`${MYP}/runs/${runId}/journal`));
+// Phase 10 — parallel payroll cycles (gate G5).
+export const listMyParallelImports = async () => myList(await api.get(`${MYP}/parallel-imports`));
+export const createMyParallelImport = (body) => api.post(`${MYP}/parallel-imports`, body);
+export const getMyParallelImport = async (id) => myOne(await api.get(`${MYP}/parallel-imports/${id}`));
+export const acceptMyParallelImport = (id) => api.post(`${MYP}/parallel-imports/${id}/accept`, {});
+export const withdrawMyParallelImport = (id, reason) => api.post(`${MYP}/parallel-imports/${id}/withdraw`, { reason });
+export const explainMyParallelDifference = (id, reason) =>
+  api.post(`${MYP}/parallel-differences/${id}/explain`, { reason });
+export const acceptMyParallelDifference = (id) => api.post(`${MYP}/parallel-differences/${id}/accept`, {});

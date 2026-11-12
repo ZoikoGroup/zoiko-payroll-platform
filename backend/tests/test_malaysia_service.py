@@ -453,7 +453,9 @@ def test_retention_template_activation_and_summary_hooks(world):
     assert jurisdiction_hooks.call("MY", "pack_activation_refusal", w.db, pack, None)
     assert jurisdiction_hooks.call("MY", "statutory_editors", w.db, pack) == set()
     summary = jurisdiction_hooks.call("MY", "statutory_summary", w.db)
-    assert summary["available"] is False and [u["key"] for u in summary["unmet"]][:2] == ["MY-GATES", "MY-PCB"]
+    assert summary["available"] is False                                       # Phase 10: the real gates
+    assert [u["key"] for u in summary["unmet"]][:7] == ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
+    assert summary["readiness"]["allPassed"] is False
 
 
 def test_malaysia_cannot_be_opened_before_the_gates(world):

@@ -10045,6 +10045,132 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/parallel-differences/{difference_id}/accept",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "accept",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/parallel-differences/{difference_id}/explain",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "explain",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/parallel-imports",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "parallel-imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/parallel-imports",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "parallel-imports",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_parallel_differences",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/parallel-imports/{import_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "parallel-imports",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/parallel-imports/{import_id}/accept",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "accept",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_parallel_differences"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/parallel-imports/{import_id}/withdraw",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "withdraw",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/malaysia/runs/{run_id}/journal",
    "data_class": "worker",
@@ -10152,9 +10278,11 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_my_identifier_vault",
     "payroll_my_tax_declarations",
     "payroll_my_work_assignments",
-    "payroll_my_worker_profiles"
+    "payroll_my_worker_profiles",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -10930,6 +11058,7 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_mx_sua_differences",
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences"
    ],
@@ -12022,6 +12151,7 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_mx_parallel_differences",
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences",
     "payslip_items"
@@ -15002,6 +15132,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences"
    ],
@@ -15022,6 +15153,7 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_mx_sua_differences",
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences"
    ],
@@ -15062,6 +15194,7 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_mx_parallel_differences",
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences",
     "payslip_items"
@@ -15084,6 +15217,7 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_mx_parallel_differences",
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences"
    ],
@@ -15103,6 +15237,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences"
    ],
@@ -16610,6 +16745,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences"
    ],
@@ -16630,6 +16766,7 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_mx_sua_differences",
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences"
    ],
@@ -16670,6 +16807,7 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_mx_parallel_differences",
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences",
     "payslip_items"
@@ -16692,6 +16830,7 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_mx_parallel_differences",
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences"
    ],
@@ -16711,6 +16850,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_my_parallel_differences",
     "payroll_nz_parallel_differences",
     "payroll_pl_parallel_differences"
    ],
@@ -24387,11 +24527,43 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/malaysia/packs/{pack_row_id}/authority-examples",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "authority-examples",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/super-admin/compliance/malaysia/packs/{pack_row_id}/configuration",
    "data_class": "platform",
    "action": "read",
    "resource": "configuration",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/malaysia/packs/{pack_row_id}/golden-check",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "golden-check",
    "principals": [
     "super_admin"
    ],
@@ -25483,6 +25655,7 @@
     "payroll_jp_social_insurance_enrollments",
     "payroll_jp_social_insurance_events",
     "payroll_jp_worker_tax_profiles",
+    "payroll_my_identifier_vault",
     "payroll_my_tax_declarations",
     "payroll_my_work_assignments",
     "payroll_my_worker_profiles",
@@ -25494,7 +25667,8 @@
     "payroll_pl_identifier_vault",
     "payroll_pl_worker_profiles",
     "payroll_za_eti_ledger",
-    "payroll_za_tax_directives"
+    "payroll_za_tax_directives",
+    "payslip_items"
    ],
    "overridden": true
   },
