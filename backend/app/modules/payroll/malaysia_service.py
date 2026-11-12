@@ -196,6 +196,75 @@ def ensure_my_service_registry_row(db: Session) -> str:
     return "PLANNED"
 
 
+def _my_seeded_packs(db: Session) -> list:
+    from app.modules.payroll.models import JurisdictionPack
+
+    return (db.query(JurisdictionPack)
+            .filter(JurisdictionPack.pack_id == _content().MY_2026[0], JurisdictionPack.version == "1.0")
+            .order_by(JurisdictionPack.effective_from).all())
+
+
+def my_seed_blockers(db: Session) -> list:
+    """Why seeding now would be wrong. seed_malaysia_pack replaces a Draft
+    pack's canonical rows wholesale, so a pack that has left Draft — or a
+    Draft a Super Admin has already started signing (any console edit or
+    signature, any signed row, or any schedule / holiday / PCB / example row
+    loaded from the official documents or the workbook) — is never re-seeded:
+    that work would be erased."""
+    from app.modules.payroll import my_super_admin
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    content = _content()
+    marker = f"%{PENDING_G1_SUFFIX.strip()}%"
+    blockers = []
+    for pack in _my_seeded_packs(db):
+        if pack.status != "Draft":
+            blockers.append(f"{pack.pack_id} is {pack.status}, not Draft — it is never rewritten")
+            continue
+        editors = my_super_admin.statutory_editors(db, pack)
+        signed = (db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                                    ContributionRate.organization_id.is_(None),
+                                                    ~ContributionRate.label.like(marker)).count()
+                  + db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                             TaxSlab.organization_id.is_(None),
+                                             ~TaxSlab.rate_label.like(marker)).count())
+        tables = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                           TaxSlab.organization_id.is_(None),
+                                           TaxSlab.rule_type != content.MY_EARNING_CLASS_RULE).count())
+        if editors or signed or tables:
+            blockers.append(f"{pack.pack_id} is already being signed ({len(editors)} editor(s), {signed} signed "
+                            f"row(s), {tables} schedule/holiday/table row(s)) — re-seeding would erase that work")
+    return blockers
+
+
+def my_seed_summary(db: Session) -> dict:
+    """Read-only: what the seed would write, what exists now, what still
+    blocks activation, and what blocks a (re-)seed. Never writes."""
+    from app.modules.billing.models import JurisdictionServiceRegistry
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    content = _content()
+    marker = f"%{PENDING_G1_SUFFIX.strip()}%"
+    packs = []
+    for pack in _my_seeded_packs(db):
+        rates = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                                  ContributionRate.organization_id.is_(None))
+        slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None))
+        packs.append({"packId": pack.pack_id, "id": pack.id, "version": pack.version, "status": pack.status,
+                      "rates": rates.count(), "slabs": slabs.count(),
+                      "pending": (rates.filter(ContributionRate.label.like(marker)).count()
+                                  + slabs.filter(TaxSlab.rate_label.like(marker)).count()),
+                      "activationRefusal": my_pack_activation_refusal(db, pack)})
+    registry = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == MY).first()
+    return {
+        "content": {"rates": len(content.MALAYSIA_SCALAR_CONTENT), "slabs": len(content.MALAYSIA_EARNING_CLASSES),
+                    "emptyTables": sorted(content.REQUIRED_TABLES)},
+        "packs": packs,
+        "registry": None if registry is None else registry.availability,
+        "blockers": my_seed_blockers(db),
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Phase 5 — records, declarations, vault, calculation inputs, run lifecycle,
 # and the 13 platform hooks (registered in jurisdiction_hooks._MODULES).
