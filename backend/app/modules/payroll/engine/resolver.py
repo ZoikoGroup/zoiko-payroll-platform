@@ -175,6 +175,17 @@ def calculate_payroll(
             "Poland payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "MY" and key == "simple":
+        # Malaysia (ZP-MY-ENG-001): simple mode would silently skip PCB, EPF,
+        # PERKESO, EIS and HRD — each a separate obligation with its own base
+        # and schedule (spec §5-§8). Fail-closed: countries/malaysia.py.
+        from app.modules.payroll.engine.countries.malaysia import MYCalculationBlockedError
+
+        raise MYCalculationBlockedError(
+            "MY_SIMPLE_MODE_UNSUPPORTED",
+            "Malaysia payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)

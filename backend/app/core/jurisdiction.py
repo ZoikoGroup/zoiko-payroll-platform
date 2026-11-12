@@ -710,6 +710,27 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^\d{10}$", "example": "0000123456", "primary": False},
         ],
     },
+    # Malaysia (ZP-MY-ENG-001 Phase 0) - schema only, EMPLOYER references only.
+    # Deliberately NOT in REGISTRATION_COUNTRIES: live Malaysian payroll stays
+    # disabled until release gates G1-G7 are signed (MY-002). Employee
+    # identifiers (MyKad/NRIC, passport, TIN, EPF / SOCSO member numbers) are
+    # personal data and live only in the identifier vault, never here. The
+    # authorities' exact number formats are not given by the specification:
+    # these patterns only bound length and characters (pending G1).
+    "MY": {
+        "label": "HASiL employer no. / EPF / PERKESO / HRD",
+        "currency": "MYR",
+        "fields": [
+            {"key": "hasil_employer_no", "label": "HASiL employer number (E number)",
+             "pattern": r"^[A-Za-z0-9 -]{6,20}$", "example": "E 1234567890", "primary": True},
+            {"key": "epf_employer_no", "label": "EPF employer number",
+             "pattern": r"^[A-Za-z0-9 -]{6,20}$", "example": "012345678", "primary": False},
+            {"key": "perkeso_employer_code", "label": "PERKESO employer code",
+             "pattern": r"^[A-Za-z0-9 -]{6,20}$", "example": "A12345678B", "primary": False},
+            {"key": "hrd_registration_no", "label": "HRD Corp registration number",
+             "pattern": r"^[A-Za-z0-9 -]{4,20}$", "example": "123456789", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -782,6 +803,14 @@ COUNTRY_NAME_TO_CODE = {
     "rzeczpospolita polska": "PL",
     "republic of poland": "PL",
     "pol": "PL",
+    # Without these, "Malaysia" truncates to "MA" (Morocco) in
+    # payroll.service._normalize_country. The bare word "my" is deliberately NOT
+    # an alias (it is an ordinary English word); "MY" resolves through
+    # JURISDICTION_TAX_SCHEMAS like every other code.
+    "malaysia": "MY",
+    "mys": "MY",
+    "persekutuan malaysia": "MY",
+    "federation of malaysia": "MY",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -813,6 +842,7 @@ CODE_TO_COUNTRY_NAME = {
     "JP": "Japan",
     "NZ": "New Zealand",
     "PL": "Poland",
+    "MY": "Malaysia",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

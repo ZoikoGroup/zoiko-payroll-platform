@@ -70,6 +70,11 @@ export const COUNTRIES = [
   // PL IBAN routing. PESEL and NIP are vault-only (spec §13); contract, ZUS
   // title, PIT statements and PPK live on the Poland statutory profile, never here.
   { code: "PL", name: "Poland" },
+  // Malaysia (ZP-MY-ENG-001 Phase 0) — mirrors employee_validation.py's
+  // MYEmployeeValidation (passport; account number + SWIFT/BIC, no IBAN).
+  // NRIC / TIN / EPF / SOCSO numbers are vault-only; citizenship, residence,
+  // work pass and labour territory live on the Malaysia statutory profile.
+  { code: "MY", name: "Malaysia" },
 ];
 
 // ISO 13616 IBAN check digits (mirrors employee_validation.py's
@@ -200,6 +205,21 @@ export function plNipIsValid(value) {
   const weights = [6, 5, 7, 2, 3, 4, 5, 6, 7];
   const check = weights.reduce((sum, w, i) => sum + w * Number(raw[i]), 0) % 11;
   return check !== 10 && check === Number(raw[9]);
+}
+
+// Malaysian MyKad / NRIC (mirrors employee_validation.py's my_nric_is_valid):
+// 12 digits, the first six a real YYMMDD date in either century and a
+// place-of-birth code that is not "00". There is no check digit.
+export function myNricIsValid(value) {
+  const raw = String(value || "").replace(/[\s-]/g, "");
+  if (!/^\d{12}$/.test(raw) || raw.slice(6, 8) === "00") return false;
+  const yy = Number(raw.slice(0, 2));
+  const mm = Number(raw.slice(2, 4));
+  const dd = Number(raw.slice(4, 6));
+  return [1900, 2000].some((century) => {
+    const d = new Date(Date.UTC(century + yy, mm - 1, dd));
+    return d.getUTCFullYear() === century + yy && d.getUTCMonth() === mm - 1 && d.getUTCDate() === dd;
+  });
 }
 
 // A PIX key only carries check digits when its declared type is CPF or CNPJ;
@@ -531,6 +551,14 @@ export const COUNTRY_FIELD_SPECS = {
     // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.PL).
     { key: "iban", label: "IBAN", type: "text", placeholder: "PL + 26 digits", upper: true, strip: " ", pattern: /^PL\d{26}$/, check: ibanPassesMod97, error: "Polish IBAN must be PL followed by 26 digits with a valid check digit." },
   ],
+  // Malaysia — mirrors backend MYEmployeeValidation. NRIC / TIN / EPF / SOCSO
+  // numbers are held ONLY in the encrypted identifier vault and refused here.
+  MY: [
+    { key: "passport_number", label: "Passport number (non-Malaysians)", type: "text", placeholder: "6–20 letters/digits", upper: true, strip: " -", pattern: /^[A-Z0-9]{6,20}$/, error: "Passport number must be 6–20 letters/digits." },
+    // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.MY).
+    { key: "swift_bic", label: "SWIFT / BIC", type: "text", placeholder: "8 or 11 characters", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "SWIFT/BIC must be 8 or 11 characters." },
+    { key: "bank_account", label: "Account number", type: "text", placeholder: "6–20 digits", strip: " -", pattern: /^\d{6,20}$/, error: "Bank account number must be 6-20 digits." },
+  ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).
   HK: [
@@ -550,7 +578,7 @@ export const COUNTRY_FIELD_SPECS = {
 export const DUPLICATE_ID_FIELDS = {
   US: "ssn", UK: "nino", AU: "tfn", CA: "sin", DE: "steuer_id", IE: "ppsn", SG: "nric_fin",
   HK: "hkid", SE: "swedish_id_number", IT: "codice_fiscale", CH: "ahv_number", SA: "national_id_iqama",
-  NL: "bsn", MX: "curp", BR: "cpf", PL: "passport_number",
+  NL: "bsn", MX: "curp", BR: "cpf", PL: "passport_number", MY: "passport_number",
 };
 
 // Every jurisdiction's compliance field, flattened into one list — used to

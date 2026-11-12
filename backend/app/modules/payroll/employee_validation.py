@@ -2034,6 +2034,90 @@ class PLEmployeeValidation(EmployeeValidationStrategy):
                     "Polish IBAN must be PL followed by 26 digits with a valid check digit.")
 
 
+# ── Malaysia (ZP-MY-ENG-001 Phase 0) ────────────────────────────────────────
+# Identifier FORMAT checks only. MyKad / NRIC has no published check digit,
+# so none is claimed: 12 digits, the first six a real YYMMDD date (in either
+# century) and a place-of-birth code that is not "00" (the full code list is
+# pending G1). TIN / EPF / SOCSO formats are not given by the specification:
+# length and characters only. Never echo a value.
+def _my_compact(value) -> str:
+    return re.sub(r"[\s-]", "", str(value or ""))
+
+
+def my_nric_birth_date_candidates(value) -> tuple:
+    """Every real date the NRIC's YYMMDD could mean (19YY and/or 20YY)."""
+    raw = _my_compact(value)
+    if not re.fullmatch(r"\d{12}", raw):
+        return ()
+    yy, mm, dd = int(raw[0:2]), int(raw[2:4]), int(raw[4:6])
+    out = []
+    for century in (1900, 2000):
+        try:
+            out.append(date(century + yy, mm, dd))
+        except ValueError:
+            continue
+    return tuple(out)
+
+
+def my_nric_is_valid(value) -> bool:
+    raw = _my_compact(value)
+    return (bool(re.fullmatch(r"\d{12}", raw)) and bool(my_nric_birth_date_candidates(raw))
+            and raw[6:8] != "00")
+
+
+def my_tin_format_ok(value) -> bool:
+    return bool(re.fullmatch(r"[A-Z]{1,2}\d{6,12}", _my_compact(value).upper()))
+
+
+def my_member_no_format_ok(value) -> bool:
+    """EPF / SOCSO member numbers: 6-20 letters or digits (format pending G1)."""
+    return bool(re.fullmatch(r"[A-Z0-9]{6,20}", _my_compact(value).upper()))
+
+
+class MYEmployeeValidation(EmployeeValidationStrategy):
+    """Malaysia (ZP-MY-ENG-001) - employee fields that are NOT vault-only.
+
+    DORMANT: consulted only while MY_TENANT_ONBOARDING_ENABLED is on (or a
+    canary organisation exists). MyKad/NRIC, TIN, EPF and SOCSO member numbers
+    and work-pass numbers are held ONLY in the encrypted identifier vault
+    (Phase 2, spec section 15): a compliance field carrying any of them is
+    refused, never stored, and the refusal never echoes the value. Bank
+    transfers route by the account number + SWIFT/BIC (Malaysia has no IBAN).
+    """
+
+    country_code = "MY"
+    duplicate_field = "passport_number"
+    SENSITIVE_FIELDS = ("passport_number", "bank_account")
+    FIELD_SPECS = {
+        "passport_number": {
+            "required": False, "upper": True, "strip_chars": " -",
+            "pattern": re.compile(r"^[A-Z0-9]{6,20}$"),
+            "error": "Passport number must be 6-20 letters or digits.",
+        },
+        "bank_account": {
+            "required": False, "strip_chars": " -",
+            "pattern": re.compile(r"^\d{6,20}$"),
+            "error": "Bank account number must be 6-20 digits.",
+        },
+        "swift_bic": {
+            "required": False, "upper": True, "strip_chars": " ",
+            "pattern": re.compile(r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$"),
+            "error": "SWIFT/BIC must be 8 or 11 characters.",
+        },
+    }
+    _VAULT_ONLY = ("national_id", "nric", "mykad", "ic_number", "tin", "tax_id", "tax_number",
+                   "epf_no", "epf_member_no", "socso_no", "socso_member_no", "perkeso_no", "work_pass_no")
+
+    @classmethod
+    def validate(cls, compliance: dict) -> dict:
+        keys = {str(k).strip().lower() for k in (compliance or {})}
+        if keys & set(cls._VAULT_ONLY):
+            raise BadRequestException("Malaysian NRIC, TIN, EPF / SOCSO member numbers and work-pass numbers "
+                                      "are held only in the encrypted identifier vault, never as an employee "
+                                      "field.")
+        return super().validate(compliance)
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -2098,6 +2182,8 @@ _DORMANT_STRATEGIES = {
     "NZ": NZEmployeeValidation,
     # Poland (ZP-PL-ENG-001 Phase 0): dormant until PL_TENANT_ONBOARDING_ENABLED.
     "PL": PLEmployeeValidation,
+    # Malaysia (ZP-MY-ENG-001 Phase 0): dormant until MY_TENANT_ONBOARDING_ENABLED.
+    "MY": MYEmployeeValidation,
 }
 
 
@@ -2125,6 +2211,13 @@ def _dormant_strategy(code: str):
         # The flag, or any canary organisation: only an organisation the
         # organisation-level gate admitted can hold a Polish employee.
         return strategy if poland_dormancy.onboarding_enabled() or poland_dormancy.canary_organization_ids() else None
+    if code == "MY":
+        from app.modules.payroll import malaysia_dormancy
+
+        # The flag, or any canary organisation: only an organisation the
+        # organisation-level gate admitted can hold a Malaysian employee.
+        return (strategy if malaysia_dormancy.onboarding_enabled() or malaysia_dormancy.canary_organization_ids()
+                else None)
     from app.modules.payroll import mexico_dormancy
 
     # Phase 10e: the kill switch only — no session here. A Mexican employee

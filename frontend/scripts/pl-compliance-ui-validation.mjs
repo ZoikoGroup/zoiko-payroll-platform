@@ -83,7 +83,7 @@ check("PLN currency and IBAN routing are wired", () => {
   assert(/PLN: \{ code: 'PLN'.*locale: 'pl-PL'/.test(currency), "PLN master entry");
   assert(/\{ code: "PL", name: "Poland", currency: "PLN" \}/.test(currency), "PLN country list entry");
   const bank = read("modules/payroll/Payroll_Employees/bankFieldsFor.js");
-  assert(/"ZA", "PL"\]/.test(bank) && /PL: \["iban"\]/.test(bank) && /PL: "IBAN"/.test(bank), "bank routing");
+  assert(/"ZA", "PL", "MY"\]/.test(bank) && /PL: \["iban"\]/.test(bank) && /PL: "IBAN"/.test(bank), "bank routing");
 });
 
 // ── Phase 7b: Super Admin Poland page (governed signing console) ──────────

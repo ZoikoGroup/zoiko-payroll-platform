@@ -82,6 +82,7 @@ from app.modules.payroll.engine.countries import south_africa as _south_africa
 from app.modules.payroll.engine.countries import japan as _japan
 from app.modules.payroll.engine.countries import new_zealand as _new_zealand
 from app.modules.payroll.engine.countries import poland as _poland
+from app.modules.payroll.engine.countries import malaysia as _malaysia
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -163,6 +164,7 @@ _calc_south_africa = _south_africa.calculate
 _calc_japan = _japan.calculate
 _calc_new_zealand = _new_zealand.calculate
 _calc_poland = _poland.calculate
+_calc_malaysia = _malaysia.calculate
 
 
 _COUNTRY_CALC = {
@@ -249,6 +251,9 @@ _COUNTRY_CALC = {
     # Poland (ZP-PL-ENG-001): fail-closed orchestrator over
     # engine/jurisdictions/poland/* (Phase 3); never the generic calculator.
     "PL": _calc_poland,
+    # Malaysia (ZP-MY-ENG-001): fail-closed (Phase 0 stub; Phase 3 orchestrator
+    # over engine/jurisdictions/malaysia/*); never the generic calculator.
+    "MY": _calc_malaysia,
 }
 
 

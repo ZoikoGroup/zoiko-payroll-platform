@@ -51,7 +51,7 @@ from typing import List, Optional
 # no Mexican payment file exists before Phase 10.
 # Switzerland and Saudi Arabia (Phase 4.1, 2026-10-23) route by IBAN (+ BIC).
 ROUTING_COUNTRIES = ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR",
-                     "CH", "SA", "ZA", "PL")
+                     "CH", "SA", "ZA", "PL", "MY")
 
 # Per-country routing fields, in display order. `key` is the storage key:
 # "ifsc" is India's dedicated top-level column; every other key is read
@@ -109,6 +109,12 @@ ROUTING_FIELDS = {
     "PL": [
         {"key": "iban", "label": "IBAN"},
     ],
+    # Malaysia (ZP-MY-ENG-001 Phase 0): no IBAN; the account number + SWIFT/BIC
+    # (checked in MYEmployeeValidation).
+    "MY": [
+        {"key": "swift_bic", "label": "SWIFT / BIC"},
+        {"key": "bank_account", "label": "Account Number"},
+    ],
     "ZA": [
         {"key": "branch_code", "label": "Branch Code"},
         {"key": "account_number", "label": "Account Number"},
@@ -150,6 +156,7 @@ BTF_ROUTING_LABEL = {
     "SA": "IBAN",
     "ZA": "Branch Code / Account",
     "PL": "IBAN",
+    "MY": "SWIFT / Account",
 }
 
 # Payment rail shown on the payslip for each jurisdiction.
@@ -177,6 +184,7 @@ PAYMENT_MODE_LABEL = {
     "SA": "SARIE",
     "ZA": "EFT",
     "PL": "Elixir / SEPA",
+    "MY": "IBG / DuitNow",
 }
 
 
@@ -260,6 +268,9 @@ def btf_routing_value(obj, country: Optional[str] = None) -> str:
         bank = _field_value(obj, "bank_code")
         branch = _field_value(obj, "branch_code")
         return f"{bank}-{branch}" if bank and branch else (bank or branch)
+    if effective == "MY":
+        bic, account = _field_value(obj, "swift_bic"), _field_value(obj, "bank_account")
+        return f"{bic} {account}" if bic and account else (bic or account)
     if effective in ("DE", "NL", "CH"):
         iban = _field_value(obj, "iban")
         bic = _field_value(obj, "bic")
