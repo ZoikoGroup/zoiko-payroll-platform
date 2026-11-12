@@ -365,3 +365,59 @@ def key_label(key: str) -> str:
 
 def keys_in_group(group: str) -> tuple:
     return tuple(k for k, (g, *_rest) in KEYS.items() if g == group)
+
+
+# ── Phase 3B: slab rows of band / formula / table keys ────────────────────
+# Code-list keys: a signed comma-separated list of codes (no fixed vocabulary;
+# the codes themselves are statutory content entered by the specialist).
+CODE_LIST_KEYS = ("be_onss_supported_employer_categories", "be_onss_supported_worker_codes")
+CODE_PATTERN = re.compile(r"^[A-Z0-9]{1,10}$")
+
+# Band dimension (stored in TaxSlab.filing_status ONLY for BE_* rule types):
+# "NAME=value;NAME=value", e.g. "EC=<employer category>;WC=<worker code>" or
+# "CHILDREN=<n>". Names per key are listed in SLAB_SPECS; a row of a key that
+# declares dimensions must carry exactly those names.
+DIMENSION_PATTERNS = {
+    "EC": CODE_PATTERN,                      # ONSS employer category (validated against the signed list)
+    "WC": CODE_PATTERN,                      # ONSS worker code (validated against the signed list)
+    "CHILDREN": re.compile(r"^\d{1,2}$"),    # number of children (multiple birth)
+}
+# Which signed code-list key validates each dimension value (when listed).
+DIMENSION_LISTS = {"EC": "be_onss_supported_employer_categories", "WC": "be_onss_supported_worker_codes"}
+
+# key -> {"fields": required request fields, "dimensions": required dimension names}
+_BAND = ("minAmount",)
+_FORMULA = ("formulaText", "name")
+SLAB_SPECS = {key: {"kind": kind,
+                    "fields": {KIND_BAND: _BAND, KIND_FORMULA: _FORMULA, KIND_TABLE: ("date", "name")}[kind],
+                    "dimensions": ()}
+              for key, (_g, kind, _r, _l) in KEYS.items() if kind in SLAB_KINDS}
+for _key in ("be_onss_employer_base_rate", "be_onss_fund_contributions"):
+    SLAB_SPECS[_key]["dimensions"] = ("EC", "WC")
+SLAB_SPECS["be_abs_maternity_multiple_weeks"]["dimensions"] = ("CHILDREN",)
+
+
+def format_dimension(**parts) -> str:
+    """{"EC": "A", "WC": "B"} -> "EC=A;WC=B" (names in a fixed, sorted order)."""
+    return ";".join(f"{name}={str(parts[name]).strip().upper()}" for name in sorted(parts))
+
+
+def parse_dimension(text) -> dict:
+    """"EC=A;WC=B" -> {"EC": "A", "WC": "B"}; "" / None -> {}. ValueError when
+    malformed, an unknown name, a repeated name or a value of the wrong shape."""
+    if text in (None, ""):
+        return {}
+    out = {}
+    for part in str(text).split(";"):
+        name, sep, value = part.partition("=")
+        name, value = name.strip().upper(), value.strip().upper()
+        if not sep or not name or not value:
+            raise ValueError(f"dimension part {part!r} must be NAME=value")
+        if name not in DIMENSION_PATTERNS:
+            raise ValueError(f"unknown dimension {name!r} (allowed: {', '.join(DIMENSION_PATTERNS)})")
+        if name in out:
+            raise ValueError(f"dimension {name!r} is repeated")
+        if not DIMENSION_PATTERNS[name].fullmatch(value):
+            raise ValueError(f"dimension {name}={value!r} has the wrong shape")
+        out[name] = value
+    return out

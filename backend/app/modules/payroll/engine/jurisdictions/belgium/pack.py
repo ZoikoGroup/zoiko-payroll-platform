@@ -200,6 +200,53 @@ class BePack:
             self._note("slab", ident, r)
         return sorted(rows, key=lambda r: (dec(field(r, "min_amount")), field(r, "sort_order") or 0))
 
+    def band(self, key: str, **dimensions) -> list:
+        """The signed band rows of `key` in force on the pay date whose
+        dimension (TaxSlab.filing_status, BE_* rule types only) equals exactly
+        `dimensions` (e.g. EC=..., WC=...). A key that declares dimensions must
+        be asked with all of them; no match raises BE_ROW_MISSING — there is
+        never a fallback to a dimensionless row (fail closed)."""
+        spec = content.SLAB_SPECS.get(key)
+        if spec is None or spec["kind"] != content.KIND_BAND:
+            self.block(E.ROW_MISSING, key, "not a band key")
+        wanted = {name.upper(): str(value).strip().upper() for name, value in dimensions.items()}
+        if set(wanted) != set(spec["dimensions"]):
+            self.block(E.ROW_MISSING, key, f"band lookup needs exactly the dimensions {spec['dimensions'] or '()'}")
+        rows = []
+        for r in self.table(key):
+            try:
+                have = content.parse_dimension(field(r, "filing_status"))
+            except ValueError:
+                self._pending(key, "a band row has a malformed dimension")
+            if have == wanted:
+                rows.append(r)
+        if not rows:
+            self.block(E.ROW_MISSING, key, f"no signed band row for {content.format_dimension(**wanted) or 'this key'}")
+        return rows
+
+    def public_holidays(self, year: int) -> list:
+        """[(date, name)] of the SIGNED BE_PUBLIC_HOLIDAY rows of `year`. The key
+        must be signed SLAB_ROWS (NOT_SUPPORTED -> BE_FEATURE_BLOCKED); any
+        unsigned row of that year raises BE_CONTENT_PENDING; no row raises
+        BE_TABLE_EMPTY. Employer substitute days are D15 (Phase 6), not here."""
+        key = "be_public_holidays"
+        marker = self.row(key)
+        if upper(field(marker, "text_value")) != content.SLAB_ROWS:
+            self._pending(key, "the key is not signed as SLAB_ROWS")
+        rows = []
+        for r in self.slabs:
+            day = as_date(field(r, "effective_from"))
+            if upper(field(r, "rule_type")) != content.PUBLIC_HOLIDAY_RULE or day is None or day.year != year:
+                continue
+            ident = f"{content.PUBLIC_HOLIDAY_RULE}:{day.isoformat()}"
+            if PENDING_MARK in str(field(r, "rate_label") or ""):
+                self._pending(ident)
+            self._note("slab", ident, r)
+            rows.append((day, str(field(r, "tax_formula") or field(r, "rate_label") or "").strip()))
+        if not rows:
+            self.block(E.TABLE_EMPTY, key, f"no signed public holiday for {year}")
+        return sorted(rows)
+
     def earning_classes(self) -> dict:
         """{(obligation, component): treatment} from BE_EARNING_CLASS rows."""
         rows = [r for r in self.slabs

@@ -156,6 +156,11 @@ def _text_problem(key: str, kind: str, value: str) -> Optional[str]:
             return None
         except ValueError:
             return f"must be an ISO date (YYYY-MM-DD) or {content.NOT_SUPPORTED}"
+    if key in content.CODE_LIST_KEYS:
+        items = [p.strip() for p in value.split(",") if p.strip()]
+        bad = [p for p in items if not content.CODE_PATTERN.fullmatch(p)]
+        return f"must be a comma-separated list of codes (letters / digits); bad: {', '.join(bad) or '(none)'}" \
+            if bad or not items or len(set(items)) != len(items) else None
     if key in content.LIST_VOCABULARIES:
         allowed = content.LIST_VOCABULARIES[key]
         items = [p.strip() for p in value.split(",") if p.strip()]
@@ -287,10 +292,44 @@ def configuration(db: Session, pack_row_id: int) -> dict:
         if view["group"] in groups:
             groups[view["group"]]["rows"].append(view)
     return {"packRowId": pack.id, "packId": pack.pack_id, "status": pack.status, "groups": groups,
+            "groupOrder": list(content.GROUPS), "vocabulary": vocabulary(), "slabSpecs": slab_specs(),
+            "earningClass": {"treatments": list(content.TREATMENTS), "obligations": list(content.OBLIGATIONS),
+                             "components": list(content.COMPONENTS), "ruleType": content.EARNING_CLASS_RULE},
+            "sourcePrefix": "ZP-BE-ENG-001 ",
             "slabRows": {rule: [slab_view(s) for s in slabs if s.rule_type == rule]
                          for rule in sorted(set(content.RULE_TYPES.values()))},
             "earningClasses": [slab_view(s) for s in slabs if s.rule_type == content.EARNING_CLASS_RULE],
             "authorityExamples": [slab_view(s) for s in slabs if s.rule_type == content.AUTHORITY_EXAMPLE_RULE]}
+
+
+def vocabulary() -> dict:
+    """key -> how a signed text value is chosen, for the console UI (no value
+    lists live in the frontend). NOT_SUPPORTED is always offered."""
+    content = _content()
+    out = {}
+    for key, (_group, kind, _ref, _label) in content.KEYS.items():
+        if key in content.LIST_VOCABULARIES:
+            out[key] = {"mode": "list", "choices": list(content.LIST_VOCABULARIES[key])}
+        elif key in content.CHOICE_VOCABULARIES:
+            out[key] = {"mode": "choice", "choices": list(content.CHOICE_VOCABULARIES[key])}
+        elif key in content.CODE_LIST_KEYS:
+            out[key] = {"mode": "codes", "choices": []}
+        elif kind in content.SLAB_KINDS:
+            out[key] = {"mode": "choice", "choices": [content.SLAB_ROWS]}
+        elif kind == content.KIND_DATE:
+            out[key] = {"mode": "date", "choices": []}
+        elif kind == content.KIND_TEXT:
+            out[key] = {"mode": "choice", "choices": []}
+        else:
+            out[key] = {"mode": "value", "choices": []}
+        out[key]["notSupported"] = content.NOT_SUPPORTED
+    return out
+
+
+def slab_specs() -> dict:
+    content = _content()
+    return {key: {"kind": spec["kind"], "ruleType": content.RULE_TYPES[key], "fields": list(spec["fields"]),
+                  "dimensions": list(spec["dimensions"])} for key, spec in content.SLAB_SPECS.items()}
 
 
 def signing_status(db: Session, pack_row_id: int) -> dict:
@@ -352,6 +391,169 @@ def seed_draft(db: Session, data: dict, actor_id) -> dict:
 
 
 _EXAMPLE_NAME = re.compile(r"^[A-Za-z0-9 _.-]{1,20}$")
+
+
+# ── Phase 3B: governed slab rows of band / formula / table keys ───────────
+SLAB_ROW_FIELDS = ("minAmount", "maxAmount", "ratePct", "flatAmount", "formulaText", "name", "date", "dimension",
+                   "effectiveFrom", "effectiveTo")
+
+
+def _signed_codes(db: Session, pack, key: str) -> set:
+    """The signed code list of `key` in `pack` (refuses when not signed)."""
+    content = _content()
+    row = _rate_row(db, pack, key)
+    text = (row.text_value or "").strip().upper() if row is not None else ""
+    if row is None or content.PENDING_MARK in (row.label or "") or not text or text == content.NOT_SUPPORTED:
+        raise BadRequestException(f"{key} is not signed yet: sign the supported code list before adding rows "
+                                  "that reference it.")
+    return {p.strip() for p in text.split(",") if p.strip()}
+
+
+def _rate_row(db: Session, pack, key: str):
+    from app.modules.payroll.models import ContributionRate
+
+    return (db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                              ContributionRate.organization_id.is_(None),
+                                              ContributionRate.component_key == key).first())
+
+
+def add_slab_row(db: Session, pack_row_id: int, key: str, data: dict, actor_id) -> dict:
+    """Create one slab row of a band / formula / table key (rule_type BE_<KEY>)
+    on an editable pack version. Reason + source required; the row starts
+    "[PENDING G1]" unless signed with a reviewed archived source (same rule as
+    scalar rows); approval invalidated, editor recorded, audited."""
+    from app.modules.payroll.models import TaxSlab
+    from app.modules.payroll.service import _require_editable_pack
+
+    content = _content()
+    spec = content.SLAB_SPECS.get(str(key or "").strip().lower())
+    if spec is None:
+        raise BadRequestException("Slab rows can be added only to Belgian band / formula / table keys.")
+    key = str(key).strip().lower()
+    pack = _pack(db, pack_row_id)
+    _require_editable_pack(pack)
+    data = dict(data or {})
+    reason = _reason(data)
+    verify = data.get("specialistVerified") is True
+    source = _source(db, data, verify)
+    unknown = set(data) - set(SLAB_ROW_FIELDS) - {"reason", "sourceDocumentId", "specialistVerified"}
+    if unknown:
+        raise BadRequestException(f"not a field of a {key} row: {', '.join(sorted(unknown))}")
+    missing = [f for f in spec["fields"] if data.get(f) in (None, "")]
+    if spec["kind"] == content.KIND_BAND and data.get("ratePct") in (None, "") and data.get("flatAmount") in (None, ""):
+        missing.append("ratePct or flatAmount")
+    if missing:
+        raise BadRequestException(f"{key} needs: {', '.join(missing)}")
+
+    dimension = None
+    if spec["dimensions"] or data.get("dimension"):
+        try:
+            parts = content.parse_dimension(data.get("dimension"))
+        except ValueError as exc:
+            raise BadRequestException(f"{key} dimension: {exc}.")
+        if set(parts) != set(spec["dimensions"]):
+            raise BadRequestException(f"{key} rows need exactly the dimensions "
+                                      f"{', '.join(spec['dimensions']) or '(none)'}.")
+        for name, value in parts.items():
+            if name in content.DIMENSION_LISTS:
+                codes = _signed_codes(db, pack, content.DIMENSION_LISTS[name])
+                if value not in codes:
+                    raise BadRequestException(f"{name}={value} is not in the signed "
+                                              f"{content.DIMENSION_LISTS[name]} list.")
+        dimension = content.format_dimension(**parts) or None
+
+    numbers = {name: _decimal(data.get(name), name) for name in ("minAmount", "maxAmount", "ratePct", "flatAmount")}
+    if any(v is not None and v < 0 for v in numbers.values()):
+        raise BadRequestException("Amounts and rates cannot be negative.")
+    if numbers["maxAmount"] is not None and numbers["minAmount"] is not None and numbers["maxAmount"] <= numbers["minAmount"]:
+        raise BadRequestException("maxAmount must be above minAmount.")
+    start = _parse("effective_from", data.get("effectiveFrom"), "effectiveFrom")
+    end = _parse("effective_to", data.get("effectiveTo"), "effectiveTo")
+    name = " ".join(str(data.get("name") or key).split())
+    if spec["kind"] == content.KIND_TABLE:
+        day = _parse("effective_from", data.get("date"), "date")
+        if (pack.effective_from and day < pack.effective_from) or (pack.effective_to and day > pack.effective_to):
+            raise BadRequestException(f"{day.isoformat()} is outside the pack window "
+                                      f"({_safe(pack.effective_from)} to {_safe(pack.effective_to)}).")
+        start, end = day, day
+    if start and end and end < start:
+        raise BadRequestException("effectiveTo cannot be before effectiveFrom.")
+    formula = " ".join(str(data.get("formulaText") or "").split()) or None
+
+    row = TaxSlab(jurisdiction_pack_id=pack.id, organization_id=None, jurisdiction_country=BE,
+                  rule_type=content.RULE_TYPES[key], filing_status=dimension,
+                  min_amount=numbers["minAmount"] if numbers["minAmount"] is not None else Decimal("0"),
+                  max_amount=numbers["maxAmount"],
+                  rate_pct=numbers["ratePct"] if numbers["ratePct"] is not None else Decimal("0"),
+                  flat_amount=numbers["flatAmount"], formula_expression=formula,
+                  tax_formula=name[:150], rate_label=_marked(f"{key}: {name}", verify, 150),
+                  effective_from=start, effective_to=end, source_document_id=source.id, sort_order=0)
+    db.add(row)
+    db.flush()
+    _finish(db, pack, actor_id, "be_statutory_slab", row.id, {}, {**slab_view(row), "action": "added",
+                                                                   "signed": verify}, reason)
+    return slab_view(row)
+
+
+def _signer(db: Session, row_id: int):
+    """The Super Admin whose audited edit last signed this slab row, or None."""
+    from app.modules.payroll.models import TaxConfigurationAudit as A
+
+    rows = (db.query(A).filter(A.entity_type == "be_statutory_slab", A.entity_id == row_id)
+            .order_by(A.id.desc()).all())
+    for audit in rows:
+        new = audit.new_value if isinstance(audit.new_value, dict) else {}
+        if new.get("signed") is True:
+            return audit.actor_id
+    return None
+
+
+def retire_slab_row(db: Session, row_id: int, data: dict, actor_id) -> dict:
+    """Hard-delete one band / formula / table slab row of a DRAFT pack (a Draft
+    row was never in force). Reason required; the audit row keeps the full
+    before-image (values, dates, source, signed state and signer). Refused on
+    any non-Draft pack."""
+    from app.modules.payroll.models import TaxSlab
+
+    content = _content()
+    row = db.get(TaxSlab, row_id)
+    if row is None or row.organization_id is not None or (row.jurisdiction_country or "").upper() != BE \
+            or row.rule_type not in set(content.RULE_TYPES.values()):
+        raise NotFoundException("Belgium band / formula / table row", row_id)
+    pack = _pack(db, row.jurisdiction_pack_id)
+    if pack.status != "Draft":
+        raise BadRequestException(f"Belgium pack {pack.pack_id} is {pack.status}: rows can be retired only from a "
+                                  "Draft version.")
+    reason = _reason(dict(data or {}))
+    before = {**slab_view(row), "formulaExpression": row.formula_expression, "signedBy": _signer(db, row.id)}
+    db.delete(row)
+    _finish(db, pack, actor_id, "be_statutory_slab", row_id, before, {"action": "retired"}, reason)
+    return {"id": row_id, "retired": True}
+
+
+def joint_committees(db: Session) -> list:
+    """Belgian Joint Committee CBA packs (payroll_collective_agreements, D3) with
+    the committee / sub-committee parsed from agreement_code by the backend
+    (the frontend never parses codes). Platform definitions only."""
+    from app.modules.payroll.models import CollectiveAgreement
+
+    content = _content()
+    out = []
+    rows = (db.query(CollectiveAgreement).filter(CollectiveAgreement.jurisdiction_country == BE,
+                                                 CollectiveAgreement.organization_id.is_(None))
+            .order_by(CollectiveAgreement.agreement_code, CollectiveAgreement.version).all())
+    for r in rows:
+        try:
+            committee, sub, code_version = content.parse_be_agreement_code(r.agreement_code)
+            valid = True
+        except ValueError:
+            committee, sub, code_version, valid = None, None, None, False
+        out.append({"id": r.id, "agreementCode": r.agreement_code, "name": r.name, "version": r.version,
+                    "status": r.status, "agreementType": r.agreement_type, "jointCommittee": committee,
+                    "subCommittee": sub, "codeVersion": code_version, "codeValid": valid,
+                    "effectiveFrom": _safe(r.effective_from), "effectiveTo": _safe(r.effective_to),
+                    "sourceDocumentId": r.source_document_id, "approvedById": r.approved_by_id})
+    return out
 
 
 def add_authority_example(db: Session, pack_row_id: int, data: dict, actor_id) -> dict:

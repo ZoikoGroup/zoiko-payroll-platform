@@ -1113,3 +1113,23 @@ export const seedPlDraftPack = (reason) => apiFetch(`${PL_SA}/seed-draft`, { met
 export const addPlAuthorityExample = (packRowId, payload) =>
   apiFetch(`${PL_SA}/packs/${packRowId}/authority-examples`, { method: "POST", body: payload });
 export const runPlGoldenCheck = (packRowId) => apiFetch(`${PL_SA}/packs/${packRowId}/golden-check`, { method: "POST" });
+
+// ── Belgium (ZP-BE-ENG-001 Phase 3A/3B) signing console ─────────────────────
+// Same governance as Poland. Groups, labels, kinds, vocabularies, slab specs and
+// reference notes all come from the configuration API (no key lists here).
+const BE_SA = "/api/super-admin/compliance/belgium";
+export const getBeSummary = () => apiFetch("/api/super-admin/compliance/jurisdictions/BE/statutory-summary");
+export const listBePacks = () => apiFetch(`${BE_SA}/packs`);
+export const getBeConfiguration = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/configuration`);
+export const getBeSigningStatus = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/signing-status`);
+export const updateBeRow = (kind, rowId, payload) =>
+  apiFetch(`${BE_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
+export const getBeDecisions = () => apiFetch(`${BE_SA}/decisions`);
+export const seedBeDraftPack = (reason) => apiFetch(`${BE_SA}/seed-draft`, { method: "POST", body: { reason } });
+export const addBeAuthorityExample = (packRowId, payload) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/authority-examples`, { method: "POST", body: payload });
+export const addBeSlabRow = (packRowId, key, payload) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/slab-rows/${key}`, { method: "POST", body: payload });
+export const retireBeSlabRow = (rowId, reason) =>
+  apiFetch(`${BE_SA}/configuration/slab-rows/${rowId}`, { method: "DELETE", params: { reason } });
+export const listBeJointCommittees = () => apiFetch(`${BE_SA}/joint-committees`);

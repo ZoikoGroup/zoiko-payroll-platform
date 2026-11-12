@@ -155,6 +155,8 @@ _STRUCTURAL_NUMBERS = {
 # Strings that look numeric but are not statutory values.
 _STRUCTURAL_STRINGS = {
     ("engine/jurisdictions/belgium/pack.py", "0.01"): "EUR cent unit (the signed rounding rule picks it)",
+    ("engine/countries/belgium_content.py", "^[A-Z0-9]{1,10}$"):
+        "ONSS code shape (1-10 letters / digits) for code lists and EC / WC dimensions",
     ("engine/countries/belgium_content.py", "Belcotax 281.10/281.11 XML guidance"):
         "evidence S22 title: Belcotax form numbers 281.10 / 281.11, not values",
     ("be_super_admin.py", "^[A-Za-z0-9 _.-]{1,20}$"): "authority-example name pattern (length 1-20)",

@@ -4897,6 +4897,36 @@ def belgium_add_authority_example(pack_row_id: int, payload: dict = Body(...),
     return result
 
 
+@router.post("/compliance/belgium/packs/{pack_row_id}/slab-rows/{key}",
+             summary="Add a row to a Belgium band / formula / table key (editable packs; source + reason; audited)")
+def belgium_add_slab_row(pack_row_id: int, key: str, payload: dict = Body(...),
+                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.add_slab_row(db, pack_row_id, key, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.delete("/compliance/belgium/configuration/slab-rows/{row_id}",
+               summary="Retire (delete) a Belgium band / formula / table row of a Draft pack (reason; audited)")
+def belgium_retire_slab_row(row_id: int, reason: Optional[str] = Query(None),
+                            current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.retire_slab_row(db, row_id, {"reason": reason}, current_user.id)
+    db.commit()
+    return result
+
+
+@router.get("/compliance/belgium/joint-committees",
+            summary="Belgian Joint Committee packs with committee / sub-committee parsed from the agreement code")
+def belgium_joint_committees(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    return be_super_admin.joint_committees(db)
+
+
 @router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
              summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
 def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,

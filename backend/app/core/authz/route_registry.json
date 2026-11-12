@@ -20493,11 +20493,43 @@
    "overridden": false
   },
   {
+   "method": "DELETE",
+   "path": "/api/super-admin/compliance/belgium/configuration/slab-rows/{row_id}",
+   "data_class": "platform",
+   "action": "delete",
+   "resource": "slab-rows",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/super-admin/compliance/belgium/decisions",
    "data_class": "platform",
    "action": "read",
    "resource": "decisions",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/belgium/joint-committees",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "joint-committees",
    "principals": [
     "super_admin"
    ],
@@ -20562,6 +20594,22 @@
    "data_class": "platform",
    "action": "read",
    "resource": "signing-status",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/slab-rows/{key}",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "slab-rows",
    "principals": [
     "super_admin"
    ],

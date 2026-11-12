@@ -99,9 +99,11 @@ check("Belgium routes salary by IBAN over SEPA", () => {
   assert(/^ {2}BE: \["iban"\],\r?$/m.test(bank), "banking compliance keys");
 });
 
-check("no Belgium routes, pages or Super Admin UI yet (Phase 1)", () => {
-  assert(!/compliance\/belgium/.test(read("App.jsx")), "no BE route");
-  assert(!/BE: "belgium"/.test(read("pages/JurisdictionCompliance/index.js")), "no BE compliance slug");
+// Phase 3B added the Super Admin console: its routes and pages are validated by
+// scripts/be-console-ui-validation.mjs.
+check("the Belgium console page is wired (Phase 3B)", () => {
+  assert(/compliance\/belgium/.test(read("App.jsx")), "BE route");
+  assert(/BE: "belgium"/.test(read("pages/JurisdictionCompliance/index.js")), "BE compliance slug");
 });
 
 if (failures.length) {
