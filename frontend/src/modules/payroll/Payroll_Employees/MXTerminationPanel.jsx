@@ -90,6 +90,9 @@ export default function MXTerminationPanel({ employeeId }) {
             { key: "reasonCode", label: "Reason (transcribed catalog)", type: "select", options: reasonCodes, required: true },
             { key: "evidenceRef", label: "Evidence reference", required: true },
             { key: "note", label: "Note" },
+            // Sweep S1 (D-12 c): read only when the D-12 decision answers OPERATOR_ENTERED.
+            { key: "indemnityDailySalary", label: "Indemnity daily salary (only if D-12 = operator entered)" },
+            { key: "indemnitySalaryEvidenceRef", label: "Evidence for that salary" },
           ]}
           onSubmit={(s) => run(() => recordMxTermination(employeeId, blankToNull(s)),
             "Recorded — another person must approve it.")}

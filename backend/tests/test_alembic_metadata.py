@@ -301,8 +301,14 @@ def test_alembic_heads_is_single_head():
     # 1ee3bbde33bb (2026-11-05, Poland P2 pl_foundation) is the single child of a8cde2482ef0;
     # e11c2c36df17 (Poland P6 pl_incapacity_episodes) is its single child;
     # e75b9219e1f8 (Poland P8 pl_filing_settlement) is the single child of that;
-    # e7ec6c1933b4 (Poland P9 pl_parallel_cycles) is its single child;
-    # 13574b996ccf (Malaysia P2 my_foundation) is the single child of that;
+    # e7ec6c1933b4 (Poland P9 pl_parallel_cycles) is its single child.
+    # efc56f3235e2 (Mexico mx_decision_inputs_m21, sweep S1): seven nullable columns the
+    # decision options read (terminations, labour policies, statutory profiles); written on
+    # 3880223bfaa0, re-parented (never applied) onto e7ec6c1933b4.
+    # f3a9c1d7e2b4 (2026-11-11, payslip templates) is the single child of efc56f3235e2
+    # (re-parented, never applied, when origin/main was merged into venu) - single head.
+    # 13574b996ccf (Malaysia P2 my_foundation) is the single child of f3a9c1d7e2b4
+    # (re-parented, never applied, at the 2026-11-12 venu sync);
     # 5f314f975ac3 (Malaysia P7 my_events_holds) is its single child.
     assert heads == ["5f314f975ac3"]
 
@@ -369,7 +375,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 260   # + 5f314f975ac3 (Malaysia P7 my_events_holds, child of 13574b996ccf)
+    assert len(revs) == 262   # + efc56f3235e2 (Mexico m21) + f3a9c1d7e2b4 (payslip templates) + 13574b996ccf (Malaysia P2, re-parented onto f3a9c1d7e2b4) + 5f314f975ac3 (Malaysia P7)
 
 
 def test_germany_head_chain_wiring_is_intact():

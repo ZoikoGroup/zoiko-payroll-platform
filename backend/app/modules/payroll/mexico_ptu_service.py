@@ -320,7 +320,10 @@ def allocate(db: Session, org_id: int, cycle_id: int, actor_id: Optional[int]) -
     facts = qualifying_facts(db, row)
     if not facts:
         raise BadRequestException(f"the employer has no committed Mexican payslip in {row.fiscal_year}")
-    result = ptu.allocate(_dec(row.distributable_amount), facts, row.fiscal_year)
+    from app.modules.payroll import mexico_decision_config
+
+    with mexico_decision_config.applying(db):                      # D-14 (sweep S1)
+        result = ptu.allocate(_dec(row.distributable_amount), facts, row.fiscal_year)
     A = m.PayrollMxPtuAllocation
     db.query(A).filter(A.cycle_id == row.id).delete(synchronize_session=False)
     by_id = {f["employee_id"]: f for f in facts}

@@ -97,6 +97,13 @@ export default function MXSandboxTab() {
             Content: {result.pack?.label || "no pack"} · State ISN: {result.isnPack?.label || "no pack"}
             {result.candidates?.length ? ` · Candidates: ${result.candidates.map((c) => `${c.decision} ${c.contentKey}=${c.value}`).join("; ")}` : ""}
           </p>
+          {/* Sweep S1: the register's APPROVED answers are in force here as in a run. */}
+          <p className="break-all text-[12px] text-foreground-muted" data-testid="mx-sandbox-approved">
+            Approved decisions in force: {Object.keys(result.approvedDecisions || {}).length
+              ? Object.entries(result.approvedDecisions).map(([k, v]) => `${k} v${v.version} = ${v.value}`).join("; ")
+              : "none"}
+            {result.approvedPackRows?.length ? ` · Pack rows filled from them: ${result.approvedPackRows.join(", ")}` : ""}
+          </p>
           {result.outcome === "BLOCKED" ? (
             <div className="mt-2" data-testid="mx-sandbox-block">
               <p className="text-[13px] font-semibold text-error">Blocked: {result.block.code}</p>

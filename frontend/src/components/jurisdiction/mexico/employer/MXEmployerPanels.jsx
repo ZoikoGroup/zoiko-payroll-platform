@@ -241,6 +241,11 @@ export function MXLaborPolicyPanel({ detail, readOnly, reload, agreements = [] }
               { key: "salaryDaysConvention", label: "Salary days for quincenal / monthly pay (contract)", type: "select",
                 options: [{ value: "CALENDAR", label: "Calendar days of the period" },
                   { value: "FIXED", label: "Fixed 15 / 30 days" }] },
+              // Sweep S1 (D-17 c): read only when the D-17 decision answers EMPLOYER_DAILY_HOURS.
+              { key: "hourlyRateDailyHours", label: "Daily hours for the overtime hourly rate (only if D-17 = employer figure)" },
+              // Sweep S1 (D-08 PER_EMPLOYER): read only when the D-08 decision leaves the method to each employer.
+              { key: "specialPayWithholdingMethod", label: "Special-pay withholding method (only if D-08 = per employer)", type: "select",
+                options: [{ value: "RLISR_174", label: "RLISR Art. 174" }, { value: "ART_96_MONTHLY", label: "LISR Art. 96 monthly" }] },
               { key: "collectiveAgreementId", label: "Collective agreement (optional)", type: "select",
                 options: agreements.map((a) => ({ value: a.id, label: `${a.code} v${a.version}` })) },
             ]}
@@ -250,6 +255,8 @@ export function MXLaborPolicyPanel({ detail, readOnly, reload, agreements = [] }
                 { serviceYearFrom: 2, serviceYearTo: null, days: s.vacationDaysLater }],
               vacationPremiumPct: s.vacationPremiumPct, sundayPremiumPct: s.sundayPremiumPct,
               salaryDaysConvention: s.salaryDaysConvention || null,
+              hourlyRateDailyHours: s.hourlyRateDailyHours || null,
+              specialPayWithholdingMethod: s.specialPayWithholdingMethod || null,
               collectiveAgreementId: s.collectiveAgreementId ? Number(s.collectiveAgreementId) : null,
             }), "Policy recorded as DRAFT with its floor check.")}
           />

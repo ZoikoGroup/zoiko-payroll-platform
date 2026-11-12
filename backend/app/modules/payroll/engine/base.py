@@ -1133,6 +1133,7 @@ class PayrollContext:
     # Phase 9e: an approved annual ISR adjustment applied to this ordinary payslip
     # ({id, difference, fiscal_year}); None for every other payslip and country.
     mx_annual_adjustment: dict = None
+    mx_decisions: dict = None                  # sweep S1: approved decision answers applied (decisions.applied)
 
     # ── Brazil (ZP-BR-ENG-001) — pre-resolved CLT payroll inputs ─────────────
     # Resolved by the service layer before dispatch; engine/countries/brazil.py

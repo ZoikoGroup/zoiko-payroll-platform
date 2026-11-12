@@ -41,6 +41,12 @@ NEW_TABLES = TENANT + WORKER
 SHARED = {"payslip_items": {"pl_calculation_snapshot"}, "payroll_runs": {"pl_approval_fingerprint"}}
 
 
+# Mexico m21 (efc56f3235e2, sweep S1) is the head after this chain: its columns are pending too.
+MX_M21 = {"payroll_mx_terminations": {"indemnity_daily_salary", "indemnity_salary_evidence_ref"},
+          "payroll_mx_labor_policies": {"hourly_rate_daily_hours", "special_pay_withholding_method"},
+          "payroll_employee_statutory_profiles": {"mx_union_member", "mx_sdi_operator_entered", "mx_sdi_evidence_ref"}}
+
+
 def _load(prefix=REVISION):
     path = next(VERSIONS.glob(f"{prefix}_*.py"))
     spec = importlib.util.spec_from_file_location(f"rev_{prefix}", path)
@@ -205,10 +211,13 @@ def test_deploy_drift_filter_explains_every_pl_object():
                                         "payroll_my_work_assignments", "payroll_my_tax_declarations",
                                         "payroll_my_accumulator_entries",  # + Malaysia P2 (13574b996ccf)
                                         "payroll_my_employer_events", "payroll_my_clearance_holds",
-                                        "payroll_my_clearance_hold_lines"}  # + Malaysia P7 (5f314f975ac3)
-    # + Malaysia P2 (13574b996ccf) shared columns on the same chain.
-    assert columns == {t: SHARED[t] | {"payslip_items": {"my_calculation_snapshot"},
-                                       "payroll_runs": {"my_approval_fingerprint"}}[t] for t in SHARED}
+                                        "payroll_my_clearance_hold_lines",  # + Malaysia P7 (5f314f975ac3)
+                                        "payroll_payslip_templates", "payroll_payslip_template_versions",
+                                        "payroll_payslip_template_assignments"}  # + payslip templates (f3a9c1d7e2b4)
+    # + Malaysia P2 (13574b996ccf) shared columns, payslip templates and Mexico m21 on the same chain.
+    assert columns == {**SHARED, **MX_M21,
+                       "payslip_items": SHARED["payslip_items"] | {"my_calculation_snapshot", "template_version_id"},
+                       "payroll_runs": SHARED["payroll_runs"] | {"my_approval_fingerprint"}}
 
 
 def test_revision_is_the_single_child_of_the_previous_head():

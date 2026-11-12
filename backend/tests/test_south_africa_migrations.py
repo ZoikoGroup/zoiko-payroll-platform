@@ -81,7 +81,9 @@ NZ_TABLES = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz
                                         "payroll_my_work_assignments", "payroll_my_tax_declarations",
                                         "payroll_my_accumulator_entries",  # + Malaysia P2 (13574b996ccf)
                                         "payroll_my_employer_events", "payroll_my_clearance_holds",
-                                        "payroll_my_clearance_hold_lines"}  # + Malaysia P7 (5f314f975ac3)
+                                        "payroll_my_clearance_hold_lines",  # + Malaysia P7 (5f314f975ac3)
+                                        "payroll_payslip_templates", "payroll_payslip_template_versions",
+                                        "payroll_payslip_template_assignments"}  # + payslip templates (f3a9c1d7e2b4)
 
 
 def _load(prefix):
@@ -253,9 +255,11 @@ def test_deploy_drift_filter_explains_every_za_object():
     assert columns["users"] == google_columns
     for table, names in P9_COLUMNS.items():
         assert columns[table] == names, table
-    assert columns["payroll_employee_statutory_profiles"] == {name for name, _t in module._PROFILE_COLUMNS}
+    # Mexico m21 (efc56f3235e2) adds three columns on the same table after this chain.
+    assert columns["payroll_employee_statutory_profiles"] - {"mx_union_member", "mx_sdi_operator_entered",
+                                                             "mx_sdi_evidence_ref"} == {name for name, _t in module._PROFILE_COLUMNS}
     assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot",
-                                        "nz_calculation_snapshot", "nz_correction_of_id", "pl_calculation_snapshot", "my_calculation_snapshot"}
+                                        "nz_calculation_snapshot", "nz_correction_of_id", "pl_calculation_snapshot", "my_calculation_snapshot", "template_version_id"}
     assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint",
                                        "jp_payment_kind", "nz_approval_fingerprint", "nz_payment_kind",
                                        "nz_run_options", "pl_approval_fingerprint", "my_approval_fingerprint"}

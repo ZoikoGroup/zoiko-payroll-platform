@@ -1,10 +1,12 @@
 """my_foundation: Malaysia employer/worker statutory tables, identifier vault, work assignments, tax declarations, ledger
 
 Revision ID: 13574b996ccf
-Revises: e7ec6c1933b4
+Revises: f3a9c1d7e2b4
 Create Date: 2026-11-12
 
-ZP-MY-ENG-001 Phase 2 (database). Additive only: seven new payroll_my_*
+ZP-MY-ENG-001 Phase 2 (database). Written on e7ec6c1933b4 (Poland P9) and
+re-parented, never applied, onto f3a9c1d7e2b4 (payslip templates) at the
+2026-11-12 venu sync (single head). Additive only: seven new payroll_my_*
 tables and two nullable shared columns; no existing row is touched.
 
   payroll_my_identifier_vault           encrypted MyKad/NRIC, TIN, EPF and
@@ -47,7 +49,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "13574b996ccf"
-down_revision: Union[str, Sequence[str], None] = "e7ec6c1933b4"
+down_revision: Union[str, Sequence[str], None] = "f3a9c1d7e2b4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

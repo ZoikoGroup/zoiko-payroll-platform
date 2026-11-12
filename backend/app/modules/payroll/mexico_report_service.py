@@ -165,8 +165,6 @@ def _run_variance(db: Session, org_id: int, run) -> dict:
     """Spec §13 stage 4: each employee's net, employer cost and statutory lines
     against the prior committed Mexican run. High-value deltas are flagged only
     against the release owner's approved D-24 threshold — never a default."""
-    from decimal import Decimal, InvalidOperation
-
     m = _mx_report_models()
     if not _committed(run):
         raise BadRequestException(f"run {run.id} is not committed — variance compares committed results only")
@@ -185,12 +183,15 @@ def _run_variance(db: Session, org_id: int, run) -> dict:
                                                                          m.PayslipItem.mx_calculation_snapshot.isnot(None))}
 
     cur, old = items(run), items(prior)
+    from app.core.exceptions import BadRequestException as _Refused
+    from app.modules.payroll import mexico_decision_config
+
     decision = _approved_value(db, VARIANCE_THRESHOLD_DECISION)
     threshold = None
-    if decision is not None:
+    if decision is not None:            # sweep S1: an MXN amount, a percentage of the prior figure, or per line
         try:
-            threshold = Decimal(str(decision.chosen_option))
-        except (InvalidOperation, ValueError):
+            threshold = mexico_decision_config.threshold(VARIANCE_THRESHOLD_DECISION, str(decision.chosen_option))
+        except _Refused:
             threshold = None
     refs = _employee_refs(db, set(cur) | set(old))
     rows = []
@@ -201,12 +202,13 @@ def _run_variance(db: Session, org_id: int, run) -> dict:
                      "delta": str(a[k] - b[k]) if a and b else None} for k in _VARIANCE_LINES}
         flag = None
         if threshold is not None and a and b:
-            flag = any(abs(a[k] - b[k]) >= threshold for k in ("net", "employer_total"))
+            flag = any(mexico_decision_config.exceeds(threshold, a[k] - b[k], b[k], k, strict=False)
+                       for k in ("net", "employer_total"))
         rows.append({"employee": refs.get(emp, f"#{emp}"), "employeeId": emp,
                      "status": "NEW" if b is None else ("LEFT" if a is None else "BOTH"), "lines": lines,
                      "highValue": flag})
     return {"runId": run.id, "priorRunId": prior.id if prior else None, "employees": rows,
-            "threshold": {"decision": VARIANCE_THRESHOLD_DECISION, "value": str(threshold) if threshold is not None
+            "threshold": {"decision": VARIANCE_THRESHOLD_DECISION, "value": threshold["raw"] if threshold is not None
                           else None,
                           "note": None if threshold is not None else "the release owner's high-value threshold (D-24) "
                           "is not approved: deltas are shown, none is flagged"}}

@@ -219,10 +219,17 @@ def seed_decisions(db: Session, decisions_md: Optional[str] = None, gap_register
 # ── answers ──────────────────────────────────────────────────────────────────
 
 def validate_answer(row, chosen: str) -> None:
-    """Refuse an answer the consuming code could not read."""
+    """Refuse an answer the consuming code could not read. A decision built as
+    configuration (sweep S1, mexico_decision_config) is checked against the
+    options built today, whatever kind its row was seeded with."""
+    from app.modules.payroll import mexico_decision_config
+
     chosen = (chosen or "").strip()
     if not chosen:
         raise BadRequestException("A proposal needs the chosen option")
+    if mexico_decision_config.spec(row.code) is not None:
+        mexico_decision_config.parse(row.code, chosen)
+        return
     if row.answer_kind == "ROUNDING_RULE":
         from app.modules.payroll.engine.jurisdictions.mexico import rounding
         from app.modules.payroll.engine.jurisdictions.mexico.errors import MXBlock
@@ -255,6 +262,24 @@ def ticket(row) -> Optional[dict]:
     seeds, where, and the citation the row carries. Draft packs only."""
     if row.status not in ("APPROVED", "TRANSCRIBED"):
         return None
+    from app.modules.payroll import mexico_decision_config
+
+    c = mexico_decision_config.spec(row.code)
+    transcription = {"decision": row.code, "version": row.version, "contentKeys": row.content_keys or [],
+                     "value": row.chosen_option, "citation": f"DECISION/{row.code}#{(row.content_hash or '')[:12]}",
+                     "target": "the next Draft version of the pack that carries the key (never an Active pack)",
+                     "transcribed": row.status == "TRANSCRIBED", "transcriptionRef": row.transcription_ref}
+    if c is not None and c["kind"] != "RECORD":
+        # Sweep S1: the answer is configuration — in force on approval, no code change. A pack-row answer
+        # also keeps its transcription hand-off: it fills only a missing row until the Draft pack carries it.
+        if c["target"].startswith("pack_row:"):
+            return {**transcription, "inForce": True, "changes": c["changes"], "stillNeeds": c["needs"],
+                    "then": "applies wherever the pack carries no row for the key; transcribe it into the next "
+                            "Draft pack for G1 sign-off"}
+        return {"decision": row.code, "version": row.version, "value": row.chosen_option,
+                "inForce": True, "target": c["target"], "changes": c["changes"], "stillNeeds": c["needs"],
+                "then": "nothing to transcribe: the code reads the answer",
+                "transcribed": row.status == "TRANSCRIBED", "transcriptionRef": row.transcription_ref}
     return {"decision": row.code, "version": row.version, "contentKeys": row.content_keys or [],
             "value": row.chosen_option, "citation": f"DECISION/{row.code}#{(row.content_hash or '')[:12]}",
             "target": "the next Draft version of the pack that carries the key (never an Active pack)",
@@ -263,13 +288,28 @@ def ticket(row) -> Optional[dict]:
             "transcribed": row.status == "TRANSCRIBED", "transcriptionRef": row.transcription_ref}
 
 
+def _configured_answer(row) -> dict:
+    """The answer grammar the code reads (sweep S1), else the seeded one."""
+    from app.modules.payroll import mexico_decision_config
+
+    c = mexico_decision_config.spec(row.code)
+    if c is None:
+        return {"answerKind": row.answer_kind, "allowedValues": row.allowed_values, "configuration": None}
+    options = c["options"]
+    allowed = ([f"{p}={v}" for p, vs in options.items() for v in vs] if isinstance(options, dict) else options)
+    return {"answerKind": c["kind"], "allowedValues": allowed,
+            "configuration": {"target": c["target"], "changes": c["changes"], "needs": c["needs"],
+                              "parts": list(options) if isinstance(options, dict) else None,
+                              "notBuilt": c.get("notBuilt")}}
+
+
 def view(row) -> dict:
     iso = lambda d: d.isoformat() if d else None  # noqa: E731
     return {"id": row.id, "code": row.code, "version": row.version, "title": row.title, "gates": row.gates or [],
             "ownerRole": row.owner_role, "question": row.question, "options": row.options or [],
             "blockCodes": row.block_codes or [], "contentKeys": row.content_keys or [],
             "questionSources": row.question_sources or [],
-            "answerKind": row.answer_kind, "allowedValues": row.allowed_values, "status": row.status,
+            **_configured_answer(row), "status": row.status,
             "chosenOption": row.chosen_option, "rationale": row.rationale, "citedSources": row.cited_sources or [],
             "contentHash": row.content_hash, "supersedesId": row.supersedes_id,
             "proposedById": row.proposed_by_id, "proposedAt": iso(row.proposed_at),

@@ -36,6 +36,11 @@ const SECTIONS = [
   ]],
   ["CFDI receiver", [
     ["mx_fiscal_postal_code", "Fiscal postal code", "text"], ["mx_receiver_fiscal_regime", "Fiscal regime (c_RegimenFiscal)", "text"],
+    // Sweep S1 (C12): written as CFDI Sindicalizado only when the C12 decision answers FROM_PROFILE.
+    ["mx_union_member", "Union member (CFDI Sindicalizado, if C12 says so)", "bool"],
+    // Sweep S1 (C4 OPERATOR_ENTERED): the CFDI SalarioDiarioIntegrado, read only when C4 says so.
+    ["mx_sdi_operator_entered", "SDI entered by an operator (MXN, if C4 says so)", "number"],
+    ["mx_sdi_evidence_ref", "Evidence reference for that SDI", "text"],
   ]],
   ["ISR (no personal tax-rate field; subsidy and annual-adjustment eligibility are computed)", [
     ["mx_annual_adjustment_exclusion", "Declared annual-adjustment exclusion (code)", "text"],
@@ -83,7 +88,13 @@ export default function MexicoStatutoryProfilePanel({ employee, onClose }) {
 
   const factInput = ([k, label, kind, choices]) => (
     <Field key={k} label={label}>
-      {kind === "select" || kind === "state" ? (
+      {kind === "bool" ? (
+        <select className={input} name={k} value={value(k) === "" ? "" : String(value(k))} onChange={setFact(k)}>
+          <option value="">— not recorded —</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      ) : kind === "select" || kind === "state" ? (
         <select className={input} name={k} value={value(k)} onChange={setFact(k)}>
           <option value="">—</option>
           {(kind === "state" ? MX_FEDERAL_ENTITIES.map((s) => ({ value: s.code, label: `${s.code} — ${s.name}` }))

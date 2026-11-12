@@ -52,8 +52,14 @@ MX_NO_FALLBACK = None
 def calculate(ctx) -> dict:
     if (ctx.country or "").upper() != _COUNTRY:
         return {}
+    from ..jurisdictions.mexico import decisions
+
+    answers = getattr(ctx, "mx_decisions", None)
     try:
-        return _calculate(ctx)
+        if answers is None:                                # the caller's answers (if any) stay applied
+            return _calculate(ctx)
+        with decisions.applied(answers):                   # sweep S1: the register's approved answers
+            return _calculate(ctx)
     except MXBlock as exc:
         if exc.organization_id is None:
             exc.organization_id = getattr(ctx, "mx_organization_id", None)

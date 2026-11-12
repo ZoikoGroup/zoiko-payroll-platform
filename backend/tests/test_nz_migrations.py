@@ -222,7 +222,9 @@ def test_deploy_drift_filter_explains_every_nz_object():
                                         "payroll_my_work_assignments", "payroll_my_tax_declarations",
                                         "payroll_my_accumulator_entries",  # + Malaysia P2 (13574b996ccf)
                                         "payroll_my_employer_events", "payroll_my_clearance_holds",
-                                        "payroll_my_clearance_hold_lines"}  # + Malaysia P7 (5f314f975ac3)
+                                        "payroll_my_clearance_hold_lines",  # + Malaysia P7 (5f314f975ac3)
+                                        "payroll_payslip_templates", "payroll_payslip_template_versions",
+                                        "payroll_payslip_template_assignments"}  # + payslip templates (f3a9c1d7e2b4)
     assert set(NEW_TABLES) <= tables
     for table, names in SHARED.items():
         assert names <= columns[table], table

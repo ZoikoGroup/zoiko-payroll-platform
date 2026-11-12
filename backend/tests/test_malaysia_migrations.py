@@ -25,7 +25,7 @@ from sqlalchemy.pool import StaticPool
 from tests.test_poland_migrations import (VERSIONS, _CaptureBind, _cols, _indexes, _load, _metadata, _policies,
                                           classified)  # noqa: F401  (pytest fixture)
 
-REVISION, PARENT, SUFFIX = "13574b996ccf", "e7ec6c1933b4", "my_foundation"
+REVISION, PARENT, SUFFIX = "13574b996ccf", "f3a9c1d7e2b4", "my_foundation"   # re-parented 2026-11-12
 TENANT = ("payroll_my_employer_registrations",)
 WORKER = ("payroll_my_identifier_vault", "payroll_my_identifier_access_events", "payroll_my_worker_profiles",
           "payroll_my_work_assignments", "payroll_my_tax_declarations", "payroll_my_accumulator_entries")

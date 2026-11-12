@@ -129,7 +129,10 @@ def run(ctx) -> dict:
                  "zone": zone, "seniority_date": fact(profile, "mx_seniority_date") if profile else None,
                  "year_to_date_exempt": getattr(ctx, "mx_year_to_date_exempt", None),
                  "separation_date": getattr(ctx, "mx_separation_date", None),
-                 "separation_total": _separation_total(special)}
+                 "separation_total": _separation_total(special),
+                 # sweep S1, D-08 PER_EMPLOYER: the employer's own withholding method for a special payment
+                 "employer_special_pay_method": (getattr(ctx, "mx_labor_policy", None) or {}).get(
+                     "special_pay_withholding_method")}
         resolved["facts"] = facts
         attempt("ordinary_lines", lambda: classification.classify(ordinary, getattr(ctx, "mx_classifications", None),
                                                                   on, work_state) if ordinary else [])
