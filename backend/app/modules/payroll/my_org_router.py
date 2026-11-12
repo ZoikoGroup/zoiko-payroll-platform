@@ -20,9 +20,10 @@ organisation router:
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_org_admin, get_current_payroll_operator
@@ -232,6 +233,19 @@ def my_delete_identifier(vault_id: int, body: Dict[str, Any] = Body(...), curren
     row = my.delete_my_identifier(db, _org_id(current_user), vault_id, _actor(current_user), body.get("reason"))
     db.commit()
     return my.identifier_view(row)
+
+
+# ── labour by territory (Phase 6) ───────────────────────────────────────────
+@router.get("/employees/{employee_id}/leave-entitlement", summary="Whole-year leave entitlement by territory")
+def my_leave_entitlement_view(employee_id: int, as_of: date = Query(..., alias="asOf"),
+                              current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return my.my_leave_entitlement(db, _org_id(current_user), employee_id, as_of)
+
+
+@router.get("/employees/{employee_id}/holidays", summary="The employee's federal + state public holidays")
+def my_holiday_calendar_view(employee_id: int, year: int = Query(...),
+                             current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return my.my_holiday_calendar(db, _org_id(current_user), employee_id, year)
 
 
 # ── employee summary, run preflight ─────────────────────────────────────────

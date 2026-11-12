@@ -486,3 +486,53 @@ def test_router_exposes_identifiers_only_masked():
     assert ("POST", "/malaysia/identifiers/{vault_id}/reveal") in paths
     assert ("POST", "/malaysia/employees/{employee_id}/work-assignments") in paths
     assert all(p.startswith("/malaysia/") for _m, p in paths)
+
+
+# ── Phase 6: labour inputs, leave / holidays without a pack ────────────────
+def test_calc_inputs_carry_every_assignment_of_the_period(world):
+    from app.modules.payroll import malaysia_service as my
+
+    w = world
+    _setup(w)
+    _assignment(w, "SABAH", "SBH", start="2026-03-16")                            # transfer mid-March
+    inputs = my.calc_inputs(w.db, None, w.employee, None, as_of=PAY_DATE, period=PERIOD)
+    assert inputs["my_assignment"]["labour_territory"] == "SABAH"
+    assert [a["labour_territory"] for a in inputs["my_assignments"]] == ["PENINSULAR_LABUAN", "SABAH"]
+    april = my.calc_inputs(w.db, None, w.employee, None, as_of=date(2026, 4, 30),
+                           period=(date(2026, 4, 1), date(2026, 4, 30)))
+    assert [a["labour_territory"] for a in april["my_assignments"]] == ["SABAH"]
+
+
+def test_freeze_keeps_overtime_events_and_assignments(world, with_pcb):
+    from app.modules.payroll import malaysia_service as my
+
+    w = world
+    _setup(w)
+    ctx = _context(my.calc_inputs(w.db, None, w.employee, None, as_of=PAY_DATE, period=PERIOD))
+    ctx.my_overtime_events = [{"event_ref": "T-1", "day_type": "WORKDAY", "date": "2026-03-10", "hours": "4",
+                               "normal_daily_hours": "8"}]
+    frozen = json.loads(json.dumps(my.my_freeze_context(ctx)))
+    thawed = my.my_thaw_context(frozen)
+    assert thawed.my_overtime_events == ctx.my_overtime_events
+    assert [a["labour_territory"] for a in thawed.my_assignments] == ["PENINSULAR_LABUAN"]
+
+
+def test_leave_and_holidays_need_an_active_pack(world):
+    from app.modules.payroll import jurisdiction_hooks
+    from app.modules.payroll import malaysia_service as my
+
+    w = world
+    _setup(w)
+    with pytest.raises(BadRequestException, match="No active Malaysia rule pack"):
+        my.my_leave_entitlement(w.db, w.org, w.employee.id, "2026-03-31")
+    with pytest.raises(BadRequestException, match="No active Malaysia rule pack"):
+        my.my_holiday_calendar(w.db, w.org, w.employee.id, 2026)
+    assert jurisdiction_hooks.call("MY", "pack_holidays", w.db, 2026) == []         # never a guessed list
+
+
+def test_router_exposes_the_labour_routes():
+    from app.modules.payroll.my_org_router import router
+
+    paths = {(sorted(r.methods)[0], r.path) for r in router.routes}
+    assert ("GET", "/malaysia/employees/{employee_id}/leave-entitlement") in paths
+    assert ("GET", "/malaysia/employees/{employee_id}/holidays") in paths

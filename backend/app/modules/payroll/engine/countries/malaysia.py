@@ -41,6 +41,8 @@ from app.modules.payroll.engine.jurisdictions.malaysia import eis as _eis
 from app.modules.payroll.engine.jurisdictions.malaysia import epf as _epf
 from app.modules.payroll.engine.jurisdictions.malaysia import errors as E
 from app.modules.payroll.engine.jurisdictions.malaysia import hrd as _hrd
+from app.modules.payroll.engine.jurisdictions.malaysia import jurisdiction as _jurisdiction
+from app.modules.payroll.engine.jurisdictions.malaysia import labour as _labour
 from app.modules.payroll.engine.jurisdictions.malaysia import minimum_wage as _minimum_wage
 from app.modules.payroll.engine.jurisdictions.malaysia import pcb as _pcb
 from app.modules.payroll.engine.jurisdictions.malaysia import perkeso as _perkeso
@@ -113,10 +115,25 @@ def calculate(ctx: PayrollContext) -> dict:
     attempt("PCB", lambda: _pcb.compute(pack, normal=base_of("PCB_NORMAL"), additional=base_of("PCB_ADDITIONAL"),
                                         epf=results.get("EPF"), declarations=declarations, profile=profile,
                                         residence=_applicability.residence(profile)))
+    # LABOUR (Phase 6, MY-001 / MY-017): the territory from the approved work
+    # assignment, then overtime verified against its approved events. Its own
+    # obligation: a labour block never hides the national computations.
+    labour = {}
+
+    def labour_step():
+        place = _jurisdiction.resolve(pack, getattr(ctx, "my_assignment", None),
+                                      getattr(ctx, "my_assignments", None), start, end)
+        labour["territory"] = place
+        labour["overtime"] = _labour.overtime(pack, place["territory"], place["holidayState"],
+                                              base_of("OT_RATE_BASE"), pay, profile,
+                                              getattr(ctx, "my_overtime_events", None))
+        return {"trace": labour}
+
+    attempt("LABOUR", labour_step)
     minimum_wage = None
     try:
         minimum_wage = _minimum_wage.check(pack, base_of("MIN_WAGE_BASIC"), pay, profile,
-                                           getattr(ctx, "my_assignment", None), start, end,
+                                           (labour.get("territory") or {}).get("territory"), start, end,
                                            getattr(ctx, "unpaid_leave_days", 0))
     except MYCalculationBlockedError as exc:
         blocked["MIN_WAGE"] = {"code": exc.key, "reason": exc.reason}
@@ -133,6 +150,7 @@ def calculate(ctx: PayrollContext) -> dict:
         "components": {k: money(v) for k, v in sorted(pay.items())},
         "obligations": {name: (r or {}).get("trace") for name, r in results.items()},
         "minimumWage": minimum_wage and {k: v for k, v in minimum_wage.items() if k != "exception"},
+        "labour": labour,
         "rounding": pack.rounding_events, "contentUsed": pack.used(),
     }
     if blocked:

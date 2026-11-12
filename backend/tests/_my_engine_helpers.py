@@ -23,6 +23,17 @@ TEST_TEXT = {
     "my_eis_age_rule": "AGE_AT_WAGE_MONTH_START", "my_hrd_non_malaysian_rule": "LEVY_ON_ALL_COVERED_WAGES",
 }
 LABEL = "TEST — not certifying"
+# Territorial labour TEST values (base key -> (flat, text)); every territory.
+TEST_TERRITORIAL = {
+    "my_ot_multiplier_workday": ("1.5", None), "my_ot_multiplier_rest_day": ("2", None),
+    "my_ot_multiplier_public_holiday": ("3", None), "my_ot_rate_days_divisor": ("26", None),
+    "my_ot_rate_divisor_rule": (None, "MONTHLY_BASE_DIV_DAYS_DIV_DAILY_HOURS"),
+    "my_annual_leave_tiers": (None, "0:8,2:12,5:16"), "my_sick_leave_tiers": (None, "0:14,2:18,5:22"),
+    "my_hospitalisation_days": ("60", None),
+}
+# (date, holiday_state or None = national, name) — TEST calendar rows.
+TEST_HOLIDAYS = ((date(2026, 5, 1), None, "Labour Day"), (date(2026, 12, 11), "SGR", "State holiday"),
+                 (date(2026, 5, 30), "SBH", "Harvest festival"))
 
 # (rule, class, lo, hi, employee, employer, effective_from, effective_to)
 TEST_SCHEDULES = (
@@ -47,6 +58,9 @@ def _rate(row, territory, overrides):
     eff_from, eff_to = row[8], row[9]
     if key in TEST_TEXT:
         text = TEST_TEXT[key]
+    base = key.split("__")[0]
+    if territory is not None and base in TEST_TERRITORIAL:
+        flat, text = TEST_TERRITORIAL[base]
     values = {"employee_rate_pct": ee, "employer_rate_pct": er, "flat_amount": flat, "text_value": text}
     values.update(overrides.get(key, {}))
     return {"id": key, "component_key": key, "label": label, "jurisdiction_state": territory,
@@ -54,7 +68,7 @@ def _rate(row, territory, overrides):
             **{k: (Decimal(str(v)) if v is not None and k != "text_value" else v) for k, v in values.items()}}
 
 
-def build_pack(overrides=None, schedules=TEST_SCHEDULES, unsigned=(), treatments=None):
+def build_pack(overrides=None, schedules=TEST_SCHEDULES, unsigned=(), treatments=None, holidays=TEST_HOLIDAYS):
     """(rate_map, slabs): every row signed except keys in `unsigned`."""
     overrides = overrides or {}
     rate_map = {}
@@ -71,6 +85,11 @@ def build_pack(overrides=None, schedules=TEST_SCHEDULES, unsigned=(), treatments
                           "min_amount": Decimal(lo), "max_amount": Decimal(hi) if hi is not None else None,
                           "flat_amount": Decimal(amount), "rate_label": f"{rule} {cls} {side} {LABEL}",
                           "effective_from": eff_from, "effective_to": eff_to, "sort_order": n})
+    for (day, state, name) in holidays:
+        n += 1
+        slabs.append({"id": n, "rule_type": content.MY_PUBLIC_HOLIDAY_RULE, "jurisdiction_state": state,
+                      "tax_formula": f"{day.isoformat()} p.1", "rate_label": f"{name} {LABEL}",
+                      "min_amount": Decimal("0"), "sort_order": n})
     for (obligation, treatment, component, label, _src) in content.MALAYSIA_EARNING_CLASSES:
         n += 1
         treatment = (treatments or {}).get((obligation, component), treatment)

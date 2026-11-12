@@ -149,6 +149,14 @@ EPF_AGE_TRANSITION_RULES = ("AGE_AT_WAGE_MONTH_START", "FROM_MONTH_AFTER_BIRTHDA
 EIS_AGE_RULES = ("AGE_AT_WAGE_MONTH_START", "AGE_AT_WAGE_MONTH_END")
 HRD_NON_MALAYSIAN_RULES = ("LEVY_ON_ALL_COVERED_WAGES", "MALAYSIAN_EMPLOYEES_ONLY")
 EPF_DIRECT_CALC_RULES = ("NON_MALAYSIAN_PART_F_ONLY",)
+# Labour (Phase 6). Overtime day types an approved overtime event can carry;
+# the hourly ordinary-rate rule (the divisor itself is a signed territorial
+# amount); how a pay period that spans two labour territories is treated;
+# leave tiers are signed text "YEARS:DAYS,YEARS:DAYS" (completed years of
+# service -> days), parsed, never assumed.
+OT_DAY_TYPES = ("WORKDAY", "REST_DAY", "PUBLIC_HOLIDAY")
+OT_RATE_DIVISOR_RULES = ("MONTHLY_BASE_DIV_DAYS_DIV_DAILY_HOURS",)
+TRANSFER_SPLIT_RULES = ("TERRITORY_AT_PERIOD_END",)
 ROUNDING_RULES = ("SEN_HALF_UP", "SEN_DOWN", "SEN_UP", "FIVE_SEN_UP", "RINGGIT_HALF_UP", "RINGGIT_DOWN",
                   "RINGGIT_UP")
 # Schedule bands: lower bound exclusive, upper bound inclusive ("exceeds X but
@@ -274,6 +282,7 @@ MALAYSIA_TERRITORY_KEYS = {
     "my_ot_multiplier_rest_day": "amount",
     "my_ot_multiplier_public_holiday": "amount",
     "my_ot_rate_divisor_rule": "text",
+    "my_ot_rate_days_divisor": "amount",
     "my_maternity_days": "amount",
     "my_paternity_days": "amount",
     "my_sick_leave_tiers": "text",
@@ -399,6 +408,7 @@ _TERRITORIAL = {
     "my_ot_multiplier_rest_day": ("Overtime multiplier, rest day", None, None, False, _WM),
     "my_ot_multiplier_public_holiday": ("Overtime multiplier, public holiday", None, None, False, _WM),
     "my_ot_rate_divisor_rule": ("Ordinary / hourly rate divisor rule", None, PENDING, False, _WM),
+    "my_ot_rate_days_divisor": ("Days divisor for the ordinary rate of pay", None, None, False, _WM),
     "my_maternity_days": ("Maternity leave (days)", "98", None, True, _EE),
     "my_paternity_days": ("Paternity leave (days)", "7", None, True, _EE),
     "my_sick_leave_tiers": ("Sick leave days by service tier", None, PENDING, False, _CY),

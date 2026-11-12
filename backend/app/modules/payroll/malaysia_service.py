@@ -985,6 +985,16 @@ def resolve_my_calc_inputs(db: Session, organization_id: int, employee, pay_date
     start, end = period or (None, None)
     assignment = _one_active(db, m.PayrollMyWorkAssignment, organization_id, employee.id, end or pay_date,
                              "work assignment")
+    # Every approved assignment overlapping the period (ACTIVE or since
+    # SUPERSEDED): a transfer inside the period needs the signed split rule
+    # (Phase 6, MY-003).
+    A = m.PayrollMyWorkAssignment
+    window_start = start or end or pay_date
+    overlapping = (db.query(A).filter(A.organization_id == organization_id, A.employee_id == employee.id,
+                                      A.status.in_((STATUS_ACTIVE, STATUS_SUPERSEDED)),
+                                      A.effective_from <= (end or pay_date),
+                                      (A.effective_to.is_(None)) | (A.effective_to >= window_start))
+                   .order_by(A.effective_from, A.id).all())
     D = m.PayrollMyTaxDeclaration
     declarations = (db.query(D).filter(D.organization_id == organization_id, D.employee_id == employee.id,
                                        D.status == "APPROVED", D.effective_from <= pay_date,
@@ -993,6 +1003,7 @@ def resolve_my_calc_inputs(db: Session, organization_id: int, employee, pay_date
     return {
         "my_pay_date": pay_date, "my_period_start": start, "my_period_end": end,
         "my_profile": _facts(profile), "my_registration": _facts(registration), "my_assignment": _facts(assignment),
+        "my_assignments": [{**_facts(a), "status": STATUS_ACTIVE} for a in overlapping],
         "my_declarations": [_facts(d) for d in declarations],
         "my_ytd": my_ytd_snapshot(db, organization_id, employee.id, entity, pay_date),
         "my_organization_id": organization_id, "my_legal_entity_id": entity, "my_employee_id": employee.id,
@@ -1011,8 +1022,8 @@ def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of:
 
 # ── frozen snapshot, replay and approval fingerprint (spec §13 replay) ─────
 _CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "additional_compensation")
-_CTX_PLAIN = ("pay_frequency", "my_components", "unpaid_leave_days", "my_organization_id", "my_legal_entity_id",
-              "my_employee_id", "trace_id")
+_CTX_PLAIN = ("pay_frequency", "my_components", "my_overtime_events", "unpaid_leave_days", "my_organization_id",
+              "my_legal_entity_id", "my_employee_id", "trace_id")
 _CTX_DATES = ("pay_date", "my_pay_date", "period_start", "period_end", "my_period_start", "my_period_end")
 _RECORD_KEYS = ("my_profile", "my_registration", "my_assignment")
 _RATE_FIELDS = ("id", "component_key", "label", "jurisdiction_state", "employee_rate_pct", "employer_rate_pct",
@@ -1040,6 +1051,7 @@ def my_freeze_context(ctx, calculation_mode: str = "standard") -> dict:
         "ctx": {k: getattr(ctx, k, None) for k in _CTX_DECIMALS + _CTX_PLAIN + _CTX_DATES},
         "records": {k: _record_for_freeze(getattr(ctx, k, None)) for k in _RECORD_KEYS},
         "declarations": [_record_for_freeze(d) for d in (getattr(ctx, "my_declarations", None) or [])],
+        "assignments": [_record_for_freeze(a) for a in (getattr(ctx, "my_assignments", None) or [])],
         "ytd": getattr(ctx, "my_ytd", None),
         "rateMap": {k: pick(r, _RATE_FIELDS) for k, r in (getattr(ctx, "rate_map", None) or {}).items()},
         "slabs": [pick(s, _SLAB_FIELDS) for s in (getattr(ctx, "slabs", None) or [])],
@@ -1069,6 +1081,7 @@ def my_thaw_context(frozen: dict):
         **{k: v for k, v in ctx.items() if v is not None}, country=MY,
         **{k: records.get(k) for k in _RECORD_KEYS},
         my_declarations=list(frozen.get("declarations") or []),
+        my_assignments=list(frozen.get("assignments") or []),
         my_ytd=frozen.get("ytd"),
         rate_map=dict(frozen.get("rateMap") or {}),
         slabs=list(frozen.get("slabs") or []),
@@ -1239,9 +1252,17 @@ def _my_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[st
 
 
 def _my_pack_holidays(db: Session, year: int) -> list:
-    # Federal and state holidays arrive as signed MY_PUBLIC_HOLIDAY rows with
-    # the labour phase (P6); nothing is seeded from a guessed list.
-    return []
+    """Signed NATIONAL holidays of `year` from the in-force pack's own rows;
+    state holidays are resolved per employee by holiday state. No pack / no
+    signed rows means nothing is seeded, never a guessed date."""
+    from app.modules.payroll.engine.jurisdictions.malaysia import holidays
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    try:
+        _rates, slabs, pack = resolve_tax_configuration(db, MY, payroll_date=date(year, 12, 31))
+    except Exception:  # an unresolvable pack is "no pack"
+        return []
+    return holidays.national_rows(slabs, year) if pack is not None else []
 
 
 def _my_template_activation_refusal(db: Session, template, actor_id=None) -> Optional[str]:
@@ -1432,6 +1453,62 @@ JURISDICTION_HOOKS = {
     "payment_treatment": "_my_payment_treatment",
     "payslip_hold_view": "_my_payslip_hold_view",
 }
+
+
+# ── labour by territory (Phase 6): leave entitlement and holiday calendar ──
+def _labour_context(db: Session, organization_id: int, employee_id: int, on: date):
+    from app.modules.payroll.engine.jurisdictions.malaysia import jurisdiction
+    from app.modules.payroll.engine.jurisdictions.malaysia.pack import MyPack
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    m = _models()
+    employee = _employee(db, organization_id, employee_id)
+    assignment = _one_active(db, m.PayrollMyWorkAssignment, organization_id, employee.id, on, "work assignment")
+    try:
+        rates, slabs, pack = resolve_tax_configuration(db, MY, payroll_date=on)
+    except Exception:  # an unresolvable pack is "no pack"
+        pack = None
+    if pack is None:
+        raise BadRequestException("No active Malaysia rule pack is in force on that date.")
+    my_pack = MyPack({r.component_key: r for r in rates}, slabs, organization_id, on)
+    place = jurisdiction.resolve(my_pack, _facts(assignment), None, on, on)
+    return employee, my_pack, place
+
+
+def my_leave_entitlement(db: Session, organization_id: int, employee_id: int, as_of) -> dict:
+    """Whole-year entitlements for the employee's territory on `as_of`, from
+    the signed territorial rows. Refused with the engine's own reason when a
+    fact or a signed rule is missing - never a guessed figure."""
+    from app.modules.payroll.engine.jurisdictions.malaysia import leave
+    from app.modules.payroll.engine.jurisdictions.malaysia.errors import MYCalculationBlockedError
+
+    on = _as_date(as_of, "asOf")
+    try:
+        employee, pack, place = _labour_context(db, organization_id, employee_id, on)
+        profile = _one_active(db, _models().PayrollMyWorkerProfile, organization_id, employee.id, on,
+                              "worker profile")
+        if profile is None:
+            raise BadRequestException("No ACTIVE Malaysia worker profile is in force on that date.")
+        out = leave.entitlements(pack, place["territory"], _facts(profile), on)
+    except MYCalculationBlockedError as blocked:
+        raise BadRequestException(f"Leave cannot be determined ({blocked.key}): {blocked.reason}")
+    return {"employeeId": employee.id, "asOf": on.isoformat(), **out}
+
+
+def my_holiday_calendar(db: Session, organization_id: int, employee_id: int, year: int) -> dict:
+    """The employee's federal + state holidays for `year` (signed rows only)."""
+    from app.modules.payroll.engine.jurisdictions.malaysia import holidays
+    from app.modules.payroll.engine.jurisdictions.malaysia.errors import MYCalculationBlockedError
+
+    on = date(int(year), 12, 31)
+    try:
+        employee, pack, place = _labour_context(db, organization_id, employee_id, on)
+        days = holidays.calendar(pack, place["holidayState"], on.year)
+    except MYCalculationBlockedError as blocked:
+        raise BadRequestException(f"The holiday calendar cannot be determined ({blocked.key}): {blocked.reason}")
+    return {"employeeId": employee.id, "year": on.year, "territory": place["territory"],
+            "holidayState": place["holidayState"],
+            "holidays": [{"date": d.isoformat(), "name": n} for d, n in sorted(days.items())]}
 
 
 # ── employee summary (for the Phase 8 panel; identifiers masked) ────────────

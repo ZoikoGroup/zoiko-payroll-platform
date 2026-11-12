@@ -17,7 +17,9 @@ from app.modules.payroll.engine.jurisdictions.malaysia import errors as E
 from app.modules.payroll.engine.jurisdictions.malaysia.pack import MyPack, dec, field, money, upper
 
 
-def check(pack: MyPack, basic, pay: dict, profile, assignment, start: date, end: date, unpaid_days) -> dict:
+def check(pack: MyPack, basic, pay: dict, profile, territory, start: date, end: date, unpaid_days) -> dict:
+    """`territory` is the RESOLVED labour territory (jurisdiction.resolve), or
+    None when it could not be resolved (the LABOUR obligation then blocks)."""
     full_month = start.day == 1 and end == date(end.year, end.month, calendar.monthrange(end.year, end.month)[1]) \
         and start.month == end.month and start.year == end.year
     reasons = []
@@ -27,10 +29,10 @@ def check(pack: MyPack, basic, pay: dict, profile, assignment, start: date, end:
         reasons.append("unpaid leave in the period")
     if dec(pay.get("HOURLY_PAY", 0)) > 0:
         reasons.append("hourly pay")
-    territory = upper(field(assignment, "labour_territory")) if assignment is not None else ""
+    territory = upper(territory)
     hours = field(profile, "normal_hours_week")
     if not territory:
-        reasons.append("no work assignment (labour territory)")
+        reasons.append("labour territory not resolved")
     elif hours in (None, ""):
         reasons.append("normal weekly hours not recorded")
     elif dec(hours) < pack.amount("my_weekly_hours_max", territory):

@@ -72,8 +72,26 @@ def _vocabulary() -> dict:
         "my_eis_age_rule": one_of(*content.EIS_AGE_RULES),
         "my_hrd_non_malaysian_rule": one_of(*content.HRD_NON_MALAYSIAN_RULES),
         "my_epf_direct_calc_rule": one_of(*content.EPF_DIRECT_CALC_RULES),
+        "my_transfer_split_rule": one_of(*content.TRANSFER_SPLIT_RULES),
     })
+    # Territorial labour policies (Phase 6): one vocabulary per territory row.
+    for territory in content.TERRITORIES:
+        vocab[content.territory_key("my_ot_rate_divisor_rule", territory)] = one_of(*content.OT_RATE_DIVISOR_RULES)
+        for base in ("my_annual_leave_tiers", "my_sick_leave_tiers"):
+            vocab[content.territory_key(base, territory)] = _leave_tiers_problem
     return vocab
+
+
+def _leave_tiers_problem(value: str):
+    """Leave tiers are "YEARS:DAYS,YEARS:DAYS": whole years ascending from 0,
+    whole or half days (engine/jurisdictions/malaysia/leave.parse_tiers)."""
+    from app.modules.payroll.engine.jurisdictions.malaysia.leave import parse_tiers
+
+    try:
+        parse_tiers(value)
+    except ValueError as error:
+        return str(error)
+    return None
 
 
 def _pack(db: Session, pack_row_id: int):

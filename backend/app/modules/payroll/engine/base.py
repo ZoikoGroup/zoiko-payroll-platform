@@ -1037,6 +1037,8 @@ class PayrollContext:
     my_profile: object = None                 # PayrollMyWorkerProfile in force (ACTIVE)
     my_registration: object = None            # PayrollMyEmployerRegistration in force (ACTIVE)
     my_assignment: object = None              # PayrollMyWorkAssignment in force (territory, holiday state)
+    my_assignments: list = None               # every ACTIVE assignment overlapping the period (transfers)
+    my_overtime_events: list = None           # [{event_ref, day_type, date, hours, normal_daily_hours}] (MY-017)
     my_components: dict = None                # {"BASIC_SALARY": ..., "OVERTIME": ...}; must add up to gross
     my_declarations: list = None              # PayrollMyTaxDeclaration rows (only APPROVED in force count)
     my_ytd: dict = None                       # {accumulator: sum before this pay date}

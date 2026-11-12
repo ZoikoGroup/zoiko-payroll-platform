@@ -9430,6 +9430,27 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/holidays",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "holidays",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_work_assignments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/malaysia/employees/{employee_id}/identifiers",
    "data_class": "worker",
    "action": "read",
@@ -9466,6 +9487,28 @@
     "payroll_employees",
     "payroll_my_identifier_access_events",
     "payroll_my_identifier_vault"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/leave-entitlement",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "leave-entitlement",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_work_assignments",
+    "payroll_my_worker_profiles"
    ],
    "overridden": false
   },
