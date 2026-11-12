@@ -259,3 +259,24 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
   the two published example IBANs in test_belgium_run_lifecycle.py; fixed with the repository privacy-scan
   allow marker (see the fix commit); privacy scan + lifecycle tests re-run: 18 passed.
 - Frontend at B3: build passed (14.5 s), lint clean on new files, npm test all 9 scripts pass.
+
+## Block C0 — migration be_filing_parallel (952284b; re-pins b188ee0)
+
+- Migration 8a1f5ef9fa5d (child of 2943a0490b5b, single head): payroll_be_filings, payroll_be_obligations,
+  payroll_be_reconciliation_variances, payroll_be_parallel_imports (TENANT) and payroll_be_parallel_differences
+  (WORKER); RLS as classify() derives; manifest entry; downgrade drops only these five tables.
+- Filing CHECKs: authority / form / kind (ORIGINAL, CORRECTION, CANCELLATION) / status vocabularies; a
+  CORRECTION or CANCELLATION must carry corrects_id; APPROVED onward needs an approver other than the creator
+  and a schema version; TRANSMITTED onward needs a submission reference; UNIQUE idempotency key. Obligations:
+  acceptance_status separate from status (accepted-but-unpaid is a legal open state, BE-036); RECONCILED
+  needs a reconciler. Variances and parallel differences resolve / accept four-eyes. No statutory number,
+  DmfA schema version or calendar date appears in any CHECK (they are content rows).
+- Tests: test_belgium_block_c_migration.py (new, 18); Phase 2 / Block B migration tests adapted (drift sets
+  gain the Block C tables; single-head check moved to the Block C test). Migration and pin tests: 186 passed,
+  1 skipped. Env: PAYROLL_DATABASE_URL=sqlite:///<scratchpad>/testdb_<ts>/zp_test.db, ZP_TEST_POSTGRES_URL unset.
+- Re-pin commit b188ee0 (standing rule, exact lists only): test_alembic_metadata (head x2, count 261 -> 262);
+  test_deploy_migrate_script (x2), test_nz_filings_migration, test_nz_holidays_act_migration,
+  test_nz_leave_pay_migration, test_nz_migrations, test_nz_parallel_migration, test_poland_migrations,
+  test_south_africa_migrations: pending-table sets gain the five Block C tables.
+- Registry diff: no existing route changed (no routes in C0).
+- Open: PostgreSQL RLS run of the new policies (CI merge gate).
