@@ -87,3 +87,28 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
   standard / calendar days + route registry -> 1146 passed, 1 skipped, 4 failed before the guard entry
   (guard fixed; the other 3 = pre-existing health routes).
 - Gaps added: G-25 .. G-29.
+
+## A4 — frontend (organisation and employee)
+
+- Commit: see the A4 commit (`feat(belgium): block A4 organisation and employee screens`).
+- A3 commit: 800c464 `feat(belgium): block A3 core engine`.
+- Frontend: `Compliances/BEComplianceCentreTab.jsx` (setup status, employer registrations with approve / verify /
+  reject, mandates as references, employer ONSS number (vault, masked), establishment units, Joint Committee
+  coverage, resolver blockers for every Belgian employee, employee records picker); tab added in
+  CompliancePage.jsx for BE orgs (Tax Configuration hidden like PL). `Payroll_Employees/BelgiumStatutoryProfilePanel.jsx`
+  (worker profile, work schedules, classification with the Joint Committee / agreement picker, declarations,
+  identifier field, resolver panel) + `BEIdentifierField.jsx` (masked NISS / BIS, four-eyes single-use reveal,
+  60 s, never stored) + `beOrgPayloads.js`; "Manage" button in EmployeeDetailPanel.jsx for BE.
+  `service/payrollService.js` BE section (placed before the Poland section: pl-compliance-ui-validation reads
+  from the Poland marker to the end of the file).
+- Backend support: `GET /api/payroll/belgium/options` (catalogue vocabularies, so no UI file types a vocabulary
+  value) and `GET /api/payroll/belgium/joint-committees` (platform definitions for the picker); route registry
+  +2 (tenant_config). Tests added to test_belgium_setup.py (2).
+- Validation: `scripts/be-console-ui-validation.mjs` extended with 7 A4 checks (wiring, no statutory number,
+  no vocabulary / content key, no payroll arithmetic, no storage / URL / console use of identifiers, every
+  imported service function exists, every /api/payroll/belgium path exists in be_org_router.py) -> 16 pass.
+- npm test: all 9 scripts pass. Lint: new files clean; CompliancePage / EmployeeDetailPanel clean (same as
+  HEAD); payrollService.js 0 findings in the BE section (32 pre-existing older findings).
+- Build: NOT VERIFIED on this machine — `npm run build` (NODE_OPTIONS=--max-old-space-size=8192) died twice
+  with V8 "out of memory" at ~1.3 GB free physical RAM (it passed in Phase 3B with ~2 GB free). Must be re-run
+  with more free memory (or in CI) before merge.

@@ -282,3 +282,18 @@ def be_resolve_classification(body: Dict[str, Any] = Body(...), current_user=Dep
     body = dict(body or {})
     return be.resolve_be_classification(db, _org_id(current_user), body.get("employeeId"), body.get("payDate"),
                                         period_start=body.get("periodStart"), pay_basis=body.get("payBasis"))
+
+
+# ── Joint Committee picker (D3): platform definitions, read-only ────────────
+@router.get("/joint-committees", summary="Belgian Joint Committee agreements (platform definitions) for the picker")
+def be_list_joint_committees(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    _org_id(current_user)
+    return be_super_admin.joint_committees(db)
+
+
+@router.get("/options", summary="Choice lists for the Belgium organisation screens (catalogue vocabularies)")
+def be_org_options(current_user=Depends(get_current_payroll_operator)):
+    _org_id(current_user)
+    return be.org_options()

@@ -1482,3 +1482,16 @@ def post_be_accumulators(db: Session, run, actor_id=None) -> int:
             added += 1
     db.flush()
     return added
+
+
+# ── Block A4: organisation UI choice lists (from the catalogue, never typed in the UI)
+def org_options() -> dict:
+    """Vocabularies the organisation screens offer. Labels only — which values
+    the engine supports is signed pack content, checked by the resolver."""
+    from app.modules.payroll import be_identifiers as bid
+
+    content = _content()
+    return {"workerCategories": list(content.WORKER_CATEGORIES), "scheduleRegimes": list(content.SCHEDULE_REGIMES),
+            "declarationTypes": list(content.DECLARATION_TYPES), "sourceChannels": list(DECLARATION_CHANNELS),
+            "residency": ["RESIDENT", "NON_RESIDENT"], "legalLanguages": ["NL", "FR", "DE"],
+            "employeeIdentifierTypes": [bid.NISS, bid.BIS], "verificationOutcomes": ["VERIFIED", "REJECTED"]}

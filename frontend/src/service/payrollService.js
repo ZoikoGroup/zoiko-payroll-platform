@@ -3120,6 +3120,58 @@ export const explainNzParallelDifference = (id, reason) =>
   api.post(`${NZ}/parallel-differences/${id}/explain`, { reason });
 export const acceptNzParallelDifference = (id) => api.post(`${NZ}/parallel-differences/${id}/accept`, {});
 
+// Belgium (ZP-BE-ENG-001 Block A4) — routes in backend/app/modules/payroll/be_org_router.py,
+// mounted under /api/payroll/belgium. Every route acts on the caller's own
+// organisation and answers 404 while Belgium is dormant (BE_TENANT_ONBOARDING_ENABLED
+// off and the org not on the canary list). Versioned writes carry a `reason`;
+// four-eyes approvals and the single-use identifier reveal are enforced
+// server-side. NISS / BIS / the ONSS number are only ever sent on create;
+// responses are masked except the reveal. Payload keys are the backend's
+// snake_case field names. Nothing here calculates payroll.
+const BE = "/api/payroll/belgium";
+const beList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const beOne = (res) => res?.data ?? res;
+export const getBeOptions = async () => beOne(await api.get(`${BE}/options`));
+export const listBeJointCommitteesForOrg = async () => beList(await api.get(`${BE}/joint-committees`));
+export const listBeRegistrations = async () => beList(await api.get(`${BE}/employer-registrations`));
+export const createBeRegistration = (body) => api.post(`${BE}/employer-registrations`, body);
+export const approveBeRegistration = (id) => api.post(`${BE}/employer-registrations/${id}/approve`, {});
+export const verifyBeRegistration = (id, outcome, reason) =>
+  api.post(`${BE}/employer-registrations/${id}/verify`, { outcome, reason });
+export const setBeEmployerOnss = (id, onssNumber) =>
+  api.post(`${BE}/employer-registrations/${id}/onss-number`, { onssNumber });
+export const listBeUnits = async () => beList(await api.get(`${BE}/establishment-units`));
+export const createBeUnit = (body) => api.post(`${BE}/establishment-units`, body);
+export const approveBeUnit = (id) => api.post(`${BE}/establishment-units/${id}/approve`, {});
+export const listBeWorkerProfiles = async (employeeId) =>
+  beList(await api.get(`${BE}/employees/${employeeId}/worker-profiles`));
+export const createBeWorkerProfile = (employeeId, body) => api.post(`${BE}/employees/${employeeId}/worker-profiles`, body);
+export const approveBeWorkerProfile = (id) => api.post(`${BE}/worker-profiles/${id}/approve`, {});
+export const listBeSchedules = async (employeeId) => beList(await api.get(`${BE}/employees/${employeeId}/work-schedules`));
+export const createBeSchedule = (employeeId, body) => api.post(`${BE}/employees/${employeeId}/work-schedules`, body);
+export const approveBeSchedule = (id) => api.post(`${BE}/work-schedules/${id}/approve`, {});
+export const listBeClassifications = async (employeeId) =>
+  beList(await api.get(`${BE}/employees/${employeeId}/classifications`));
+export const createBeClassification = (employeeId, body) =>
+  api.post(`${BE}/employees/${employeeId}/classifications`, body);
+export const approveBeClassification = (id) => api.post(`${BE}/classifications/${id}/approve`, {});
+export const listBeDeclarations = async (employeeId) => beList(await api.get(`${BE}/employees/${employeeId}/declarations`));
+export const createBeDeclaration = (employeeId, body) => api.post(`${BE}/employees/${employeeId}/declarations`, body);
+export const approveBeDeclaration = (id) => api.post(`${BE}/declarations/${id}/approve`, {});
+export const withdrawBeDeclaration = (id, reason, effectiveTo) =>
+  api.post(`${BE}/declarations/${id}/withdraw`, { reason, effectiveTo });
+export const listBeIdentifiers = async (employeeId) => beList(await api.get(`${BE}/employees/${employeeId}/identifiers`));
+export const createBeIdentifier = (employeeId, identifierType, value) =>
+  api.post(`${BE}/employees/${employeeId}/identifiers`, { identifierType, value });
+export const requestBeIdentifierReveal = (vaultId, reason) =>
+  api.post(`${BE}/identifiers/${vaultId}/reveal-request`, { reason });
+export const approveBeIdentifierReveal = (vaultId) => api.post(`${BE}/identifiers/${vaultId}/reveal-approve`, {});
+export const revealBeIdentifier = async (vaultId) => beOne(await api.post(`${BE}/identifiers/${vaultId}/reveal`, {}));
+export const deleteBeIdentifier = (vaultId, reason) => api.post(`${BE}/identifiers/${vaultId}/delete`, { reason });
+export const getBeEmployeeSummary = async (employeeId) => beOne(await api.get(`${BE}/employees/${employeeId}/summary`));
+export const resolveBeClassification = async (employeeId, payDate, extra = {}) =>
+  beOne(await api.post(`${BE}/classification/resolve`, { employeeId, payDate, ...extra }));
+
 // Poland (ZP-PL-ENG-001) — routes in backend/app/modules/payroll/pl_org_router.py,
 // mounted under /api/payroll/poland. Every route acts on the caller's own
 // organisation and answers 404 while PL_TENANT_ONBOARDING_ENABLED is off.

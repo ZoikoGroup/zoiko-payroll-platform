@@ -387,3 +387,32 @@ def test_router_is_mounted_and_every_route_is_guarded():
     mounted = {getattr(r, "path", "") for r in payroll_router.routes}
     assert any(p.endswith("/belgium/employer-registrations") for p in mounted)
     assert not any("{organization_id}" in p or "org_id" in p for _m, p in paths)
+
+
+# ── Block A4 support routes: picker + choice lists (read-only, no personal data)
+def test_options_come_from_the_catalogue(world):
+    from app.modules.payroll.be_org_router import be_org_options
+    from app.modules.payroll.engine.countries import belgium_content as content
+    from tests._mx_employer_helpers import principal
+
+    out = be_org_options(principal(world.org))
+    assert out["workerCategories"] == list(content.WORKER_CATEGORIES)
+    assert out["scheduleRegimes"] == list(content.SCHEDULE_REGIMES)
+    assert out["declarationTypes"] == list(content.DECLARATION_TYPES)
+    assert out["employeeIdentifierTypes"] == ["NISS", "BIS"]
+
+
+def test_joint_committee_picker_lists_platform_definitions_only(world):
+    from app.modules.payroll.be_org_router import be_list_joint_committees
+    from app.modules.payroll.models import CollectiveAgreement
+    from tests._mx_employer_helpers import principal
+
+    w = world
+    w.db.add_all([CollectiveAgreement(organization_id=None, jurisdiction_country="BE", agreement_code="BE-PC-200-1.0",
+                                      name="TEST ONLY committee", agreement_type="SECTOR", status="Active"),
+                  CollectiveAgreement(organization_id=w.org, jurisdiction_country="BE",
+                                      agreement_code="BE-PC-124-1.0", name="TEST ONLY org copy",
+                                      agreement_type="SECTOR", status="Active")])
+    w.db.commit()
+    rows = be_list_joint_committees(principal(w.org), w.db)
+    assert [(r["agreementCode"], r["jointCommittee"]) for r in rows] == [("BE-PC-200-1.0", "200")]

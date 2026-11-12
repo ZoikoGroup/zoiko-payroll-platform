@@ -3641,6 +3641,40 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/belgium/joint-committees",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "joint-committees",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/options",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "options",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/belgium/work-schedules/{row_id}/approve",
    "data_class": "worker",

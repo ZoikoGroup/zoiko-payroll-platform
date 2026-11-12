@@ -10,6 +10,13 @@
  *    BE component — groups, labels, vocabularies and specs come from the API;
  *  - every superAdminService function a Belgium file imports is exported, and
  *    every Belgium API path the service uses exists in the backend router.
+ * Block A4 (organisation and employee screens):
+ *  - the Compliance Centre tab and the employee "Manage" button are wired for BE only;
+ *  - the same number / vocabulary / arithmetic rules hold for the org files
+ *    (choice lists come from /belgium/options, committees from /joint-committees);
+ *  - every payrollService function a Belgian org file imports is exported, and
+ *    every /api/payroll/belgium path it uses exists in be_org_router.py;
+ *  - an identifier is never put in storage, the URL or the console.
  * Does not import .jsx (the Vite graph is heavy on this machine).
  */
 import { readFileSync, readdirSync } from "node:fs";
@@ -120,6 +127,85 @@ check("no payroll arithmetic in Belgium UI files", () => {
   for (const file of uiFiles) {
     assert(!/\b(gross|net|withholding|contribution)\s*[*+-]/i.test(read(file)), `${file}: arithmetic on a payroll value`);
   }
+});
+
+// ── Block A4: organisation and employee screens ────────────────────────────
+const ORG_FILES = ["modules/payroll/Compliances/BEComplianceCentreTab.jsx",
+  "modules/payroll/Payroll_Employees/BelgiumStatutoryProfilePanel.jsx",
+  "modules/payroll/Payroll_Employees/BEIdentifierField.jsx", "modules/payroll/Payroll_Employees/beOrgPayloads.js"];
+
+check("A4: the Compliance Centre tab and the employee button are wired for BE", () => {
+  const page = read("modules/payroll/Compliances/CompliancePage.jsx");
+  assert(page.includes('import BEComplianceCentreTab from "./BEComplianceCentreTab";'), "tab import");
+  assert(/isBelgium = normalizeCountryCode\(companyDetails\.jurisdictionCountry\) === "BE"/.test(page), "isBelgium");
+  assert(page.includes("...(isBelgium ? [BE_TAB] : [])") && page.includes("currentTab === BE_TAB && <BEComplianceCentreTab />"),
+    "tab listed and rendered");
+  const panel = read("modules/payroll/Payroll_Employees/EmployeeDetailPanel.jsx");
+  assert(panel.includes('employee.countryCode === "BE"') && panel.includes("setShowBeStatutory(true)"), "Manage button");
+  assert(panel.includes("<BelgiumStatutoryProfilePanel employee={employee}"), "panel rendered");
+});
+
+check("A4: no hard-coded statutory number in the org files", () => {
+  for (const file of ORG_FILES) {
+    const code = read(file).replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    const strings = [...code.matchAll(/"([^"\n]*)"|'([^'\n]*)'|`([^`]*)`/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+    for (const raw of strings) {
+      const str = raw.replace(/\b[a-z-]+-\[[^\]]*\]/g, "");          // Tailwind arbitrary values (shadow-[...])
+      if (/^[a-z0-9 :/.[\]()-]+$/.test(str) && /\b(px|py|text|mt|mb|gap|grid|rounded|border|bg|max-w|col|p)-/.test(str)) continue;
+      assert(!STATUTORY_NUMBER.test(str), `${file}: ${JSON.stringify(str)}`);
+    }
+  }
+});
+
+check("A4: no content key or catalogue vocabulary value in the org files", () => {
+  for (const file of ORG_FILES) {
+    const code = read(file);
+    const key = code.match(/["'`]be_[a-z0-9_]+["'`]/);
+    assert(!key, `${file}: content key ${key && key[0]}`);
+    for (const m of code.matchAll(/["'`]([A-Z0-9_]{2,})["'`]/g)) {
+      assert(!vocabulary.has(m[1]), `${file}: vocabulary value ${m[1]}`);
+    }
+  }
+});
+
+check("A4: no payroll arithmetic in the org files", () => {
+  for (const file of ORG_FILES) {
+    assert(!/\b(gross|net|withholding|contribution|onss)\s*[*+\-/]/i.test(read(file)), `${file}: arithmetic on a payroll value`);
+  }
+});
+
+check("A4: an identifier never reaches storage, the URL or the console", () => {
+  for (const file of ORG_FILES) {
+    const code = read(file).replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    assert(!/localStorage|sessionStorage|console\.|window\.location|history\.push|searchParams/.test(code),
+      `${file}: storage / URL / console use`);
+  }
+  const field = read("modules/payroll/Payroll_Employees/BEIdentifierField.jsx");
+  assert(/type="password"/.test(field) && /autoComplete="off"/.test(field), "identifier input is masked");
+  assert(/setValue\(""\)/.test(field) && /setTimeout\(\(\) => setRevealed\(null\)/.test(field), "typed value and reveal are wiped");
+});
+
+check("A4: every payrollService function a Belgian org file imports exists", () => {
+  const service = read("service/payrollService.js");
+  for (const file of ORG_FILES) {
+    for (const m of read(file).matchAll(/import \{([^}]*)\} from "[./]*service\/payrollService"/g)) {
+      for (const name of m[1].split(",").map((x) => x.trim()).filter(Boolean)) {
+        assert(new RegExp(`export (const|function|async function) ${name}\\b`).test(service), `${file}: ${name}`);
+      }
+    }
+  }
+});
+
+check("A4: every /api/payroll/belgium path in payrollService exists in be_org_router.py", () => {
+  const service = read("service/payrollService.js");
+  const start = service.indexOf('const BE = "/api/payroll/belgium";');
+  assert(start >= 0, "BE section");
+  const section = service.slice(start);
+  const paths = [...section.matchAll(/\$\{BE\}([^`"]*)/g)].map((m) => m[1].replace(/\$\{[^}]+\}/g, "{}"));
+  assert(paths.length >= 25, `only ${paths.length} paths`);
+  const router = readFileSync(resolve(BACKEND, "modules/payroll/be_org_router.py"), "utf-8");
+  const routes = [...router.matchAll(/@router\.(?:get|post|put|delete)\("([^"]*)"/g)].map((m) => m[1].replace(/\{[^}]+\}/g, "{}"));
+  for (const path of paths) assert(routes.includes(path), `no backend route for ${path}`);
 });
 
 if (failures.length) {
