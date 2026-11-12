@@ -1768,6 +1768,22 @@
    "overridden": true
   },
   {
+   "method": "POST",
+   "path": "/api/billing/checkout/confirm",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "confirm",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: activates the org's own subscription from a paid Stripe session; country counts only, no worker row returned",
+   "scan_worker_tables": [],
+   "overridden": true
+  },
+  {
    "method": "GET",
    "path": "/api/billing/dunning-status",
    "data_class": "self",

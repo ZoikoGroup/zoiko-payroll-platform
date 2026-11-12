@@ -100,6 +100,7 @@ GET,/api/auth/reset-password,public,read,reset-password,,public,,,,no,
 POST,/api/auth/reset-password,public,create,reset-password,,public,,,,no,
 POST,/api/billing/cancel,tenant_config,create,cancel,org_admin,tenant,,,,no,
 POST,/api/billing/checkout,tenant_config,create,checkout,org_admin,tenant,,,payroll_employees,yes,reviewed: checkout with country-limit impact check (per-country counts only); no worker row returned
+POST,/api/billing/checkout/confirm,tenant_config,create,confirm,org_admin,tenant,,,,yes,"reviewed: activates the org's own subscription from a paid Stripe session; country counts only, no worker row returned"
 GET,/api/billing/dunning-status,self,read,dunning-status,assisted_access|employee|machine_client|org_admin|payroll_admin|platform_security|super_admin|support_operator|support_temp,self,,,,no,
 GET,/api/billing/my-subscription,self,read,my-subscription,assisted_access|employee|machine_client|org_admin|payroll_admin|platform_security|super_admin|support_operator|support_temp,self,,,payroll_employees,yes,reviewed: org subscription + country usage counts; no worker row returned
 POST,/api/billing/my-subscription/billing-portal,tenant_config,create,billing-portal,org_admin,tenant,,,,no,

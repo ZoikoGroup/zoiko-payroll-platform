@@ -327,6 +327,26 @@ _paid_sub = BillingSubscription(
 _db.add(_paid_sub)
 _db.flush()
 
+# Success-page confirmation (POST /billing/checkout/confirm): two
+# subscription-less orgs — one that paid, one whose admin must not be able to
+# claim the first org's session.
+_confirm_org = Organization(
+    organization_name="Confirm Corp", organization_code="CONFCHK", workspace_type="EVALUATION",
+    country="DE", is_active=True, billing_classification="COMMERCIAL_ACTIVE", charge_enabled=True,
+)
+_deferred_org = Organization(
+    organization_name="Deferred Corp", organization_code="DEFRCHK", workspace_type="EVALUATION",
+    country="DE", is_active=True, billing_classification="COMMERCIAL_ACTIVE", charge_enabled=True,
+)
+_db.add_all([_confirm_org, _deferred_org])
+_db.flush()
+for _org, _email in ((_confirm_org, "confirm-admin@example.com"), (_deferred_org, "deferred-admin@example.com")):
+    _db.add(User(
+        email=_email, hashed_password=hash_password("strong-password"), role=UserRole.ORG_ADMIN,
+        first_name="Confirm", last_name="Admin", organization_id=_org.id, is_active=True,
+    ))
+_db.flush()
+
 _db.commit()
 
 # Restore pre-purge app modules so other test files don't get class-identity conflicts
@@ -817,3 +837,103 @@ def test_webhook_for_another_environments_checkout_is_acknowledged_not_500(clien
     assert r.status_code == 200, r.text
     _db.expire_all()
     assert _db.query(BillingSubscription).count() == count_before
+
+
+# ── POST /billing/checkout/confirm (success-page reconciliation) ──────────
+# The customer paid, Stripe redirected to the success page, and the webhook
+# never reached this environment: the page must still activate the plan.
+
+def _stripe_session(org_id, *, subscription="sub_CONFIRM_001", status="complete",
+                    payment_status="paid", commencement=None):
+    metadata = {"organization_id": str(org_id), "plan_version_id": str(_version.id)}
+    if commencement is not None:
+        metadata["service_commencement_at"] = commencement.isoformat()
+    return stripe.StripeObject.construct_from({
+        "id": "cs_test_CONFIRM", "mode": "subscription", "status": status,
+        "payment_status": payment_status, "subscription": subscription, "metadata": metadata,
+    }, "sk_test_FAKE")
+
+
+def _confirm(client, email, session):
+    with patch.object(stripe.checkout.Session, "retrieve", return_value=session):
+        return client.post("/api/billing/checkout/confirm", json={"session_id": "cs_test_CONFIRM"},
+                           headers=_auth(_login(client, email)))
+
+
+def test_checkout_success_url_carries_the_session_id_template(client):
+    token = _login(client, "prod-admin@example.com")
+    client.post("/api/billing/checkout", json={"plan_code": "PROFESSIONAL"}, headers=_auth(token))
+    success_url = stripe.checkout.Session.create.call_args.kwargs["success_url"]
+    assert success_url == "http://localhost:3000/billing/checkout/success?session_id={CHECKOUT_SESSION_ID}"
+
+
+def test_confirm_refuses_another_organizations_session(client):
+    r = _confirm(client, "deferred-admin@example.com", _stripe_session(_confirm_org.id))
+    assert r.status_code == 403, r.text
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _deferred_org.id).first() is None
+
+
+def test_confirm_refuses_an_unpaid_session(client):
+    r = _confirm(client, "confirm-admin@example.com",
+                 _stripe_session(_confirm_org.id, status="open", payment_status="unpaid"))
+    assert r.status_code == 400, r.text
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _confirm_org.id).first() is None
+
+
+def test_confirm_activates_a_paid_checkout_without_the_webhook(client):
+    r = _confirm(client, "confirm-admin@example.com", _stripe_session(_confirm_org.id))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "ACTIVE" and body["workspace_type"] == "PRODUCTION"
+    assert body["plan_code"] == "PROFESSIONAL" and body["deferred"] is False
+
+    _db.expire_all()
+    sub = _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _confirm_org.id).one()
+    assert sub.status == SubscriptionStatus.ACTIVE.value
+    assert sub.stripe_subscription_id == "sub_CONFIRM_001"
+
+    # The platform now reports the subscription — the reported bug.
+    my = client.get("/api/billing/my-subscription", headers=_auth(_login(client, "confirm-admin@example.com")))
+    assert my.status_code == 200, my.text
+    assert my.json()["subscription"]["status"] == "ACTIVE"
+
+
+def test_confirm_then_late_webhook_is_idempotent(client):
+    again = _confirm(client, "confirm-admin@example.com", _stripe_session(_confirm_org.id))
+    assert again.status_code == 200 and again.json()["status"] == "ACTIVE"
+
+    r = _post_webhook(client, "checkout.session.completed", {
+        "metadata": {"organization_id": str(_confirm_org.id), "plan_version_id": str(_version.id)},
+        "subscription": "sub_CONFIRM_001",
+    }, event_id="evt_confirm_late_webhook")
+    assert r.status_code == 200, r.text
+
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _confirm_org.id).count() == 1
+    audit = _db.query(BillingCommercialAuditEvent).filter(
+        BillingCommercialAuditEvent.stripe_event_id == "evt_confirm_late_webhook").one()
+    assert audit.payload["already_applied"] is True
+
+
+def test_confirm_deferred_checkout_is_trialing_and_never_undoes_a_later_payment(client):
+    later = datetime.utcnow() + timedelta(days=30)
+    session = _stripe_session(_deferred_org.id, subscription="sub_DEFERRED_001",
+                              payment_status="no_payment_required", commencement=later)
+    r = _confirm(client, "deferred-admin@example.com", session)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "TRIALING" and r.json()["deferred"] is True
+    assert r.json()["workspace_type"] == "EVALUATION"
+
+    # The real charge lands (invoice.paid) — the sub becomes ACTIVE ...
+    r = _post_webhook(client, "invoice.paid", {"subscription": "sub_DEFERRED_001", "id": "in_DEFERRED_PAID",
+                                               "amount_paid": 4900}, event_id="evt_deferred_paid")
+    assert r.status_code == 200, r.text
+    # ... and a reload of the success page must not push it back to TRIALING.
+    r = _confirm(client, "deferred-admin@example.com", session)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "ACTIVE"
+    _db.expire_all()
+    sub = _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _deferred_org.id).one()
+    assert sub.status == SubscriptionStatus.ACTIVE.value
