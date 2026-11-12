@@ -205,8 +205,14 @@ def test_deploy_drift_filter_explains_every_pl_object():
     # Poland P6 (e11c2c36df17) is pending on the same chain.
     assert tables == set(NEW_TABLES) | {"payroll_pl_incapacity_episodes", "payroll_pl_filings",  # P6, P8
                                         "payroll_pl_settlements", "payroll_pl_reconciliation_variances",
-                                        "payroll_pl_parallel_imports", "payroll_pl_parallel_differences"}  # P9
-    assert columns == {**SHARED, **MX_M21}
+                                        "payroll_pl_parallel_imports", "payroll_pl_parallel_differences",  # P9
+                                        "payroll_be_identifier_vault", "payroll_be_identifier_access_events",
+                                        "payroll_be_employer_registrations", "payroll_be_establishment_units",
+                                        "payroll_be_worker_profiles", "payroll_be_work_schedules",
+                                        "payroll_be_employment_classifications", "payroll_be_declarations",
+                                        "payroll_be_accumulator_entries"}  # + Belgium P2 (1d76678ef1a1)
+    be_shared = {"payslip_items": {"be_calculation_snapshot"}, "payroll_runs": {"be_approval_fingerprint"}}  # + BE P2
+    assert columns == {**{t: SHARED[t] | be_shared[t] for t in SHARED}, **MX_M21}
 
 
 def test_revision_is_the_single_child_of_the_previous_head():

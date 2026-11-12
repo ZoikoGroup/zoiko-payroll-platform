@@ -155,8 +155,14 @@ def test_drift_filter_explains():
                                         "payroll_pl_filings", "payroll_pl_settlements",
                                         "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
                                         "payroll_pl_parallel_imports",
-                                        "payroll_pl_parallel_differences"}  # + Poland P9 (e7ec6c1933b4)
-    pl_shared = {"payslip_items": {"pl_calculation_snapshot"}, "payroll_runs": {"pl_approval_fingerprint"}}
+                                        "payroll_pl_parallel_differences",  # + Poland P9 (e7ec6c1933b4)
+                                        "payroll_be_identifier_vault", "payroll_be_identifier_access_events",
+                                        "payroll_be_employer_registrations", "payroll_be_establishment_units",
+                                        "payroll_be_worker_profiles", "payroll_be_work_schedules",
+                                        "payroll_be_employment_classifications", "payroll_be_declarations",
+                                        "payroll_be_accumulator_entries"}  # + Belgium P2 (1d76678ef1a1)
+    pl_shared = {"payslip_items": {"pl_calculation_snapshot", "be_calculation_snapshot"},  # + Belgium P2
+                 "payroll_runs": {"pl_approval_fingerprint", "be_approval_fingerprint"}}
     assert columns == {**{t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}}, **MX_M21}
 
 

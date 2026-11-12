@@ -305,7 +305,8 @@ def test_alembic_heads_is_single_head():
     # efc56f3235e2 (Mexico mx_decision_inputs_m21, sweep S1): seven nullable columns the
     # decision options read (terminations, labour policies, statutory profiles); written on
     # 3880223bfaa0, re-parented (never applied) onto e7ec6c1933b4 - single head.
-    assert heads == ["efc56f3235e2"]
+    # 1d76678ef1a1 (Belgium P2 be_foundation) is the single child of efc56f3235e2.
+    assert heads == ["1d76678ef1a1"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -317,7 +318,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["efc56f3235e2"]
+    assert list(script.get_heads()) == ["1d76678ef1a1"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -370,7 +371,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 259   # + efc56f3235e2 (Mexico mx_decision_inputs_m21, child of e7ec6c1933b4) + e7ec6c1933b4 (Poland P9 pl_parallel_cycles, child of e75b9219e1f8)
+    assert len(revs) == 260   # + 1d76678ef1a1 (Belgium P2 be_foundation, child of efc56f3235e2) + efc56f3235e2 (Mexico mx_decision_inputs_m21, child of e7ec6c1933b4) + e7ec6c1933b4 (Poland P9 pl_parallel_cycles, child of e75b9219e1f8)
 
 
 def test_germany_head_chain_wiring_is_intact():
