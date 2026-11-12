@@ -179,6 +179,21 @@ check("the payslip breakdown only reads the frozen my_result", () => {
   assert(/MY: "PCB \/ MTD"/.test(labels) && /MY: "HRD Levy \(Employer\)"/.test(labels), "Malaysia payslip labels");
 });
 
+// ── Phase 9: filings, settlements, reconciliation, journal ─────────────────
+check("the filing / settlement panel and the journal are wired and never send anything", () => {
+  const centre = read("modules/payroll/Compliances/MYComplianceCentreTab.jsx");
+  assert(centre.includes("<MYFilingSettlementPanel />"), "filing panel in the centre");
+  const panel = read("modules/payroll/Compliances/MYFilingSettlementPanel.jsx");
+  assert(/disabled=\{state\.busy \|\| !r\.schemaArchived\}/.test(panel), "approval disabled without an archived layout");
+  assert(!/fetch\(|XMLHttpRequest|sendTo|transmit/i.test(panel), "no live transport from the UI (D-5)");
+  assert(!/nric|tin\b|passport/i.test(panel.replace(/masked identifiers/g, "")), "identifier wording in the filing screen");
+  const run = read("modules/payroll/PayRollRuns/RunDetailPanel.jsx");
+  assert(/=== "MY"\)\s*&& \["Paid", "Closed"\]\.includes\(\(detail \|\| run\)\.status\) && <MYRunJournalPanel/.test(run),
+    "journal only for a paid run");
+  const events = read("modules/payroll/Payroll_Employees/MalaysiaStatutoryProfilePanel.jsx");
+  assert(events.includes("buildMyEventFiling(r.id)"), "event form action");
+});
+
 if (failures.length) {
   console.error(`my-compliance-ui-validation: ${failures.length} failed, ${passed} passed`);
   failures.forEach((f) => console.error(`  - ${f}`));

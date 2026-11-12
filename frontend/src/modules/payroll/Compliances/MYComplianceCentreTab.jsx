@@ -7,6 +7,7 @@ import JPRecordSection, { isDraft, statusCol } from "../../../components/jurisdi
 import { REASON_FIELD, period } from "../../../components/jurisdiction/new_zealand/nzOrgOptions";
 import { HRD_CATEGORIES } from "../../../components/jurisdiction/malaysia/myOrgOptions";
 import { MalaysiaEmployeeRecords } from "../Payroll_Employees/MalaysiaStatutoryProfilePanel";
+import MYFilingSettlementPanel from "./MYFilingSettlementPanel";
 
 // Malaysia Compliance Centre (ZP-MY-ENG-001 "Malaysia country setup"). The
 // employer registration per legal employer (HASiL employer number, EPF /
@@ -121,6 +122,7 @@ export default function MYComplianceCentreTab() {
     <div className="space-y-4" data-testid="my-compliance-centre">
       <SetupStatus />
       <EmployerRegistrations />
+      <MYFilingSettlementPanel />
       <EmployeeRecords />
     </div>
   );

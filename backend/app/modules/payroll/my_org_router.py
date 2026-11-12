@@ -303,6 +303,141 @@ def my_approve_release(hold_id: int, current_user=Depends(get_current_org_admin)
     return my.hold_view(db, row)
 
 
+# ── Phase 9: filings, settlements, reconciliation, journal (MY-021 / MY-022) ─
+# Payload generation only; no live HASiL / EPF / PERKESO / HRD / bank call (D-5).
+@router.get("/filings", summary="Malaysia filing records (canonical payloads; masked identifiers)")
+def my_list_filings(period: Optional[str] = Query(None), form: Optional[str] = Query(None),
+                    status: Optional[str] = Query(None), current_user=Depends(get_current_payroll_operator),
+                    db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_filing as myf
+
+    return myf.list_my_filings(db, _org_id(current_user), period=period, form_code=form, status=status)
+
+
+@router.get("/filings/{filing_id}", summary="One Malaysia filing with its canonical payload")
+def my_get_filing(filing_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_filing as myf
+
+    return myf.get_my_filing(db, _org_id(current_user), filing_id)
+
+
+@router.post("/filings/rebuild/{run_id}", summary="Rebuild the monthly authority filings of a PAID run (idempotent)")
+def my_rebuild_filings(run_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import malaysia_filing as myf
+
+    run = _run(db, _org_id(current_user), run_id)
+    if str(getattr(run.status, "value", run.status)) not in myf.PAID_STATUSES:
+        raise BadRequestException("Filings are built for a PAID run.")
+    rows = myf.build_my_run_filings(db, run, _actor(current_user))
+    db.commit()
+    return [myf.filing_view(r) for r in rows]
+
+
+@router.post("/filings/annual", summary="Build EA / Form E / CP8D for a closed year (idempotent)")
+def my_build_annual(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                    db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_filing as myf
+
+    myf.refuse_out_of_scope(body.get("form"))
+    rows = myf.build_my_annual_filings(db, _org_id(current_user), int(body.get("year") or 0),
+                                       body.get("legalEntityId"), _actor(current_user))
+    db.commit()
+    return [myf.filing_view(r) for r in rows]
+
+
+@router.post("/employer-events/{row_id}/filing", summary="Build the CP22 / CP22A / CP21 payload of an event")
+def my_build_event_filing(row_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_filing as myf
+
+    row = myf.build_my_event_filing(db, _org_id(current_user), row_id, _actor(current_user))
+    db.commit()
+    return myf.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/approve", summary="Approve a DRAFT filing (four-eyes; archived layout only)")
+def my_approve_filing(filing_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_filing as myf
+
+    row = myf.approve_my_filing(db, _org_id(current_user), filing_id, _actor(current_user))
+    db.commit()
+    return myf.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/submission", summary="Record a manual submission (idempotent by reference)")
+def my_record_submission(filing_id: int, body: Dict[str, Any] = Body(...),
+                         current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_filing as myf
+
+    row = myf.record_my_filing_submission(db, _org_id(current_user), filing_id, body.get("submissionRef"),
+                                          _actor(current_user))
+    db.commit()
+    return myf.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/response", summary="Record the authority's receipt or rejection")
+def my_record_response(filing_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                       db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_filing as myf
+
+    row = myf.record_my_filing_response(db, _org_id(current_user), filing_id, body, _actor(current_user))
+    db.commit()
+    return myf.filing_view(row)
+
+
+@router.get("/settlements", summary="Malaysia PCB / EPF / PERKESO / HRD liabilities")
+def my_list_settlements(period: Optional[str] = Query(None), liability: Optional[str] = Query(None),
+                        status: Optional[str] = Query(None), current_user=Depends(get_current_payroll_operator),
+                        db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_settlement as mss
+
+    return mss.list_my_settlements(db, _org_id(current_user), period=period, liability=liability, status=status)
+
+
+@router.post("/settlements/{settlement_id}/payments", summary="Record a payment (idempotent by reference)")
+def my_record_payment(settlement_id: int, body: Dict[str, Any] = Body(...),
+                      current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_settlement as mss
+
+    row = mss.record_my_settlement_payment(db, _org_id(current_user), settlement_id, body, _actor(current_user))
+    db.commit()
+    return mss.settlement_view(row)
+
+
+@router.post("/settlements/{settlement_id}/reconcile", summary="Reconcile a liability (or raise a variance)")
+def my_reconcile(settlement_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_settlement as mss
+
+    out = mss.reconcile_my_settlement(db, _org_id(current_user), settlement_id, _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.get("/variances", summary="Malaysia reconciliation variances")
+def my_list_variances(status: Optional[str] = Query(None), current_user=Depends(get_current_payroll_operator),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_settlement as mss
+
+    return mss.list_my_variances(db, _org_id(current_user), status=status)
+
+
+@router.post("/variances/{variance_id}/resolve", summary="Resolve a variance (four-eyes, reason required)")
+def my_resolve_variance(variance_id: int, body: Dict[str, Any] = Body(...),
+                        current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_settlement as mss
+
+    row = mss.resolve_my_variance(db, _org_id(current_user), variance_id, body.get("reason"), _actor(current_user))
+    db.commit()
+    return mss.variance_view(row)
+
+
+@router.get("/runs/{run_id}/journal", summary="Accounting journal of a PAID run (balanced or BLOCKED)")
+def my_run_journal(run_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_journal as myj
+
+    return myj.build_my_journal(db, _org_id(current_user), run_id)
+
+
 # ── employee summary, run preflight ─────────────────────────────────────────
 @router.get("/employees/{employee_id}/summary", summary="An employee's Malaysia records (identifiers masked)")
 def my_employee_summary(employee_id: int, current_user=Depends(get_current_payroll_operator),

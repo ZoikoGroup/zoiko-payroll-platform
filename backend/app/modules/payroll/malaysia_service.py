@@ -517,6 +517,10 @@ def record_my_employer_registration(db: Session, organization_id: int, payload: 
     _enum(data, "hrd_category", content.HRD_CATEGORIES)
     for key, label in _REFERENCE_LABELS:
         _reference(data, key, label)
+    if data.get("my_journal_accounts") is not None:
+        from app.modules.payroll.malaysia_journal import clean_journal_accounts
+
+        data["my_journal_accounts"] = clean_journal_accounts(data["my_journal_accounts"])
     if data["hrd_category"] != "NOT_REGISTERED" and not (data.get("hrd_registration_no")
                                                          and data.get("hrd_category_from")
                                                          and data.get("hrd_category_evidence_ref")):
@@ -1214,7 +1218,8 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
     """Approval needs every MY payslip frozen, a verified employer registration,
     a work assignment, the identifiers statutory reporting needs and no open
     statutory exception; later steps re-verify the approval fingerprint; PAID
-    posts the year-to-date ledger exactly once (filings / settlements: Phase 9)."""
+    posts the year-to-date ledger exactly once and (Phase 9) builds the month's
+    authority payloads and liabilities (idempotent)."""
     from fastapi import HTTPException, status as http_status
 
     from app.modules.payroll.models import PayrollStatus
@@ -1235,7 +1240,11 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
             raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
                 "Malaysia: the approved calculation no longer matches this run - recalculate and approve again."))
     if next_status == PayrollStatus.PAID:
+        from app.modules.payroll import malaysia_filing, malaysia_settlement
+
         post_accumulators(db, run, actor_id)
+        malaysia_filing.build_my_run_filings(db, run, actor_id)        # Phase 9: monthly authority payloads
+        malaysia_settlement.build_my_settlements(db, run, actor_id)    # Phase 9: PCB / EPF / PERKESO / HRD liabilities
 
 
 # ── platform hooks ──────────────────────────────────────────────────────────
@@ -1292,6 +1301,7 @@ MY_RETENTION_CATEGORIES = (
     ("ACCESS_LOGS", "Identifier access events"),
     ("WORK_LOCATION", "Work assignments (labour territory, holiday state)"),
     ("EMPLOYER_EVENTS", "CP22 / CP22A / CP21 / death notices, receipts and tax-clearance holds"),
+    ("FILING_RECORDS", "Authority payloads, submissions, receipts, settlements and reconciliation variances"),
 )
 MY_DECISIONS = {
     "D-1": ("Poland template: split engine, versioned four-eyes records, vault, signing console", False),

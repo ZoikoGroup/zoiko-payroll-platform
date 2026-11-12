@@ -32,6 +32,7 @@ import PLPayslipBreakdown from "./PLPayslipBreakdown";
 import PLRunPreflightPanel from "./PLRunPreflightPanel";
 import MYPayslipBreakdown from "./MYPayslipBreakdown";
 import MYRunPreflightPanel from "./MYRunPreflightPanel";
+import MYRunJournalPanel from "./MYRunJournalPanel";
 import PLRunJournalPanel from "./PLRunJournalPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
@@ -638,6 +639,8 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
               {items.some((i) => (i.country || i.countryCode) === "NZ") && <NZRunPreflightPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "PL") && <PLRunPreflightPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "MY") && <MYRunPreflightPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "MY")
+                && ["Paid", "Closed"].includes((detail || run).status) && <MYRunJournalPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "PL")
                 && ["Paid", "Closed"].includes((detail || run).status) && <PLRunJournalPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "NZ") && (

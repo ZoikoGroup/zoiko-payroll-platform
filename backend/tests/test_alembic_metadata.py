@@ -309,8 +309,9 @@ def test_alembic_heads_is_single_head():
     # (re-parented, never applied, when origin/main was merged into venu) - single head.
     # 13574b996ccf (Malaysia P2 my_foundation) is the single child of f3a9c1d7e2b4
     # (re-parented, never applied, at the 2026-11-12 venu sync);
-    # 5f314f975ac3 (Malaysia P7 my_events_holds) is its single child.
-    assert heads == ["5f314f975ac3"]
+    # 5f314f975ac3 (Malaysia P7 my_events_holds) is its single child;
+    # efdc07f97eb5 (Malaysia P9 my_filing_settlement) is the single child of that.
+    assert heads == ["efdc07f97eb5"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -322,7 +323,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["5f314f975ac3"]
+    assert list(script.get_heads()) == ["efdc07f97eb5"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -375,7 +376,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 262   # + efc56f3235e2 (Mexico m21) + f3a9c1d7e2b4 (payslip templates) + 13574b996ccf (Malaysia P2, re-parented onto f3a9c1d7e2b4) + 5f314f975ac3 (Malaysia P7)
+    assert len(revs) == 263   # + efdc07f97eb5 (Malaysia P9); + efc56f3235e2 (Mexico m21) + f3a9c1d7e2b4 (payslip templates) + 13574b996ccf (Malaysia P2, re-parented onto f3a9c1d7e2b4) + 5f314f975ac3 (Malaysia P7)
 
 
 def test_germany_head_chain_wiring_is_intact():

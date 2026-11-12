@@ -156,6 +156,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                                         "payroll_my_accumulator_entries",  # + Malaysia P2 (13574b996ccf)
                                         "payroll_my_employer_events", "payroll_my_clearance_holds",
                                         "payroll_my_clearance_hold_lines",  # + Malaysia P7 (5f314f975ac3)
+                                        "payroll_my_filings", "payroll_my_settlements", "payroll_my_reconciliation_variances",  # + Malaysia P9 (efdc07f97eb5)
                                         "payroll_payslip_templates", "payroll_payslip_template_versions",
                                         "payroll_payslip_template_assignments"}  # + payslip templates (f3a9c1d7e2b4)
         nz_run_columns = {"nz_approval_fingerprint", "nz_payment_kind", "nz_run_options",   # + P6 options
@@ -272,7 +273,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         my_tables = {"payroll_my_identifier_vault", "payroll_my_identifier_access_events",
                      "payroll_my_employer_registrations", "payroll_my_worker_profiles",
                      "payroll_my_work_assignments", "payroll_my_tax_declarations", "payroll_my_accumulator_entries",
-                     "payroll_my_employer_events", "payroll_my_clearance_holds", "payroll_my_clearance_hold_lines"}
+                     "payroll_my_employer_events", "payroll_my_clearance_holds", "payroll_my_clearance_hold_lines",
+                     "payroll_my_filings", "payroll_my_settlements",
+                     "payroll_my_reconciliation_variances"}
         my_runs = {"payroll_runs": {"my_approval_fingerprint"}}
         tables, columns = pending_objects("e7ec6c1933b4")
         assert tables == payslip_template_tables | my_tables

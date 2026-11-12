@@ -3289,3 +3289,20 @@ export const requestMyHoldRelease = (holdId, releaseReference, evidenceRef) =>
 export const approveMyHoldRelease = (holdId) => api.post(`${MYP}/clearance-holds/${holdId}/release-approve`, {});
 export const getMyEmployeeSummary = async (employeeId) => myOne(await api.get(`${MYP}/employees/${employeeId}/summary`));
 export const getMyRunPreflight = async (runId) => myList(await api.get(`${MYP}/runs/${runId}/preflight`));
+// Phase 9 — filings, settlements, reconciliation, journal (no live transport, D-5).
+export const listMyFilings = async (params = {}) => myList(await api.get(`${MYP}/filings`, { params }));
+export const getMyFiling = async (id) => myOne(await api.get(`${MYP}/filings/${id}`));
+export const rebuildMyRunFilings = async (runId) => myList(await api.post(`${MYP}/filings/rebuild/${runId}`, {}));
+export const buildMyAnnualFilings = async (year, legalEntityId) =>
+  myList(await api.post(`${MYP}/filings/annual`, { year, legalEntityId }));
+export const buildMyEventFiling = (eventId) => api.post(`${MYP}/employer-events/${eventId}/filing`, {});
+export const approveMyFiling = (id) => api.post(`${MYP}/filings/${id}/approve`, {});
+export const recordMyFilingSubmission = (id, submissionRef) =>
+  api.post(`${MYP}/filings/${id}/submission`, { submissionRef });
+export const recordMyFilingResponse = (id, body) => api.post(`${MYP}/filings/${id}/response`, body);
+export const listMySettlements = async (params = {}) => myList(await api.get(`${MYP}/settlements`, { params }));
+export const recordMySettlementPayment = (id, body) => api.post(`${MYP}/settlements/${id}/payments`, body);
+export const reconcileMySettlement = async (id) => myOne(await api.post(`${MYP}/settlements/${id}/reconcile`, {}));
+export const listMyVariances = async (params = {}) => myList(await api.get(`${MYP}/variances`, { params }));
+export const resolveMyVariance = (id, reason) => api.post(`${MYP}/variances/${id}/resolve`, { reason });
+export const getMyRunJournal = async (runId) => myOne(await api.get(`${MYP}/runs/${runId}/journal`));

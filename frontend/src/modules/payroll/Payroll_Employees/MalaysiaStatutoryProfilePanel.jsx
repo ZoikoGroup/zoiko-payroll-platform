@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import {
-  approveMyAssignment, approveMyDeclaration, approveMyHoldRelease, approveMyWorkerProfile, cancelMyEmployerEvent,
+  approveMyAssignment, approveMyDeclaration, approveMyHoldRelease, approveMyWorkerProfile, buildMyEventFiling,
+  cancelMyEmployerEvent,
   createMyAssignment, createMyDeclaration, createMyEmployerEvent, createMyWorkerProfile, getMyEmployeeSummary,
   getMyHolidays, getMyLeaveEntitlement, listMyAssignments, listMyDeclarations, listMyEmployerEvents,
   listMyWorkerProfiles, openMyClearanceHold, requestMyHoldRelease, submitMyEmployerEvent, withdrawMyDeclaration,
@@ -232,6 +233,8 @@ export function MalaysiaEmployeeRecords({ employeeId }) {
               if (!on || !reason) throw new Error("A start date and a reason are required.");
               await openMyClearanceHold(r.id, on, reason);
             } },
+          { label: "Build HASiL form", show: (r) => ["CP22", "CP22A", "CP21"].includes(r.event_type) && r.status !== "CANCELLED",
+            ok: "Form payload built (DRAFT) — see Filings in the Compliance Centre.", run: (r) => buildMyEventFiling(r.id) },
           { label: "Cancel", show: (r) => r.status === "OPEN", ok: "Event cancelled.",
             run: async (r) => {
               const reason = ask("Reason for cancelling the event");
