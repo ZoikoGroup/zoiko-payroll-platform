@@ -460,3 +460,115 @@ def statutory_editors(db: Session, pack) -> set:
     rows = (db.query(A.actor_id).filter(A.jurisdiction_pack_id == pack.id, A.entity_type.in_(AUDIT_TYPES),
                                         A.actor_id.isnot(None)).distinct().all())
     return {r[0] for r in rows}
+
+
+# ── Phase 8a: the console's read side, in-app seeding and the workbook ─────
+def _canonical(db: Session, pack):
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    rates = (db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                               ContributionRate.organization_id.is_(None))
+             .order_by(ContributionRate.sort_order, ContributionRate.id).all())
+    slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None))
+             .order_by(TaxSlab.sort_order, TaxSlab.id).all())
+    return rates, slabs
+
+
+def configuration(db: Session, pack_row_id: int) -> dict:
+    """Every canonical row of a MY pack for the console: national and
+    territorial parameters, each schedule, holidays and earning classes."""
+    pack = _pack(db, pack_row_id)
+    content = _content()
+    rates, slabs = _canonical(db, pack)
+    basis = {row[0]: row[10] for row in content.MALAYSIA_SCALAR_CONTENT}
+    vocabulary = _vocabulary()
+
+    def rows(rule):
+        return [slab_view(s) for s in slabs if s.rule_type == rule]
+
+    return {"packRowId": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status,
+            "rates": [{**rate_view(r), "dateBasis": basis.get(r.component_key),
+                       "vocabulary": r.component_key in vocabulary} for r in rates],
+            "schedules": {rule: rows(rule) for rule in content.SCHEDULE_RULES},
+            "holidays": rows(content.MY_PUBLIC_HOLIDAY_RULE),
+            "earningClasses": rows(content.MY_EARNING_CLASS_RULE),
+            "territories": list(content.TERRITORIES)}
+
+
+def signing_status(db: Session, pack_row_id: int) -> dict:
+    pack = _pack(db, pack_row_id)
+    content = _content()
+    rates, slabs = _canonical(db, pack)
+    pending_slabs, table_rows = {}, {}
+    for s in slabs:
+        table_rows[s.rule_type] = table_rows.get(s.rule_type, 0) + 1
+        if MARK in (s.rate_label or ""):
+            pending_slabs[s.rule_type] = pending_slabs.get(s.rule_type, 0) + 1
+    return {"packId": pack.pack_id, "packRowId": pack.id, "version": pack.version, "status": pack.status,
+            "pendingRates": sorted(r.component_key for r in rates if MARK in (r.label or "")),
+            "emptyValues": sorted(r.component_key for r in rates if r.flat_amount is None and not r.text_value
+                                  and r.employee_rate_pct is None and r.employer_rate_pct is None),
+            "pendingPolicies": sorted(r.component_key for r in rates if (r.text_value or "") == "PENDING_G1"),
+            "notSupported": sorted(r.component_key for r in rates if (r.text_value or "") == NOT_SUPPORTED),
+            "reviewClasses": sum(1 for s in slabs if s.rule_type == content.MY_EARNING_CLASS_RULE
+                                 and s.assessment_basis == "REVIEW"),
+            "emptyTables": [rule for rule in content.REQUIRED_TABLES if not table_rows.get(rule)],
+            "pendingSlabsByRuleType": pending_slabs, "editors": sorted(statutory_editors(db, pack)),
+            "activationRefusal": mys.my_pack_activation_refusal(db, pack)}
+
+
+def list_packs(db: Session) -> list:
+    from app.modules.payroll.models import JurisdictionPack
+
+    packs = (db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == MY)
+             .order_by(JurisdictionPack.effective_from, JurisdictionPack.id).all())
+    return [{"id": p.id, "packId": p.pack_id, "version": p.version, "packType": p.pack_type, "status": p.status,
+             "effectiveFrom": _json(p.effective_from), "effectiveTo": _json(p.effective_to),
+             "approvedById": p.approved_by_id, "updatedById": p.updated_by_id} for p in packs]
+
+
+def seed_draft(db: Session, data: dict, actor_id) -> dict:
+    """Create the Draft MY-PAYROLL-2026 pack (every row unsigned) and the
+    PLANNED registry row from malaysia_content.py inside the deployed app (no
+    shell, no environment file) - only while no Malaysia pack exists."""
+    from app.modules.payroll.models import JurisdictionPack
+    from app.modules.payroll.service import record_tax_audit
+
+    reason = _reason(data)
+    existing = [p.pack_id for p in db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == MY)]
+    if existing:
+        raise BadRequestException(f"Malaysia content is already seeded ({', '.join(existing)}); change it through "
+                                  "the signing console or the workbook instead.")
+    pack = mys.seed_malaysia_pack(db)
+    availability = mys.ensure_my_service_registry_row(db)
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="jurisdiction_pack", entity_id=pack.id,
+                     jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference=mys.SPEC,
+                     old_value=None, new_value={"status": pack.status, "availability": availability},
+                     reason=f"{reason} - canonical {pack.pack_id} seeded as Draft from {mys.SPEC} (Super Admin "
+                            f"console).", auto_commit=False)
+    db.flush()
+    return {"packs": list_packs(db), "availability": availability}
+
+
+def _adapter():
+    from app.modules.payroll.my_workbook_adapter import MalaysiaWorkbookAdapter
+
+    return MalaysiaWorkbookAdapter()
+
+
+def workbook_export(db: Session, pack_row_id: int) -> bytes:
+    from app.modules.payroll import statutory_workbook
+
+    return statutory_workbook.export_workbook(db, _pack(db, pack_row_id), _adapter())
+
+
+def workbook_import(db: Session, pack_row_id: int, data: bytes, actor_id, *, apply: bool, reason=None,
+                    filename: str = "workbook.xlsx") -> dict:
+    """Preview (apply=False) or apply (apply=True, Draft pack, all-or-nothing,
+    every written row UNSIGNED) a filled Malaysia workbook."""
+    from app.modules.payroll import statutory_workbook
+
+    if not data:
+        raise BadRequestException("Upload the filled workbook (.xlsx).")
+    return statutory_workbook.import_workbook(db, _pack(db, pack_row_id), data, _adapter(), actor_id,
+                                              reason=reason, apply=apply, filename=filename)

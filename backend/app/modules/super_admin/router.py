@@ -4828,6 +4828,123 @@ def poland_golden_check(pack_row_id: int, current_user=Depends(get_current_super
     return pl_super_admin.golden_check(db, pack_row_id)
 
 
+# ── Malaysia (ZP-MY-ENG-001 Phase 8a): governed signing console + workbook ──
+_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@router.get("/compliance/malaysia/packs", summary="Malaysia packs with their status")
+def malaysia_packs(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    return my_super_admin.list_packs(db)
+
+
+@router.get("/compliance/malaysia/packs/{pack_row_id}/configuration",
+            summary="Every canonical Malaysia row: national + territorial parameters, schedules, holidays, classes")
+def malaysia_configuration(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    return my_super_admin.configuration(db, pack_row_id)
+
+
+@router.get("/compliance/malaysia/packs/{pack_row_id}/signing-status",
+            summary="What still blocks activation of a Malaysia pack (gate G1)")
+def malaysia_signing_status(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    return my_super_admin.signing_status(db, pack_row_id)
+
+
+@router.put("/compliance/malaysia/configuration/rows/{kind}/{row_id}",
+            summary="Governed edit / sign of one Malaysia statutory row (editable packs; source + reason; audited)")
+def malaysia_configuration_update_row(kind: str, row_id: int, payload: dict = Body(...),
+                                      current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    result = my_super_admin.update_row(db, kind, row_id, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.post("/compliance/malaysia/configuration/sign",
+             summary="Sign many Malaysia rows at once (all or nothing; reviewed source; audited)")
+def malaysia_configuration_sign(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                                db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    result = my_super_admin.sign_rows(db, payload.get("refs") or [], current_user.id, payload.get("reason"),
+                                      payload.get("sourceDocumentId"))
+    db.commit()
+    return result
+
+
+@router.post("/compliance/malaysia/packs/{pack_row_id}/tables/{rule_type}",
+             summary="Load a whole Malaysia table into a Draft pack (all or nothing; every row unsigned; audited)")
+def malaysia_replace_table(pack_row_id: int, rule_type: str, payload: dict = Body(...),
+                           current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    count = my_super_admin.replace_table(db, pack_row_id, rule_type, payload.get("rows") or [], current_user.id,
+                                         payload.get("reason"))
+    db.commit()
+    return {"ruleType": rule_type, "rows": count}
+
+
+@router.post("/compliance/malaysia/seed-draft",
+             summary="Create the Draft Malaysia pack from the specification (only while none exists; reason; audited)")
+def malaysia_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                        db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    result = my_super_admin.seed_draft(db, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.get("/compliance/malaysia/decisions", summary="Malaysia owner decisions D-1 to D-8")
+def malaysia_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import malaysia_service
+
+    return malaysia_service.owner_decisions(db)
+
+
+@router.get("/compliance/malaysia/packs/{pack_row_id}/workbook/export",
+            summary="Download the Malaysia statutory workbook template with the pack's current values")
+def malaysia_workbook_export(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                             db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    data = my_super_admin.workbook_export(db, pack_row_id)
+    return StreamingResponse(io.BytesIO(data), media_type=_XLSX,
+                             headers={"Content-Disposition": f'attachment; filename="malaysia-pack-{pack_row_id}.xlsx"'})
+
+
+@router.post("/compliance/malaysia/packs/{pack_row_id}/workbook/preview",
+             summary="Preview a filled Malaysia workbook (CHANGED / UNCHANGED / MISSING / INVALID; nothing written)")
+async def malaysia_workbook_preview(pack_row_id: int, file: UploadFile = File(...),
+                                    current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    data = await file.read()
+    return my_super_admin.workbook_import(db, pack_row_id, data, current_user.id, apply=False,
+                                         filename=file.filename or "workbook.xlsx")
+
+
+@router.post("/compliance/malaysia/packs/{pack_row_id}/workbook/apply",
+             summary="Apply a filled Malaysia workbook to a Draft pack (all or nothing; rows unsigned; audited)")
+async def malaysia_workbook_apply(pack_row_id: int, file: UploadFile = File(...), reason: str = Form(...),
+                                  current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    data = await file.read()
+    result = my_super_admin.workbook_import(db, pack_row_id, data, current_user.id, apply=True, reason=reason,
+                                            filename=file.filename or "workbook.xlsx")
+    db.commit()
+    return result
+
+
 @router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
              summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
 def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,

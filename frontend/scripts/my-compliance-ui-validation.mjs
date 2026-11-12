@@ -7,6 +7,9 @@
  * backend/tests/test_malaysia_scaffold.py), and the Malaysia schema / currency
  * / bank wiring must mirror the backend. Later phases add their own checks
  * here. Does not import .jsx (the Vite graph OOMs on this machine).
+ *
+ * Phase 8a: the Super Admin console and statutory workbook are wired to
+ * declared backend routes; generic editors hidden; workbook never signs.
  */
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -79,6 +82,50 @@ check("MYR currency and SWIFT/account routing are wired", () => {
   const bank = read("modules/payroll/Payroll_Employees/bankFieldsFor.js");
   assert(/"PL", "MY"\]/.test(bank) && /MY: \["swift_bic", "bank_account"\]/.test(bank) && /MY: "SWIFT \/ Account"/.test(bank),
     "bank routing");
+});
+
+// ── Phase 8a: Super Admin console (signing + statutory workbook) ───────────
+const BACKEND_ROOT = resolve(__dirname, "..", "..", "backend", "app", "modules");
+const saRouter = () => readFileSync(resolve(BACKEND_ROOT, "super_admin", "router.py"), "utf-8");
+check("every Malaysia Super Admin client call has a declared backend route", () => {
+  const service = read("service/superAdminService.js");
+  assert(service.includes('const MY_SA = "/api/super-admin/compliance/malaysia"'), "MY_SA base");
+  const calls = [...service.matchAll(/\$\{MY_SA\}(\/[^`"?]*)/g)].map((m) => m[1]
+    .replace(/\$\{packRowId\}/g, "{pack_row_id}").replace(/\$\{kind\}/g, "{kind}").replace(/\$\{rowId\}/g, "{row_id}")
+    .replace(/\$\{step\}/g, "{step}"));
+  assert(calls.length >= 9, `only ${calls.length} Malaysia client calls`);
+  const router = saRouter();
+  calls.forEach((path) => {
+    const paths = path.includes("{step}") ? ["preview", "apply"].map((s) => path.replace("{step}", s)) : [path];
+    paths.forEach((one) => assert(router.includes(`"/compliance/malaysia${one}"`), `no backend route for ${one}`));
+  });
+});
+check("the Malaysia page hides the generic editors and is routed", () => {
+  const config = read("config/jurisdictions/malaysiaComplianceConfig.jsx");
+  assert(/hiddenTabs: \["rates", "slabs"\]/.test(config), "generic editors must be hidden");
+  ["my-territory", "my-tables", "my-earning", "my-workbook", "my-signing"].forEach((key) =>
+    assert(config.includes(`tab("${key}"`), `tab ${key}`));
+  const app = read("App.jsx");
+  assert(app.includes('path="/super-admin/compliance/malaysia"') && app.includes("<MYCompliancePage />"), "route");
+  assert(/MY: "malaysia"/.test(read("pages/JurisdictionCompliance/index.js")), "slug");
+  assert(/MY: Malaysia/.test(read("components/jurisdiction/CountryFlag.jsx")), "flag");
+  assert(/jurisdiction_country == "MY"/.test(readFileSync(resolve(BACKEND_ROOT, "payroll", "service.py"), "utf-8")),
+    "backend refuses the generic editor for MY");
+});
+check("the workbook screen never signs or activates and applies only to a Draft pack", () => {
+  const tab = read("components/jurisdiction/malaysia/MYWorkbookTab.jsx");
+  assert(!/specialistVerified|signMyRows|activate/i.test(tab.replace(/never signs|Activated|activate a pack/gi, "")),
+    "the workbook must not sign or activate");
+  assert(tab.includes("isEditablePack(pack)") && tab.includes("!summary.INVALID"), "Draft-only, no INVALID rows");
+  assert(/Change reason \*/.test(tab), "apply needs a reason");
+});
+check("territorial rows are read per territory, never defaulted", () => {
+  const content = read("components/jurisdiction/malaysia/myContent.js");
+  ["PENINSULAR_LABUAN", "SABAH", "SARAWAK"].forEach((t) => assert(content.includes(`code: "${t}"`), t));
+  assert(!/\b(1700|5000|6000|20000|4000)\b/.test(content), "a statutory number in the console vocabulary");
+  const tabs = read("components/jurisdiction/malaysia/MYPackTabs.jsx");
+  assert(tabs.includes("territoryKey(base, t)") && tabs.includes('<span className="text-error">missing</span>'),
+    "a missing territorial row is shown, never filled");
 });
 
 if (failures.length) {

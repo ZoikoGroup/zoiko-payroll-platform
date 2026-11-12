@@ -144,7 +144,11 @@ const orgRouter = readFileSync(resolve(BACKEND, "pl_org_router.py"), "utf-8");
 const orgRoutes = new Set([...orgRouter.matchAll(/@router\.(get|post|put|patch|delete)\(\s*"([^"]+)"/g)]
   .map(([, method, path]) => `${method.toUpperCase()} /api/payroll/poland${path.replace(/\{[^}]+\}/g, "{}")}`));
 const payrollService = read("service/payrollService.js");
-const plBlock = payrollService.slice(payrollService.indexOf('const PL = "/api/payroll/poland";'));
+// Poland's block runs from its base constant to the next service base
+// constant (payslip templates, Malaysia, ...), never to the end of the file.
+const plStart = payrollService.indexOf('const PL = "/api/payroll/poland";');
+const plNext = payrollService.slice(plStart + 1).search(/\nconst [A-Z_]+ = "\/api\/payroll\//);
+const plBlock = payrollService.slice(plStart, plNext < 0 ? undefined : plStart + 1 + plNext);
 const plCalls = [...plBlock.matchAll(/api\.(get|post|put|delete)\(`([^`]+)`/g)]
   .map(([, method, path]) => `${method.toUpperCase()} ${path.replace("${PL}", "/api/payroll/poland").split("?")[0]
     .replace(/\$\{[^}]+\}/g, "{}")}`);
