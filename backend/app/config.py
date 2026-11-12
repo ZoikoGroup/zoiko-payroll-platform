@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     # Belgium canary: comma-separated organisation ids that may use Belgium while
     # the flag above is off and Belgium stays PLANNED for everyone else. Empty by default.
     BE_CANARY_ORG_IDS: str = ""
+    # Belgium identifier vault (ZP-BE-ENG-001 Block A1, be_identifiers; spec §15, D14):
+    # NISS / BIS and the employer's ONSS number are encrypted at rest. JSON object
+    # mapping key version -> 32-byte key from Secret Manager. Empty = encrypt /
+    # decrypt / fingerprint refuse, which is fine while Belgium is dormant. No
+    # fallback to PAYROLL_SECRET_KEY or any other country's keyring.
+    BE_IDENTIFIER_KEYRING: str = ""
+    # Belgium duplicate-detection key (32 bytes, Secret Manager). Never rotated:
+    # fingerprints must stay comparable across keyring rotations.
+    BE_IDENTIFIER_FINGERPRINT_KEY: str = ""
     # Poland identifier vault (ZP-PL-ENG-001 Phase 2, pl_identifiers; spec §13):
     # PESEL, employee NIP and the employer's ZUS contribution account (NRS) are
     # encrypted at rest. JSON object mapping key version -> 32-byte key from

@@ -445,3 +445,714 @@ JURISDICTION_HOOKS = {
     "payment_treatment": "_be_payment_treatment",
     "payslip_hold_view": "_be_payslip_hold_view",
 }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Block A1 — statutory setup records, declarations, identifier vault
+# (mirrors poland_service: whitelisted fields, effective dating, versioning,
+# four-eyes approval via the shared require_four_eyes, audited)
+# ══════════════════════════════════════════════════════════════════════════
+import re as _re
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+
+STATUS_DRAFT, STATUS_ACTIVE, STATUS_SUPERSEDED = "DRAFT", "ACTIVE", "SUPERSEDED"
+
+
+def _models():
+    from app.modules.payroll import models as m
+
+    return m
+
+
+def _as_date(value, field: str) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        raise BadRequestException(f"{field} must be an ISO date (YYYY-MM-DD).")
+
+
+def _as_datetime(value, field: str) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day)
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        raise BadRequestException(f"{field} must be an ISO date-time.")
+
+
+def _decimal(value, field: str) -> Optional[Decimal]:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        raise BadRequestException(f"{field} must be a decimal number.")
+
+
+def _reason(reason) -> str:
+    text = (reason or "").strip()
+    if not text:
+        raise BadRequestException("A reason is required for every Belgium statutory change (spec §12 audit).")
+    return text[:300]
+
+
+def _audit(db: Session, actor_id, action: str, entity_type: str, entity_id: int, old=None, new=None,
+           reason: Optional[str] = None) -> None:
+    from app.modules.payroll.service import record_tax_audit
+
+    record_tax_audit(db, actor_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id,
+                     old_value=old, new_value=new, reason=reason, legal_reference=SPEC, auto_commit=False)
+
+
+def _employee(db: Session, organization_id: int, employee_id):
+    from app.core.authz.scopes import organization_scoped
+    from app.modules.payroll.models import PayrollEmployee
+
+    employee = (organization_scoped(db, PayrollEmployee, organization_id)
+                .filter(PayrollEmployee.id == employee_id).first())
+    if employee is None or (getattr(employee, "country_code", None) or "").upper() != BE:
+        raise NotFoundException("Belgian employee")
+    return employee
+
+
+def _legal_entity(db: Session, organization_id: int, legal_entity_id) -> None:
+    if legal_entity_id is None:
+        return
+    from app.modules.organizations.models import LegalEntity
+
+    found = (db.query(LegalEntity.id)
+             .filter(LegalEntity.id == legal_entity_id, LegalEntity.organization_id == organization_id).first())
+    if found is None:
+        raise NotFoundException("Legal entity in this organisation")
+
+
+def _facts(row) -> Optional[dict]:
+    """Plain-value dict of a model row (the engine reads dicts). Vault rows are
+    never passed here: callers use identifier_view, which carries no digit."""
+    if row is None:
+        return None
+    return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+
+
+def _json_safe(value):
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+def _in_force(query, model, on: date):
+    return query.filter(model.effective_from <= on, (model.effective_to.is_(None)) | (model.effective_to >= on))
+
+
+def _enum(data: dict, key: str, allowed) -> None:
+    value = data.get(key)
+    if value is None:
+        return
+    value = str(value).strip().upper()
+    if value not in allowed:
+        raise BadRequestException(f"{key} must be one of: {', '.join(allowed)}.")
+    data[key] = value
+
+
+# ── field whitelists (anything else is refused; the server owns status) ────
+BE_REGISTRATION_FIELDS = (
+    "effective_from", "effective_to", "legal_entity_id", "legal_name", "enterprise_number", "employer_category_code",
+    "withholding_declaration_frequency", "holiday_fund_ref", "legal_language", "mandate_refs",
+    "filing_credential_ref", "source_document_id", "evidence_ref")
+BE_UNIT_FIELDS = ("registration_id", "unit_number", "name", "address", "region", "effective_from", "effective_to",
+                  "legal_entity_id", "evidence_ref")
+BE_PROFILE_FIELDS = ("effective_from", "effective_to", "legal_entity_id", "worker_category", "onss_worker_code",
+                     "tax_status", "residency", "special_status", "niss_vault_id", "evidence_ref")
+BE_SCHEDULE_FIELDS = ("effective_from", "effective_to", "legal_entity_id", "regime", "weekly_hours", "days_pattern",
+                      "reference_period", "supersedes_id", "evidence_ref")
+BE_CLASSIFICATION_FIELDS = ("effective_from", "effective_to", "legal_entity_id", "employment_line",
+                            "establishment_unit_id", "joint_committee", "sub_committee", "collective_agreement_id",
+                            "function_class", "seniority_months", "work_schedule_id", "evidence_ref")
+BE_DECLARATION_FIELDS = ("declaration_type", "value", "received_at", "effective_from", "effective_to",
+                         "source_channel", "legal_entity_id", "evidence_ref")
+DECLARATION_CHANNELS = ("PAPER", "ELECTRONIC", "EMPLOYEE_PORTAL", "IMPORT")
+
+_DATE_FIELDS = {"effective_from", "effective_to"}
+_DECIMAL_FIELDS = {"weekly_hours"}
+_INT_FIELDS = {"legal_entity_id", "source_document_id", "registration_id", "niss_vault_id", "establishment_unit_id",
+               "collective_agreement_id", "seniority_months", "work_schedule_id", "supersedes_id"}
+_JSON_FIELDS = {"mandate_refs", "address", "days_pattern", "value"}
+_COMMITTEE = _re.compile(r"^\d+(?:\.\d+)?$")
+_CODE = _re.compile(r"^[A-Z0-9]{1,10}$")
+
+
+def _clean(payload: dict, fields, *, required=()) -> dict:
+    if not isinstance(payload, dict):
+        raise BadRequestException("The request body must be an object.")
+    unknown = sorted(set(payload) - set(fields))
+    if unknown:
+        raise BadRequestException(f"unknown field(s): {', '.join(unknown)}")
+    data = {}
+    for key, value in payload.items():
+        if value is None or value == "":
+            data[key] = None
+        elif key in _DATE_FIELDS:
+            data[key] = _as_date(value, key)
+        elif key == "received_at":
+            data[key] = _as_datetime(value, key)
+        elif key in _DECIMAL_FIELDS:
+            data[key] = _decimal(value, key)
+        elif key in _INT_FIELDS:
+            try:
+                data[key] = int(value)
+            except (TypeError, ValueError):
+                raise BadRequestException(f"{key} must be a whole number.")
+        elif key in _JSON_FIELDS:
+            if not isinstance(value, (dict, list)):
+                raise BadRequestException(f"{key} must be a JSON object or list.")
+            data[key] = value
+        else:
+            data[key] = str(value).strip()
+    missing = [key for key in required if data.get(key) in (None, "")]
+    if missing:
+        raise BadRequestException(f"required field(s): {', '.join(missing)}")
+    if data.get("effective_to") and data.get("effective_from") and data["effective_to"] < data["effective_from"]:
+        raise BadRequestException("effective_to cannot be before effective_from.")
+    return data
+
+
+# ── versioned records with a second person's approval ──────────────────────
+def _create_version(db: Session, model, organization_id: int, data: dict, actor_id, label: str, reason: str,
+                    scope: dict):
+    """A DRAFT version; previous_version_id points at the latest row of the
+    same scope (or the explicitly superseded row)."""
+    explicit = data.pop("supersedes_id", None)
+    if explicit is not None:
+        prior = db.query(model).filter(model.id == explicit, model.organization_id == organization_id,
+                                       *[getattr(model, k) == v for k, v in scope.items()]).first()
+        if prior is None:
+            raise BadRequestException("supersedes_id does not belong to this scope.")
+    else:
+        query = db.query(model).filter(model.organization_id == organization_id,
+                                       *[(getattr(model, k).is_(None) if v is None else getattr(model, k) == v)
+                                         for k, v in scope.items()])
+        prior = query.order_by(model.effective_from.desc(), model.id.desc()).first()
+    row = model(organization_id=organization_id, status=STATUS_DRAFT, created_by_id=actor_id,
+                previous_version_id=getattr(prior, "id", None), **data)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "created", label, row.id, new={"effective_from": data["effective_from"].isoformat()},
+           reason=reason)
+    return row
+
+
+def _approve_version(db: Session, model, organization_id: int, row_id: int, actor_id, label: str, scope_keys):
+    """Four-eyes approval (approver != creator, shared require_four_eyes). An
+    earlier ACTIVE version of the same scope that is still open is superseded
+    from this version's start; a later ACTIVE version refuses."""
+    from app.modules.payroll.service import require_four_eyes
+
+    row = db.query(model).filter(model.id == row_id, model.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException(f"Belgium {label.replace('be_', '').replace('_', ' ')}")
+    if row.status != STATUS_DRAFT:
+        raise BadRequestException(f"Only a DRAFT {label.replace('_', ' ')} can be approved.")
+    require_four_eyes(row.created_by_id, actor_id, f"Approving a Belgium {label.replace('_', ' ')}",
+                      db=db, entity_type=label, entity_id=row.id, current_status=row.status)
+    start = row.effective_from
+    if scope_keys is None:
+        others = ([db.get(model, row.previous_version_id)] if row.previous_version_id else [])
+        others = [o for o in others if o is not None and o.status == STATUS_ACTIVE]
+    else:
+        others = db.query(model).filter(model.organization_id == organization_id, model.status == STATUS_ACTIVE,
+                                        model.id != row.id,
+                                        *[(getattr(model, k).is_(None) if getattr(row, k) is None
+                                           else getattr(model, k) == getattr(row, k)) for k in scope_keys]).all()
+    for old in others:
+        if old.effective_from >= start:
+            raise BadRequestException("An ACTIVE version on or after this effective date already exists.")
+        if old.effective_to is None or old.effective_to >= start:
+            old.effective_to = date.fromordinal(start.toordinal() - 1)
+            old.status = STATUS_SUPERSEDED
+    db.flush()
+    row.status = STATUS_ACTIVE
+    row.approved_by_id = actor_id
+    row.approved_at = datetime.utcnow()
+    db.flush()
+    _audit(db, actor_id, "approved", label, row.id, old={"status": STATUS_DRAFT},
+           new={"status": STATUS_ACTIVE, "effective_from": start.isoformat()})
+    return row
+
+
+def _one_active(db: Session, model, organization_id: int, on: date, label: str, **scope):
+    query = _in_force(db.query(model).filter(model.organization_id == organization_id,
+                                             model.status == STATUS_ACTIVE), model, on)
+    for key, value in scope.items():
+        query = query.filter(getattr(model, key).is_(None) if value is None else getattr(model, key) == value)
+    rows = query.all()
+    if len(rows) > 1:
+        raise BadRequestException(f"Two ACTIVE Belgium {label} versions overlap on {on.isoformat()}.")
+    return rows[0] if rows else None
+
+
+# ── employer registrations (BE-001, BE-038) ─────────────────────────────────
+def _enterprise_number(value) -> str:
+    digits = _re.sub(r"[\s.]", "", str(value or ""))
+    if not _re.fullmatch(r"\d{9,12}", digits):
+        raise BadRequestException("enterprise_number must be the KBO/BCE number (digits; format check only, G-16).")
+    return digits
+
+
+def record_be_employer_registration(db: Session, organization_id: int, payload: dict, actor_id, reason=None):
+    reason = _reason(reason)
+    data = _clean(payload, BE_REGISTRATION_FIELDS, required=("effective_from", "legal_name", "enterprise_number"))
+    _legal_entity(db, organization_id, data.get("legal_entity_id"))
+    data["enterprise_number"] = _enterprise_number(data["enterprise_number"])
+    _enum(data, "legal_language", ("NL", "FR", "DE"))
+    if data.get("employer_category_code") is not None:
+        data["employer_category_code"] = data["employer_category_code"].upper()
+        if not _CODE.fullmatch(data["employer_category_code"]):
+            raise BadRequestException("employer_category_code must be an ONSS category code (letters / digits).")
+    if data.get("mandate_refs") is not None and not isinstance(data["mandate_refs"], list):
+        raise BadRequestException("mandate_refs must be a list of mandate REFERENCES (never secrets).")
+    return _create_version(db, _models().PayrollBeEmployerRegistration, organization_id, data, actor_id,
+                           "be_employer_registration", reason, {"legal_entity_id": data.get("legal_entity_id")})
+
+
+def approve_be_employer_registration(db: Session, organization_id: int, row_id: int, actor_id):
+    return _approve_version(db, _models().PayrollBeEmployerRegistration, organization_id, row_id, actor_id,
+                            "be_employer_registration", ("legal_entity_id",))
+
+
+def verify_be_employer_registration(db: Session, organization_id: int, row_id: int, actor_id, outcome, reason):
+    from app.modules.payroll.service import require_four_eyes
+
+    reason = _reason(reason)
+    R = _models().PayrollBeEmployerRegistration
+    row = db.query(R).filter(R.id == row_id, R.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException("Belgium employer registration")
+    outcome = str(outcome or "").strip().upper()
+    if outcome not in ("VERIFIED", "REJECTED"):
+        raise BadRequestException("outcome must be VERIFIED or REJECTED.")
+    if row.status != STATUS_ACTIVE:
+        raise BadRequestException("Only an ACTIVE employer registration is verified.")
+    require_four_eyes(row.created_by_id, actor_id, "Verifying a Belgium employer registration", db=db,
+                      entity_type="be_employer_registration", entity_id=row.id, current_status=row.status)
+    old = row.verification_state
+    row.verification_state = outcome
+    db.flush()
+    _audit(db, actor_id, "verified", "be_employer_registration", row.id, old={"verification_state": old},
+           new={"verification_state": outcome}, reason=reason)
+    return row
+
+
+# ── establishment units (BE-001, BE-038) ────────────────────────────────────
+def record_be_establishment_unit(db: Session, organization_id: int, payload: dict, actor_id, reason=None):
+    reason = _reason(reason)
+    data = _clean(payload, BE_UNIT_FIELDS, required=("registration_id", "unit_number", "name", "effective_from"))
+    R = _models().PayrollBeEmployerRegistration
+    registration = db.query(R).filter(R.id == data["registration_id"], R.organization_id == organization_id).first()
+    if registration is None:
+        raise NotFoundException("Belgium employer registration")
+    data["legal_entity_id"] = registration.legal_entity_id
+    data["unit_number"] = _re.sub(r"[\s.]", "", data["unit_number"])
+    if not _re.fullmatch(r"\d{1,20}", data["unit_number"]):
+        raise BadRequestException("unit_number must be the establishment unit number (digits; format check only).")
+    return _create_version(db, _models().PayrollBeEstablishmentUnit, organization_id, data, actor_id,
+                           "be_establishment_unit", reason,
+                           {"registration_id": data["registration_id"], "unit_number": data["unit_number"]})
+
+
+def approve_be_establishment_unit(db: Session, organization_id: int, row_id: int, actor_id):
+    return _approve_version(db, _models().PayrollBeEstablishmentUnit, organization_id, row_id, actor_id,
+                            "be_establishment_unit", ("registration_id", "unit_number"))
+
+
+# ── worker profiles (BE-002) ────────────────────────────────────────────────
+def record_be_worker_profile(db: Session, organization_id: int, employee_id: int, payload: dict, actor_id,
+                             reason=None):
+    content = _content()
+    reason = _reason(reason)
+    employee = _employee(db, organization_id, employee_id)
+    data = _clean(payload, BE_PROFILE_FIELDS, required=("effective_from", "worker_category"))
+    _enum(data, "worker_category", content.WORKER_CATEGORIES)
+    _enum(data, "residency", ("RESIDENT", "NON_RESIDENT"))
+    if data.get("onss_worker_code") is not None:
+        data["onss_worker_code"] = data["onss_worker_code"].upper()
+        if not _re.fullmatch(r"[A-Z0-9]{1,4}", data["onss_worker_code"]):
+            raise BadRequestException("onss_worker_code must be an ONSS worker code (letters / digits).")
+    if data.get("niss_vault_id") is not None:
+        _vault_for_employee(db, organization_id, employee.id, data["niss_vault_id"], ("NISS", "BIS"))
+    data.setdefault("legal_entity_id", getattr(employee, "legal_entity_id", None))
+    data["employee_id"] = employee.id
+    return _create_version(db, _models().PayrollBeWorkerProfile, organization_id, data, actor_id,
+                           "be_worker_profile", reason, {"employee_id": employee.id})
+
+
+def approve_be_worker_profile(db: Session, organization_id: int, row_id: int, actor_id):
+    return _approve_version(db, _models().PayrollBeWorkerProfile, organization_id, row_id, actor_id,
+                            "be_worker_profile", ("employee_id",))
+
+
+# ── work schedules (BE-022) ─────────────────────────────────────────────────
+def record_be_work_schedule(db: Session, organization_id: int, employee_id: int, payload: dict, actor_id,
+                            reason=None):
+    """An explicit schedule object. Schedules are versioned in their own lineage
+    (supersedes_id): an employee with several employment lines can hold several
+    ACTIVE schedules, so approving one never supersedes another line's."""
+    content = _content()
+    reason = _reason(reason)
+    employee = _employee(db, organization_id, employee_id)
+    data = _clean(payload, BE_SCHEDULE_FIELDS, required=("effective_from", "regime", "weekly_hours"))
+    _enum(data, "regime", content.SCHEDULE_REGIMES)
+    if data["weekly_hours"] <= 0:
+        raise BadRequestException("weekly_hours must be above zero.")
+    data.setdefault("legal_entity_id", getattr(employee, "legal_entity_id", None))
+    data["employee_id"] = employee.id
+    if data.get("supersedes_id") is None:
+        data["supersedes_id"] = None
+        row = _create_version_lineage(db, organization_id, data, actor_id, reason)
+        return row
+    return _create_version(db, _models().PayrollBeWorkSchedule, organization_id, data, actor_id,
+                           "be_work_schedule", reason, {"employee_id": employee.id})
+
+
+def _create_version_lineage(db: Session, organization_id: int, data: dict, actor_id, reason: str):
+    data.pop("supersedes_id", None)
+    S = _models().PayrollBeWorkSchedule
+    row = S(organization_id=organization_id, status=STATUS_DRAFT, created_by_id=actor_id, **data)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "created", "be_work_schedule", row.id,
+           new={"effective_from": data["effective_from"].isoformat()}, reason=reason)
+    return row
+
+
+def approve_be_work_schedule(db: Session, organization_id: int, row_id: int, actor_id):
+    return _approve_version(db, _models().PayrollBeWorkSchedule, organization_id, row_id, actor_id,
+                            "be_work_schedule", None)
+
+
+# ── employment classifications (BE-003, BE-020) ─────────────────────────────
+def record_be_employment_classification(db: Session, organization_id: int, employee_id: int, payload: dict,
+                                        actor_id, reason=None):
+    m = _models()
+    reason = _reason(reason)
+    employee = _employee(db, organization_id, employee_id)
+    data = _clean(payload, BE_CLASSIFICATION_FIELDS, required=("effective_from", "employment_line"))
+    for key in ("joint_committee", "sub_committee"):
+        if data.get(key) is not None:
+            data[key] = data[key].upper()
+            pattern = _COMMITTEE if key == "joint_committee" else _CODE
+            if not pattern.fullmatch(data[key]):
+                raise BadRequestException(f"{key} has an invalid format.")
+    if data.get("sub_committee") and not data.get("joint_committee"):
+        raise BadRequestException("A sub-committee needs its Joint Committee.")
+    if data.get("seniority_months") is not None and data["seniority_months"] < 0:
+        raise BadRequestException("seniority_months cannot be negative.")
+    if data.get("establishment_unit_id") is not None:
+        U = m.PayrollBeEstablishmentUnit
+        if db.query(U.id).filter(U.id == data["establishment_unit_id"], U.organization_id == organization_id).first() is None:
+            raise NotFoundException("Belgium establishment unit")
+    if data.get("work_schedule_id") is not None:
+        S = m.PayrollBeWorkSchedule
+        if db.query(S.id).filter(S.id == data["work_schedule_id"], S.organization_id == organization_id,
+                                 S.employee_id == employee.id).first() is None:
+            raise NotFoundException("Work schedule of this employee")
+    if data.get("collective_agreement_id") is not None:
+        A = m.CollectiveAgreement
+        agreement = db.query(A).filter(A.id == data["collective_agreement_id"]).first()
+        if agreement is None or (agreement.jurisdiction_country or "").upper() != BE \
+                or agreement.organization_id not in (None, organization_id):
+            raise NotFoundException("Belgian Joint Committee agreement")
+    data.setdefault("legal_entity_id", getattr(employee, "legal_entity_id", None))
+    data["employee_id"] = employee.id
+    return _create_version(db, m.PayrollBeEmploymentClassification, organization_id, data, actor_id,
+                           "be_employment_classification", reason,
+                           {"employee_id": employee.id, "employment_line": data["employment_line"]})
+
+
+def approve_be_employment_classification(db: Session, organization_id: int, row_id: int, actor_id):
+    return _approve_version(db, _models().PayrollBeEmploymentClassification, organization_id, row_id, actor_id,
+                            "be_employment_classification", ("employee_id", "employment_line"))
+
+
+# ── declarations (spec §5 stages 1 and 5, BE-012) ───────────────────────────
+def record_be_declaration(db: Session, organization_id: int, employee_id: int, payload: dict, actor_id):
+    content = _content()
+    employee = _employee(db, organization_id, employee_id)
+    data = _clean(payload, BE_DECLARATION_FIELDS,
+                  required=("declaration_type", "received_at", "effective_from", "source_channel", "evidence_ref"))
+    _enum(data, "declaration_type", content.DECLARATION_TYPES)
+    _enum(data, "source_channel", DECLARATION_CHANNELS)
+    if data.get("value") is not None and not isinstance(data["value"], dict):
+        raise BadRequestException("value must be a JSON object.")
+    data.setdefault("legal_entity_id", getattr(employee, "legal_entity_id", None))
+    D = _models().PayrollBeDeclaration
+    row = D(organization_id=organization_id, employee_id=employee.id, status="RECEIVED", created_by_id=actor_id,
+            **data)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "received", "be_declaration", row.id,
+           new={"type": row.declaration_type, "effective_from": row.effective_from.isoformat()},
+           reason=f"{row.declaration_type} received {row.received_at.isoformat()}")
+    return row
+
+
+def _declaration(db: Session, organization_id: int, row_id: int):
+    D = _models().PayrollBeDeclaration
+    row = db.query(D).filter(D.id == row_id, D.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException("Belgium declaration")
+    return row
+
+
+def approve_be_declaration(db: Session, organization_id: int, row_id: int, actor_id):
+    """Four-eyes approval; an earlier APPROVED declaration of the same type that
+    is still open is superseded from this one's start (never edited away)."""
+    from app.modules.payroll.service import require_four_eyes
+
+    D = _models().PayrollBeDeclaration
+    row = _declaration(db, organization_id, row_id)
+    if row.status != "RECEIVED":
+        raise BadRequestException("Only a RECEIVED declaration can be approved.")
+    require_four_eyes(row.created_by_id, actor_id, "Approving a Belgium declaration", db=db,
+                      entity_type="be_declaration", entity_id=row.id, current_status=row.status)
+    start = row.effective_from
+    for old in (db.query(D).filter(D.organization_id == organization_id, D.employee_id == row.employee_id,
+                                   D.declaration_type == row.declaration_type, D.status == "APPROVED",
+                                   D.id != row.id).all()):
+        if old.effective_from >= start:
+            raise BadRequestException("An APPROVED declaration of this type already starts on or after this one.")
+        if old.effective_to is None or old.effective_to >= start:
+            old.effective_to = date.fromordinal(start.toordinal() - 1)
+            old.status = "SUPERSEDED"
+            old.superseded_by_id = row.id
+    row.status = "APPROVED"
+    row.approved_by_id = actor_id
+    row.approved_at = datetime.utcnow()
+    db.flush()
+    _audit(db, actor_id, "approved", "be_declaration", row.id, old={"status": "RECEIVED"},
+           new={"status": "APPROVED", "type": row.declaration_type})
+    return row
+
+
+def withdraw_be_declaration(db: Session, organization_id: int, row_id: int, actor_id, reason, effective_to):
+    reason = _reason(reason)
+    row = _declaration(db, organization_id, row_id)
+    if row.status != "APPROVED":
+        raise BadRequestException("Only an APPROVED declaration can be withdrawn.")
+    end = _as_date(effective_to, "effectiveTo")
+    if end < row.effective_from:
+        raise BadRequestException("The withdrawal date cannot be before the declaration started.")
+    row.effective_to = end
+    row.status = "WITHDRAWN"
+    row.withdrawn_at = datetime.utcnow()
+    db.flush()
+    _audit(db, actor_id, "withdrawn", "be_declaration", row.id, old={"status": "APPROVED"},
+           new={"status": "WITHDRAWN", "effective_to": end.isoformat()}, reason=reason)
+    return row
+
+
+# ── identifier vault (spec §15, BE-040): masked; reveal requested + approved ─
+def _vault(db: Session, organization_id: int, vault_id: int):
+    V = _models().PayrollBeIdentifierVault
+    row = db.query(V).filter(V.id == vault_id, V.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException("Belgian identifier")
+    return row
+
+
+def _vault_for_employee(db: Session, organization_id: int, employee_id: int, vault_id: int, kinds):
+    row = _vault(db, organization_id, vault_id)
+    if row.employee_id != employee_id or row.identifier_type not in kinds or row.status != "ACTIVE":
+        raise BadRequestException("The identifier reference does not belong to this employee.")
+    return row
+
+
+def _vault_owner(row) -> str:
+    from app.modules.payroll import be_identifiers as bid
+
+    subject = row.employee_id if row.subject_type == bid.SUBJECT_EMPLOYEE else row.legal_entity_id
+    return bid.vault_owner(row.organization_id, row.subject_type, subject, row.identifier_type, row.id)
+
+
+def _vault_event(db: Session, row, action: str, actor_id, reason=None, purpose=None, previous_id=None):
+    Event = _models().PayrollBeIdentifierAccessEvent
+    event = Event(organization_id=row.organization_id, legal_entity_id=row.legal_entity_id,
+                  employee_id=row.employee_id, vault_id=row.id, actor_id=actor_id, created_by_id=actor_id,
+                  action=action, purpose=purpose, reason=(reason or None) and reason[:300],
+                  previous_version_id=previous_id)
+    db.add(event)
+    db.flush()
+    return event
+
+
+def identifier_view(row) -> dict:
+    """The only identifier representation any API returns (no digit)."""
+    from app.modules.payroll import be_identifiers as bid
+
+    active = row.status == "ACTIVE"
+    return {"id": row.id, "subjectType": row.subject_type, "identifierType": row.identifier_type,
+            "employeeId": row.employee_id, "legalEntityId": row.legal_entity_id, "onFile": active,
+            "masked": bid.masked(row.identifier_type) if active else None, "status": row.status,
+            "keyVersion": row.key_version}
+
+
+def create_be_identifier(db: Session, organization_id: int, identifier_type: str, raw, actor_id, *,
+                         employee_id=None, legal_entity_id=None):
+    from app.modules.payroll import be_identifiers as bid
+
+    V = _models().PayrollBeIdentifierVault
+    identifier_type = str(identifier_type or "").strip().upper()
+    if identifier_type in (bid.NISS, bid.BIS):
+        subject_type = bid.SUBJECT_EMPLOYEE
+        employee = _employee(db, organization_id, employee_id)
+        legal_entity_id = getattr(employee, "legal_entity_id", None)
+    elif identifier_type == bid.ONSS:
+        subject_type, employee_id = bid.SUBJECT_EMPLOYER, None
+        _legal_entity(db, organization_id, legal_entity_id)
+    else:
+        raise BadRequestException("identifierType must be NISS, BIS or ONSS.")
+    try:
+        plain = bid.normalise(identifier_type, raw)
+        fingerprint = bid.fingerprint(identifier_type, plain)
+    except bid.BeIdentifierError as error:
+        raise BadRequestException(str(error))
+    if db.query(V.id).filter(V.organization_id == organization_id, V.identifier_type == identifier_type,
+                             V.fingerprint == fingerprint, V.status == "ACTIVE").first():
+        raise BadRequestException(f"This {identifier_type} is already on file in this organisation.")
+    if subject_type == bid.SUBJECT_EMPLOYEE and db.query(V.id).filter(
+            V.organization_id == organization_id, V.employee_id == employee_id,
+            V.identifier_type == identifier_type, V.status == "ACTIVE").first():
+        raise BadRequestException(f"The employee already has a {identifier_type} on file; delete it first.")
+    row = V(organization_id=organization_id, legal_entity_id=legal_entity_id, employee_id=employee_id,
+            subject_type=subject_type, identifier_type=identifier_type, ciphertext="pending", key_version=0,
+            fingerprint=fingerprint, collected_at=datetime.utcnow(), status="ACTIVE", created_by_id=actor_id)
+    db.add(row)
+    db.flush()
+    try:
+        row.ciphertext, row.key_version = bid.encrypt(plain, _vault_owner(row))
+    except bid.BeIdentifierError as error:
+        raise BadRequestException(str(error))
+    plain = None
+    db.flush()
+    _vault_event(db, row, "CREATE", actor_id, purpose=bid.PURPOSE)
+    return row
+
+
+def list_be_identifiers(db: Session, organization_id: int, employee_id=None) -> list:
+    V = _models().PayrollBeIdentifierVault
+    q = db.query(V).filter(V.organization_id == organization_id)
+    if employee_id is not None:
+        _employee(db, organization_id, employee_id)
+        q = q.filter(V.employee_id == employee_id)
+    return [identifier_view(r) for r in q.order_by(V.id)]
+
+
+def _last_event(db: Session, row, action: str, after_id: int = 0):
+    Event = _models().PayrollBeIdentifierAccessEvent
+    return (db.query(Event).filter(Event.vault_id == row.id, Event.action == action, Event.id > after_id)
+            .order_by(Event.id.desc()).first())
+
+
+def request_be_identifier_reveal(db: Session, organization_id: int, vault_id: int, reason, actor_id):
+    row = _vault(db, organization_id, vault_id)
+    if row.status != "ACTIVE" or not row.ciphertext:
+        raise BadRequestException("The identifier has been deleted.")
+    return _vault_event(db, row, "REVEAL_REQUESTED", actor_id, reason=_reason(reason), purpose="REVEAL")
+
+
+def approve_be_identifier_reveal(db: Session, organization_id: int, vault_id: int, actor_id):
+    from app.modules.payroll.service import require_four_eyes
+
+    row = _vault(db, organization_id, vault_id)
+    request = _last_event(db, row, "REVEAL_REQUESTED")
+    if request is None:
+        raise BadRequestException("There is no reveal request to approve.")
+    if _last_event(db, row, "REVEAL_APPROVED", request.id) is not None:
+        raise BadRequestException("This reveal request has already been approved.")
+    require_four_eyes(request.actor_id, actor_id, "Approving a Belgian identifier reveal", db=db,
+                      entity_type="be_identifier_access_event", entity_id=request.id,
+                      current_status="REVEAL_REQUESTED")
+    return _vault_event(db, row, "REVEAL_APPROVED", actor_id, reason=request.reason, purpose="REVEAL",
+                        previous_id=request.id)
+
+
+def reveal_be_identifier(db: Session, organization_id: int, vault_id: int, actor_id) -> dict:
+    """The ONE response that carries the value: requester only, approved by a
+    second person, single use."""
+    from app.modules.payroll import be_identifiers as bid
+
+    row = _vault(db, organization_id, vault_id)
+    if row.status != "ACTIVE" or not row.ciphertext:
+        raise BadRequestException("The identifier has been deleted.")
+    request = _last_event(db, row, "REVEAL_REQUESTED")
+    approval = _last_event(db, row, "REVEAL_APPROVED", request.id) if request is not None else None
+    if request is None or approval is None:
+        raise BadRequestException("A reveal needs a request and a second person's approval.")
+    if _last_event(db, row, "REVEALED", approval.id) is not None:
+        raise BadRequestException("This approval has already been used; request a new reveal.")
+    if request.actor_id != actor_id:
+        raise BadRequestException("Only the person who requested the reveal can see the identifier.")
+    try:
+        value = bid.decrypt(row.ciphertext, row.key_version, _vault_owner(row))
+    except bid.BeIdentifierError as error:
+        raise BadRequestException(str(error))
+    _vault_event(db, row, "REVEALED", actor_id, reason=request.reason, purpose="REVEAL", previous_id=approval.id)
+    return {"vaultId": row.id, "identifierType": row.identifier_type, "value": value}
+
+
+def delete_be_identifier(db: Session, organization_id: int, vault_id: int, actor_id, reason):
+    reason = _reason(reason)
+    row = _vault(db, organization_id, vault_id)
+    if row.status == "DELETED":
+        raise BadRequestException("The identifier has already been deleted.")
+    row.status = "DELETED"
+    row.deleted_at = datetime.utcnow()
+    row.ciphertext = None
+    db.flush()
+    _vault_event(db, row, "DELETED", actor_id, reason=reason)
+    return row
+
+
+def set_be_employer_onss(db: Session, organization_id: int, registration_id: int, raw, actor_id):
+    """Put the employer's ONSS number on file (vault) for a DRAFT registration."""
+    R = _models().PayrollBeEmployerRegistration
+    registration = db.query(R).filter(R.id == registration_id, R.organization_id == organization_id).first()
+    if registration is None:
+        raise NotFoundException("Belgium employer registration")
+    if registration.status != STATUS_DRAFT:
+        raise BadRequestException("The ONSS number is set on a DRAFT registration (create a new version).")
+    row = create_be_identifier(db, organization_id, "ONSS", raw, actor_id,
+                               legal_entity_id=registration.legal_entity_id)
+    registration.onss_number_vault_id = row.id
+    db.flush()
+    _audit(db, actor_id, "updated", "be_employer_registration", registration.id,
+           new={"onss_number_vault_id": row.id}, reason="ONSS number put on file (vault)")
+    return row
+
+
+# ── employee summary (identifiers masked) ───────────────────────────────────
+def employee_summary(db: Session, organization_id: int, employee_id: int) -> dict:
+    m = _models()
+    _employee(db, organization_id, employee_id)
+
+    def versions(model):
+        return [_json_safe(_facts(r)) for r in db.query(model).filter(
+            model.organization_id == organization_id, model.employee_id == employee_id).order_by(model.id)]
+
+    return {"employeeId": employee_id, "identifiers": list_be_identifiers(db, organization_id, employee_id),
+            "workerProfiles": versions(m.PayrollBeWorkerProfile),
+            "workSchedules": versions(m.PayrollBeWorkSchedule),
+            "classifications": versions(m.PayrollBeEmploymentClassification),
+            "declarations": versions(m.PayrollBeDeclaration)}

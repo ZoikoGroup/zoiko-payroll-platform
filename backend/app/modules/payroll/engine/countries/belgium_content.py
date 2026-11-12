@@ -114,6 +114,7 @@ SOURCE_CODES = tuple(code for code, *_ in SOURCE_REFERENCES)
 # ── Vocabularies (no statutory values) ────────────────────────────────────
 WORKER_CATEGORIES = ("MANUAL", "EMPLOYEE", "APPRENTICE", "STUDENT", "FLEXI", "OCCASIONAL", "OTHER")  # BE-002
 PAY_FREQUENCIES = ("MONTHLY", "SEMI_MONTHLY", "FORTNIGHTLY", "WEEKLY")                               # BE-004, G-11
+SCHEDULE_REGIMES = ("EFFECTIVE", "AVERAGE")                                                          # BE-022
 PAY_BASES = ("SALARIED", "HOURLY")                                                                   # BE-004
 # Rounding rule vocabulary (unit + mode); WHICH rule applies is G-02 / G-19.
 ROUNDING_RULES = ("CENT_HALF_UP", "CENT_DOWN", "EURO_HALF_UP", "EURO_DOWN")

@@ -148,8 +148,13 @@ _STRUCTURAL_NUMBERS = {
     },
     "belgium_service.py": {
         0: "list index", 1: "list index", 8: "refusal message shows the first 8 problems",
+        10: "ISO date string slice [:10]",
         100: "ContributionRate.label column width", 150: "TaxSlab.rate_label column width",
         200: "SourceArtifact.agency column width", 300: "SourceArtifact.title column width",
+    },
+    "be_identifiers.py": {
+        1: "regex group index; key versions start at 1", 2: "two hex characters per key byte",
+        4: "base64 padding block", 12: "AES-GCM nonce length in bytes", 32: "AES-256 key length in bytes",
     },
 }
 # Strings that look numeric but are not statutory values.
@@ -163,6 +168,10 @@ _STRUCTURAL_STRINGS = {
     ("belgium_service.py", "Belgium form templates (Dimona, DmfA, 281.10, payslip) stay inactive until the "
                            "authority schemas are archived and the filing path is certified (gate G3)."):
         "Belcotax form number 281.10, not a value",
+    ("be_identifiers.py", r"^\d{5,16}$"): "ONSS employer number shape (5-16 digits; format only, G-16)",
+    ("belgium_service.py", "^[A-Z0-9]{1,10}$"): "ONSS category / sub-committee code shape (1-10 letters / digits)",
+    ("belgium_service.py", r"\d{9,12}"): "KBO/BCE enterprise number shape (format only, G-16)",
+    ("belgium_service.py", r"\d{1,20}"): "establishment unit number shape (digits, column width 20)",
 }
 _NUMERIC_TEXT = re.compile(r"\d+(?:[.,]\d+)?\s*%|EUR\s*\d|\b\d+[.,]\d{2}\b")
 
