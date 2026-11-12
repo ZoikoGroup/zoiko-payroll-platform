@@ -32525,6 +32525,11 @@ def advance_payroll_run_status(
     if next_status == PayrollStatus.APPROVED:
         run.approved_by = approver_id
         run.approved_at = datetime.utcnow()
+        # Payslip templates: freeze the org's assigned template version onto
+        # each payslip so a later template edit never changes an issued one.
+        # Presentation only — a failure here is logged and never blocks payroll.
+        from app.modules.payroll import payslip_template_service
+        payslip_template_service.freeze_run_templates(db, run)
     if next_status == PayrollStatus.AUTHORIZED:
         run.authorized_by = approver_id
         run.authorized_at = datetime.utcnow()
@@ -33936,15 +33941,13 @@ def _amount_to_words(amount):
     return result
 
 
-def _register_rupee_font(c):
-    """Attempt to register a Unicode-capable TTF font (regular + bold) so the
-    rupee symbol renders correctly.  Falls back silently to Helvetica if no
-    suitable font is found."""
+def unicode_font_candidates():
+    """(regular, bold) TTF paths that can render the rupee sign and other
+    non-Latin-1 characters, in preference order. Shared by the reportlab
+    payslip PDF and the payslip-template PDF."""
     import os
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
 
-    candidates = [
+    return [
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
          "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
         ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
@@ -33961,7 +33964,17 @@ def _register_rupee_font(c):
          "/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
         ("/Library/Fonts/Arial.ttf", "/Library/Fonts/Arial Bold.ttf"),
     ]
-    for regular_path, bold_path in candidates:
+
+
+def _register_rupee_font(c):
+    """Attempt to register a Unicode-capable TTF font (regular + bold) so the
+    rupee symbol renders correctly.  Falls back silently to Helvetica if no
+    suitable font is found."""
+    import os
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    for regular_path, bold_path in unicode_font_candidates():
         if not os.path.isfile(regular_path):
             continue
         try:
@@ -34078,95 +34091,11 @@ def _draw_evaluation_watermark(c, width: float, height: float, font_name: str = 
     c.restoreState()
 
 
-def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: int = None) -> bytes:
-    """Renders a professional PDF payslip document styled after the Nova Tech
-    Solutions template: navy blue header, bordered grid tables, side-by-side
-    earnings/deductions, summary box, net-in-words, and disclaimer footer.
-    Requires ``reportlab``."""
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import mm
-    from reportlab.lib import colors
-    from reportlab.pdfgen import canvas
-
-    data, item, run = get_payslip_by_id(db, payslip_id, organization_id)
-
-    # ── Company info for header ──
-    company = db.query(CompanyComplianceDetails).filter(
-        CompanyComplianceDetails.organization_id == organization_id
-    ).first() if organization_id else None
-    company_name = getattr(company, "name", None) or "Company Name"
-    company_address = getattr(company, "address", None) or ""
-
-    # Prompt 3: EVALUATION workspaces get a 'PREVIEW — EVALUATION ONLY'
-    # watermark (read live from Organization, so converting to PRODUCTION
-    # removes it automatically).
-    evaluation = _is_evaluation_workspace(db, organization_id)
-
-    # A statutorily-blocked payslip (PayslipStatus.FAILED — today: Germany
-    # PAP unavailable / no effective EmployeeStatutoryProfile, recorded as
-    # Phase 8BI's FAILED sentinel) carries ZERO monetary figures. Rendering
-    # the normal layout here would fabricate a €0.00 payslip document —
-    # explicitly forbidden (§25: never fabricate zero). Render the explicit
-    # blocked-state document instead, which contains NO monetary amounts.
-    if item.status == PayslipStatus.FAILED:
-        return _render_blocked_payslip_pdf_bytes(data, item, run, company_name, company_address, evaluation=evaluation)
-
-    # Phase 8BU: a PARTIALLY_CALCULATED Germany payslip (Part 21 — "remove
-    # unnecessary internal blocking") DOES carry real, non-fabricated
-    # figures for whichever components resolved (SI contributions, gross,
-    # employer levies) but NOT for wage tax/Soli/church tax when those are
-    # the unavailable component(s). The normal payslip layout below cannot
-    # render this correctly — its `fmt()` helper can't distinguish a real
-    # €0.00 from an unavailable one — so route to a dedicated renderer that
-    # shows the real figures plainly and marks only the actually-unavailable
-    # ones as "UNAVAILABLE" text, never as a numeric zero.
-    if item.status == PayslipStatus.PARTIAL:
-        return _render_partial_payslip_pdf_bytes(data, item, run, company_name, company_address, evaluation=evaluation)
-
-    # data["country"] is get_payslip_by_id()'s already-resolved country —
-    # the payslip's own snapshotted jurisdiction (its employee's country at
-    # generation time), not the org's current default. Re-deriving it here
-    # from the org's CompanyComplianceDetails (as this used to do) meant a
-    # non-default-jurisdiction employee's PDF showed the wrong currency,
-    # income-tax label, and statutory terminology.
-    country = _normalize_country(data.get("country") or "IN")
-    if country == "UK":
-        return _render_uk_payslip_pdf_bytes(db, data, item, run, company_name, company_address,
-                                            evaluation=evaluation)
-    sym = _get_currency_symbol(country)
-
-    def fmt(val):
-        v = float(val or 0)
-        if v == 0:
-            return f"{sym} 0.00"
-        return f"{sym} {v:,.2f}"
-
-    def fmt_plain(val):
-        return f"{float(val or 0):,.2f}"
-
-    def fmt_date(v):
-        if not v:
-            return "-"
-        if isinstance(v, str):
-            try:
-                v = datetime.strptime(v[:10], "%Y-%m-%d").date()
-            except Exception:
-                return v
-        try:
-            return v.strftime("%d-%b-%Y")
-        except Exception:
-            return str(v)
-
-    def mask_account(acc):
-        if not acc:
-            return "-"
-        s = str(acc)
-        if len(s) <= 4:
-            return s
-        return "X" * (len(s) - 4) + s[-4:]
-
-    currency_word = {"IN": "Rupees", "US": "Dollars", "UK": "Pounds"}.get(country, "")
-
+def payslip_line_items(data: dict, country: str):
+    """The employee-facing earnings and deduction lines of a payslip, as the
+    PDF prints them: ([(label, amount)], [(label, amount)]). Shared by the PDF
+    and the payslip-template renderer so both always show the same lines.
+    May add the derived 'lohnsteuerOnly' key to ``data`` (Germany)."""
     # ── Build earnings & deduction items (pre-computed for layout) ──
     earnings_items = [
         ("Basic Salary", data["basicPay"]),
@@ -34187,7 +34116,6 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
         # Singapore: this is exactly the CPF Additional Wages figure the
         # engine used (engine/countries/singapore.py — OW = gross − AW).
         earnings_items.append(("Additional Wages (AW)" if country == "SG" else "Additional Compensation", add_comp))
-    earnings_total = float(data["salary"] or 0)
 
     deduction_items = []
     attendance_ded = float(data.get("attendanceDeduction", 0) or 0)
@@ -34335,6 +34263,110 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     # cost, not the employee's) — removed at Venu's request. They remain
     # visible to admins on the Payroll Register / Run Detail views, which
     # are internal cost-review screens, not the payslip document itself.
+    return earnings_items, deduction_items
+
+
+def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: int = None) -> bytes:
+    """Renders a professional PDF payslip document styled after the Nova Tech
+    Solutions template: navy blue header, bordered grid tables, side-by-side
+    earnings/deductions, summary box, net-in-words, and disclaimer footer.
+    Requires ``reportlab``."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.pdfgen import canvas
+
+    # Payslip templates: a payslip the organisation shows through its own
+    # template downloads (and is emailed) in that layout. No template, a
+    # payslip a template can't represent, or any template failure -> None,
+    # and the standard statutory PDF below is produced exactly as before.
+    from app.modules.payroll import payslip_template_service as _payslip_templates
+    templated = _payslip_templates.template_pdf_or_none(db, payslip_id, organization_id)
+    if templated is not None:
+        return templated
+
+    data, item, run = get_payslip_by_id(db, payslip_id, organization_id)
+
+    # ── Company info for header ──
+    company = db.query(CompanyComplianceDetails).filter(
+        CompanyComplianceDetails.organization_id == organization_id
+    ).first() if organization_id else None
+    company_name = getattr(company, "name", None) or "Company Name"
+    company_address = getattr(company, "address", None) or ""
+
+    # Prompt 3: EVALUATION workspaces get a 'PREVIEW — EVALUATION ONLY'
+    # watermark (read live from Organization, so converting to PRODUCTION
+    # removes it automatically).
+    evaluation = _is_evaluation_workspace(db, organization_id)
+
+    # A statutorily-blocked payslip (PayslipStatus.FAILED — today: Germany
+    # PAP unavailable / no effective EmployeeStatutoryProfile, recorded as
+    # Phase 8BI's FAILED sentinel) carries ZERO monetary figures. Rendering
+    # the normal layout here would fabricate a €0.00 payslip document —
+    # explicitly forbidden (§25: never fabricate zero). Render the explicit
+    # blocked-state document instead, which contains NO monetary amounts.
+    if item.status == PayslipStatus.FAILED:
+        return _render_blocked_payslip_pdf_bytes(data, item, run, company_name, company_address, evaluation=evaluation)
+
+    # Phase 8BU: a PARTIALLY_CALCULATED Germany payslip (Part 21 — "remove
+    # unnecessary internal blocking") DOES carry real, non-fabricated
+    # figures for whichever components resolved (SI contributions, gross,
+    # employer levies) but NOT for wage tax/Soli/church tax when those are
+    # the unavailable component(s). The normal payslip layout below cannot
+    # render this correctly — its `fmt()` helper can't distinguish a real
+    # €0.00 from an unavailable one — so route to a dedicated renderer that
+    # shows the real figures plainly and marks only the actually-unavailable
+    # ones as "UNAVAILABLE" text, never as a numeric zero.
+    if item.status == PayslipStatus.PARTIAL:
+        return _render_partial_payslip_pdf_bytes(data, item, run, company_name, company_address, evaluation=evaluation)
+
+    # data["country"] is get_payslip_by_id()'s already-resolved country —
+    # the payslip's own snapshotted jurisdiction (its employee's country at
+    # generation time), not the org's current default. Re-deriving it here
+    # from the org's CompanyComplianceDetails (as this used to do) meant a
+    # non-default-jurisdiction employee's PDF showed the wrong currency,
+    # income-tax label, and statutory terminology.
+    country = _normalize_country(data.get("country") or "IN")
+    if country == "UK":
+        return _render_uk_payslip_pdf_bytes(db, data, item, run, company_name, company_address,
+                                            evaluation=evaluation)
+    sym = _get_currency_symbol(country)
+
+    def fmt(val):
+        v = float(val or 0)
+        if v == 0:
+            return f"{sym} 0.00"
+        return f"{sym} {v:,.2f}"
+
+    def fmt_plain(val):
+        return f"{float(val or 0):,.2f}"
+
+    def fmt_date(v):
+        if not v:
+            return "-"
+        if isinstance(v, str):
+            try:
+                v = datetime.strptime(v[:10], "%Y-%m-%d").date()
+            except Exception:
+                return v
+        try:
+            return v.strftime("%d-%b-%Y")
+        except Exception:
+            return str(v)
+
+    def mask_account(acc):
+        if not acc:
+            return "-"
+        s = str(acc)
+        if len(s) <= 4:
+            return s
+        return "X" * (len(s) - 4) + s[-4:]
+
+    currency_word = {"IN": "Rupees", "US": "Dollars", "UK": "Pounds"}.get(country, "")
+
+    # ── Build earnings & deduction items (pre-computed for layout) ──
+    earnings_items, deduction_items = payslip_line_items(data, country)
+    earnings_total = float(data["salary"] or 0)
     deductions_total = float(data["totalDeductions"] or 0)
 
     import io
