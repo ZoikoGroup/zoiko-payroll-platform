@@ -63,12 +63,21 @@ def _all(root, name) -> list:
     return [el for el in root.iter() if _local(el) == name]
 
 
+# D-20 (sweep S1): TEXT = Anexo 20 I.D's text ("se deben omitir los ceros no significativos", the default);
+# PADDED = the worked example on the same page (tt=0000014300.000000: 10 integer digits, ".", 6 decimals).
+QR_TOTAL_FORMS = ("TEXT", "PADDED")
+
+
 def qr_total(total: str) -> str:
-    """Anexo 20 I.D: the total with "los ceros no significativos" omitted (D-20)."""
+    """Anexo 20 I.D: the total — the text's form unless D-20 answers PADDED."""
+    from app.modules.payroll.engine.jurisdictions.mexico.decisions import switch
+
     try:
         d = Decimal(str(total))
     except (InvalidOperation, ValueError):
         raise BadRequestException("the stamped CFDI's Total is not a number")
+    if switch("D-20") == "PADDED":
+        return f"{d:017.6f}"                     # the example's shape exactly
     return format(d.normalize(), "f")
 
 
@@ -164,7 +173,15 @@ def record_render(db: Session, org_id: int, document_id: int, actor_id: Optional
 
 
 def mx_cfdi_receipt_pdf(db: Session, org_id: int, document_id: int) -> bytes:
-    """The receipt as a PDF, with the Anexo 20 QR (≥ 2.75 cm) — built in memory."""
+    """The receipt as a PDF, with the Anexo 20 QR (≥ 2.75 cm) — built in memory.
+    The register's approved decisions (D-20) apply (sweep S1)."""
+    from app.modules.payroll import mexico_decision_config
+
+    with mexico_decision_config.applying(db):
+        return _mx_cfdi_receipt_pdf(db, org_id, document_id)
+
+
+def _mx_cfdi_receipt_pdf(db: Session, org_id: int, document_id: int) -> bytes:
     from reportlab.graphics import renderPDF
     from reportlab.graphics.barcode.qr import QrCodeWidget
     from reportlab.graphics.shapes import Drawing

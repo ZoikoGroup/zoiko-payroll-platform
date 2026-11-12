@@ -60,7 +60,10 @@ def _new_movement(db: Session, org_id: int, existing: dict, *, source_kind, sour
                   employee_id, run_id, event_date, sbc, actor_id, replaces=None):
     m = L.models()
     attempt = len(existing.get(source_key, []))
-    due_date, rule = due.movement_due(event_date)
+    from app.modules.payroll import mexico_decision_config
+
+    with mexico_decision_config.applying(db):                              # D-16 (sweep S1)
+        due_date, rule = due.movement_due(event_date)
     mv = m.PayrollMxImssMovement(
         organization_id=org_id, registration_id=reg_id, employee_id=employee_id, payroll_run_id=run_id,
         source_kind=source_kind, source_key=source_key, movement_type=movement_type, event_date=event_date,
@@ -362,7 +365,11 @@ def blocks(db: Session) -> list:
         {"code": "MX_WORK_RISK_REVIEW", "item": "X6",
          "message": "the annual work-risk premium review needs S10 / S14 / S29 (deferred, D10)"},
     ]
-    if _content.MX_IMSS_MOVEMENT_DEADLINE is None or not _content.MX_OFFICIAL_HOLIDAYS:
+    from app.modules.payroll import mexico_decision_config
+
+    with mexico_decision_config.applying(db):
+        holidays_known = due.holidays_known()
+    if _content.MX_IMSS_MOVEMENT_DEADLINE is None or not holidays_known:
         out.insert(1, {"code": due.UNSOURCED, "item": "X2",
                        "message": "the movement deadline (S13 / S10) and the official holiday calendar are not "
                                   "transcribed — movements have no due date"})

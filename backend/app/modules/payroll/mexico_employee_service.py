@@ -44,6 +44,8 @@ EDITABLE_COLUMNS = (
     "mx_contract_type_code", "mx_regime_type_code", "mx_workday_type_code", "mx_job_risk_code",
     "mx_professional_min_code", "mx_pay_frequency_code", "mx_daily_salary", "mx_salary_type",
     "mx_annual_adjustment_exclusion", "mx_annual_adjustment_exclusion_evidence_ref",
+    "mx_union_member",                                   # sweep S1 (C12): CFDI Receptor Sindicalizado
+    "mx_sdi_operator_entered", "mx_sdi_evidence_ref",    # sweep S1 (C4 OPERATOR_ENTERED): CFDI SDI + evidence
 )
 _UPPER = ("mx_receiver_fiscal_regime", "mx_work_state", "mx_contract_type_code", "mx_regime_type_code",
           "mx_workday_type_code", "mx_job_risk_code", "mx_professional_min_code", "mx_pay_frequency_code",
@@ -86,6 +88,11 @@ def statutory_profile_errors(data) -> list:
     if getattr(data, "mx_annual_adjustment_exclusion", None) and not getattr(
             data, "mx_annual_adjustment_exclusion_evidence_ref", None):
         errors.append("an annual-adjustment exclusion is the employee's declaration — attach its evidence reference")
+    sdi = getattr(data, "mx_sdi_operator_entered", None)
+    if sdi is not None and sdi <= 0:
+        errors.append("mx_sdi_operator_entered must be more than zero")
+    if sdi is not None and not getattr(data, "mx_sdi_evidence_ref", None):
+        errors.append("an operator-entered SalarioDiarioIntegrado needs its evidence reference")
     return errors
 
 

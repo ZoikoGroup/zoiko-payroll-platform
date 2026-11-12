@@ -130,6 +130,12 @@ def test_downgrade_only_own_tables(model_engine):
     assert set(NEW_TABLES) <= set(sa.inspect(engine).get_table_names())
 
 
+# Mexico m21 (efc56f3235e2, sweep S1) is the head after this chain: its columns are pending too.
+MX_M21 = {"payroll_mx_terminations": {"indemnity_daily_salary", "indemnity_salary_evidence_ref"},
+          "payroll_mx_labor_policies": {"hourly_rate_daily_hours", "special_pay_withholding_method"},
+          "payroll_employee_statutory_profiles": {"mx_union_member", "mx_sdi_operator_entered", "mx_sdi_evidence_ref"}}
+
+
 def test_drift_filter_explains():
     import os
 
@@ -162,7 +168,7 @@ def test_drift_filter_explains():
                        "payroll_runs": {"nz_run_options", "pl_approval_fingerprint"},
                        "payroll_nz_leave_events": {"leave_pay_calculation_id"},
                        "users": {"auth_provider", "google_id", "avatar_url"},
-                       "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
+                       "payroll_nz_employer_profiles": {"nz_journal_accounts"}, **MX_M21}
 
 
 def test_single_child_of_foundation():

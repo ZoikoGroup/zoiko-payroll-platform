@@ -263,9 +263,22 @@ def create_employer(db: Session, org_id: int, data: dict, actor_id: Optional[int
     return profile_view(row)
 
 
+def _second_admin(db: Session, org_id: int, part: str, action: str, entity_id, actor_id, payload: dict) -> None:
+    """D-28 (sweep S1): a second org admin confirms this configuration change
+    once D-28 answers FOUR_EYES for `part` (FOUR_EYES_WHEN_LIVE: once the
+    organisation is live); otherwise it runs as before."""
+    from app.modules.payroll import mexico_two_person
+
+    mexico_two_person.require(db, decision="D-28", part=part, action=action, entity_type=f"mx_{action}",
+                              entity_id=entity_id or 0, actor_id=actor_id, payload=payload,
+                              second="a second org admin", organization_id=org_id)
+
+
 def create_employer_version(db: Session, org_id: int, employer_id: int, data: dict, actor_id: Optional[int]) -> dict:
     """A change is a new version from its effective date; the open version is
     closed the day before. The RFC never changes inside a chain."""
+    _second_admin(db, org_id, "EMPLOYER_VERSION", "create_employer_version", employer_id, actor_id,  # D-28 (sweep S1)
+                  {"org": org_id, "employer_id": employer_id, "data": data})
     from app.modules.payroll.models import PayrollMxEmployerProfile as P
 
     root = employer_root(db, org_id, employer_id)
@@ -338,6 +351,8 @@ def establishment_view(row) -> dict:
 
 
 def create_establishment(db: Session, org_id: int, employer_id: int, data: dict, actor_id: Optional[int]) -> dict:
+    _second_admin(db, org_id, "ESTABLISHMENT", "create_establishment", employer_id, actor_id,  # D-28 (sweep S1)
+                  {"org": org_id, "employer_id": employer_id, "data": data})
     from app.modules.payroll.models import PayrollMxEstablishment as E, PayrollMxImssRegistration as R
 
     root = employer_root(db, org_id, employer_id)
@@ -369,6 +384,8 @@ def create_establishment(db: Session, org_id: int, employer_id: int, data: dict,
 
 
 def deactivate_establishment(db: Session, org_id: int, establishment_id: int, actor_id: Optional[int]) -> dict:
+    _second_admin(db, org_id, "ESTABLISHMENT", "deactivate_establishment", establishment_id, actor_id,  # D-28 (sweep S1)
+                  {"org": org_id, "establishment_id": establishment_id})
     from app.modules.payroll.models import PayrollMxEstablishment as E
 
     row = _owned(db, E, establishment_id, org_id, "establishment")
@@ -403,6 +420,8 @@ def _overlaps(a_from, a_to, b_from, b_to) -> bool:
 
 
 def create_registration(db: Session, org_id: int, employer_id: int, data: dict, actor_id: Optional[int]) -> dict:
+    _second_admin(db, org_id, "IMSS_REGISTRATION", "create_registration", employer_id, actor_id,  # D-28 (sweep S1)
+                  {"org": org_id, "employer_id": employer_id, "data": data})
     from app.modules.payroll.models import PayrollMxImssRegistration as R
 
     root = employer_root(db, org_id, employer_id)
@@ -437,6 +456,8 @@ def create_registration(db: Session, org_id: int, employer_id: int, data: dict, 
 
 
 def set_infonavit_model(db: Session, org_id: int, registration_id: int, model: str, actor_id: Optional[int]) -> dict:
+    _second_admin(db, org_id, "INFONAVIT_MODEL", "set_infonavit_model", registration_id, actor_id,  # D-28 (sweep S1)
+                  {"org": org_id, "registration_id": registration_id, "model": model})
     from app.modules.payroll.models import PayrollMxImssRegistration as R
 
     row = _owned(db, R, registration_id, org_id, "IMSS registration")
@@ -453,6 +474,8 @@ def set_infonavit_model(db: Session, org_id: int, registration_id: int, model: s
 
 def close_registration(db: Session, org_id: int, registration_id: int, effective_to: date,
                        actor_id: Optional[int]) -> dict:
+    _second_admin(db, org_id, "IMSS_REGISTRATION", "close_registration", registration_id, actor_id,  # D-28 (sweep S1)
+                  {"org": org_id, "registration_id": registration_id, "effective_to": effective_to})
     from app.modules.payroll.models import PayrollMxImssRegistration as R
 
     row = _owned(db, R, registration_id, org_id, "IMSS registration")
@@ -855,7 +878,34 @@ def _policy_values(data: dict) -> dict:
             "vacation_premium_pct": _dec(data.get("vacation_premium_pct"), "vacationPremiumPct"),
             "sunday_premium_pct": _dec(data.get("sunday_premium_pct"), "sundayPremiumPct"),
             "vacation_bands": _vacation_bands(data.get("vacation_policy")),
-            "salary_days_convention": _salary_days_convention(data.get("salary_days_convention"))}
+            "salary_days_convention": _salary_days_convention(data.get("salary_days_convention")),
+            "hourly_rate_daily_hours": _hourly_rate_daily_hours(data.get("hourly_rate_daily_hours")),
+            "special_pay_withholding_method": _special_pay_method(data.get("special_pay_withholding_method"))}
+
+
+def _special_pay_method(value):
+    """D-08 PER_EMPLOYER, sweep S1: this employer's withholding method for a special payment in its own run."""
+    from app.modules.payroll.engine.countries.mexico_rules import WITHHOLDING_METHODS
+
+    if value in (None, ""):
+        return None
+    value = str(value).strip().upper()
+    if value not in WITHHOLDING_METHODS:
+        raise BadRequestException(f"specialPayWithholdingMethod must be one of {', '.join(WITHHOLDING_METHODS)}")
+    return value
+
+
+def _hourly_rate_daily_hours(value):
+    """D-17 (c), sweep S1: the employer's daily-hours figure (0 < hours ≤ 24), or None."""
+    if value in (None, ""):
+        return None
+    try:
+        hours = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        raise BadRequestException("hourlyRateDailyHours must be a number of hours")
+    if not (0 < hours <= 24):
+        raise BadRequestException("hourlyRateDailyHours must be more than 0 and at most 24")
+    return hours
 
 
 # Phase 6 D13: salary days of a QUINCENAL_15 / MONTHLY period — an employer /
@@ -881,7 +931,9 @@ def policy_view(row) -> dict:
             "savingsFund": row.savings_fund, "foodVouchers": row.food_vouchers, "otherBenefits": row.other_benefits,
             "timeRecordDependency": row.time_record_dependency, "floorCheckStatus": row.floor_check_status,
             "floorCheckDetail": row.floor_check_detail, "status": row.status,
-            "salaryDaysConvention": row.salary_days_convention}
+            "salaryDaysConvention": row.salary_days_convention,
+            "hourlyRateDailyHours": None if row.hourly_rate_daily_hours is None else str(row.hourly_rate_daily_hours),
+            "specialPayWithholdingMethod": row.special_pay_withholding_method}
 
 
 def _row_policy(row) -> dict:
@@ -912,7 +964,9 @@ def create_labor_policy(db: Session, org_id: int, employer_id: int, data: dict, 
             savings_fund=data.get("savings_fund"), food_vouchers=data.get("food_vouchers"),
             other_benefits=data.get("other_benefits"), time_record_dependency=data.get("time_record_dependency"),
             floor_check_status=check["status"], floor_check_detail=check, status="DRAFT", created_by_id=actor_id,
-            salary_days_convention=values["salary_days_convention"])
+            salary_days_convention=values["salary_days_convention"],
+            hourly_rate_daily_hours=values["hourly_rate_daily_hours"],
+            special_pay_withholding_method=values["special_pay_withholding_method"])
     db.add(row)
     db.flush()
     _audit(db, actor_id=actor_id, action="create", entity_type="mx_labor_policy", entity_id=row.id,
@@ -926,6 +980,8 @@ def activate_labor_policy(db: Session, org_id: int, policy_id: int, actor_id: Op
     """Re-checks the floors now (content may have changed since creation);
     only PASS activates. The previous ACTIVE policy is superseded from the
     day before."""
+    _second_admin(db, org_id, "LABOR_POLICY_ACTIVATION", "activate_labor_policy", policy_id, actor_id,  # D-28 (sweep S1)
+                  {"org": org_id, "policy_id": policy_id})
     from app.modules.payroll.models import PayrollMxLaborPolicy as L
 
     row = _owned(db, L, policy_id, org_id, "labour policy")
@@ -1022,6 +1078,8 @@ def credential_view(row, *, include_ref: bool = False) -> dict:
 
 
 def create_credential(db: Session, org_id: int, employer_id: int, data: dict, actor_id: Optional[int]) -> dict:
+    _second_admin(db, org_id, "CREDENTIAL", "create_credential", employer_id, actor_id,  # D-28 (sweep S1)
+                  {"org": org_id, "employer_id": employer_id, "data": data})
     from app.modules.payroll.models import PayrollMxCredentialRef as C, PayrollMxImssRegistration as R
 
     root = employer_root(db, org_id, employer_id)
@@ -1058,6 +1116,8 @@ def create_credential(db: Session, org_id: int, employer_id: int, data: dict, ac
 
 
 def revoke_credential(db: Session, org_id: int, credential_id: int, actor_id: Optional[int]) -> dict:
+    _second_admin(db, org_id, "CREDENTIAL", "revoke_credential", credential_id, actor_id,  # D-28 (sweep S1)
+                  {"org": org_id, "credential_id": credential_id})
     from app.modules.payroll.models import PayrollMxCredentialRef as C
 
     row = _owned(db, C, credential_id, org_id, "credential reference")
@@ -1144,6 +1204,8 @@ def parse_certificate(raw: bytes) -> dict:
 
 
 def attach_certificate(db: Session, org_id: int, credential_id: int, raw: bytes, actor_id: Optional[int]) -> dict:
+    _second_admin(db, org_id, "CREDENTIAL", "attach_certificate", credential_id, actor_id,  # D-28 (sweep S1)
+                  {"org": org_id, "credential_id": credential_id, "raw": _hashlib.sha256(raw).hexdigest()})
     from app.modules.payroll.models import PayrollMxCredentialRef as C
 
     row = _owned(db, C, credential_id, org_id, "credential reference")

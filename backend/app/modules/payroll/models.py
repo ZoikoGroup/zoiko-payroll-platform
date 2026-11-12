@@ -1173,6 +1173,9 @@ class EmployeeStatutoryProfile(Base):
     mx_contract_type_code         = Column(String(10), nullable=True)
     mx_regime_type_code           = Column(String(10), nullable=True)
     mx_workday_type_code          = Column(String(10), nullable=True)
+    mx_union_member               = Column(Boolean, nullable=True)        # sweep S1 (m21), C12: Sindicalizado
+    mx_sdi_operator_entered       = Column(Numeric(14, 4), nullable=True) # sweep S1 (m21), C4 OPERATOR_ENTERED
+    mx_sdi_evidence_ref           = Column(String(300), nullable=True)    #   its evidence
     mx_job_risk_code              = Column(String(10), nullable=True)
     mx_professional_min_code      = Column(String(20), nullable=True)
     mx_pay_frequency_code         = Column(String(10), nullable=True)
@@ -10099,6 +10102,10 @@ class PayrollMxLaborPolicy(Base):
     # never inferred: NULL BLOCKS a Mexican calculation. IMSS contribution
     # days are always calendar days, independent of this.
     salary_days_convention  = Column(String(10), nullable=True)
+    # Sweep S1 (m21), D-17 (c): the employer's own daily-hours figure for the overtime hourly rate.
+    hourly_rate_daily_hours = Column(Numeric(6, 2), nullable=True)
+    # Sweep S1 (m21), D-08 PER_EMPLOYER: this employer's withholding method for a special payment in its own run.
+    special_pay_withholding_method = Column(String(20), nullable=True)
     floor_check_status      = Column(String(16), nullable=False, default="BLOCKED_CONTENT")
     floor_check_detail      = Column(JSON, nullable=True)
     status                  = Column(String(12), nullable=False, default="DRAFT")    # DRAFT / ACTIVE / SUPERSEDED
@@ -10788,6 +10795,9 @@ class PayrollMxTermination(Base):
     reason_source             = Column(String(200), nullable=True)              # the catalog entry's source at recording
     evidence_ref              = Column(String(300), nullable=False)
     note                      = Column(String(300), nullable=True)
+    # Sweep S1 (m21), D-12 (c): the LFT Art. 89 indemnity daily salary an operator enters, with its evidence.
+    indemnity_daily_salary    = Column(Numeric(14, 4), nullable=True)
+    indemnity_salary_evidence_ref = Column(String(300), nullable=True)
     status                    = Column(String(10), nullable=False, default="DRAFT")   # DRAFT / APPROVED / COMMITTED / CANCELLED
     recorded_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)

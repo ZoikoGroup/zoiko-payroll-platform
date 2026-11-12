@@ -410,7 +410,7 @@ def test_migration_downgrades_and_upgrades_cleanly_on_sqlite():
     spec = importlib.util.spec_from_file_location("_mig_f3a9", path)
     mig = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mig)
-    assert mig.down_revision == "e7ec6c1933b4"
+    assert mig.down_revision == "efc56f3235e2"
 
     engine = create_engine("sqlite:///:memory:", poolclass=StaticPool)
     Base.metadata.create_all(engine)

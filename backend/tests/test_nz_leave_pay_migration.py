@@ -24,6 +24,12 @@ SHARED = {"payslip_items": {"nz_correction_of_id"}, "payroll_runs": {"nz_run_opt
           "payroll_nz_leave_events": {"leave_pay_calculation_id"}}
 
 
+# Mexico m21 (efc56f3235e2, sweep S1) is the head after this chain: its columns are pending too.
+MX_M21 = {"payroll_mx_terminations": {"indemnity_daily_salary", "indemnity_salary_evidence_ref"},
+          "payroll_mx_labor_policies": {"hourly_rate_daily_hours", "special_pay_withholding_method"},
+          "payroll_employee_statutory_profiles": {"mx_union_member", "mx_sdi_operator_entered", "mx_sdi_evidence_ref"}}
+
+
 def _load(prefix=REVISION):
     path = next(VERSIONS.glob(f"{prefix}_*.py"))
     spec = importlib.util.spec_from_file_location(f"rev_{prefix}", path)
@@ -152,7 +158,7 @@ def test_drift_filter_explains():
     pl_shared = {"payslip_items": {"pl_calculation_snapshot", "template_version_id"}, "payroll_runs": {"pl_approval_fingerprint"}}
     assert columns == {**{t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}},
                        "users": {"auth_provider", "google_id", "avatar_url"},
-                       "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
+                       "payroll_nz_employer_profiles": {"nz_journal_accounts"}, **MX_M21}
 
 
 def test_single_child_literal_and_manifest():

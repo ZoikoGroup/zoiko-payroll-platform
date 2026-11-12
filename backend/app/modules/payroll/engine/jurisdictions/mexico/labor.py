@@ -65,10 +65,28 @@ def workweek(content, policy: dict) -> dict:
     return {"policy_hours": hours, "statutory_max": maximum}
 
 
-HOURLY_RATE_RULES = ("DAILY_SALARY_OVER_JORNADA_HOURS",)
+# D-17 (sweep S1): the daily salary ÷ the LFT Art. 61 day length; ÷ (the policy's weekly hours ÷ its working
+# days); or ÷ the employer's own daily-hours figure on the labour policy.
+HOURLY_RATE_RULES = ("DAILY_SALARY_OVER_JORNADA_HOURS", "WEEKLY_HOURS_OVER_DAYS", "EMPLOYER_DAILY_HOURS")
 
 
-def hourly_rate(content, hours: dict, daily_salary: Decimal) -> Decimal:
+def _working_days(schedule) -> Decimal:
+    """Scheduled days with hours > 0 in the labour policy's weekly schedule."""
+    items = schedule.values() if isinstance(schedule, dict) else (schedule or [])
+    days = 0
+    for item in items:
+        hours = item.get("hours") if isinstance(item, dict) else item
+        try:
+            days += 1 if Decimal(str(hours)) > 0 else 0
+        except Exception:
+            raise MXBlock("MX_LABOR_POLICY_INCOMPLETE", "the labour policy's weekly schedule is not readable")
+    if days == 0:
+        raise MXBlock("MX_LABOR_POLICY_INCOMPLETE",
+                      "the labour policy has no weekly schedule with working days (D-17: weekly hours over days)")
+    return Decimal(days)
+
+
+def hourly_rate(content, hours: dict, daily_salary: Decimal, policy: dict = None) -> Decimal:
     """W3-5: a supplied rate (tests, legacy inputs), else the transcribed rule
     (mx_hourly_rate_rule, D-17) over the LFT Art. 61 working-day length of the
     worker's c_TipoJornada. While the rule is missing, overtime BLOCKS."""
@@ -80,6 +98,16 @@ def hourly_rate(content, hours: dict, daily_salary: Decimal) -> Decimal:
     rule = content.text("mx_hourly_rate_rule").upper()
     if rule not in HOURLY_RATE_RULES:
         raise MXBlock("MX_RULE_UNRECOGNISED", f"mx_hourly_rate_rule {rule!r} is not one of {HOURLY_RATE_RULES}")
+    if rule == "WEEKLY_HOURS_OVER_DAYS":
+        weekly = _dec((policy or {}).get("ordinary_weekly_hours"), "labour-policy ordinary weekly hours",
+                      "MX_LABOR_POLICY_INCOMPLETE")
+        return daily_salary / (weekly / _working_days((policy or {}).get("weekly_schedule")))
+    if rule == "EMPLOYER_DAILY_HOURS":
+        figure = (policy or {}).get("hourly_rate_daily_hours")
+        if figure in (None, ""):
+            raise MXBlock("MX_HOURLY_RATE_FIGURE_MISSING",
+                          "the labour policy has no daily-hours figure for the hourly rate (D-17: employer's figure)")
+        return daily_salary / _dec(figure, "labour-policy daily hours", "MX_LABOR_POLICY_INCOMPLETE")
     from ...countries import mexico_content as _c
 
     entry = _c.MX_JORNADA_DAILY_HOURS.get(str(hours.get("workday_type_code") or ""))
@@ -96,7 +124,7 @@ def hour_lines(content, hours, policy: dict, daily_salary: Decimal) -> dict:
     overtime = [_dec(w.get("overtime_hours") or 0, f"week {i + 1} overtime hours")
                 for i, w in enumerate(hours.get("weeks") or [])]
     if any(h > 0 for h in overtime):
-        rate = hourly_rate(content, hours, daily_salary)          # W3-5: first, as the run service checked it
+        rate = hourly_rate(content, hours, daily_salary, policy)  # W3-5: first, as the run service checked it
         keys = ("mx_overtime_double_weekly_max_hours", "mx_overtime_double_multiplier", "mx_overtime_triple_multiplier")
         if not all(content.has(k) for k in keys):
             raise MXBlock("MX_OVERTIME_RULES_MISSING", "overtime tiers are not transcribed (S26/S18)")

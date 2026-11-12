@@ -1,10 +1,11 @@
 """payslip_templates: organisation-owned payslip presentation templates
 
 Revision ID: f3a9c1d7e2b4
-Revises: e7ec6c1933b4
+Revises: efc56f3235e2
 Create Date: 2026-11-11
 
-Additive only.
+Additive only. Written on e7ec6c1933b4; re-parented (never applied) onto Mexico m21
+efc56f3235e2 when origin/main was merged into venu, keeping a single head.
 
   payroll_payslip_templates             an organisation's payslip layout
   payroll_payslip_template_versions     its revisions (Draft -> Active -> Archived)
@@ -27,7 +28,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "f3a9c1d7e2b4"
-down_revision: Union[str, Sequence[str], None] = "e7ec6c1933b4"
+down_revision: Union[str, Sequence[str], None] = "efc56f3235e2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

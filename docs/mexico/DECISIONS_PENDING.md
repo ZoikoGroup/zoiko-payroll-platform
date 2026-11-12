@@ -2,6 +2,8 @@
 
 Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §3 stop condition 2). Each entry is a decision engineering may not take: the question, the options, the saved sources that bear on it, and what stays blocked (with its named code) until it is made. Engineering keeps working on everything the decision does not block.
 
+**Sweep S1 (2026-10-28): decisions are configuration.** Every option below that can be built from saved sources is built and selectable in Super Admin → Mexico → Decisions (proposed by one Super Admin, approved by a second, audited, versioned). An APPROVED answer switches the engine, report or CFDI behaviour at once with no code change; a pack-row answer (D-01, D-03, D-17's row) fills the row only where the Draft pack has none. Unanswered, each case keeps blocking with its own code. Each decision's panel states what answering changes, what value is still needed, and any option not built with the reason. Per-decision table: `MEXICO_FINAL_SWEEP_PROGRESS.md` §S1. "Status" below stays the owner's status: no decision has been answered.
+
 **Owners** are roles, as in the gap register: **G1 owner** (ISR / CFDI), **G2 owner** (IMSS / SUA), **G3 owner** (INFONAVIT), **G4 owner** (State ISN), **G5 owner** (Labor), **Release owner**, **Security lead**, **Spec owner**.
 
 | # | Decision | Owner | Blocks (code) | Status |
@@ -164,8 +166,7 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 
 - **Found in the blind transcription:** the 1997 LSS Transitorio VIGÉSIMO SÉPTIMO (S10 p. 111): RCV quotas are paid "en forma bimestral, hasta en tanto no se homologuen los períodos de pago de las Leyes del ISSSTE e INFONAVIT". Both bimonthly rules end on the same unsaved condition. `MX_IMSS` is therefore not in the calendar either.
 - **Question.** Ley INFONAVIT Art. 35 says "por mensualidades vencidas, a más tardar los días diecisiete del mes inmediato siguiente". The 1997 decree's Transitorio SEXTO keeps it "de forma bimestral hasta que en la Ley del Instituto de Seguridad y Servicios Sociales de los Trabajadores del Estado se establezca que la periodicidad de pagos se realizará mensualmente". Has that condition been met? And do retiro and CEAV (LSS) follow the monthly Art. 39 or a bimonthly cycle (Art. 184 speaks of "la cuota correspondiente al bimestre")?
-- **Needs.** The ISSSTE law (not saved; a W2-5 source to find), or an owner's decision on the operating practice.
-- **Blocks.** INFONAVIT and IMSS due dates (neither is in `MX_FILING_CALENDAR`). Engineering option once decided: split the RCV branches into their own liability with a bimonthly rule, and date the other IMSS branches monthly (LSS Art. 39).
+- **Resolved by sources (W2-5).** S36 Art. 21 (the ISSSTE law, saved in W2-5) still pays bimonthly, so the condition is not met and both stay bimonthly. INFONAVIT's due dates are transcribed; IMSS waits for gap A18. Kept here for the record; it is not in the sweep S1 configuration because nothing is left to choose.
 
 ## D-16 · Business days for IMSS deadlines
 
