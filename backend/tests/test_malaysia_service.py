@@ -536,3 +536,131 @@ def test_router_exposes_the_labour_routes():
     paths = {(sorted(r.methods)[0], r.path) for r in router.routes}
     assert ("GET", "/malaysia/employees/{employee_id}/leave-entitlement") in paths
     assert ("GET", "/malaysia/employees/{employee_id}/holidays") in paths
+    for method, path in (("POST", "/malaysia/employees/{employee_id}/employer-events"),
+                         ("POST", "/malaysia/employer-events/{row_id}/submitted"),
+                         ("POST", "/malaysia/employer-events/{row_id}/clearance-hold"),
+                         ("POST", "/malaysia/clearance-holds/{hold_id}/release-approve")):
+        assert (method, path) in paths
+
+
+# ── Phase 7: employer events and tax-clearance holds (MY-019 / MY-020) ─────
+@pytest.fixture
+def signed_pack(monkeypatch):
+    """Due dates / hold maximum from a signed TEST pack (30 / 30 / 30 / 30 / 90 days)."""
+    from app.modules.payroll import malaysia_service as my
+    from app.modules.payroll.engine.jurisdictions.malaysia.pack import MyPack
+
+    rate_map, slabs = build_pack()
+    monkeypatch.setattr(my, "_signed_pack", lambda db, org, on: MyPack(rate_map, slabs, org, on))
+
+
+def _event(w, kind="CP22A", on="2026-06-30", clearance=True):
+    from app.modules.payroll import malaysia_service as my
+
+    return my.record_my_employer_event(w.db, w.org, w.employee.id, {
+        "event_type": kind, "event_date": on, "clearance_required": clearance, "evidence_ref": "resignation letter"},
+        w.a, "employee resigned")
+
+
+def test_event_due_dates_come_from_signed_content(world, signed_pack):
+    w = world
+    assert (_event(w, "CP22", "2026-03-01", False).due_date) == date(2026, 3, 31)      # 30 days after start
+    assert (_event(w, "CP22A", "2026-06-30").due_date) == date(2026, 5, 31)           # 30 days before cessation
+    assert (_event(w, "CP21", "2026-06-30").due_date) == date(2026, 5, 31)
+    assert (_event(w, "DEATH_NOTICE", "2026-04-01", False).due_date) == date(2026, 5, 1)
+    with pytest.raises(BadRequestException, match="CP22A or CP21"):
+        _event(w, "CP22", "2026-03-01", True)
+
+
+def test_without_a_signed_pack_the_due_date_stays_empty_and_preflight_refuses(world):
+    from app.modules.payroll import malaysia_service as my
+
+    w = world
+    row = _event(w)
+    assert row.due_date is None and row.due_rule.startswith("PENDING")
+    codes = [c for c, _m in my.my_event_problems(w.db, w.org, w.employee.id, PAY_DATE)]
+    assert codes == ["MY_EVENT_DUE_UNKNOWN", "MY_CLEARANCE_HOLD_REQUIRED"]
+    with pytest.raises(BadRequestException, match="never open-ended"):
+        my.open_my_clearance_hold(w.db, w.org, row.id, w.a, "2026-06-01", "departing")
+
+
+def test_submission_is_recorded_by_a_second_person_and_cancel_needs_a_reason(world, signed_pack):
+    from app.modules.payroll import malaysia_service as my
+
+    w = world
+    row = _event(w, "CP22", "2026-03-01", False)
+    w.db.commit()
+    with pytest.raises(BadRequestException, match="receipt"):
+        my.submit_my_employer_event(w.db, w.org, row.id, w.b, "2026-03-20", "", "scan")
+    with pytest.raises(Exception, match="(?i)four|approv|same"):
+        my.submit_my_employer_event(w.db, w.org, row.id, w.a, "2026-03-20", "R-1", "scan")
+    w.db.rollback()
+    done = my.submit_my_employer_event(w.db, w.org, row.id, w.b, "2026-03-20", "R-1", "scan")
+    assert (done.status, done.receipt_ref) == ("SUBMITTED", "R-1")
+    other = _event(w, "CP22", "2026-04-01", False)
+    with pytest.raises(BadRequestException, match="reason"):
+        my.cancel_my_employer_event(w.db, w.org, other.id, w.a, "")
+    assert my.cancel_my_employer_event(w.db, w.org, other.id, w.a, "entered twice").status == "CANCELLED"
+
+
+def test_overdue_events_and_missing_holds_stop_approval(world, signed_pack, with_pcb):
+    from fastapi import HTTPException
+
+    from app.modules.payroll import malaysia_service as my
+    from app.modules.payroll.models import PayrollStatus
+
+    w = world
+    _setup(w)
+    _event(w, "CP22", "2026-01-15", False)                                           # due 14 Feb, still OPEN
+    _event(w, "CP21", "2026-06-30")                                                  # needs a hold
+    run, _item = _run_with_payslip(w)
+    codes = {p["code"] for p in my.my_run_preflight(w.db, run)}
+    assert {"MY_EVENT_OVERDUE", "MY_CLEARANCE_HOLD_REQUIRED"} <= codes
+    with pytest.raises(HTTPException, match="MY_EVENT_OVERDUE"):
+        my.before_run_transition(w.db, run, PayrollStatus.APPROVED, w.b)
+
+
+def test_a_hold_withholds_the_payslip_and_is_released_by_a_second_person(world, signed_pack, with_pcb):
+    from app.modules.payroll import jurisdiction_hooks
+    from app.modules.payroll import malaysia_service as my
+
+    w = world
+    _setup(w)
+    event = _event(w, "CP21", "2026-04-30")
+    hold = my.open_my_clearance_hold(w.db, w.org, event.id, w.a, "2026-03-01", "leaving Malaysia")
+    assert (hold.state, hold.hold_until) == ("HELD", date(2026, 5, 30))               # + 90 signed days
+    with pytest.raises(BadRequestException, match="already has an open"):
+        my.open_my_clearance_hold(w.db, w.org, event.id, w.a, "2026-03-02", "again")
+    run, item = _run_with_payslip(w)
+    item.net_pay = Decimal("4315.35")
+    out = jurisdiction_hooks.call("MY", "payment_treatment", w.db, w.org, run, [item])
+    assert out[item.id][0] == "HELD"
+    view = jurisdiction_hooks.call("MY", "payslip_hold_view", item)
+    assert view == {"status": "HELD", "amount": "4315.35", "holdId": hold.id,
+                    "basis": "Malaysia tax-clearance hold (CP22A / CP21) - money remains owed to the employee"}
+    assert "MY_CLEARANCE_HOLD_REQUIRED" not in {c for c, _m in my.my_event_problems(w.db, w.org, w.employee.id,
+                                                                                    PAY_DATE)}
+    with pytest.raises(BadRequestException, match="clearance reference"):
+        my.request_my_hold_release(w.db, w.org, hold.id, w.a, "", "")
+    my.request_my_hold_release(w.db, w.org, hold.id, w.a, "HASiL clearance letter 123", "scan")
+    w.db.commit()
+    with pytest.raises(Exception, match="(?i)four|approv|same"):
+        my.approve_my_hold_release(w.db, w.org, hold.id, w.a)
+    w.db.rollback()
+    released = my.approve_my_hold_release(w.db, w.org, hold.id, w.b)
+    assert released.state == "RELEASED" and my.hold_view(w.db, released)["heldTotal"] == "0"
+    assert jurisdiction_hooks.call("MY", "payment_treatment", w.db, w.org, run, [item]) == {}   # paid next file
+    assert my.employee_summary(w.db, w.org, w.employee.id)["clearanceHolds"][0]["state"] == "RELEASED"
+
+
+def test_a_hold_past_its_maximum_is_flagged_and_stops_withholding(world, signed_pack, with_pcb):
+    from app.modules.payroll import malaysia_service as my
+
+    w = world
+    _setup(w)
+    event = _event(w, "CP22A", "2026-01-31")
+    my.open_my_clearance_hold(w.db, w.org, event.id, w.a, "2025-12-01", "retiring")    # held until 1 Mar 2026
+    run, item = _run_with_payslip(w)
+    assert my.my_payment_treatment(w.db, w.org, run, [item]) == {}
+    assert "MY_CLEARANCE_HOLD_EXPIRED" in {c for c, _m in my.my_event_problems(w.db, w.org, w.employee.id,
+                                                                               PAY_DATE)}

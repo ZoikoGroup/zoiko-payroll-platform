@@ -14299,3 +14299,95 @@ class PayrollMyAccumulatorEntry(_MyCommon, Base):
 
     def __repr__(self):
         return f"<PayrollMyAccumulatorEntry employee={self.employee_id} {self.year} {self.accumulator} {self.amount}>"
+
+
+# Malaysia Phase 7 (migration 5f314f975ac3): employer events and tax-clearance holds.
+_MY_EVENT_TYPES = ("CP22", "CP22A", "CP21", "DEATH_NOTICE")
+_MY_EVENT_STATUSES = ("OPEN", "SUBMITTED", "CANCELLED")
+_MY_HOLD_STATES = ("HELD", "RELEASE_REQUESTED", "RELEASED", "LAPSED")
+
+
+class PayrollMyEmployerEvent(_MyCommon, Base):
+    """CP22 / CP22A / CP21 / death notice (MY-019): the event date, the due
+    date computed from SIGNED pack content when recorded (NULL = not yet
+    computable; preflight refuses approval), whether a tax-clearance hold is
+    required, and the submission receipt recorded by a second person."""
+    __tablename__ = "payroll_my_employer_events"
+
+    updated_at          = Column(DateTime(timezone=True), nullable=True)
+    employee_id         = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type          = Column(String(14), nullable=False)
+    event_date          = Column(Date, nullable=False)
+    due_date            = Column(Date, nullable=True)
+    due_rule            = Column(String(60), nullable=True)
+    clearance_required  = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    status              = Column(String(10), nullable=False, default="OPEN", server_default="OPEN")
+    submitted_on        = Column(Date, nullable=True)
+    receipt_ref         = Column(String(100), nullable=True)
+    cancel_reason       = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"event_type IN {_nz_in(_MY_EVENT_TYPES)}", name="ck_my_event_type"),
+        sa.CheckConstraint(f"status IN {_nz_in(_MY_EVENT_STATUSES)}", name="ck_my_event_status"),
+        sa.CheckConstraint("status <> 'SUBMITTED' OR (submitted_on IS NOT NULL AND receipt_ref IS NOT NULL "
+                           "AND evidence_ref IS NOT NULL AND approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_my_event_submitted"),
+        sa.CheckConstraint("status <> 'CANCELLED' OR cancel_reason IS NOT NULL", name="ck_my_event_cancelled"),
+        sa.CheckConstraint("event_type IN ('CP22A', 'CP21') OR clearance_required = false",
+                           name="ck_my_event_clearance_type"),
+        Index("ix_my_event_lookup", "organization_id", "employee_id", "event_type", "status"),
+    )
+
+
+class PayrollMyClearanceHold(_MyCommon, Base):
+    """The employer's tax-clearance hold of cash due to a departing employee
+    (MY-020): held until the signed maximum hold date or a release on HASiL's
+    clearance letter, requested by one person and approved by another. Held
+    money remains owed to the employee - never a deduction."""
+    __tablename__ = "payroll_my_clearance_holds"
+
+    updated_at               = Column(DateTime(timezone=True), nullable=True)
+    employee_id              = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_id                 = Column(Integer, ForeignKey("payroll_my_employer_events.id", ondelete="RESTRICT"), nullable=False)
+    opened_on                = Column(Date, nullable=False)
+    hold_until               = Column(Date, nullable=False)
+    state                    = Column(String(18), nullable=False, default="HELD", server_default="HELD")
+    release_reference        = Column(String(100), nullable=True)
+    release_evidence_ref     = Column(String(300), nullable=True)
+    release_requested_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    released_by_id           = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    released_at              = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"state IN {_nz_in(_MY_HOLD_STATES)}", name="ck_my_hold_state"),
+        sa.CheckConstraint("hold_until >= opened_on", name="ck_my_hold_dates"),
+        sa.CheckConstraint("state NOT IN ('RELEASE_REQUESTED', 'RELEASED') OR (release_reference IS NOT NULL "
+                           "AND release_evidence_ref IS NOT NULL AND release_requested_by_id IS NOT NULL)",
+                           name="ck_my_hold_release_request"),
+        sa.CheckConstraint("state <> 'RELEASED' OR (released_by_id IS NOT NULL AND released_at IS NOT NULL AND "
+                           "released_by_id <> release_requested_by_id)", name="ck_my_hold_release_four_eyes"),
+        Index("uq_my_hold_one_open_per_employee", "organization_id", "employee_id", unique=True,
+              postgresql_where=text("state IN ('HELD', 'RELEASE_REQUESTED')"),
+              sqlite_where=text("state IN ('HELD', 'RELEASE_REQUESTED')")),
+    )
+
+
+class PayrollMyClearanceHoldLine(_MyCommon, Base):
+    """One held payslip: its net pay, owed to the employee, HELD until the
+    hold is released (then RELEASED)."""
+    __tablename__ = "payroll_my_clearance_hold_lines"
+
+    updated_at       = Column(DateTime(timezone=True), nullable=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    hold_id          = Column(Integer, ForeignKey("payroll_my_clearance_holds.id", ondelete="CASCADE"), nullable=False)
+    payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="CASCADE"), nullable=False)
+    amount           = Column(Numeric(14, 2), nullable=False)
+    status           = Column(String(10), nullable=False, default="HELD", server_default="HELD")
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('HELD', 'RELEASED')", name="ck_my_hold_line_status"),
+        sa.CheckConstraint("amount >= 0", name="ck_my_hold_line_amount"),
+        Index("ix_my_hold_line_hold", "hold_id"),
+        Index("uq_my_hold_line_payslip", "payslip_item_id", unique=True),
+    )

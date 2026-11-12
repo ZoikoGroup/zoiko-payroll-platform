@@ -203,7 +203,9 @@ def test_deploy_drift_filter_explains_every_pl_object():
                                         "payroll_my_identifier_vault", "payroll_my_identifier_access_events",
                                         "payroll_my_employer_registrations", "payroll_my_worker_profiles",
                                         "payroll_my_work_assignments", "payroll_my_tax_declarations",
-                                        "payroll_my_accumulator_entries"}  # + Malaysia P2 (13574b996ccf)
+                                        "payroll_my_accumulator_entries",  # + Malaysia P2 (13574b996ccf)
+                                        "payroll_my_employer_events", "payroll_my_clearance_holds",
+                                        "payroll_my_clearance_hold_lines"}  # + Malaysia P7 (5f314f975ac3)
     # + Malaysia P2 (13574b996ccf) shared columns on the same chain.
     assert columns == {t: SHARED[t] | {"payslip_items": {"my_calculation_snapshot"},
                                        "payroll_runs": {"my_approval_fingerprint"}}[t] for t in SHARED}

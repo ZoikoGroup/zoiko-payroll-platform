@@ -248,6 +248,61 @@ def my_holiday_calendar_view(employee_id: int, year: int = Query(...),
     return my.my_holiday_calendar(db, _org_id(current_user), employee_id, year)
 
 
+# ── employer events and tax-clearance holds (Phase 7, MY-019 / MY-020) ─────
+@router.get("/employees/{employee_id}/employer-events", summary="CP22 / CP22A / CP21 / death notices of an employee")
+def my_list_events(employee_id: int, current_user=Depends(get_current_payroll_operator),
+                   db: Session = Depends(get_db)):
+    return _list(db, my._models().PayrollMyEmployerEvent, _org_id(current_user), employee_id)
+
+
+@router.post("/employees/{employee_id}/employer-events", summary="Record an employer event (due date from signed content)")
+def my_create_event(employee_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                    db: Session = Depends(get_db)):
+    payload, reason = _split(body)
+    return _commit(db, my.record_my_employer_event(db, _org_id(current_user), employee_id, payload,
+                                                   _actor(current_user), reason))
+
+
+@router.post("/employer-events/{row_id}/submitted", summary="Record the HASiL submission receipt (four-eyes)")
+def my_submit_event(row_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                    db: Session = Depends(get_db)):
+    return _commit(db, my.submit_my_employer_event(db, _org_id(current_user), row_id, _actor(current_user),
+                                                   body.get("submittedOn"), body.get("receiptRef"),
+                                                   body.get("evidenceRef")))
+
+
+@router.post("/employer-events/{row_id}/cancel", summary="Cancel an OPEN employer event (reason required)")
+def my_cancel_event(row_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                    db: Session = Depends(get_db)):
+    return _commit(db, my.cancel_my_employer_event(db, _org_id(current_user), row_id, _actor(current_user),
+                                                   body.get("reason")))
+
+
+@router.post("/employer-events/{row_id}/clearance-hold", summary="Open the tax-clearance hold for a departure event")
+def my_open_hold(row_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                 db: Session = Depends(get_db)):
+    row = my.open_my_clearance_hold(db, _org_id(current_user), row_id, _actor(current_user), body.get("openedOn"),
+                                    body.get("reason"))
+    db.commit()
+    return my.hold_view(db, row)
+
+
+@router.post("/clearance-holds/{hold_id}/release-request", summary="Put a hold forward for release (HASiL letter)")
+def my_request_release(hold_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                       db: Session = Depends(get_db)):
+    row = my.request_my_hold_release(db, _org_id(current_user), hold_id, _actor(current_user),
+                                     body.get("releaseReference"), body.get("evidenceRef"))
+    db.commit()
+    return my.hold_view(db, row)
+
+
+@router.post("/clearance-holds/{hold_id}/release-approve", summary="Release a clearance hold (four-eyes)")
+def my_approve_release(hold_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    row = my.approve_my_hold_release(db, _org_id(current_user), hold_id, _actor(current_user))
+    db.commit()
+    return my.hold_view(db, row)
+
+
 # ── employee summary, run preflight ─────────────────────────────────────────
 @router.get("/employees/{employee_id}/summary", summary="An employee's Malaysia records (identifiers masked)")
 def my_employee_summary(employee_id: int, current_user=Depends(get_current_payroll_operator),

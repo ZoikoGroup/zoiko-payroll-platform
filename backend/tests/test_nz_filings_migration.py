@@ -153,7 +153,9 @@ def test_drift_filter_explains():
                                         "payroll_my_identifier_vault", "payroll_my_identifier_access_events",
                                         "payroll_my_employer_registrations", "payroll_my_worker_profiles",
                                         "payroll_my_work_assignments", "payroll_my_tax_declarations",
-                                        "payroll_my_accumulator_entries"}  # + Malaysia P2 (13574b996ccf)
+                                        "payroll_my_accumulator_entries",  # + Malaysia P2 (13574b996ccf)
+                                        "payroll_my_employer_events", "payroll_my_clearance_holds",
+                                        "payroll_my_clearance_hold_lines"}  # + Malaysia P7 (5f314f975ac3)
     pl_shared = {"payslip_items": {"pl_calculation_snapshot", "my_calculation_snapshot"}, "payroll_runs": {"pl_approval_fingerprint", "my_approval_fingerprint"}}
     assert columns == {t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}}
 

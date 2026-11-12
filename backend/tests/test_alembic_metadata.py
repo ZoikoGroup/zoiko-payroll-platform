@@ -302,8 +302,9 @@ def test_alembic_heads_is_single_head():
     # e11c2c36df17 (Poland P6 pl_incapacity_episodes) is its single child;
     # e75b9219e1f8 (Poland P8 pl_filing_settlement) is the single child of that;
     # e7ec6c1933b4 (Poland P9 pl_parallel_cycles) is its single child;
-    # 13574b996ccf (Malaysia P2 my_foundation) is the single child of that.
-    assert heads == ["13574b996ccf"]
+    # 13574b996ccf (Malaysia P2 my_foundation) is the single child of that;
+    # 5f314f975ac3 (Malaysia P7 my_events_holds) is its single child.
+    assert heads == ["5f314f975ac3"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -315,7 +316,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["13574b996ccf"]
+    assert list(script.get_heads()) == ["5f314f975ac3"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -368,7 +369,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 259   # + 13574b996ccf (Malaysia P2 my_foundation, child of e7ec6c1933b4)
+    assert len(revs) == 260   # + 5f314f975ac3 (Malaysia P7 my_events_holds, child of 13574b996ccf)
 
 
 def test_germany_head_chain_wiring_is_intact():

@@ -79,7 +79,9 @@ NZ_TABLES = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz
                                         "payroll_my_identifier_vault", "payroll_my_identifier_access_events",
                                         "payroll_my_employer_registrations", "payroll_my_worker_profiles",
                                         "payroll_my_work_assignments", "payroll_my_tax_declarations",
-                                        "payroll_my_accumulator_entries"}  # + Malaysia P2 (13574b996ccf)
+                                        "payroll_my_accumulator_entries",  # + Malaysia P2 (13574b996ccf)
+                                        "payroll_my_employer_events", "payroll_my_clearance_holds",
+                                        "payroll_my_clearance_hold_lines"}  # + Malaysia P7 (5f314f975ac3)
 
 
 def _load(prefix):

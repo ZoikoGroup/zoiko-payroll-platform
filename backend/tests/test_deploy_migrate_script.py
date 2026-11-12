@@ -153,7 +153,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                                         "payroll_my_identifier_vault", "payroll_my_identifier_access_events",
                                         "payroll_my_employer_registrations", "payroll_my_worker_profiles",
                                         "payroll_my_work_assignments", "payroll_my_tax_declarations",
-                                        "payroll_my_accumulator_entries"}  # + Malaysia P2 (13574b996ccf)
+                                        "payroll_my_accumulator_entries",  # + Malaysia P2 (13574b996ccf)
+                                        "payroll_my_employer_events", "payroll_my_clearance_holds",
+                                        "payroll_my_clearance_hold_lines"}  # + Malaysia P7 (5f314f975ac3)
         nz_run_columns = {"nz_approval_fingerprint", "nz_payment_kind", "nz_run_options",   # + P6 options
                           "pl_approval_fingerprint", "my_approval_fingerprint"}                                        # + Poland P2
         jp_tables |= nz_tables

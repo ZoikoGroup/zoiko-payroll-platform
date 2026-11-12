@@ -1161,6 +1161,8 @@ def my_run_preflight(db: Session, run) -> list:
         elif registration.verification_state != "VERIFIED":
             problem("MY_REGISTRATION_NOT_VERIFIED", item.employee_id,
                     "The Malaysia employer registration is not verified.")
+        for code, message in my_event_problems(db, run.organization_id, item.employee_id, run.pay_date):
+            problem(code, item.employee_id, message)
         if _one_active(db, m.PayrollMyWorkAssignment, run.organization_id, item.employee_id,
                        run.period_end or run.pay_date, "work assignment") is None:
             problem("MY_ASSIGNMENT_MISSING", item.employee_id,
@@ -1274,15 +1276,6 @@ def _my_template_activation_refusal(db: Session, template, actor_id=None) -> Opt
             "and the filing path is certified (gate G3, MY-022).")
 
 
-def _my_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:
-    return {}
-
-
-def _my_payslip_hold_view(item) -> Optional[dict]:
-    # Tax-clearance holds (MY-019 / MY-020) arrive in Phase 7.
-    return None
-
-
 def _my_statutory_editors(db: Session, pack) -> set:
     """Super Admins who edited or signed a statutory row of this pack version:
     the pack approval refuses every one of them."""
@@ -1298,6 +1291,7 @@ MY_RETENTION_CATEGORIES = (
     ("EMPLOYEE_IDENTITY", "Identifier vault metadata (NRIC / TIN / member numbers) and worker profiles"),
     ("ACCESS_LOGS", "Identifier access events"),
     ("WORK_LOCATION", "Work assignments (labour territory, holiday state)"),
+    ("EMPLOYER_EVENTS", "CP22 / CP22A / CP21 / death notices, receipts and tax-clearance holds"),
 )
 MY_DECISIONS = {
     "D-1": ("Poland template: split engine, versioned four-eyes records, vault, signing console", False),
@@ -1346,7 +1340,9 @@ def _retained_record_label(db: Session, organization_id: int, employee_id: int) 
     for model, label in ((m.PayrollMyWorkerProfile, "worker statutory profiles"),
                          (m.PayrollMyTaxDeclaration, "tax declarations"),
                          (m.PayrollMyAccumulatorEntry, "year-to-date ledger"),
-                         (m.PayrollMyWorkAssignment, "work assignments")):
+                         (m.PayrollMyWorkAssignment, "work assignments"),
+                         (m.PayrollMyEmployerEvent, "employer events"),
+                         (m.PayrollMyClearanceHold, "tax-clearance holds")):
         if db.query(model.id).filter(model.organization_id == organization_id,
                                      model.employee_id == employee_id).first():
             return label
@@ -1511,6 +1507,284 @@ def my_holiday_calendar(db: Session, organization_id: int, employee_id: int, yea
             "holidays": [{"date": d.isoformat(), "name": n} for d, n in sorted(days.items())]}
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# Phase 7 — employer events (CP22 / CP22A / CP21 / death, MY-019) and the
+# tax-clearance hold of a departing employee's cash (MY-020). Held money
+# REMAINS OWED to the employee: the payslip's net pay is unchanged, the bank
+# file leaves it out while the hold is in force, and the hold is shown on the
+# payslip as a legal hold — never a deduction. Final pay keeps salary, leave /
+# termination pay, statutory deductions and held cash as separate concepts.
+# ══════════════════════════════════════════════════════════════════════════
+EVENT_TYPES = ("CP22", "CP22A", "CP21", "DEATH_NOTICE")
+CLEARANCE_EVENT_TYPES = ("CP22A", "CP21")
+HOLDING_STATES = ("HELD", "RELEASE_REQUESTED")
+# event type -> (signed days row, direction: +1 after the event date, -1 before it)
+_DUE_RULES = {"CP22": ("my_cp22_days_after_start", 1), "CP22A": ("my_cp22a_days_before_cessation", -1),
+              "DEATH_NOTICE": ("my_cp22a_days_after_death", 1), "CP21": ("my_cp21_days_before_departure", -1)}
+
+
+def _signed_pack(db: Session, organization_id: int, on: date):
+    """The signed pack view in force on `on`, or None when no active pack resolves."""
+    from app.modules.payroll.engine.jurisdictions.malaysia.pack import MyPack
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    try:
+        rates, slabs, pack = resolve_tax_configuration(db, MY, payroll_date=on)
+    except Exception:  # an unresolvable pack is "no pack"
+        return None
+    if pack is None:
+        return None
+    return MyPack({r.component_key: r for r in rates}, slabs, organization_id, on)
+
+
+def _days_from(pack, key: str, start: date, direction: int):
+    """(date, rule) from a signed whole-day row, or (None, why) when it cannot
+    be computed — never a defaulted number of days."""
+    from datetime import timedelta
+
+    from app.modules.payroll.engine.jurisdictions.malaysia.errors import MYCalculationBlockedError
+
+    if pack is None:
+        return None, "PENDING: no active Malaysia pack"
+    try:
+        days = pack.amount(key)
+    except MYCalculationBlockedError as blocked:
+        return None, f"PENDING: {blocked.key}"[:60]
+    if days != days.to_integral_value() or days < 0:
+        return None, f"PENDING: {key} is not whole days"[:60]
+    return start + direction * timedelta(days=int(days)), f"{key} {'+' if direction > 0 else '-'}{int(days)}"[:60]
+
+
+def _event(db: Session, organization_id: int, row_id: int):
+    M = _models().PayrollMyEmployerEvent
+    row = db.query(M).filter(M.id == row_id, M.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException("Malaysia employer event")
+    return row
+
+
+def record_my_employer_event(db: Session, organization_id: int, employee_id: int, payload: dict, actor_id,
+                             reason=None):
+    """CP22 / CP22A / CP21 / death notice with its due date from signed content."""
+    reason = _reason(reason)
+    employee = _employee(db, organization_id, employee_id)
+    if not isinstance(payload, dict):
+        raise BadRequestException("The request body must be an object.")
+    unknown = sorted(set(payload) - {"event_type", "event_date", "clearance_required", "evidence_ref"})
+    if unknown:
+        raise BadRequestException(f"unknown field(s): {', '.join(unknown)}")
+    kind = str(payload.get("event_type") or "").strip().upper()
+    if kind not in EVENT_TYPES:
+        raise BadRequestException(f"event_type must be one of: {', '.join(EVENT_TYPES)}.")
+    on = _as_date(payload.get("event_date"), "event_date")
+    clearance = _bool(payload.get("clearance_required"), "clearance_required") or False
+    if clearance and kind not in CLEARANCE_EVENT_TYPES:
+        raise BadRequestException("Only a CP22A or CP21 event can require a tax-clearance hold.")
+    key, direction = _DUE_RULES[kind]
+    due, rule = _days_from(_signed_pack(db, organization_id, on), key, on, direction)
+    M = _models().PayrollMyEmployerEvent
+    row = M(organization_id=organization_id, legal_entity_id=getattr(employee, "legal_entity_id", None),
+            employee_id=employee.id, event_type=kind, event_date=on, due_date=due, due_rule=rule,
+            clearance_required=clearance, status="OPEN", created_by_id=actor_id,
+            evidence_ref=(str(payload.get("evidence_ref") or "").strip() or None))
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "created", "my_employer_event", row.id,
+           new={"type": kind, "event_date": on.isoformat(), "due_date": due and due.isoformat()}, reason=reason)
+    return row
+
+
+def submit_my_employer_event(db: Session, organization_id: int, row_id: int, actor_id, submitted_on, receipt_ref,
+                             evidence_ref):
+    """Record the submission to HASiL with its receipt — by a second person."""
+    from app.modules.payroll.service import require_four_eyes
+
+    row = _event(db, organization_id, row_id)
+    if row.status != "OPEN":
+        raise BadRequestException("Only an OPEN employer event can be marked submitted.")
+    receipt, evidence = str(receipt_ref or "").strip(), str(evidence_ref or "").strip()
+    if not receipt or not evidence:
+        raise BadRequestException("A submission needs the HASiL receipt reference and evidence.")
+    require_four_eyes(row.created_by_id, actor_id, "Recording a Malaysia employer event submission", db=db,
+                      entity_type="my_employer_event", entity_id=row.id, current_status=row.status)
+    row.status, row.submitted_on = "SUBMITTED", _as_date(submitted_on, "submittedOn")
+    row.receipt_ref, row.evidence_ref = receipt[:100], evidence[:300]
+    row.approved_by_id, row.approved_at = actor_id, datetime.utcnow()
+    db.flush()
+    _audit(db, actor_id, "submitted", "my_employer_event", row.id, old={"status": "OPEN"},
+           new={"status": "SUBMITTED", "submitted_on": row.submitted_on.isoformat(),
+                "late": bool(row.due_date and row.submitted_on > row.due_date)})
+    return row
+
+
+def cancel_my_employer_event(db: Session, organization_id: int, row_id: int, actor_id, reason):
+    reason = _reason(reason)
+    row = _event(db, organization_id, row_id)
+    if row.status != "OPEN":
+        raise BadRequestException("Only an OPEN employer event can be cancelled.")
+    M = _models().PayrollMyClearanceHold
+    if db.query(M.id).filter(M.event_id == row.id, M.state.in_(HOLDING_STATES)).first():
+        raise BadRequestException("Release the event's clearance hold before cancelling it.")
+    row.status, row.cancel_reason = "CANCELLED", reason
+    db.flush()
+    _audit(db, actor_id, "cancelled", "my_employer_event", row.id, old={"status": "OPEN"},
+           new={"status": "CANCELLED"}, reason=reason)
+    return row
+
+
+def _hold(db: Session, organization_id: int, row_id: int):
+    M = _models().PayrollMyClearanceHold
+    row = db.query(M).filter(M.id == row_id, M.organization_id == organization_id).first()
+    if row is None:
+        raise NotFoundException("Malaysia clearance hold")
+    return row
+
+
+def open_my_clearance_hold(db: Session, organization_id: int, event_id: int, actor_id, opened_on, reason=None):
+    """Hold the departing employee's cash from `opened_on` until the signed
+    maximum hold date (my_clearance_hold_max_days) or a release."""
+    reason = _reason(reason)
+    event = _event(db, organization_id, event_id)
+    if event.event_type not in CLEARANCE_EVENT_TYPES or not event.clearance_required:
+        raise BadRequestException("A clearance hold is opened only from a CP22A / CP21 event that requires one.")
+    if event.status == "CANCELLED":
+        raise BadRequestException("The event has been cancelled.")
+    M = _models().PayrollMyClearanceHold
+    if db.query(M.id).filter(M.organization_id == organization_id, M.employee_id == event.employee_id,
+                             M.state.in_(HOLDING_STATES)).first():
+        raise BadRequestException("The employee already has an open clearance hold.")
+    start = _as_date(opened_on, "openedOn")
+    until, rule = _days_from(_signed_pack(db, organization_id, start), "my_clearance_hold_max_days", start, 1)
+    if until is None:
+        raise BadRequestException(f"The maximum hold period is not signed ({rule}); a hold is never open-ended.")
+    row = M(organization_id=organization_id, legal_entity_id=event.legal_entity_id, employee_id=event.employee_id,
+            event_id=event.id, opened_on=start, hold_until=until, state="HELD", created_by_id=actor_id,
+            evidence_ref=event.evidence_ref)
+    db.add(row)
+    db.flush()
+    _audit(db, actor_id, "opened", "my_clearance_hold", row.id,
+           new={"event": event.id, "opened_on": start.isoformat(), "hold_until": until.isoformat()}, reason=reason)
+    return row
+
+
+def request_my_hold_release(db: Session, organization_id: int, hold_id: int, actor_id, release_reference,
+                            evidence_ref):
+    row = _hold(db, organization_id, hold_id)
+    if row.state != "HELD":
+        raise BadRequestException("Only a HELD clearance hold can be put forward for release.")
+    reference, evidence = str(release_reference or "").strip(), str(evidence_ref or "").strip()
+    if not reference or not evidence:
+        raise BadRequestException("A release needs HASiL's clearance reference and its evidence.")
+    row.state, row.release_reference, row.release_evidence_ref = "RELEASE_REQUESTED", reference[:100], evidence[:300]
+    row.release_requested_by_id = actor_id
+    db.flush()
+    _audit(db, actor_id, "release_requested", "my_clearance_hold", row.id, old={"state": "HELD"},
+           new={"state": "RELEASE_REQUESTED", "reference": row.release_reference})
+    return row
+
+
+def approve_my_hold_release(db: Session, organization_id: int, hold_id: int, actor_id):
+    """A second person releases the hold; its held lines become RELEASED and
+    the payslips are paid in the next bank file of their run."""
+    from app.modules.payroll.service import require_four_eyes
+
+    row = _hold(db, organization_id, hold_id)
+    if row.state != "RELEASE_REQUESTED":
+        raise BadRequestException("There is no release request to approve.")
+    require_four_eyes(row.release_requested_by_id, actor_id, "Releasing a Malaysia tax-clearance hold", db=db,
+                      entity_type="my_clearance_hold", entity_id=row.id, current_status=row.state)
+    row.state, row.released_by_id, row.released_at = "RELEASED", actor_id, datetime.utcnow()
+    L = _models().PayrollMyClearanceHoldLine
+    for line in db.query(L).filter(L.hold_id == row.id, L.status == "HELD"):
+        line.status = "RELEASED"
+    db.flush()
+    _audit(db, actor_id, "released", "my_clearance_hold", row.id, old={"state": "RELEASE_REQUESTED"},
+           new={"state": "RELEASED"})
+    return row
+
+
+def hold_view(db: Session, row) -> dict:
+    L = _models().PayrollMyClearanceHoldLine
+    lines = db.query(L).filter(L.hold_id == row.id).order_by(L.id).all()
+    held = sum((Decimal(str(line.amount)) for line in lines if line.status == "HELD"), Decimal("0"))
+    return {**_json_safe(_facts(row)), "heldTotal": str(held),
+            "lines": [{"payslipId": line.payslip_item_id, "amount": str(line.amount), "status": line.status}
+                      for line in lines],
+            "treatment": "LEGAL_HOLD - held money remains owed to the employee; not a deduction"}
+
+
+def my_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:
+    """{payslip_id: (treatment, reason)} for the bank export: a payslip whose
+    employee has an open clearance hold in force on the pay date is HELD (left
+    out of the payment file; a hold line records the owed amount)."""
+    my_items = [i for i in items if (i.country_code or "").upper() == MY]
+    if not my_items:
+        return {}
+    M, L = _models().PayrollMyClearanceHold, _models().PayrollMyClearanceHoldLine
+    holds = {h.employee_id: h for h in db.query(M).filter(M.organization_id == organization_id,
+                                                          M.state.in_(HOLDING_STATES))}
+    out = {}
+    for item in my_items:
+        hold = holds.get(item.employee_id)
+        if hold is None or not (hold.opened_on <= run.pay_date <= hold.hold_until):
+            continue
+        line = db.query(L).filter(L.payslip_item_id == item.id).first()
+        if line is None:
+            db.add(L(organization_id=organization_id, legal_entity_id=hold.legal_entity_id,
+                     employee_id=item.employee_id, hold_id=hold.id, payslip_item_id=item.id,
+                     amount=Decimal(str(item.net_pay or 0)), status="HELD"))
+        out[item.id] = ("HELD", f"Malaysia tax-clearance hold #{hold.id} (MY-020)")
+    db.flush()
+    return out
+
+
+def _my_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:
+    return my_payment_treatment(db, organization_id, run, items)
+
+
+def _my_payslip_hold_view(item) -> Optional[dict]:
+    """The payslip's clearance-hold line, if any: a LEGAL HOLD shown apart from
+    deductions (net pay unchanged)."""
+    if (getattr(item, "country_code", None) or "").upper() != MY:
+        return None
+    from sqlalchemy.orm import object_session
+
+    session = object_session(item)
+    if session is None:
+        return None
+    L = _models().PayrollMyClearanceHoldLine
+    line = session.query(L).filter(L.payslip_item_id == item.id).first()
+    if line is None:
+        return None
+    return {"status": line.status, "amount": str(line.amount), "holdId": line.hold_id,
+            "basis": "Malaysia tax-clearance hold (CP22A / CP21) - money remains owed to the employee"}
+
+
+def my_event_problems(db: Session, organization_id: int, employee_id: int, pay_date: date) -> list:
+    """Preflight findings for one employee: undated or overdue employer
+    events, a clearance hold that is required but not open, an expired hold."""
+    E_, H = _models().PayrollMyEmployerEvent, _models().PayrollMyClearanceHold
+    out = []
+    events = (db.query(E_).filter(E_.organization_id == organization_id, E_.employee_id == employee_id,
+                                  E_.status == "OPEN").order_by(E_.id).all())
+    for event in events:
+        if event.due_date is None:
+            out.append(("MY_EVENT_DUE_UNKNOWN", f"{event.event_type} #{event.id} has no due date ({event.due_rule})"))
+        elif event.due_date < pay_date:
+            out.append(("MY_EVENT_OVERDUE", f"{event.event_type} #{event.id} was due {event.due_date.isoformat()}"))
+    for event in (db.query(E_).filter(E_.organization_id == organization_id, E_.employee_id == employee_id,
+                                      E_.status != "CANCELLED", E_.clearance_required.is_(True)).all()):
+        if db.query(H.id).filter(H.event_id == event.id).first() is None:
+            out.append(("MY_CLEARANCE_HOLD_REQUIRED",
+                        f"{event.event_type} #{event.id} requires a tax-clearance hold before final pay (MY-020)"))
+    for hold in db.query(H).filter(H.organization_id == organization_id, H.employee_id == employee_id,
+                                   H.state.in_(HOLDING_STATES)):
+        if hold.hold_until < pay_date:
+            out.append(("MY_CLEARANCE_HOLD_EXPIRED",
+                        f"hold #{hold.id} passed its maximum date {hold.hold_until.isoformat()}; review the release"))
+    return out
+
+
 # ── employee summary (for the Phase 8 panel; identifiers masked) ────────────
 def employee_summary(db: Session, organization_id: int, employee_id: int) -> dict:
     m = _models()
@@ -1523,4 +1797,8 @@ def employee_summary(db: Session, organization_id: int, employee_id: int) -> dic
     return {"employeeId": employee_id, "identifiers": list_my_identifiers(db, organization_id, employee_id),
             "workerProfiles": versions(m.PayrollMyWorkerProfile),
             "workAssignments": versions(m.PayrollMyWorkAssignment),
-            "declarations": versions(m.PayrollMyTaxDeclaration)}
+            "declarations": versions(m.PayrollMyTaxDeclaration),
+            "employerEvents": versions(m.PayrollMyEmployerEvent),
+            "clearanceHolds": [hold_view(db, h) for h in db.query(m.PayrollMyClearanceHold).filter(
+                m.PayrollMyClearanceHold.organization_id == organization_id,
+                m.PayrollMyClearanceHold.employee_id == employee_id).order_by(m.PayrollMyClearanceHold.id)]}

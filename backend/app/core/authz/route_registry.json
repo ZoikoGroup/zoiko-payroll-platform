@@ -9353,6 +9353,44 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/malaysia/clearance-holds/{hold_id}/release-approve",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "release-approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_clearance_hold_lines",
+    "payroll_my_clearance_holds"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/clearance-holds/{hold_id}/release-request",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "release-request",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_clearance_hold_lines",
+    "payroll_my_clearance_holds"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/malaysia/declarations/{row_id}/approve",
    "data_class": "worker",
    "action": "approve",
@@ -9425,6 +9463,46 @@
    "scan_worker_tables": [
     "payroll_employees",
     "payroll_my_tax_declarations"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/employer-events",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "employer-events",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_employer_events"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/employer-events",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "employer-events",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_employer_events"
    ],
    "overridden": false
   },
@@ -9529,6 +9607,9 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees",
+    "payroll_my_clearance_hold_lines",
+    "payroll_my_clearance_holds",
+    "payroll_my_employer_events",
     "payroll_my_identifier_vault",
     "payroll_my_tax_declarations",
     "payroll_my_work_assignments",
@@ -9614,6 +9695,63 @@
     "payroll_employees",
     "payroll_my_identifier_vault",
     "payroll_my_worker_profiles"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employer-events/{row_id}/cancel",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_clearance_holds",
+    "payroll_my_employer_events"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employer-events/{row_id}/clearance-hold",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "clearance-hold",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_clearance_hold_lines",
+    "payroll_my_clearance_holds",
+    "payroll_my_employer_events"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employer-events/{row_id}/submitted",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "submitted",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_employer_events"
    ],
    "overridden": false
   },
@@ -9776,6 +9914,8 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees",
+    "payroll_my_clearance_holds",
+    "payroll_my_employer_events",
     "payroll_my_work_assignments",
     "payroll_my_worker_profiles",
     "payslip_items"
