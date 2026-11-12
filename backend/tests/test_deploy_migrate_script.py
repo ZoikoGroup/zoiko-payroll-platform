@@ -159,7 +159,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                                         "payroll_be_worker_profiles", "payroll_be_work_schedules",
                                         "payroll_be_employment_classifications", "payroll_be_declarations",
                                         "payroll_be_accumulator_entries",  # + Belgium P2 (1d76678ef1a1)
-                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings"}  # + Belgium Block B (2943a0490b5b)
+                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
         nz_run_columns = {"nz_approval_fingerprint", "nz_payment_kind", "nz_run_options",   # + P6 options
                           "pl_approval_fingerprint",                                        # + Poland P2
                           "be_approval_fingerprint"}                                        # + Belgium P2
@@ -278,7 +278,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                         "payroll_be_employment_classifications", "payroll_be_declarations",
                         "payroll_be_accumulator_entries"}
         tables, columns = pending_objects("e7ec6c1933b4")
-        be_block_b_tables = {"payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings"}  # + Belgium Block B (2943a0490b5b)
+        be_block_b_tables = {"payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
         assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
         assert tables == be_p2_tables | be_block_b_tables and columns == {**mx_m21, "payslip_items": {"be_calculation_snapshot"},
                                                       "payroll_runs": {"be_approval_fingerprint"}}
