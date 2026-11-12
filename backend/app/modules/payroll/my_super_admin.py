@@ -427,3 +427,18 @@ def sign_rows(db: Session, refs: list, actor_id, reason: str, source_document_id
         signed.append(update_row(db, kind, row_id, {"reason": reason, "sourceDocumentId": source_id,
                                                     "specialistVerified": True}, actor_id))
     return {"signed": len(signed), "rows": signed}
+
+
+# Audit entity types written by this console (row edits, signatures, table
+# replacements); everyone behind one is a statutory editor of that pack.
+AUDIT_TYPES = ("my_statutory_rate", "my_statutory_slab", "my_statutory_table")
+
+
+def statutory_editors(db: Session, pack) -> set:
+    """Super Admins who edited, replaced or signed a statutory row of this pack
+    version: the pack approval refuses every one of them (four-eyes)."""
+    from app.modules.payroll.models import TaxConfigurationAudit as A
+
+    rows = (db.query(A.actor_id).filter(A.jurisdiction_pack_id == pack.id, A.entity_type.in_(AUDIT_TYPES),
+                                        A.actor_id.isnot(None)).distinct().all())
+    return {r[0] for r in rows}

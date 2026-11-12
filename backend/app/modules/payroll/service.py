@@ -1545,7 +1545,7 @@ def check_jurisdiction_readiness(
 # Mexico (ZP-MX-ENG-001): MX-003 — only the signed, effective-dated canonical
 # pack; an org-synced copy would drop the row-level dates that separate the
 # January and February UMA rows (MX-004).
-_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL")
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY")
 # Countries whose payroll refuses an AMBIGUOUS resolution: more than one Active
 # canonical tax pack covering the payroll date (activation already forbids the
 # overlap; this keeps a corrupted / manually edited database from silently
@@ -8617,23 +8617,23 @@ def se_activation_blockers(db: Session, pack) -> list:
 # Display names for the per-country opt-in activation gates below.
 _GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong",
                              "CH": "Switzerland", "SA": "Saudi Arabia", "NL": "Netherlands", "MX": "Mexico", "BR": "Brazil",
-                             "ZA": "South Africa", "PL": "Poland"}
+                             "ZA": "South Africa", "PL": "Poland", "MY": "Malaysia"}
 # Phase 6.0 F2: countries whose pack approver may never be its activator.
-_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL")  # MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY")  # MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose pack approver may never be the Super Admin who
 # last edited / submitted the pack (refused at the Approve step itself).
-_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose REFUSED pack / report-template governance
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
-_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 # Singapore completion programme (2026-09-29): countries whose TAX packs follow
 # an explicit transition graph. Before this, only the Active-downgrade guard
 # applied, so a Superseded / Retired Singapore pack could be moved back to
 # Draft, edited through upsert and re-activated, and any string was accepted
 # as a status. Same per-country opt-in pattern as the constants above; other
 # countries keep their existing free lifecycle (DE keeps its downgrade guard).
-_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 TAX_PACK_TRANSITIONS = {
     "Draft": ("In Review", "QA", "Approved", "Active"),
     "In Review": ("Draft", "QA", "Approved", "Active"),
@@ -20464,6 +20464,13 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             jurisdiction_hooks.call("PL", "calc_inputs", db, None, emp, None, as_of=pay_date)
             if emp_country == "PL" else None
         )
+        # Malaysia (ZP-MY-ENG-001 Phase 5): inputs in force on the run's pay date,
+        # and the pay period (MY-006) the preview context does not otherwise carry.
+        my_inputs = (
+            jurisdiction_hooks.call("MY", "calc_inputs", db, None, emp, None, as_of=pay_date,
+                                    period=(period_start, period_end) if period_start and period_end else None)
+            if emp_country == "MY" else None
+        )
         # Mexico (ZP-MX-ENG-001 Phase 6): guarded + read-only (MX-039). The pay
         # date is the run's own pay date, passed explicitly — never the period
         # end or today's date (MX-004); without it the preview refuses. A
@@ -20653,6 +20660,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             japan_inputs=japan_inputs,
             nz_inputs=nz_inputs,
             poland_inputs=pl_inputs,
+            malaysia_inputs=my_inputs,
             mexico_inputs=mexico_inputs,
             brazil_inputs=brazil_inputs,
             pay_date=period_end or date.today(),
@@ -25710,6 +25718,12 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("PL", "calc_inputs", db, run, employee, resolved_pack)
         if country == "PL" else None
     )
+    # Malaysia (ZP-MY-ENG-001 Phase 5): inputs in force on the run's pay date and
+    # the run's pay period (MY-006).
+    my_inputs = (
+        jurisdiction_hooks.call("MY", "calc_inputs", db, run, employee, resolved_pack)
+        if country == "MY" else None
+    )
     # Mexico (ZP-MX-ENG-001 Phase 6): guarded, read-only inputs as of the run's
     # pay date; the payslip's money columns come from the Mexican earning lines
     # (D2) — the engine refuses any other gross (MX_GROSS_MISMATCH).
@@ -25837,6 +25851,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         netherlands_inputs=netherlands_inputs,
         japan_inputs=japan_inputs,
         poland_inputs=pl_inputs,
+        malaysia_inputs=my_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
         pay_date=run.pay_date,
@@ -25880,6 +25895,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     if pl_inputs is not None:
         from app.modules.payroll import poland_service as _pl_service
         pl_frozen = _pl_service.pl_freeze_context(ctx, calculation_mode)
+    my_frozen = None
+    if my_inputs is not None:
+        from app.modules.payroll import malaysia_service as _my_service
+        my_frozen = _my_service.my_freeze_context(ctx, calculation_mode)
     try:
         result = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -26062,6 +26081,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # replay or correction uses. None for every non-PL payslip.
         "pl_calculation_snapshot": (_pl_service.pl_payslip_snapshot(result, frozen=pl_frozen)
                                     if pl_frozen is not None else None),
+        # Malaysia (ZP-MY-ENG-001 Phase 5): my_result plus the frozen context a
+        # replay or correction uses. None for every non-MY payslip.
+        "my_calculation_snapshot": (_my_service.my_payslip_snapshot(result, frozen=my_frozen)
+                                    if my_frozen is not None else None),
         # Netherlands (ZP-NL-ENG-001): the frozen NL context + nl_result dict
         # (wage_tax, employee_insurance, whk, zvw, wkr, car_addition, labor_pay,
         # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
@@ -32822,6 +32845,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jurisdiction_hooks.call("PL", "calc_inputs", db, run, employee, None)
         if country == "PL" else None
     )
+    # Malaysia (ZP-MY-ENG-001 Phase 5): the same pay-date inputs as a generated run.
+    my_inputs = (
+        jurisdiction_hooks.call("MY", "calc_inputs", db, run, employee, None)
+        if country == "MY" else None
+    )
     # Mexico (Phase 6): the payslip is computed from the profile, labour policy
     # and approved hours; manual amounts that disagree are refused, never
     # silently replaced.
@@ -32968,6 +32996,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         netherlands_inputs=netherlands_inputs,
         japan_inputs=japan_inputs,
         poland_inputs=pl_inputs,
+        malaysia_inputs=my_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
         **ytd_inputs,
@@ -33000,6 +33029,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if pl_inputs is not None:
         from app.modules.payroll import poland_service as _pl_service
         pl_frozen = _pl_service.pl_freeze_context(ctx, calculation_mode)
+    my_frozen = None
+    if my_inputs is not None:
+        from app.modules.payroll import malaysia_service as _my_service
+        my_frozen = _my_service.my_freeze_context(ctx, calculation_mode)
     try:
         calc = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -33050,6 +33083,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
                                  if nz_frozen is not None else None),
         pl_calculation_snapshot=(_pl_service.pl_payslip_snapshot(calc, frozen=pl_frozen)
                                  if pl_frozen is not None else None),
+        my_calculation_snapshot=(_my_service.my_payslip_snapshot(calc, frozen=my_frozen)
+                                 if my_frozen is not None else None),
         mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
                                  if mexico_inputs is not None else None),
         **tax_snapshot,
@@ -33762,6 +33797,11 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "plCalculationSnapshot": (
             {k: v for k, v in (item.pl_calculation_snapshot or {}).items() if k != "frozenContext"}
             if (item.country_code or country) == "PL" and item.pl_calculation_snapshot else None),
+        # Malaysia (ZP-MY-ENG-001): the frozen my_result; the frozen inputs
+        # (frozenContext) stay server-side.
+        "myCalculationSnapshot": (
+            {k: v for k, v in (item.my_calculation_snapshot or {}).items() if k != "frozenContext"}
+            if (item.country_code or country) == "MY" and item.my_calculation_snapshot else None),
     }
 
 

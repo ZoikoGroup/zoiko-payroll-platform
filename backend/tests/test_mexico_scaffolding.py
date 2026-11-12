@@ -211,6 +211,8 @@ def test_other_hook_modules_unchanged():
         "NZ": "app.modules.payroll.new_zealand_service",
         # Poland (ZP-PL-ENG-001) Phase 4 – all 13 hooks, fail-closed module.
         "PL": "app.modules.payroll.poland_service",
+        # Malaysia (ZP-MY-ENG-001) Phase 5 – all 13 hooks, fail-closed module.
+        "MY": "app.modules.payroll.malaysia_service",
     }
 
 

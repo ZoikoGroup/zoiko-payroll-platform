@@ -9353,6 +9353,451 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/malaysia/declarations/{row_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_accumulator_entries",
+    "payroll_my_tax_declarations"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/declarations/{row_id}/withdraw",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "withdraw",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_tax_declarations"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/declarations",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "declarations",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_tax_declarations"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/declarations",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "declarations",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_tax_declarations"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/identifiers",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "identifiers",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_identifier_vault"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/identifiers",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "identifiers",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_identifier_access_events",
+    "payroll_my_identifier_vault"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/summary",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "summary",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_identifier_vault",
+    "payroll_my_tax_declarations",
+    "payroll_my_work_assignments",
+    "payroll_my_worker_profiles"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/work-assignments",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "work-assignments",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_work_assignments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/work-assignments",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "work-assignments",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_work_assignments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/worker-profiles",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "worker-profiles",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_worker_profiles"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employees/{employee_id}/worker-profiles",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "worker-profiles",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_identifier_vault",
+    "payroll_my_worker_profiles"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/employer-registrations",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "employer-registrations",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employer-registrations",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "employer-registrations",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employer-registrations/{row_id}/approve",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/employer-registrations/{row_id}/verify",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "verify",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/identifiers/{vault_id}/delete",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "delete",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_identifier_access_events",
+    "payroll_my_identifier_vault"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/identifiers/{vault_id}/reveal",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reveal",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_identifier_access_events",
+    "payroll_my_identifier_vault"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/identifiers/{vault_id}/reveal-approve",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reveal-approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_identifier_access_events",
+    "payroll_my_identifier_vault"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/identifiers/{vault_id}/reveal-request",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "reveal-request",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_identifier_access_events",
+    "payroll_my_identifier_vault"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/runs/{run_id}/preflight",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "preflight",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_my_work_assignments",
+    "payroll_my_worker_profiles",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/malaysia/summary",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "summary",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_tax_declarations",
+    "payroll_my_work_assignments",
+    "payroll_my_worker_profiles"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/work-assignments/{row_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_work_assignments"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/malaysia/worker-profiles/{row_id}/approve",
+   "data_class": "worker",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_my_worker_profiles"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/mexico-transfer/imports/{copy_id}/approve",
    "data_class": "worker",
    "action": "approve",
@@ -24190,6 +24635,9 @@
     "payroll_jp_social_insurance_enrollments",
     "payroll_jp_social_insurance_events",
     "payroll_jp_worker_tax_profiles",
+    "payroll_my_tax_declarations",
+    "payroll_my_work_assignments",
+    "payroll_my_worker_profiles",
     "payroll_nz_authority_deductions",
     "payroll_nz_employee_tax_profiles",
     "payroll_nz_ird_vault",

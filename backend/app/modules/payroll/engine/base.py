@@ -1032,6 +1032,8 @@ class PayrollContext:
     # the pay date. Never an identifier (NRIC / TIN / EPF / SOCSO numbers stay in
     # the vault). None = not supplied -> the affected obligation BLOCKS.
     my_pay_date: date = None                  # preferred over pay_date
+    my_period_start: date = None              # preferred over period_start (the preview passes none)
+    my_period_end: date = None                # preferred over period_end
     my_profile: object = None                 # PayrollMyWorkerProfile in force (ACTIVE)
     my_registration: object = None            # PayrollMyEmployerRegistration in force (ACTIVE)
     my_assignment: object = None              # PayrollMyWorkAssignment in force (territory, holiday state)

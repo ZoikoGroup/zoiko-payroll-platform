@@ -74,7 +74,8 @@ def calculate(ctx: PayrollContext) -> dict:
     pay_date = as_date(getattr(ctx, "my_pay_date", None) or getattr(ctx, "pay_date", None))
     if pay_date is None:
         raise MYCalculationBlockedError(E.PAY_DATE_MISSING, "the pay date decides every Malaysian rule", org)
-    start, end = as_date(getattr(ctx, "period_start", None)), as_date(getattr(ctx, "period_end", None))
+    start = as_date(getattr(ctx, "my_period_start", None) or getattr(ctx, "period_start", None))
+    end = as_date(getattr(ctx, "my_period_end", None) or getattr(ctx, "period_end", None))
     if start is None or end is None or end < start:
         raise MYCalculationBlockedError(E.PERIOD_MISSING, "the pay period decides the wage / contribution month "
                                         "(MY-006)", org)
