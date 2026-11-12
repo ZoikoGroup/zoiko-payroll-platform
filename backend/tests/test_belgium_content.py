@@ -148,12 +148,20 @@ _STRUCTURAL_NUMBERS = {
     },
     "belgium_service.py": {
         0: "list index", 1: "list index", 8: "refusal message shows the first 8 problems",
-        10: "ISO date string slice [:10]",
+        10: "ISO date string slice [:10]", 2: "resolved_pack tuple index (rates, slabs, pack)",
+        3: "months per quarter (calendar fact, ONSS quarter number)",
         100: "ContributionRate.label column width", 150: "TaxSlab.rate_label column width",
         200: "SourceArtifact.agency column width", 300: "SourceArtifact.title column width",
     },
     "engine/jurisdictions/belgium/applicability.py": {
         0: "list index", 1: "list index / count of the other blocking reasons",
+    },
+    "engine/countries/belgium.py": {0: "list index", 1: "exactly one employment line"},
+    "engine/jurisdictions/belgium/declarations.py": {0: "a count cannot be negative"},
+    "engine/jurisdictions/belgium/formula.py": {
+        0: "evaluation depth start", 1: "depth step",
+        2000: "maximum formula length (guard against pathological input)",
+        60: "maximum nesting depth (guard against pathological input)",
     },
     "be_identifiers.py": {
         1: "regex group index; key versions start at 1", 2: "two hex characters per key byte",
@@ -171,6 +179,8 @@ _STRUCTURAL_STRINGS = {
     ("belgium_service.py", "Belgium form templates (Dimona, DmfA, 281.10, payslip) stay inactive until the "
                            "authority schemas are archived and the filing path is certified (gate G3)."):
         "Belcotax form number 281.10, not a value",
+    ("engine/countries/belgium.py", "BE-ENGINE-A3-2026.11"): "engine build identifier (not a value)",
+    ("belgium_service.py", "0.01"): "ledger amount column scale Numeric(14, 2) (storage precision, not rounding)",
     ("be_identifiers.py", r"^\d{5,16}$"): "ONSS employer number shape (5-16 digits; format only, G-16)",
     ("belgium_service.py", "^[A-Z0-9]{1,10}$"): "ONSS category / sub-committee code shape (1-10 letters / digits)",
     ("belgium_service.py", r"\d{9,12}"): "KBO/BCE enterprise number shape (format only, G-16)",

@@ -34,6 +34,7 @@ ONE = Decimal("1")
 # signed be_rounding_* rule chooses which unit and mode apply.
 _CENT = Decimal("0.01")
 _EURO = ONE
+_PERCENT = Decimal("100")    # a rate_pct is a percentage (structural unit)
 PENDING_MARK = content.PENDING_MARK
 PENDING = "PENDING_G1"
 
@@ -109,7 +110,8 @@ class BePack:
     def _note(self, kind: str, ident: str, row) -> None:
         start, end = as_date(field(row, "effective_from")), as_date(field(row, "effective_to"))
         names = (("employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value") if kind == "rate"
-                 else ("min_amount", "max_amount", "rate_pct", "flat_amount", "assessment_basis", "tax_formula"))
+                 else ("min_amount", "max_amount", "rate_pct", "flat_amount", "assessment_basis", "tax_formula",
+                       "formula_expression"))
         self._used[(kind, ident)] = {"kind": kind, "id": ident,
                                      "effectiveFrom": start.isoformat() if start else None,
                                      "effectiveTo": end.isoformat() if end else None,
@@ -266,6 +268,54 @@ class BePack:
             self._note("slab", ident, r)
             out[key] = treatment
         return out
+
+    # ── Block A3: formulas and band values (restricted grammar only) ────────
+    def be_evaluate(self, ident: str, text, variables: dict) -> Decimal:
+        """Evaluate signed formula text with the restricted grammar (never eval)."""
+        from app.modules.payroll.engine.jurisdictions.belgium import formula as F
+
+        try:
+            return F.evaluate_be_formula(text, variables)
+        except F.FormulaError as error:
+            self.block(E.FORMULA_INVALID, ident, f"the signed formula cannot be evaluated: {error}")
+
+    def formula(self, key: str, name: Optional[str] = None, **variables) -> Decimal:
+        """The value of the signed formula row of a KIND_FORMULA key (one row in
+        force, or the row named `name`)."""
+        if content.KEYS.get(key, (None, None))[1] != content.KIND_FORMULA:
+            self.block(E.ROW_MISSING, key, "not a formula key")
+        rows = self.table(key)
+        if name is not None:
+            rows = [r for r in rows if upper(field(r, "tax_formula")) == upper(name)]
+        if len(rows) != 1:
+            self.block(E.ROW_MISSING, key, "exactly one signed formula row must be in force"
+                       + (f" for {name}" if name else ""))
+        text = field(rows[0], "formula_expression")
+        if not text:
+            self._pending(key, "the formula row has no formula text")
+        return self.be_evaluate(key, text, variables)
+
+    def band_for(self, key: str, rows: list, amount: Decimal):
+        """The band row whose [min_amount, max_amount) contains `amount`
+        (max_amount empty = open-ended). None found -> BE_BAND_NOT_FOUND."""
+        found = [r for r in rows if dec(field(r, "min_amount")) <= amount
+                 and (field(r, "max_amount") in (None, "") or amount < dec(field(r, "max_amount")))]
+        if len(found) != 1:
+            self.block(E.BAND_NOT_FOUND, key, "no single signed band row covers the amount"
+                       if not found else "several signed band rows overlap at the amount")
+        return found[0]
+
+    def band_value(self, key: str, row, amount: Decimal, **variables) -> Decimal:
+        """A band row's value at `amount`: its signed formula (variables x, low,
+        high, rate, flat plus the caller's), otherwise flat + rate% of the part
+        of `amount` above the band floor."""
+        low, rate, flat = dec(field(row, "min_amount")), dec(field(row, "rate_pct")), dec(field(row, "flat_amount"))
+        text = field(row, "formula_expression")
+        if text:
+            high = field(row, "max_amount")
+            return self.be_evaluate(key, text, {"x": amount, "low": low, "rate": rate, "flat": flat,
+                                             "high": dec(high) if high not in (None, "") else amount, **variables})
+        return flat + (amount - low) * rate / _PERCENT
 
     def used(self) -> list:
         return [self._used[k] for k in sorted(self._used, key=lambda k: (k[0], str(k[1])))]

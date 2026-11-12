@@ -113,9 +113,10 @@ def test_swiss_canton_values_never_resolve_as_belgium(canton, monkeypatch):
 
 
 # ── fail-closed calculation dispatch ───────────────────────────────────────
+# Block A3: standard / enterprise now run the Belgian engine, which still
+# blocks (here: no pay date / no records) - never the generic calculator.
 @pytest.mark.parametrize("mode, code", [("simple", "BE_SIMPLE_MODE_UNSUPPORTED"),
-                                        ("standard", "BE_ENGINE_NOT_BUILT"),
-                                        ("enterprise", "BE_ENGINE_NOT_BUILT")])
+                                        ("standard", "BE_"), ("enterprise", "BE_")])
 def test_every_calculation_mode_is_blocked_and_never_generic(mode, code, monkeypatch):
     from app.modules.payroll.engine import standard
     from app.modules.payroll.engine.base import PayrollContext
@@ -128,7 +129,8 @@ def test_every_calculation_mode_is_blocked_and_never_generic(mode, code, monkeyp
     with pytest.raises(BECalculationBlockedError) as raised:
         calculate_payroll(PayrollContext(gross=Decimal("4000"), basic=Decimal("4000"), country="BE"), mode)
     assert isinstance(raised.value, MissingComplianceConfigurationError)
-    assert raised.value.key == code
+    assert raised.value.key == code if mode == "simple" else raised.value.key.startswith(code)
+    assert raised.value.key != "BE_ENGINE_NOT_BUILT"
     assert generic_calls == []
 
 
@@ -334,7 +336,8 @@ def test_type_a_hooks_fail_closed(db):
     from app.modules.payroll import jurisdiction_hooks as jh
     from app.modules.payroll.engine.countries.belgium import BECalculationBlockedError
 
-    with pytest.raises(BECalculationBlockedError, match="BE_ENGINE_NOT_BUILT"):
+    # Block A3: calc_inputs exists; without a pay date it refuses.
+    with pytest.raises(BadRequestException, match="pay date"):
         jh.call("BE", "calc_inputs", db, None, SimpleNamespace(organization_id=1), None)
     assert jh.call("BE", "statutory_profile_errors", SimpleNamespace())
     with pytest.raises(BadRequestException):

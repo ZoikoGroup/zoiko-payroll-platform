@@ -10070,6 +10070,7 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
+    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -12080,6 +12081,7 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
+    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -12297,6 +12299,7 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
+    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -12562,6 +12565,7 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
+    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -14819,6 +14823,7 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
+    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -15098,6 +15103,7 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
+    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -15351,6 +15357,7 @@
    "note": null,
    "scan_worker_tables": [
     "organization_ytd_accumulators",
+    "payroll_be_accumulator_entries",
     "payroll_employees",
     "payroll_ytd_accumulators",
     "payslip_allowance_items",
@@ -16892,6 +16899,7 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
+    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -17140,6 +17148,7 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
+    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -17180,6 +17189,7 @@
    "scan_worker_tables": [
     "organization_ytd_accumulators",
     "payroll_attendance_records",
+    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",
@@ -17242,6 +17252,7 @@
    "note": null,
    "scan_worker_tables": [
     "organization_ytd_accumulators",
+    "payroll_be_accumulator_entries",
     "payroll_ch_absence_benefit_events",
     "payroll_ch_family_allowance_entitlements",
     "payroll_court_ordered_deductions",

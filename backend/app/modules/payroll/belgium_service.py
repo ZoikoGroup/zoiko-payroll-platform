@@ -54,12 +54,18 @@ def _run_has_belgian_items(db: Session, run) -> bool:
                                            PayslipItem.country_code == BE).first() is not None
 
 
-# ── 1. calc_inputs (type a; no BE caller before Phase 5) ────────────────────
+# ── 1. calc_inputs (type a): Block A3, see resolve_be_calc_inputs ─────────
 def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of=None, period=None, **_kwargs) -> dict:
-    from app.modules.payroll.engine.jurisdictions.belgium import errors as E
-
-    raise E.BECalculationBlockedError(E.ENGINE_NOT_BUILT, NOT_BUILT_MESSAGE,
-                                      organization_id=getattr(employee, "organization_id", None))
+    """be_* context fields in force on the run's pay date. Without a pay date
+    the calculation refuses (every Belgian rule is selected by it)."""
+    pay_date = getattr(run, "pay_date", None) or as_of
+    if pay_date is None:
+        raise BadRequestException("Belgian payroll needs the run's pay date: every rule is selected by it.")
+    pack = resolved_pack[2] if resolved_pack else None
+    version = (f"{getattr(pack, 'pack_id', None) or getattr(pack, 'id', None)}@{getattr(pack, 'version', None)}"
+               if pack is not None else None)
+    return resolve_be_calc_inputs(db, employee.organization_id, employee, _as_date(pay_date, "payDate"),
+                                  pack_version=version)
 
 
 # ── 2. before_run_transition (loop, but only for runs with BE payslips) ─────
@@ -1236,3 +1242,243 @@ def resolve_be_classification(db: Session, organization_id: int, employee_id: in
         contract_type=getattr(employee, "employment_type", None), pay_frequency=getattr(employee, "pay_frequency", None),
         pay_basis=pay_basis, period_start=start)
     return _json_safe({"employeeId": employee.id, **result})
+
+
+# ── Block A3: calculation inputs, freeze / replay, snapshot, ledger ─────────
+# Never frozen, hashed or handed to the engine: identifier references and
+# credential / evidence references stay in their own tables.
+_BE_FROZEN_EXCLUDE = ("niss_vault_id", "onss_number_vault_id", "filing_credential_ref", "mandate_refs",
+                      "source_document_id", "created_by_id", "approved_by_id", "created_at", "updated_at",
+                      "approved_at")
+
+
+def _strip(record):
+    if record is None:
+        return None
+    return {k: v for k, v in record.items() if k not in _BE_FROZEN_EXCLUDE}
+
+
+def _be_records(db: Session, organization_id: int, employee, on: date) -> dict:
+    """Every Belgian record the resolver and engine read, as plain dicts. Vault
+    ids and credential references are stripped (never frozen, never hashed)."""
+    m = _models()
+
+    def rows(model):
+        return db.query(model).filter(model.organization_id == organization_id,
+                                      model.employee_id == employee.id).order_by(model.id).all()
+
+    classifications = rows(m.PayrollBeEmploymentClassification)
+    unit_ids = {c.establishment_unit_id for c in classifications if c.establishment_unit_id is not None}
+    agreement_ids = {c.collective_agreement_id for c in classifications if c.collective_agreement_id is not None}
+    U, A = m.PayrollBeEstablishmentUnit, m.CollectiveAgreement
+    units = {u.id: _strip(_facts(u)) for u in (db.query(U).filter(U.organization_id == organization_id,
+                                                                  U.id.in_(unit_ids)).all() if unit_ids else [])}
+    agreements = {a.id: _strip(_facts(a)) for a in (db.query(A).filter(A.id.in_(agreement_ids)).all()
+                                                    if agreement_ids else [])
+                  if a.organization_id in (None, organization_id)}
+    registration = _be_registration_for(db, organization_id, getattr(employee, "legal_entity_id", None), on)
+    profile = _latest_for(db, m.PayrollBeWorkerProfile, organization_id, on, employee_id=employee.id)
+    return {"registration": _strip(_facts(registration)), "profile": _strip(_facts(profile)),
+            "classifications": [_strip(_facts(c)) for c in classifications],
+            "schedules": [_strip(_facts(s)) for s in rows(m.PayrollBeWorkSchedule)], "units": units,
+            "agreements": agreements, "declarations": [_strip(_facts(d)) for d in rows(m.PayrollBeDeclaration)]}
+
+
+def be_ytd_snapshot(db: Session, organization_id: int, employee_id: int, legal_entity_id, pay_date: date) -> dict:
+    """Year-to-date sums BEFORE the pay date (calendar year), every accumulator
+    present (an explicit zero means 'known to be zero')."""
+    from sqlalchemy import func
+
+    Entry = _models().PayrollBeAccumulatorEntry
+    query = (db.query(Entry.accumulator, func.sum(Entry.amount))
+             .filter(Entry.organization_id == organization_id, Entry.employee_id == employee_id,
+                     Entry.year == pay_date.year, Entry.pay_date < pay_date))
+    query = query.filter(Entry.legal_entity_id.is_(None) if legal_entity_id is None
+                         else Entry.legal_entity_id == legal_entity_id)
+    totals = {name: Decimal(str(amount or 0)) for name, amount in query.group_by(Entry.accumulator)}
+    return {name: totals.get(name, Decimal("0")) for name in _content().ACCUMULATORS}
+
+
+def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date: date, pack_version=None) -> dict:
+    """Every Belgian input in force ON THE PAY DATE. Nothing is inferred: a
+    missing record stays None and the engine refuses with its own reason. The
+    pay basis has no recorded source yet (gap G-22), so it stays None."""
+    records = _be_records(db, organization_id, employee, pay_date)
+    entity = getattr(employee, "legal_entity_id", None)
+    return {
+        "be_pay_date": pay_date, "be_registration": records["registration"], "be_profile": records["profile"],
+        "be_classifications": records["classifications"], "be_schedules": records["schedules"],
+        "be_units": records["units"], "be_agreements": records["agreements"],
+        "be_declarations": records["declarations"],
+        "be_contract_type": getattr(employee, "employment_type", None),
+        "be_pay_frequency": getattr(employee, "pay_frequency", None), "be_pay_basis": None,
+        "be_ytd": be_ytd_snapshot(db, organization_id, employee.id, entity, pay_date),
+        "be_pack_version": pack_version, "be_organization_id": organization_id, "be_legal_entity_id": entity,
+        "be_employee_id": employee.id,
+    }
+
+
+_BE_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "additional_compensation",
+                    "be_pension_premium", "be_exceptional_reference")
+_BE_CTX_PLAIN = ("pay_frequency", "be_components", "be_source_periods", "be_contract_type", "be_pay_frequency",
+                 "be_pay_basis", "be_pack_version", "be_organization_id", "be_legal_entity_id", "be_employee_id",
+                 "trace_id")
+_BE_CTX_DATES = ("pay_date", "be_pay_date", "period_start", "period_end")
+_BE_RECORD_KEYS = ("be_registration", "be_profile")
+_BE_LIST_KEYS = ("be_classifications", "be_schedules", "be_declarations")
+_BE_MAP_KEYS = ("be_units", "be_agreements")
+_BE_RATE_FIELDS = ("component_key", "label", "employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value",
+                   "effective_from", "effective_to")
+_BE_SLAB_FIELDS = ("id", "rule_type", "filing_status", "tax_regime", "assessment_basis", "rate_label", "rate_pct",
+                   "min_amount", "max_amount", "flat_amount", "tax_formula", "formula_expression", "sort_order",
+                   "effective_from", "effective_to")
+
+
+def be_freeze_context(ctx, calculation_mode: str = "standard") -> dict:
+    """Immutable input snapshot (spec §13): records, rows and dates as JSON.
+    Vault ids and credential references are never in it."""
+    def pick(row, fields):
+        return {f: (row.get(f) if isinstance(row, dict) else getattr(row, f, None)) for f in fields}
+
+    def rates(value):
+        items = value if isinstance(value, (list, tuple)) else [value]
+        return [pick(r, _BE_RATE_FIELDS) for r in items]
+
+    return _json_safe({
+        "version": 1, "calculationMode": calculation_mode,
+        "ctx": {k: getattr(ctx, k, None) for k in _BE_CTX_DECIMALS + _BE_CTX_PLAIN + _BE_CTX_DATES},
+        "records": {k: _strip(getattr(ctx, k, None)) for k in _BE_RECORD_KEYS},
+        "lists": {k: [_strip(r) for r in (getattr(ctx, k, None) or [])] for k in _BE_LIST_KEYS},
+        "maps": {k: {str(i): _strip(r) for i, r in (getattr(ctx, k, None) or {}).items()} for k in _BE_MAP_KEYS},
+        "ytd": getattr(ctx, "be_ytd", None),
+        "rateMap": {k: rates(r) for k, r in (getattr(ctx, "rate_map", None) or {}).items()},
+        "slabs": [pick(s, _BE_SLAB_FIELDS) for s in (getattr(ctx, "slabs", None) or [])],
+    })
+
+
+def be_thaw_context(frozen: dict):
+    """The engine reads records, rows and dates through tolerant readers (ISO
+    strings, decimal strings), so the frozen JSON replays as-is; the platform
+    money fields are restored to Decimal and map keys to ints."""
+    from app.modules.payroll.engine.base import PayrollContext
+
+    if not frozen or frozen.get("version") != 1:
+        raise BadRequestException("This payslip has no replayable Belgium calculation context.")
+    ctx = {}
+    for key, value in (frozen.get("ctx") or {}).items():
+        if key in _BE_CTX_DECIMALS:
+            ctx[key] = None if value in (None, "") else Decimal(str(value))
+        elif key in _BE_CTX_DATES:
+            ctx[key] = None if value in (None, "") else date.fromisoformat(str(value)[:10])
+        else:
+            ctx[key] = value
+    for key in ("gross", "basic"):
+        ctx[key] = ctx.get(key) if ctx.get(key) is not None else Decimal("0")
+    records, lists, maps = frozen.get("records") or {}, frozen.get("lists") or {}, frozen.get("maps") or {}
+    return PayrollContext(
+        **{k: v for k, v in ctx.items() if v is not None}, country=BE,
+        **{k: records.get(k) for k in _BE_RECORD_KEYS},
+        **{k: list(lists.get(k) or []) for k in _BE_LIST_KEYS},
+        **{k: {int(i): r for i, r in (maps.get(k) or {}).items()} for k in _BE_MAP_KEYS},
+        be_ytd=frozen.get("ytd"), rate_map=dict(frozen.get("rateMap") or {}),
+        slabs=list(frozen.get("slabs") or []))
+
+
+def be_replay(frozen: dict):
+    """Recalculate a frozen Belgium payslip exactly as it was calculated."""
+    from app.modules.payroll.engine.resolver import calculate_payroll
+
+    return calculate_payroll(be_thaw_context(frozen), frozen.get("calculationMode") or "standard")
+
+
+def be_payslip_snapshot(result, frozen: Optional[dict] = None) -> Optional[dict]:
+    """payslip_items.be_calculation_snapshot: be_result plus the frozen context."""
+    r = result.get("be_result") if isinstance(result, dict) else getattr(result, "be_result", None)
+    if not r:
+        return None
+    snapshot = dict(r)
+    if frozen is not None:
+        snapshot["frozenContext"] = frozen
+    return _json_safe(snapshot)
+
+
+def be_payslip_view(snapshot) -> Optional[dict]:
+    """The payslip serializer's BE block: be_result without the frozen inputs."""
+    if not snapshot:
+        return None
+    return {k: v for k, v in snapshot.items() if k != "frozenContext"}
+
+
+_ONSS_QUARTER_ACCUMULATORS = ("ONSS_EMPLOYEE_BASE", "ONSS_EMPLOYEE", "ONSS_EMPLOYER_BASE", "ONSS_MANUAL_108_BASE",
+                              "WORK_BONUS_SOCIAL")
+
+
+def post_be_accumulators(db: Session, run, actor_id=None) -> int:
+    """Bring the append-only ledger in line with the run's BE payslips
+    (BE-009, BE-017). Mirrors Poland's post_accumulators; called when payslips
+    are generated, regenerated or deleted.
+
+    * A payslip + accumulator with no RUN entry gets one (the database refuses
+      a second RUN entry), carrying the employment line and the run's period.
+    * When a payslip was regenerated (different deltas) or deleted (its RUN
+      entries lose their payslip link), a CORRECTION entry linked to the RUN
+      entry (reverses_id) posts the difference — entries are never edited.
+    Idempotent: a second call adds nothing."""
+    from app.modules.payroll.models import PayrollEmployee, PayslipItem
+
+    Entry = _models().PayrollBeAccumulatorEntry
+    pay_date = getattr(run, "pay_date", None)
+    if pay_date is None:
+        return 0
+    start, end = getattr(run, "period_start", None), getattr(run, "period_end", None)
+    if start is None or end is None:
+        start = end = None
+    items = {i.id: i for i in db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id,
+                                                           PayslipItem.country_code == BE).all()}
+    entries = db.query(Entry).filter(Entry.run_id == run.id).order_by(Entry.id).all()
+    roots = [e for e in entries if e.entry_kind == "RUN"]
+    net = {r.id: Decimal(str(r.amount)) for r in roots}
+    for e in entries:
+        if e.entry_kind == "CORRECTION" and e.reverses_id in net:
+            net[e.reverses_id] += Decimal(str(e.amount))
+
+    def deltas(item) -> dict:
+        snapshot = (item.be_calculation_snapshot or {}) if item is not None else {}
+        return {k: Decimal(str(v)) for k, v in (snapshot.get("accumulatorDeltas") or {}).items()}
+
+    def result_hash(item):
+        return (((item.be_calculation_snapshot or {}).get("hashes") or {}).get("input")) if item is not None else None
+
+    added = 0
+    rooted = set()
+    for root in roots:
+        item = items.get(root.payslip_item_id)
+        rooted.add((root.payslip_item_id, root.accumulator))
+        target = deltas(item).get(root.accumulator, Decimal("0"))
+        difference = (target - net[root.id]).quantize(Decimal("0.01"))
+        if difference == 0:
+            continue
+        db.add(Entry(organization_id=root.organization_id, legal_entity_id=root.legal_entity_id,
+                     employee_id=root.employee_id, employment_line=root.employment_line, year=root.year,
+                     quarter=root.quarter, accumulator=root.accumulator, pay_date=root.pay_date,
+                     source_period_start=root.source_period_start, source_period_end=root.source_period_end,
+                     amount=difference, entry_kind="CORRECTION", run_id=run.id, payslip_item_id=root.payslip_item_id,
+                     reverses_id=root.id, result_hash=result_hash(item), created_by_id=actor_id))
+        added += 1
+    for item_id, item in sorted(items.items()):
+        snapshot = item.be_calculation_snapshot or {}
+        employee = None
+        for accumulator, amount in sorted(deltas(item).items()):
+            if (item_id, accumulator) in rooted:
+                continue
+            employee = employee or db.get(PayrollEmployee, item.employee_id)
+            quarter = (pay_date.month - 1) // 3 + 1 if accumulator in _ONSS_QUARTER_ACCUMULATORS else None
+            db.add(Entry(organization_id=run.organization_id,
+                         legal_entity_id=getattr(employee, "legal_entity_id", None), employee_id=item.employee_id,
+                         employment_line=snapshot.get("employmentLine"), year=pay_date.year, quarter=quarter,
+                         accumulator=accumulator, pay_date=pay_date, source_period_start=start,
+                         source_period_end=end, amount=amount, entry_kind="RUN", run_id=run.id,
+                         payslip_item_id=item_id, result_hash=result_hash(item), created_by_id=actor_id))
+            added += 1
+    db.flush()
+    return added

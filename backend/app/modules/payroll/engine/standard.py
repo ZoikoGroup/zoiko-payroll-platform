@@ -372,6 +372,9 @@ class StandardStrategy(PayrollStrategy):
             # Poland: ZUS employee (pension + disability + sickness) + health +
             # PPK employee. PIT arrives as tds above. 0 elsewhere.
             + deductions.get("pl_employee_total", Decimal("0"))
+            # Belgium: employee ONSS after the social work bonus. Withholding
+            # arrives as tds above. 0 elsewhere.
+            + deductions.get("be_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -662,6 +665,8 @@ class StandardStrategy(PayrollStrategy):
             nz_result=deductions.get("nz_result"),
             # Poland (ZP-PL-ENG-001). Absent from every non-PL calculator dict.
             pl_result=deductions.get("pl_result"),
+            # Belgium (ZP-BE-ENG-001). Absent from every non-BE calculator dict.
+            be_result=deductions.get("be_result"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

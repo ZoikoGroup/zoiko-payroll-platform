@@ -436,7 +436,8 @@ def test_even_a_signed_active_assigned_pack_leaves_onboarding_refused_and_calcul
                                                                                              organization):
     """Simulates the worst case: a fully signed Belgian pack that is ACTIVE and
     assigned. Onboarding still refuses (registry PLANNED, dormant) and the
-    calculation still blocks (BE_ENGINE_NOT_BUILT)."""
+    calculation still blocks (Block A3: the engine blocks without the
+    statutory records - never the generic calculator)."""
     from app.modules.payroll import service
     from app.modules.payroll.engine.base import PayrollContext
     from app.modules.payroll.engine.countries.belgium import BECalculationBlockedError
@@ -453,5 +454,5 @@ def test_even_a_signed_active_assigned_pack_leaves_onboarding_refused_and_calcul
     assert get_jurisdiction_onboarding_block_reason(db, "Belgium")
     assert get_jurisdiction_change_block_reason(db, "India", "Belgium")
     for mode in ("standard", "enterprise"):
-        with pytest.raises(BECalculationBlockedError, match="BE_ENGINE_NOT_BUILT"):
+        with pytest.raises(BECalculationBlockedError, match="Belgium calculation blocked"):
             calculate_payroll(PayrollContext(gross=Decimal("1000"), basic=Decimal("1000"), country="BE"), mode)

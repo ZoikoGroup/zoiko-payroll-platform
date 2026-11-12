@@ -313,6 +313,7 @@ def build_context_from_employee(
     japan_inputs: dict | None = None,
     nz_inputs: dict | None = None,
     poland_inputs: dict | None = None,
+    belgium_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -524,4 +525,7 @@ def build_context_from_employee(
         # Poland (ZP-PL-ENG-001): pl_* context fields resolved by
         # poland_service.calc_inputs as of the run's pay date (Phase 4).
         **(poland_inputs or {}),
+        # Belgium (ZP-BE-ENG-001 Block A3): be_* context fields resolved by
+        # belgium_service.calc_inputs as of the run's pay date.
+        **(belgium_inputs or {}),
     )

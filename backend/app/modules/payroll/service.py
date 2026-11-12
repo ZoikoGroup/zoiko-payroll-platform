@@ -20484,6 +20484,12 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             jurisdiction_hooks.call("PL", "calc_inputs", db, None, emp, None, as_of=pay_date)
             if emp_country == "PL" else None
         )
+        # Belgium (ZP-BE-ENG-001 Block A3): inputs in force on the run's pay
+        # date; without a pay date the preview refuses.
+        be_inputs = (
+            jurisdiction_hooks.call("BE", "calc_inputs", db, None, emp, None, as_of=pay_date)
+            if emp_country == "BE" else None
+        )
         # Mexico (ZP-MX-ENG-001 Phase 6): guarded + read-only (MX-039). The pay
         # date is the run's own pay date, passed explicitly — never the period
         # end or today's date (MX-004); without it the preview refuses. A
@@ -20673,6 +20679,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             japan_inputs=japan_inputs,
             nz_inputs=nz_inputs,
             poland_inputs=pl_inputs,
+            belgium_inputs=be_inputs,
             mexico_inputs=mexico_inputs,
             brazil_inputs=brazil_inputs,
             pay_date=period_end or date.today(),
@@ -25730,6 +25737,11 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("PL", "calc_inputs", db, run, employee, resolved_pack)
         if country == "PL" else None
     )
+    # Belgium (ZP-BE-ENG-001 Block A3): inputs in force on the run's pay date.
+    be_inputs = (
+        jurisdiction_hooks.call("BE", "calc_inputs", db, run, employee, resolved_pack)
+        if country == "BE" else None
+    )
     # Mexico (ZP-MX-ENG-001 Phase 6): guarded, read-only inputs as of the run's
     # pay date; the payslip's money columns come from the Mexican earning lines
     # (D2) — the engine refuses any other gross (MX_GROSS_MISMATCH).
@@ -25857,6 +25869,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         netherlands_inputs=netherlands_inputs,
         japan_inputs=japan_inputs,
         poland_inputs=pl_inputs,
+        belgium_inputs=be_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
         pay_date=run.pay_date,
@@ -25900,6 +25913,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     if pl_inputs is not None:
         from app.modules.payroll import poland_service as _pl_service
         pl_frozen = _pl_service.pl_freeze_context(ctx, calculation_mode)
+    be_frozen = None
+    if be_inputs is not None:
+        from app.modules.payroll import belgium_service as _be_service
+        be_frozen = _be_service.be_freeze_context(ctx, calculation_mode)
     try:
         result = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -26082,6 +26099,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # replay or correction uses. None for every non-PL payslip.
         "pl_calculation_snapshot": (_pl_service.pl_payslip_snapshot(result, frozen=pl_frozen)
                                     if pl_frozen is not None else None),
+        # Belgium (ZP-BE-ENG-001 Block A3): be_result plus the frozen context a
+        # replay or correction uses. None for every non-BE payslip.
+        "be_calculation_snapshot": (_be_service.be_payslip_snapshot(result, frozen=be_frozen)
+                                    if be_frozen is not None else None),
         # Netherlands (ZP-NL-ENG-001): the frozen NL context + nl_result dict
         # (wage_tax, employee_insurance, whk, zvw, wkr, car_addition, labor_pay,
         # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
@@ -27588,6 +27609,14 @@ def _generate_payslips_for_run(db: Session, run: PayrollRun, organization_id: in
             continue
         seq += 1
 
+    # Belgium (ZP-BE-ENG-001 Block A3): RUN accumulator entries (employment line
+    # + source period) for this run's BE payslips; idempotent per payslip +
+    # accumulator. Runs without BE payslips are untouched.
+    if any(getattr(i, "country_code", None) == "BE" for i in db.new) or db.query(PayslipItem.id).filter(
+            PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == "BE").first() is not None:
+        from app.modules.payroll import belgium_service as _be_service
+        db.flush()
+        _be_service.post_be_accumulators(db, run, getattr(run, "created_by", None))
     db.commit()
     return _recompute_run_aggregates(db, run)
 
@@ -27968,6 +27997,12 @@ def regenerate_employee_payslip(db: Session, run_id: int, employee_id: int, orga
     # and the reproduction snapshot (no-op when there are none).
     _reapply_attached_germany_overtime_deltas(db, existing_item, organization_id, attached_ot, actor_id=actor_id)
 
+    # Belgium (ZP-BE-ENG-001 Block A3): a linked CORRECTION brings the ledger in
+    # line with the recalculated payslip (never an edit). Other countries skip.
+    if (existing_item.country_code or "").upper() == "BE":
+        from app.modules.payroll import belgium_service as _be_service
+        db.flush()
+        _be_service.post_be_accumulators(db, run, actor_id)
     db.commit()
     run = _recompute_run_aggregates(db, run)
     _sg_ir21_after_correction(db, ir21_case, actor_id=actor_id)
@@ -32698,6 +32733,12 @@ def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
         db.rollback()
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Cannot delete this payslip: {exc}")
     db.delete(item)
+    # Belgium (ZP-BE-ENG-001 Block A3): the deleted payslip's ledger entries are
+    # reversed by linked CORRECTION entries (never deleted). Other countries skip.
+    if (item.country_code or "").upper() == "BE" and run is not None:
+        from app.modules.payroll import belgium_service as _be_service
+        db.flush()
+        _be_service.post_be_accumulators(db, run, None)
     db.commit()
     _notify_payslip_deleted(db, item, run, organization_id)
 
@@ -32841,6 +32882,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     pl_inputs = (
         jurisdiction_hooks.call("PL", "calc_inputs", db, run, employee, None)
         if country == "PL" else None
+    )
+    # Belgium (ZP-BE-ENG-001 Block A3): the same pay-date inputs as a generated run.
+    be_inputs = (
+        jurisdiction_hooks.call("BE", "calc_inputs", db, run, employee, None)
+        if country == "BE" else None
     )
     # Mexico (Phase 6): the payslip is computed from the profile, labour policy
     # and approved hours; manual amounts that disagree are refused, never
@@ -32988,6 +33034,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         netherlands_inputs=netherlands_inputs,
         japan_inputs=japan_inputs,
         poland_inputs=pl_inputs,
+        belgium_inputs=be_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
         **ytd_inputs,
@@ -33020,6 +33067,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if pl_inputs is not None:
         from app.modules.payroll import poland_service as _pl_service
         pl_frozen = _pl_service.pl_freeze_context(ctx, calculation_mode)
+    be_frozen = None
+    if be_inputs is not None:
+        from app.modules.payroll import belgium_service as _be_service
+        be_frozen = _be_service.be_freeze_context(ctx, calculation_mode)
     try:
         calc = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -33070,6 +33121,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
                                  if nz_frozen is not None else None),
         pl_calculation_snapshot=(_pl_service.pl_payslip_snapshot(calc, frozen=pl_frozen)
                                  if pl_frozen is not None else None),
+        be_calculation_snapshot=(_be_service.be_payslip_snapshot(calc, frozen=be_frozen)
+                                 if be_frozen is not None else None),
         mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
                                  if mexico_inputs is not None else None),
         **tax_snapshot,
@@ -33298,6 +33351,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jm_heart_increment = calc.jm_heart_ytd_remuneration_after - ctx.jm_heart_ytd_remuneration_before
         _upsert_jm_heart_ytd(db, organization_id, run.pay_date, jm_heart_increment, payslip_id=item.id)
     _ytd_record_postings(db, item, ytd_pre_state)
+    # Belgium (ZP-BE-ENG-001 Block A3): RUN ledger entries for the added payslip.
+    if country == "BE":
+        from app.modules.payroll import belgium_service as _be_service
+        db.flush()
+        _be_service.post_be_accumulators(db, run, getattr(run, "created_by", None))
     db.commit()
     db.refresh(item)
     _recompute_run_aggregates(db, run)
@@ -33782,6 +33840,11 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "plCalculationSnapshot": (
             {k: v for k, v in (item.pl_calculation_snapshot or {}).items() if k != "frozenContext"}
             if (item.country_code or country) == "PL" and item.pl_calculation_snapshot else None),
+        # Belgium (ZP-BE-ENG-001 Block A3): the frozen be_result; the frozen
+        # inputs (frozenContext) stay server-side.
+        "beCalculationSnapshot": (
+            {k: v for k, v in (item.be_calculation_snapshot or {}).items() if k != "frozenContext"}
+            if (item.country_code or country) == "BE" and item.be_calculation_snapshot else None),
     }
 
 

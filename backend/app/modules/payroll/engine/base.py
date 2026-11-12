@@ -1028,6 +1028,30 @@ class PayrollContext:
     pl_organization_id: int = None
     pl_legal_entity_id: int = None
     pl_employee_id: int = None
+    # ── Belgium (ZP-BE-ENG-001 Block A3) ──────────────────────────────────
+    # Everything countries/belgium.py reads, resolved by belgium_service
+    # .calc_inputs as of the pay date. Missing facts BLOCK; nothing is
+    # defaulted. Plain dicts only — never a vault id's value or a credential.
+    be_pay_date: date = None                  # preferred over pay_date
+    be_registration: dict = None              # employer registration in force
+    be_profile: dict = None                   # worker statutory profile in force
+    be_classifications: list = None           # employment classifications (all versions; resolver picks)
+    be_schedules: list = None                 # work schedules (all versions)
+    be_units: dict = None                     # {id: establishment unit} linked by the classifications
+    be_agreements: dict = None                # {id: Joint Committee agreement} linked by the classifications
+    be_declarations: list = None              # declarations (only APPROVED in force count)
+    be_components: dict = None                # {"SALARY": ..., "BONUS": ...}; must add up to gross (BE-008)
+    be_source_periods: dict = None            # {component: {"start", "end"}} (BE-009)
+    be_contract_type: str = None
+    be_pay_frequency: str = None
+    be_pay_basis: str = None
+    be_pension_premium: Decimal = None        # employer occupational-pension premium (special contribution base)
+    be_exceptional_reference: Decimal = None  # annual reference remuneration for exceptional withholding
+    be_ytd: dict = None                       # {accumulator: sum before this pay date}
+    be_pack_version: str = None               # pack id / version recorded in the trace (BE-010)
+    be_organization_id: int = None
+    be_legal_entity_id: int = None
+    be_employee_id: int = None
     # Phase 4 — bonus path (S1/S8) and lifecycle events (spec §11).
     jp_payment_kind: str = None                # "SALARY" (default) | "BONUS" (bonus-only payment)
     jp_prior_month_pay_after_si: Decimal = None  # selects the NTA bonus-rate band

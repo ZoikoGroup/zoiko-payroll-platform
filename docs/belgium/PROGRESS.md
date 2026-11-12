@@ -36,7 +36,7 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 
 ## A2 — applicability resolver
 
-- Commit: see the A2 commit (`feat(belgium): block A2 applicability resolver`); hash recorded in the A3 entry.
+- Commit: 720d74b `feat(belgium): block A2 applicability resolver`.
 - Added: `engine/jurisdictions/belgium/applicability.py` (pure; collects every blocking reason; `require()` raises
   the first for the engine), A2 block / exception codes in `errors.py`, `belgium_service.resolve_be_classification`
   (read-only: loads records + the active BE pack via `resolve_tax_configuration`, no pack -> BE_PACK_MISSING),
@@ -51,3 +51,39 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
   404 passed, 1 skipped (PG), 3 failed = pre-existing health routes only (verified by path listing).
 - Gaps added: G-22 (pay basis has no recorded source), G-23 (contract-type vocabulary unsigned),
   G-24 (special statuses blocked; exceptions vs blocks).
+
+## A3 — core engine
+
+- Commit: see the A3 commit (`feat(belgium): block A3 core engine`); hash recorded in the A4 entry.
+- Added (pure, engine/jurisdictions/belgium/): `formula.py` (AST whitelist; Decimal literals from the source
+  text; never eval / exec; interpreter BE-FORMULA-1), `declarations.py`, `bases.py` (closed components,
+  signed earning-class matrix, REVIEW / missing class blocks, exceptional never in the regular base, source
+  periods kept), `onss.py` (employee base; 108%-style uplift only for signed manual categories; social work
+  bonus line; employer base / wage moderation / special / funds / pension as separate lines; manual holiday
+  fund to obligation deltas only; BSSC exception only), `withholding.py` (Annex III stages 1-8; regular vs
+  exceptional strategies; family layer from APPROVED declarations; fiscal work bonus line; trace has pack
+  + interpreter versions). `pack.py`: be_evaluate / formula / band_for / band_value; formula text in used().
+- Orchestrator `engine/countries/belgium.py` replaces BE_ENGINE_NOT_BUILT for the supported scope (one
+  employment line, resident). Mapping: tds, be_employee_total, employer_esi, employer_pension, be_result.
+- Integration (additive; BE-guarded): PayrollContext be_* fields; build_context_from_employee
+  belgium_inputs; standard.py sums be_employee_total and maps be_result; service.py preview /
+  _compute_payslip_values / add_payslip_item call the BE calc_inputs hook only when country == "BE",
+  freeze + persist payslip_items.be_calculation_snapshot; _serialize_payslip beCalculationSnapshot (no
+  frozenContext); ledger: generate / add item post RUN entries, regenerate / delete post linked CORRECTIONs.
+- belgium_service: calc_inputs (pay-date records; vault ids / credentials stripped), be_ytd_snapshot,
+  be_freeze_context / be_thaw_context / be_replay, be_payslip_snapshot / view, post_be_accumulators.
+- Route registry: no new route. The ledger write adds `payroll_be_accumulator_entries` to scan_worker_tables
+  of 11 payslip routes (generate / runs / items / recalculate / delete, MX / NZ run + correction routes);
+  data_class, scope and principals unchanged (verified by diffing the fresh build). A first draft named a
+  pack method `evaluate`, which the name-based callgraph linked to authz `policy.evaluate` and turned other
+  countries' calculation-preview routes into worker routes; renamed to be_evaluate / evaluate_be_formula.
+- Tests updated (BE only): test_belgium_scaffold (standard / enterprise now block with a BE_ reason, never
+  BE_ENGINE_NOT_BUILT; calc_inputs needs a pay date), test_belgium_super_admin (still blocks). Guard
+  allow-list extended for the new modules.
+- New tests: test_belgium_formula.py 54, test_belgium_engine.py 34 (synthetic TEST ONLY packs; seams in the
+  end-to-end tests: synthetic pack instead of the canonical resolver, pay basis (G-22), fake business-code
+  generator for SQLite as in tests/_nz_p6_fixtures.py).
+- Run: test_belgium_*.py + attendance gate + AU / CA integration + Poland service / engine + engine
+  standard / calendar days + route registry -> 1146 passed, 1 skipped, 4 failed before the guard entry
+  (guard fixed; the other 3 = pre-existing health routes).
+- Gaps added: G-25 .. G-29.

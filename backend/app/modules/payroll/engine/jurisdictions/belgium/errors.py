@@ -71,3 +71,21 @@ MID_PERIOD_CHANGE = "BE_MID_PERIOD_CLASSIFICATION_CHANGE"
 # exceptions (not blocks): stop approval, never auto-pay (spec §2 / §4)
 SECTOR_AGREEMENT_MISSING = "BE_SECTOR_AGREEMENT_MISSING"
 SCALE_INPUT_MISSING = "BE_SCALE_INPUT_MISSING"
+
+# ── Block A3: engine ────────────────────────────────────────────────────────
+PAY_DATE_MISSING = "BE_PAY_DATE_MISSING"
+FORMULA_INVALID = "BE_FORMULA_INVALID"
+BAND_NOT_FOUND = "BE_BAND_NOT_FOUND"
+COMPONENT_UNKNOWN = "BE_COMPONENT_UNKNOWN"              # free-text / unknown earning (BE-008)
+COMPONENTS_MISMATCH = "BE_COMPONENTS_MISMATCH"          # components do not add up to gross
+EARNING_CLASS_MISSING = "BE_EARNING_CLASS_MISSING"      # no signed treatment for a paid component
+EARNING_CLASS_REVIEW = "BE_EARNING_CLASS_REVIEW"        # REVIEW treatment never calculates (BE-006)
+EARNING_CLASS_CONFLICT = "BE_EARNING_CLASS_CONFLICT"    # exceptional also in the regular base (BE-011)
+SOURCE_PERIOD_MISSING = "BE_SOURCE_PERIOD_MISSING"      # arrears / corrections need their period (BE-009)
+MULTI_LINE_UNSUPPORTED = "BE_MULTI_LINE_UNSUPPORTED"    # line-level pay split not modelled
+NON_RESIDENT_UNSUPPORTED = "BE_NON_RESIDENT_UNSUPPORTED"
+YTD_MISSING = "BE_YTD_MISSING"
+DECLARATION_INVALID = "BE_DECLARATION_INVALID"
+# exceptions (not blocks)
+EXC_NEGATIVE_NET = "BE_NEGATIVE_NET"
+EXC_REDUCTION_CAPPED = "BE_REDUCTION_CAPPED"
