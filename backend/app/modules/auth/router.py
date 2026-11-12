@@ -14,6 +14,7 @@ import json
 import logging
 import secrets
 from hmac import compare_digest
+from typing import Annotated, Optional
 from urllib.parse import urlencode, urlsplit
 
 from pydantic import BaseModel
@@ -24,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.core.google_oauth import AUTHORIZATION_ENDPOINT
 from app.core.dependencies import get_current_org_admin, get_current_user, oauth2_scheme, require_recent_mfa
-from app.core.exceptions import BadRequestException
+from app.core.exceptions import BadRequestException, NotFoundException, UnauthorizedException
 from app.core.rate_limiter import limiter
 from app.database import get_db
 from app.modules.auth import service
@@ -173,6 +174,16 @@ def _google_state_error_response() -> RedirectResponse:
     return response
 
 
+def _google_failure_reason(message: str) -> str:
+    """Map a google_sign_in refusal to the login page's reason codes."""
+    text = (message or "").lower()
+    for needle, reason in (("not verified", "email_unverified"), ("deactivated", "account_deactivated"),
+                           ("suspended", "organization_suspended"), ("temporary", "access_ended")):
+        if needle in text:
+            return reason
+    return "failed"
+
+
 def _clear_google_state(response: RedirectResponse) -> RedirectResponse:
     response.delete_cookie(GOOGLE_STATE_COOKIE, path="/")
     return response
@@ -193,35 +204,57 @@ def google_register(request: Request):
 
 
 @router.get("/google/callback", summary="Google OAuth callback (session or pending registration)")
-def google_callback(request: Request, code: str = Query(...), state: str = Query(...),
-                    db: Session = Depends(get_db)):
-    """Google redirects here after consent. Exchange the code, then either
-    issue a session (existing account) or create a pending registration and
-    send the user to /register?pending=<token> (new account)."""
+def google_callback(request: Request, code: Annotated[Optional[str], Query()] = None,
+                    state: Annotated[Optional[str], Query()] = None,
+                    db: Session = Depends(get_db),
+                    error: Annotated[Optional[str], Query()] = None):
+    """Exchange Google's authorization code, then:
+
+      * an existing Zoiko account → signed straight in (or sent to its MFA
+        step, exactly like password sign-in);
+      * no account → a pending registration and /register?pending=<token>.
+
+    GOOGLE_REDIRECT_URI is the frontend route /auth/google/callback; that
+    page forwards Google's ?code=&state= here (the state cookie lives on this
+    API host). Session tokens go back in the URL fragment, never the query
+    string, so they are not sent to any server or written to access logs."""
+    frontend = settings.FRONTEND_URL.rstrip("/")
+    if error or not code:
+        # The user cancelled on Google's consent screen (error=access_denied).
+        return _clear_google_state(RedirectResponse(
+            frontend + "/login?" + urlencode({"error": "google_cancelled"}), status_code=302))
     state_cookie = request.cookies.get(GOOGLE_STATE_COOKIE, "")
     cookie_mode, separator, expected_state = state_cookie.partition(":")
     if (
         not separator
         or cookie_mode not in {"login", "register"}
-        or not compare_digest(state, expected_state)
+        or not compare_digest(state or "", expected_state)
     ):
         return _google_state_error_response()
     mode = cookie_mode
     try:
         result = service.google_sign_in(db, code, request=request, mode=mode)
-    except UnauthorizedException:
-        # Send the user back to the login page with a friendly error.
-        error_url = settings.FRONTEND_URL.rstrip("/") + "/login?" + urlencode({"error": "google_sign_in_failed"})
+    except UnauthorizedException as exc:
+        # Back to the login page with a fixed reason code — never free text
+        # in the URL (a crafted link could otherwise put any wording on the
+        # sign-in page). The login page owns the wording.
+        error_url = frontend + "/login?" + urlencode(
+            {"error": "google_sign_in_failed", "reason": _google_failure_reason(str(exc.detail))})
         return _clear_google_state(RedirectResponse(error_url, status_code=302))
 
     if result["action"] == "session":
         session = result["session"]
         callback_url = (
-            settings.FRONTEND_URL.rstrip("/")
-            + "/auth/google/callback?"
+            frontend
+            + "/auth/google/callback#"
             + urlencode({"access_token": session["access_token"], "refresh_token": session["refresh_token"]})
         )
         return _clear_google_state(RedirectResponse(callback_url, status_code=302))
+
+    if result["action"] == "mfa":
+        # Same second factor as password sign-in: the login page finishes it.
+        mfa_url = frontend + "/login#" + urlencode({"mfa_token": result["mfa_token"], "mfa_mode": result["mfa_mode"]})
+        return _clear_google_state(RedirectResponse(mfa_url, status_code=302))
 
     # New Google identity: send to registration page pre-filled via the
     # pending token (never auto-create an account during Google sign-in).

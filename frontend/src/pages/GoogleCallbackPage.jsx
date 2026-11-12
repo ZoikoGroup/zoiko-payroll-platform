@@ -1,56 +1,81 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { setSession, getStoredUser } from "../api/client";
+import { API_BASE, setSession, getStoredUser } from "../api/client";
 import { api } from "../service/api";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_DEFAULT_REDIRECT } from "../config/roles";
 
 /**
- * Reached via backend redirect after Google OAuth consent:
- *   /auth/google/callback?access_token=...&refresh_token=...
+ * /auth/google/callback is reached twice in one Google sign-in:
  *
- * Stores the session in localStorage, loads the user profile, then sends
- * the user to their role's default dashboard. Clears the token query params
- * from the URL so they aren't left in the address bar / history.
+ *  1. From Google (GOOGLE_REDIRECT_URI) with ?code=&state= — forwarded as a
+ *     full-page navigation to the API's /api/auth/google/callback, which owns
+ *     the state cookie and exchanges the code. The API then either signs the
+ *     user in (back here, step 2), sends a registered user with MFA to the
+ *     login page's second-factor step, or sends a new Google identity to
+ *     /register?pending=<token>.
+ *  2. From the API with #access_token=&refresh_token= (URL fragment: never
+ *     sent to a server). Stores the session, loads the profile, opens the
+ *     role's dashboard and clears the tokens from the address bar.
  */
 export default function GoogleCallbackPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { login } = useAuth();
+  // The tokens are read from the URL once and kept here: the URL is cleared
+  // straight after, and React StrictMode (development) runs this effect a
+  // second time — re-reading the then-empty URL used to send a successful
+  // sign-in to /login?error=google_sign_in_failed.
+  const tokensRef = useRef(null);
+  const forwardedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     const run = async () => {
-      const accessToken = searchParams.get("access_token");
-      const refreshToken = searchParams.get("refresh_token");
+      // Step 1: Google's redirect — hand the code to the API.
+      // Once only: Google's code is single-use, a second exchange fails.
+      if (searchParams.get("code") || searchParams.get("error")) {
+        if (!forwardedRef.current) {
+          forwardedRef.current = true;
+          window.location.replace(`${API_BASE}/api/auth/google/callback${window.location.search}`);
+        }
+        return;
+      }
+
+      // Step 2: the API's redirect with the session (fragment; the query
+      // string is accepted too for links issued before this change).
+      if (!tokensRef.current) {
+        const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+        tokensRef.current = {
+          accessToken: fragment.get("access_token") || searchParams.get("access_token"),
+          refreshToken: fragment.get("refresh_token") || searchParams.get("refresh_token"),
+        };
+        // Drop the tokens from the URL / history before doing anything else.
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+      const { accessToken, refreshToken } = tokensRef.current;
 
       if (!accessToken) {
-        navigate("/login", { replace: true });
+        navigate("/login?error=google_sign_in_failed", { replace: true });
         return;
       }
 
       setSession({ accessToken, refreshToken });
 
       try {
-        const user = await api.get("/auth/me");
-        if (user) {
-          // api.get("/auth/me") returns the UserResponse shape (matches
-          // LoginResponse.user). login() stores it in context + localStorage.
-          if (cancelled) return;
-          login(user);
-        }
+        const user = await api.get("/api/auth/me");
+        if (cancelled) return;
+        // UserResponse shape (matches LoginResponse.user); login() stores it
+        // in context + localStorage.
+        if (user) await login(user);
       } catch {
-        // If /auth/me fails we still have a valid session; send them to the
-        // dashboard and let the app recover.
+        // The session is valid; the dashboard reloads the profile itself.
       }
-
-      // Drop the token params from the URL without a full reload.
-      window.history.replaceState(null, "", window.location.pathname);
+      if (cancelled) return;
 
       const role = getStoredUser()?.role;
-      const target = ROLE_DEFAULT_REDIRECT[role] || "/dashboard";
-      navigate(target, { replace: true });
+      navigate(ROLE_DEFAULT_REDIRECT[role] || "/dashboard", { replace: true });
     };
 
     run();
@@ -59,5 +84,9 @@ export default function GoogleCallbackPage() {
     };
   }, [searchParams, navigate, login]);
 
-  return null;
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <p style={{ color: "#64748B", fontSize: 15 }}>Signing you in with Google…</p>
+    </div>
+  );
 }
