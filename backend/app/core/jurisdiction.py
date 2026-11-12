@@ -75,6 +75,10 @@ REGISTRATION_COUNTRIES = [
     "Saudi Arabia",
     "Singapore",
     "Switzerland",
+    # Mexico — owner decision 2026-11-11, same gate bypass as above: packs
+    # Active and the registry AVAILABLE on the configured database. Onboarding
+    # still also needs MX_TENANT_ONBOARDING_ENABLED (mexico_dormancy).
+    "Mexico",
 ]
 
 # Keyed by the 2-letter code the rest of the payroll module uses

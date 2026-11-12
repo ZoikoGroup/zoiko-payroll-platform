@@ -140,7 +140,10 @@ def test_a_decision_never_changes_a_calculation_by_itself(db, seeded):
     did = _id(db, "D-01")
     S.propose_mx_decision(db, did, _proposal("HALF_UP:0.01"), SA_A.id)
     S.approve_mx_decision(db, did, SA_B.id)
-    assert not any(r.key == "mx_rounding_rule" for r in c.MX_SCALAR_CONTENT)
+    # The content row an engineer transcribed (2026-11-11) cites the saved source the decision rests on — never
+    # the decision record — and a calculation without that row in force still blocks.
+    rows = [r for r in c.MX_SCALAR_CONTENT if r.key == "mx_rounding_rule"]
+    assert [r.text_value for r in rows] == ["HALF_UP:0.01"] and rows[0].source.startswith("S30/")
     with pytest.raises(MXBlock) as exc:
         rounding.rounder(Content({}, []))
     assert exc.value.key == "MX_ROUNDING_RULE_MISSING"

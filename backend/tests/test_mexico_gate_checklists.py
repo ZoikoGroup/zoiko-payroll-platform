@@ -45,14 +45,16 @@ def test_every_gate_lists_its_items_split_into_code_and_evidence(db):
 
 def test_code_items_reflect_the_current_state(db):
     """No pack seeded: the pack checks are unmet with a reason; the decisions
-    still open today (01 Diario, rounding, SDI source, CDMX D-06) are unmet;
-    payroll is blocked in every state without an Active ISN pack."""
+    still open today (01 Diario, SDI source, CDMX D-06) are unmet; the rounding
+    rule (D-01, transcribed 2026-11-11) is met; payroll is blocked in every
+    state without an Active ISN pack."""
     items = {i["code"]: i for g in _view(db)["gates"] for i in g["items"] if i["kind"] == "code"}
     national = items["national_pack_approved"]
     assert national["met"] is False and "no national Mexico pack" in national["detail"]
-    for key in ("sources_verified", "golden_pass", "cfdi_release_active", "pay_frequency_01", "rounding_rule",
+    for key in ("sources_verified", "golden_pass", "cfdi_release_active", "pay_frequency_01",
                 "cfdi_sdi_source", "isn_pack_approved", "isn_d06"):
         assert items[key]["met"] is False, key
+    assert items["rounding_rule"]["met"] is True and "HALF_UP:0.01" in items["rounding_rule"]["detail"]
     assert items["unsupported_states_blocked"]["met"] is True and "32" in items["unsupported_states_blocked"]["detail"]
 
 

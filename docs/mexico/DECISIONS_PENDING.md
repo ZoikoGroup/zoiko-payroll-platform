@@ -6,7 +6,7 @@ Kept under the completion master prompt (`MEXICO_COMPLETION_MASTER_PROMPT.md` §
 
 | # | Decision | Owner | Blocks (code) | Status |
 |---|---|---|---|---|
-| D-01 | Monetary rounding rule | G1 owner | Every calculation; pack activation (`mx_rounding_rule` is required) | Open |
+| D-01 | Monetary rounding rule | G1 owner | Every calculation; pack activation (`mx_rounding_rule` is required) | Open — content transcribed 2026-11-11 (option A, `HALF_UP:0.01`, cited S30 Guía de llenado; seeded as `MX-PAYROLL-2026` v1.1 by `scripts/seed_mexico_canonical_packs_v1_1.py`); the four-eyes record in Super Admin → Mexico → Decisions is still to be made |
 | D-02 | Pay frequency 01 Diario → Art. 96 DAILY? | G1 owner | Daily-paid employees (`MX_PAY_FREQUENCY_MAPPING_MISSING`) | Open |
 | D-03 | CEAV lowest band: which minimum wage anchors "1.0 SM" | G2 owner | **Every calculation with CEAV** (`MX_CONTENT_MISSING` on `mx_ceav_lowest_band_min_wage_ref`: band 1's lower bound is read for every SBC — corrected in final mile X2), and ZLFN employees in band 1 (`MX_CEAV_LOWEST_BAND_PENDING_G2`) | Open |
 | D-04 | Interpretations behind transcribed rows (Batch 2, W1-1) | G1 / G2 / G3 / G5 owners | Nothing today (rows are Draft, `[PENDING G1]`); activation needs them confirmed | Open |
@@ -257,3 +257,11 @@ Each is transcribed and cited, `[PENDING G1]`; the owner confirms or rejects it 
 - **Question.** Which employer configuration changes need a second org admin, and should establishments and the INFONAVIT operating model be effective-dated?
 - **Options.** Per item: employer profile versions, establishments, IMSS registrations, the INFONAVIT model, labour-policy activation, credential references and rotation. Each item can be single-person, four-eyes, or four-eyes only once the organisation is live.
 - **Blocks.** Nothing. The answer shapes G5 / G7 evidence.
+
+## D-29 · Employee receipt delivery without employee logins (MX-R12, PAY-009, MX-T041)
+
+- **Question.** How does an employee receive the Recibo / CFDI receipt when the organisation does not give employees logins — a secure expiring link by email with access logging, an employer-portal download on the employee's behalf, or another channel?
+- **Options.** (a) a secure expiring link by email with access logging; (b) an employer-portal download on the employee's behalf; (c) other.
+- **Also decide.** Retention of access for former employees (how long the link/portal download stays available after the employee leaves).
+- **Owner.** product + ZP-PRIV.
+- **Blocks.** DELIVERED via an employee channel. Today it is operator-recorded only (DELIVERY recorded by an operator with a proof reference in `payroll_mx_document_access_events`).

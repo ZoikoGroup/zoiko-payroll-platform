@@ -51,20 +51,25 @@ def test_without_a_pack_nothing_is_calculated(db):
     assert r["outcome"] == "BLOCKED" and r["block"]["code"] == "MX_PACK_MISSING" and r["persisted"] is False
 
 
-def test_today_every_run_stops_at_the_rounding_rule_linked_to_d01(db, world):
+def test_today_every_run_calculates_now_that_d01_and_d03_are_transcribed(db, world):
+    """D-01 (mx_rounding_rule) and D-03 (mx_ceav_lowest_band_min_wage_ref) are
+    in the content (2026-11-11): with no candidate at all the run calculates —
+    still a sandbox on the Draft pack, never a payslip."""
     r = _run(db)
-    assert r["outcome"] == "BLOCKED" and r["block"]["code"] == "MX_ROUNDING_RULE_MISSING"
-    assert [d["code"] for d in r["clearedBy"]] == ["D-01"]
+    assert r["outcome"] == "CALCULATED" and "block" not in r
     assert r["pack"]["draft"] is True and "NOT ACTIVE" in r["pack"]["label"]
     assert r["watermarks"] == [_X().SANDBOX_MARK] and r["candidates"] == []
 
 
-def test_with_d01_alone_it_stops_at_d03_for_every_employee(db, world):
-    """Finding (X2): D-03's row is read for every SBC, not only ZLFN band 1."""
-    r = _run(db, candidates=CANDIDATES[:1])
-    assert r["block"]["code"] == "MX_CONTENT_MISSING" and "mx_ceav_lowest_band_min_wage_ref" in r["block"]["message"]
-    assert [d["code"] for d in r["clearedBy"]] == ["D-03"]
-    assert _X().CANDIDATE_MARK in r["watermarks"]
+def test_the_transcribed_rows_give_the_same_result_as_the_candidates(db, world):
+    """The transcribed D-01 / D-03 rows are exactly the values the X2 what-if
+    used as candidates (HALF_UP:0.01, GENERAL): the same result either way."""
+    plain = _run(db)
+    with_candidates = _run(db, candidates=CANDIDATES)
+    assert plain["outcome"] == with_candidates["outcome"] == "CALCULATED"
+    assert plain["result"]["mx_result"]["isr_withheld"] == with_candidates["result"]["mx_result"]["isr_withheld"]
+    assert plain["result"]["mx_result"]["employer_total"] == with_candidates["result"]["mx_result"]["employer_total"]
+    assert _X().CANDIDATE_MARK in with_candidates["watermarks"]
 
 
 def _segment(r):

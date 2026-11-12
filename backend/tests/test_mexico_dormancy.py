@@ -294,11 +294,14 @@ def test_an_org_already_mexican_keeps_its_jurisdiction(db):
 
 # ── sign-up and employees keep refusing Mexico (pinned) ───────────────────
 
-def test_signup_paths_refuse_mexico(db):
+def test_signup_paths_refuse_mexico_while_dormant(db):
+    """Mexico is listed at registration (owner decision 2026-11-11), but a
+    sign-up is still refused while it is dormant (no Active pack, kill switch
+    off, registry not AVAILABLE) — listing a country never opens it."""
     from app.core.jurisdiction import REGISTRATION_COUNTRIES
     from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
 
-    assert "Mexico" not in REGISTRATION_COUNTRIES and "MX" not in REGISTRATION_COUNTRIES
+    assert "Mexico" in REGISTRATION_COUNTRIES and "MX" not in REGISTRATION_COUNTRIES
     assert get_jurisdiction_onboarding_block_reason(db, "Mexico") is not None
 
 
