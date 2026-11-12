@@ -1576,6 +1576,9 @@ class PayrollRun(Base):
     # Poland (ZP-PL-ENG-001): approval bound to the frozen PL snapshots + rule
     # pack + engine build; NULL for non-PL runs (1ee3bbde33bb).
     pl_approval_fingerprint = Column(JSON, nullable=True)
+    # Belgium (ZP-BE-ENG-001): approval bound to the frozen BE snapshots + rule
+    # pack + engine build; NULL for non-BE runs (1d76678ef1a1).
+    be_approval_fingerprint = Column(JSON, nullable=True)
     # Phase 4.2: the first payment channel used for this run — GENERIC_FILE
     # (bank transfer file) or SEPA (NL pain.001 batch); the other is refused,
     # so one run is never paid twice. Migration 8f90dde5f7b5.
@@ -2038,6 +2041,10 @@ class PayslipItem(Base):
     # health / fund / PPK bases) + trace, replayed exactly as computed; NULL for
     # non-PL payslips (1ee3bbde33bb).
     pl_calculation_snapshot = Column(JSON, nullable=True)
+    # Belgium (ZP-BE-ENG-001): frozen BE inputs + be_result (independent ONSS /
+    # withholding / holiday / sector bases, BE-007) + trace, replayed exactly as
+    # computed; NULL for non-BE payslips (1d76678ef1a1). Never a NISS.
+    be_calculation_snapshot = Column(JSON, nullable=True)
     # Saudi Arabia: employer Occupational Hazards (2% of contributory wages,
     # capped at 45,000 SAR/month, floor 400 SAR) — informational, not deducted
     # from employee. Zero for non-SA payslips.
@@ -13997,3 +14004,403 @@ class PayrollPlParallelDifference(_PlCommon, Base):
 
     def __repr__(self):
         return f"<PayrollPlParallelDifference import={self.import_id} {self.concept} {self.status}>"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Belgium (ZP-BE-ENG-001 Phase 2, migration 1d76678ef1a1)
+# ══════════════════════════════════════════════════════════════════════════
+# Vocabularies only — no statutory value appears in any constraint (no rate,
+# threshold, band or date): enumerations, evidence, date order and four-eyes.
+# _BE_DECLARATION_TYPES and _BE_ACCUMULATORS are deliberately minimal initial
+# lists; Phase 3 content keys extend them through a later migration.
+_BE_WORKER_CATEGORIES = ("MANUAL", "EMPLOYEE", "APPRENTICE", "STUDENT", "FLEXI", "OCCASIONAL", "OTHER")  # BE-002
+# NISS / BIS: the worker's national (or BIS) number; ONSS: the employer's ONSS
+# number. The enterprise number is a public register number, held as a plain
+# column on the employer registration, never in the vault.
+_BE_IDENTIFIER_TYPES = ("NISS", "BIS", "ONSS")
+_BE_DECLARATION_TYPES = (
+    "FAMILY_SITUATION",              # spec §5 stage 5: evidenced family circumstances (withholding layer)
+    "DEPENDANTS",                    # spec §5 stage 5: dependants for the family / reduction layer
+    "NON_RESIDENT_STATUS",           # spec §5 stage 1: resident / non-resident tax profile
+    "WORK_BONUS_FISCAL_ELECTION",    # BE-012: fiscal work bonus, independent of the social one
+)
+# year = calendar year for every accumulator EXCEPT HOLIDAY_PAY_BASE, where
+# year = the holiday service year (BE-024). Employer-level totals are derived
+# by aggregating these worker / employment-line rows and are never stored as
+# separate rows (BE-017).
+_BE_ACCUMULATORS = (
+    "WITHHOLDING_TAXABLE",              # spec §5 stage 8, BE-014: regular withholding basis by period / 281.10
+    "WITHHOLDING",                      # spec §5 stage 8, BE-014: regular professional withholding
+    "WITHHOLDING_EXCEPTIONAL_TAXABLE",  # BE-011: exceptional remuneration accumulates separately
+    "WITHHOLDING_EXCEPTIONAL",          # BE-011: exceptional-remuneration withholding
+    "ONSS_EMPLOYEE_BASE",               # BE-007 / BE-017: employee ONSS base
+    "ONSS_EMPLOYEE",                    # BE-017: employee ONSS contribution
+    "ONSS_EMPLOYER_BASE",               # BE-007: employer ONSS base
+    "ONSS_MANUAL_108_BASE",             # BE-007 / BE-016: manual-worker 108% base, never for white-collar
+    "WORK_BONUS_SOCIAL",                # BE-012: social work bonus
+    "WORK_BONUS_FISCAL",                # BE-012: fiscal work bonus
+    "HOLIDAY_PAY_BASE",                 # BE-024: holiday base, keyed by holiday service year
+)
+_BE_SCHEDULE_REGIMES = ("EFFECTIVE", "AVERAGE")  # BE-022
+
+
+class _BeCommon(_NzCommon):
+    """The same id / tenant / legal employer / evidence / version / approval /
+    stamp columns as Poland, New Zealand and Japan. Statutory rows are never
+    edited in place: a change is a new row whose previous_version_id points at
+    the row it supersedes (BE-039: no mutable "current Belgium config")."""
+
+
+def _be_versioned_checks(prefix: str) -> tuple:
+    return (
+        sa.CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED')", name=f"ck_be_{prefix}_status"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name=f"ck_be_{prefix}_dates"),
+        sa.CheckConstraint("status <> 'ACTIVE' OR (approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name=f"ck_be_{prefix}_four_eyes"),
+    )
+
+
+class PayrollBeIdentifierVault(_BeCommon, Base):
+    """Encrypted Belgian identifiers (spec §15, BE-040): a worker's NISS / INSZ
+    or BIS number, or the employer's ONSS number. Ciphertext only — no
+    plaintext and no trailing digits in any column — with its key version and a
+    keyed HMAC fingerprint used only for duplicate detection (be_identifiers.py,
+    Phase 4). One ACTIVE row per employee per identifier type."""
+    __tablename__ = "payroll_be_identifier_vault"
+
+    updated_at       = Column(DateTime(timezone=True), nullable=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=True, index=True)
+    subject_type     = Column(String(10), nullable=False)          # EMPLOYEE / EMPLOYER
+    identifier_type  = Column(String(10), nullable=False)          # NISS / BIS / ONSS
+    ciphertext       = Column(Text, nullable=True)                 # nulled on deletion
+    key_version      = Column(SmallInteger, nullable=False)
+    fingerprint      = Column(String(64), nullable=False)
+    purpose          = Column(String(30), nullable=False, default="PAYROLL_STATUTORY", server_default="PAYROLL_STATUTORY")
+    collected_at     = Column(DateTime(timezone=True), nullable=False)
+    deleted_at       = Column(DateTime(timezone=True), nullable=True)
+    status           = Column(String(10), nullable=False, default="ACTIVE", server_default="ACTIVE")
+
+    __table_args__ = (
+        sa.CheckConstraint("subject_type IN ('EMPLOYEE', 'EMPLOYER')", name="ck_be_vault_subject_type"),
+        sa.CheckConstraint("(subject_type = 'EMPLOYEE' AND employee_id IS NOT NULL AND "
+                           "identifier_type IN ('NISS', 'BIS')) OR "
+                           "(subject_type = 'EMPLOYER' AND employee_id IS NULL AND identifier_type = 'ONSS')",
+                           name="ck_be_vault_subject_identifier"),
+        sa.CheckConstraint("status IN ('ACTIVE', 'DELETED')", name="ck_be_vault_status"),
+        sa.CheckConstraint("deleted_at IS NOT NULL OR ciphertext IS NOT NULL", name="ck_be_vault_ciphertext_or_deleted"),
+        Index("uq_be_vault_one_active_employee_identifier", "organization_id", "employee_id", "identifier_type",
+              unique=True, postgresql_where=text("status = 'ACTIVE' AND subject_type = 'EMPLOYEE'"),
+              sqlite_where=text("status = 'ACTIVE' AND subject_type = 'EMPLOYEE'")),
+        Index("uq_be_vault_fingerprint", "organization_id", "identifier_type", "fingerprint", unique=True,
+              postgresql_where=text("status = 'ACTIVE'"), sqlite_where=text("status = 'ACTIVE'")),
+    )
+
+    def __repr__(self):
+        # Never the ciphertext or fingerprint.
+        return f"<PayrollBeIdentifierVault id={self.id} {self.subject_type}/{self.identifier_type} {self.status}>"
+
+
+class PayrollBeIdentifierAccessEvent(_BeCommon, Base):
+    """Append-only audit of every vault action (spec §15). No updated_at."""
+    __tablename__ = "payroll_be_identifier_access_events"
+
+    employee_id  = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=True, index=True)
+    vault_id     = Column(Integer, ForeignKey("payroll_be_identifier_vault.id", ondelete="SET NULL"), nullable=True,
+                          index=True)
+    actor_id     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action       = Column(String(20), nullable=False)
+    purpose      = Column(String(60), nullable=True)
+    reason       = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("action IN ('CREATE', 'REVEAL_REQUESTED', 'REVEAL_APPROVED', 'REVEALED', "
+                           "'EXPORTED', 'DELETED', 'ROTATED')", name="ck_be_vault_event_action"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBeIdentifierAccessEvent vault={self.vault_id} {self.action}>"
+
+
+class PayrollBeEmployerRegistration(_BeCommon, Base):
+    """Per-legal-employer Belgium setup (spec §12 BEEmployerRegistration,
+    BE-001 / BE-038): legal name, enterprise number (public register, plain),
+    the ONSS number through the vault, ONSS employer category (NULL = not
+    decided -> the resolver BLOCKS), professional-withholding declaration
+    frequency (BE-013: never assumed), holiday fund reference, legal language,
+    authority mandate and filing credential REFERENCES only (never secrets),
+    verification state and source document. Effective-dated; one ACTIVE open
+    row per (organisation, legal entity); activation needs a second approver."""
+    __tablename__ = "payroll_be_employer_registrations"
+
+    updated_at                         = Column(DateTime(timezone=True), nullable=True)
+    effective_from                     = Column(Date, nullable=False)
+    effective_to                       = Column(Date, nullable=True)
+    legal_name                         = Column(String(200), nullable=False)
+    enterprise_number                  = Column(String(12), nullable=False)
+    onss_number_vault_id               = Column(Integer, ForeignKey("payroll_be_identifier_vault.id",
+                                                                    ondelete="SET NULL"), nullable=True)
+    employer_category_code             = Column(String(10), nullable=True)
+    withholding_declaration_frequency  = Column(String(20), nullable=True)
+    holiday_fund_ref                   = Column(String(100), nullable=True)
+    legal_language                     = Column(String(2), nullable=True)
+    mandate_refs                       = Column(JSON, nullable=True)
+    filing_credential_ref              = Column(String(100), nullable=True)
+    verification_state                 = Column(String(12), nullable=False, default="UNVERIFIED",
+                                                server_default="UNVERIFIED")
+    source_document_id                 = Column(Integer, ForeignKey("payroll_source_artifacts.id", ondelete="SET NULL"),
+                                                nullable=True)
+    status                             = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        *_be_versioned_checks("employer"),
+        sa.CheckConstraint("legal_language IS NULL OR legal_language IN ('NL', 'FR', 'DE')",
+                           name="ck_be_employer_legal_language"),
+        sa.CheckConstraint("verification_state IN ('UNVERIFIED', 'VERIFIED', 'REJECTED')",
+                           name="ck_be_employer_verification"),
+        Index("ix_be_employer_org_period", "organization_id", "effective_from"),
+        Index("uq_be_employer_one_active_entity", "organization_id", "legal_entity_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NOT NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NOT NULL")),
+        Index("uq_be_employer_one_active_org", "organization_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL AND legal_entity_id IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBeEmployerRegistration org={self.organization_id} {self.effective_from} {self.status}>"
+
+
+class PayrollBeEstablishmentUnit(_BeCommon, Base):
+    """An establishment unit of a Belgian legal employer (spec §12, BE-001 /
+    BE-038): unit number, name, address, region; effective-dated, one ACTIVE
+    open row per (registration, unit number)."""
+    __tablename__ = "payroll_be_establishment_units"
+
+    updated_at       = Column(DateTime(timezone=True), nullable=True)
+    registration_id  = Column(Integer, ForeignKey("payroll_be_employer_registrations.id", ondelete="CASCADE"),
+                              nullable=False, index=True)
+    unit_number      = Column(String(20), nullable=False)
+    name             = Column(String(200), nullable=False)
+    address          = Column(JSON, nullable=True)
+    region           = Column(String(40), nullable=True)
+    effective_from   = Column(Date, nullable=False)
+    effective_to     = Column(Date, nullable=True)
+    status           = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        *_be_versioned_checks("unit"),
+        Index("uq_be_unit_one_active", "registration_id", "unit_number", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBeEstablishmentUnit registration={self.registration_id} {self.unit_number} {self.status}>"
+
+
+class PayrollBeWorkerProfile(_BeCommon, Base):
+    """Effective-dated Belgian worker statutory profile (spec §12
+    BEWorkerStatutoryProfile, BE-002): worker category separate from the
+    contract, ONSS worker code, tax status, residency, special status (an
+    unsupported one BLOCKS — D6), NISS through the vault only. One ACTIVE open
+    row per employee."""
+    __tablename__ = "payroll_be_worker_profiles"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False,
+                               index=True)
+    effective_from    = Column(Date, nullable=False)
+    effective_to      = Column(Date, nullable=True)
+    worker_category   = Column(String(12), nullable=False)
+    onss_worker_code  = Column(String(4), nullable=True)
+    tax_status        = Column(String(30), nullable=True)
+    residency         = Column(String(14), nullable=True)
+    special_status    = Column(String(30), nullable=True)
+    niss_vault_id     = Column(Integer, ForeignKey("payroll_be_identifier_vault.id", ondelete="SET NULL"),
+                               nullable=True)
+    status            = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        *_be_versioned_checks("worker_profile"),
+        sa.CheckConstraint(f"worker_category IN {_nz_in(_BE_WORKER_CATEGORIES)}", name="ck_be_worker_category"),
+        sa.CheckConstraint("residency IS NULL OR residency IN ('RESIDENT', 'NON_RESIDENT')",
+                           name="ck_be_worker_residency"),
+        Index("ix_be_worker_profile_employee_period", "employee_id", "effective_from"),
+        Index("uq_be_worker_profile_one_active", "organization_id", "employee_id", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBeWorkerProfile employee={self.employee_id} {self.worker_category} {self.effective_from}>"
+
+
+class PayrollBeWorkSchedule(_BeCommon, Base):
+    """An explicit work-schedule object (BE-022): effective or average weekly
+    regime, weekly hours, day pattern and reference period. Overtime is
+    calculated from the governing schedule, never a fixed-hours constant."""
+    __tablename__ = "payroll_be_work_schedules"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False,
+                               index=True)
+    regime            = Column(String(10), nullable=False)
+    weekly_hours      = Column(Numeric(5, 2), nullable=False)
+    days_pattern      = Column(JSON, nullable=True)
+    reference_period  = Column(String(20), nullable=True)
+    effective_from    = Column(Date, nullable=False)
+    effective_to      = Column(Date, nullable=True)
+    status            = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        *_be_versioned_checks("schedule"),
+        sa.CheckConstraint(f"regime IN {_nz_in(_BE_SCHEDULE_REGIMES)}", name="ck_be_schedule_regime"),
+        sa.CheckConstraint("weekly_hours > 0", name="ck_be_schedule_hours_positive"),
+        Index("ix_be_schedule_employee_period", "employee_id", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBeWorkSchedule employee={self.employee_id} {self.regime} {self.effective_from}>"
+
+
+class PayrollBeEmploymentClassification(_BeCommon, Base):
+    """Effective-dated employment classification (spec §12
+    BEEmploymentClassification, BE-003 / BE-020): employment line,
+    establishment unit, Joint Committee / sub-committee, the CBA pack
+    (payroll_collective_agreements, D3), function class, seniority and the
+    governing work schedule. One ACTIVE open row per (employee, employment
+    line); line-level facts are never aggregated away."""
+    __tablename__ = "payroll_be_employment_classifications"
+
+    updated_at               = Column(DateTime(timezone=True), nullable=True)
+    employee_id              = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False,
+                                      index=True)
+    employment_line          = Column(String(40), nullable=False)
+    establishment_unit_id    = Column(Integer, ForeignKey("payroll_be_establishment_units.id", ondelete="SET NULL"),
+                                      nullable=True)
+    joint_committee          = Column(String(10), nullable=True)
+    sub_committee            = Column(String(10), nullable=True)
+    collective_agreement_id  = Column(Integer, ForeignKey("payroll_collective_agreements.id", ondelete="SET NULL"),
+                                      nullable=True)
+    function_class           = Column(String(40), nullable=True)
+    seniority_months         = Column(Integer, nullable=True)
+    work_schedule_id         = Column(Integer, ForeignKey("payroll_be_work_schedules.id", ondelete="SET NULL"),
+                                      nullable=True)
+    effective_from           = Column(Date, nullable=False)
+    effective_to             = Column(Date, nullable=True)
+    status                   = Column(String(12), nullable=False, default="DRAFT", server_default="DRAFT")
+
+    __table_args__ = (
+        *_be_versioned_checks("classification"),
+        sa.CheckConstraint("seniority_months IS NULL OR seniority_months >= 0", name="ck_be_classification_seniority"),
+        Index("ix_be_classification_employee_period", "employee_id", "effective_from"),
+        Index("uq_be_classification_one_active_line", "organization_id", "employee_id", "employment_line", unique=True,
+              postgresql_where=text("status = 'ACTIVE' AND effective_to IS NULL"),
+              sqlite_where=text("status = 'ACTIVE' AND effective_to IS NULL")),
+    )
+
+    def __repr__(self):
+        return (f"<PayrollBeEmploymentClassification employee={self.employee_id} {self.employment_line} "
+                f"{self.joint_committee} {self.effective_from}>")
+
+
+class PayrollBeDeclaration(_BeCommon, Base):
+    """Every payroll-affecting worker statement (spec §5 stages 1 and 5,
+    BE-012): received_at, effective_from/to, evidence, source channel,
+    superseded_by and actor; four-eyes approval; never edited in place."""
+    __tablename__ = "payroll_be_declarations"
+
+    updated_at        = Column(DateTime(timezone=True), nullable=True)
+    employee_id       = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    effective_from    = Column(Date, nullable=False)
+    effective_to      = Column(Date, nullable=True)
+    declaration_type  = Column(String(32), nullable=False)
+    value             = Column(JSON, nullable=True)
+    received_at       = Column(DateTime(timezone=True), nullable=False)
+    source_channel    = Column(String(16), nullable=False)
+    superseded_by_id  = Column(Integer, ForeignKey("payroll_be_declarations.id", ondelete="SET NULL"), nullable=True)
+    withdrawn_at      = Column(DateTime(timezone=True), nullable=True)
+    status            = Column(String(12), nullable=False, default="RECEIVED", server_default="RECEIVED")
+
+    __table_args__ = (
+        sa.CheckConstraint(f"declaration_type IN {_nz_in(_BE_DECLARATION_TYPES)}", name="ck_be_declaration_type"),
+        sa.CheckConstraint("source_channel IN ('PAPER', 'ELECTRONIC', 'EMPLOYEE_PORTAL', 'IMPORT')",
+                           name="ck_be_declaration_channel"),
+        sa.CheckConstraint("status IN ('RECEIVED', 'APPROVED', 'WITHDRAWN', 'SUPERSEDED', 'REJECTED')",
+                           name="ck_be_declaration_status"),
+        sa.CheckConstraint("evidence_ref IS NOT NULL", name="ck_be_declaration_evidence"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_be_declaration_dates"),
+        sa.CheckConstraint("status <> 'APPROVED' OR (approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_be_declaration_four_eyes"),
+        sa.CheckConstraint("status <> 'WITHDRAWN' OR withdrawn_at IS NOT NULL", name="ck_be_declaration_withdrawn"),
+        sa.CheckConstraint("status <> 'SUPERSEDED' OR superseded_by_id IS NOT NULL", name="ck_be_declaration_superseded"),
+        Index("ix_be_declaration_lookup", "employee_id", "declaration_type", "effective_from"),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBeDeclaration employee={self.employee_id} {self.declaration_type} {self.status}>"
+
+
+class PayrollBeAccumulatorEntry(_BeCommon, Base):
+    """Append-only ledger (spec §12, BE-017): worker- and employment-line-level
+    accumulators keyed by employee + legal entity + employment line + year +
+    accumulator; a balance is the sum of entries before a pay date —
+    replayable, never a mutable counter. employment_line is required for
+    line-level accumulators and NULL only for accumulators that are worker-level
+    by nature; employer-level totals are derived by aggregation and never stored
+    as separate rows. year is the calendar year, except HOLIDAY_PAY_BASE (the
+    holiday service year, BE-024). source_period_start / _end: the period the
+    remuneration relates to, separate from pay_date (arrears, bonuses, holiday
+    pay, corrections — BE-009). quarter: the ONSS quarter where relevant.
+    Opening balances need evidence and a different approver; a correction is a
+    linked compensating entry, never an edit."""
+    __tablename__ = "payroll_be_accumulator_entries"
+
+    employee_id          = Column(Integer, ForeignKey("payroll_employees.id", ondelete="CASCADE"), nullable=False,
+                                  index=True)
+    employment_line      = Column(String(40), nullable=True)
+    year                 = Column(SmallInteger, nullable=False)
+    quarter              = Column(SmallInteger, nullable=True)
+    accumulator          = Column(String(32), nullable=False)
+    pay_date             = Column(Date, nullable=False)
+    source_period_start  = Column(Date, nullable=True)
+    source_period_end    = Column(Date, nullable=True)
+    amount               = Column(Numeric(14, 2), nullable=False)
+    entry_kind           = Column(String(16), nullable=False)   # RUN / CORRECTION / OPENING_BALANCE
+    run_id               = Column(Integer, ForeignKey("payroll_runs.id", ondelete="SET NULL"), nullable=True)
+    payslip_item_id      = Column(Integer, ForeignKey("payslip_items.id", ondelete="SET NULL"), nullable=True)
+    reverses_id          = Column(Integer, ForeignKey("payroll_be_accumulator_entries.id", ondelete="SET NULL"),
+                                  nullable=True)
+    declaration_id       = Column(Integer, ForeignKey("payroll_be_declarations.id", ondelete="SET NULL"),
+                                  nullable=True)
+    result_hash          = Column(String(64), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"accumulator IN {_nz_in(_BE_ACCUMULATORS)}", name="ck_be_accum_accumulator"),
+        sa.CheckConstraint("entry_kind IN ('RUN', 'CORRECTION', 'PRIOR_EMPLOYER', 'OPENING_BALANCE')",
+                           name="ck_be_accum_kind"),
+        # Belgium blocks PRIOR_EMPLOYER entries outright. A later migration may
+        # allow it per accumulator once signed content needs it.
+        sa.CheckConstraint("entry_kind <> 'PRIOR_EMPLOYER'", name="ck_be_accum_no_prior_employer"),
+        sa.CheckConstraint("entry_kind <> 'OPENING_BALANCE' OR "
+                           "(evidence_ref IS NOT NULL AND approved_by_id IS NOT NULL AND "
+                           "(created_by_id IS NULL OR approved_by_id <> created_by_id))",
+                           name="ck_be_accum_evidence_four_eyes"),
+        sa.CheckConstraint("entry_kind <> 'RUN' OR payslip_item_id IS NOT NULL", name="ck_be_accum_run_payslip"),
+        sa.CheckConstraint("entry_kind <> 'CORRECTION' OR reverses_id IS NOT NULL OR run_id IS NOT NULL",
+                           name="ck_be_accum_correction_link"),
+        sa.CheckConstraint("quarter IS NULL OR quarter BETWEEN 1 AND 4", name="ck_be_accum_quarter"),
+        sa.CheckConstraint("(source_period_start IS NULL) = (source_period_end IS NULL)",
+                           name="ck_be_accum_source_period_pair"),
+        sa.CheckConstraint("source_period_end IS NULL OR source_period_start IS NULL OR "
+                           "source_period_end >= source_period_start", name="ck_be_accum_source_period_order"),
+        Index("ix_be_accum_lookup", "employee_id", "legal_entity_id", "employment_line", "year", "accumulator",
+              "pay_date"),
+        Index("uq_be_accum_payslip_accumulator", "payslip_item_id", "accumulator", unique=True,
+              postgresql_where=text("entry_kind = 'RUN'"), sqlite_where=text("entry_kind = 'RUN'")),
+    )
+
+    def __repr__(self):
+        return f"<PayrollBeAccumulatorEntry employee={self.employee_id} {self.year} {self.accumulator} {self.amount}>"
