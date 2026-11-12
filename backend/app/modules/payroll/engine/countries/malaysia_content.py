@@ -144,10 +144,17 @@ DATE_BASES = ("CALENDAR_YEAR", "WAGE_MONTH", "CONTRIBUTION_MONTH", "PAYMENT_DATE
 ANNUAL_DUE_RULES = ("END_FEBRUARY", "END_MARCH")
 # Rounding vocabulary (unit + mode). WHICH one applies to each obligation is
 # not given by the specification: every my_rounding_* row is PENDING_G1.
+# Engine policies (values PENDING_G1 until signed; vocabulary only).
+EPF_AGE_TRANSITION_RULES = ("AGE_AT_WAGE_MONTH_START", "FROM_MONTH_AFTER_BIRTHDAY")
+EIS_AGE_RULES = ("AGE_AT_WAGE_MONTH_START", "AGE_AT_WAGE_MONTH_END")
+HRD_NON_MALAYSIAN_RULES = ("LEVY_ON_ALL_COVERED_WAGES", "MALAYSIAN_EMPLOYEES_ONLY")
+EPF_DIRECT_CALC_RULES = ("NON_MALAYSIAN_PART_F_ONLY",)
 ROUNDING_RULES = ("SEN_HALF_UP", "SEN_DOWN", "SEN_UP", "FIVE_SEN_UP", "RINGGIT_HALF_UP", "RINGGIT_DOWN",
                   "RINGGIT_UP")
 # Schedule bands: lower bound exclusive, upper bound inclusive ("exceeds X but
-# not exceeding Y"); the first band starts at 0; the top band may be open.
+# not exceeding Y"); the first band starts at 0 (inclusive); the top band may
+# be open. A schedule row may carry effective_from / effective_to (e.g. the
+# LINDUNG 24 JAM phase): the row in force on the pay date is used.
 # Public-holiday rows: the date (ISO) in tax_formula, the name in rate_label,
 # jurisdiction_state = the HOLIDAY_STATES code (NULL = national).
 
@@ -223,12 +230,15 @@ MALAYSIA_PARAMETER_KEYS = {
     "my_epf_rate_pr_hist_60_plus_high": "pct_both",
     "my_epf_rate_non_malaysian": "pct_both",
     "my_epf_direct_calc_rule": "text",
+    "my_epf_age_transition_rule": "text",
+    "my_epf_age_threshold": "amount",
     # PERKESO Act 4 / EIS Act 800 / foreign workers (spec §7)
     "my_socso_wage_ceiling": "amount",
     "my_socso_employee_rate_ref": "pct_employee",
     "my_eis_rate_ref": "pct_both",
     "my_eis_min_age": "amount",
     "my_eis_max_age": "amount",
+    "my_eis_age_rule": "text",
     "my_fw_lindung_employee_rate": "pct_employee",
     "my_fw_lindung_phase_rule": "text",
     # HRD levy (spec §8)
@@ -237,6 +247,7 @@ MALAYSIA_PARAMETER_KEYS = {
     "my_hrd_compulsory_min_employees": "amount",
     "my_hrd_optional_min_employees": "amount",
     "my_hrd_base_rule": "text",
+    "my_hrd_non_malaysian_rule": "text",
     # employer events, filing and settlement (spec §10, §11)
     "my_cp22_days_after_start": "amount",
     "my_cp22a_days_before_cessation": "amount",
@@ -320,6 +331,10 @@ _NATIONAL = (
      True, date(2025, 10, 1), None, _WM),
     ("my_epf_direct_calc_rule", "When EPF may be calculated directly instead of by table", None, None, None,
      PENDING, "S5", False, None, None, _WM),
+    ("my_epf_age_transition_rule", "Which wage month the age-60 EPF class change applies from", None, None, None,
+     PENDING, "S5", False, None, None, _WM),
+    ("my_epf_age_threshold", "EPF age at which the 60-and-over member classes apply", None, None, "60", None,
+     "S5", True, None, None, _WM),
     ("my_socso_wage_ceiling", "PERKESO Act 4 / EIS Act 800 contribution wage ceiling (RM)", None, None, "6000",
      None, "S7", True, date(2024, 10, 1), None, _CM),
     ("my_socso_employee_rate_ref", "Act 4 standard employee contribution reference (%)", "0.5", None, None,
@@ -327,6 +342,8 @@ _NATIONAL = (
     ("my_eis_rate_ref", "EIS contribution reference (%)", "0.2", "0.2", None, None, "S9", True, None, None, _CM),
     ("my_eis_min_age", "EIS coverage lower age", None, None, "18", None, "S9", True, None, None, _CM),
     ("my_eis_max_age", "EIS coverage upper age", None, None, "60", None, "S9", True, None, None, _CM),
+    ("my_eis_age_rule", "How the EIS age bounds are measured", None, None, None, PENDING, "S9", False,
+     None, None, _CM),
     ("my_fw_lindung_employee_rate", "Foreign-worker LINDUNG 24 JAM phase 1 employee component (%)", "0.75",
      None, None, None, "S8", True, date(2026, 6, 1), None, _CM),
     ("my_fw_lindung_phase_rule", "LINDUNG 24 JAM phase boundaries and shares", None, None, None, PENDING, "S8",
@@ -341,6 +358,8 @@ _NATIONAL = (
      None, "S14", True, None, None, _EE),
     ("my_hrd_base_rule", "HRD levy base inclusions / exclusions", None, None, None, PENDING, "S14", False,
      None, None, _WM),
+    ("my_hrd_non_malaysian_rule", "Whether non-Malaysian employees' wages are in the HRD levy base", None, None,
+     None, PENDING, "S14", False, None, None, _WM),
     ("my_cp22_days_after_start", "CP22 within days after employment starts", None, None, "30", None, "S2", True,
      None, None, _EE),
     ("my_cp22a_days_before_cessation", "CP22A at least days before cessation", None, None, "30", None, "S2",

@@ -68,6 +68,10 @@ def _vocabulary() -> dict:
         else "must be the specification's version label (letters, digits, . _ / -)",
         "my_ea_due": one_of("END_FEBRUARY"),
         "my_form_e_due": one_of("END_MARCH"),
+        "my_epf_age_transition_rule": one_of(*content.EPF_AGE_TRANSITION_RULES),
+        "my_eis_age_rule": one_of(*content.EIS_AGE_RULES),
+        "my_hrd_non_malaysian_rule": one_of(*content.HRD_NON_MALAYSIAN_RULES),
+        "my_epf_direct_calc_rule": one_of(*content.EPF_DIRECT_CALC_RULES),
     })
     return vocab
 
@@ -290,8 +294,9 @@ def mys_date(value, field: str) -> date:
 def validate_schedule(rule_type: str, rows: list) -> list:
     """Problems in a schedule (empty list = valid). rows: dicts with
     member_class, wage_from, wage_to (None = open top band), employee_amount,
-    employer_amount (Decimals). Per class: starts at 0, contiguous, no
-    overlap, ascending, amounts >= 0, only the last band open."""
+    employer_amount (Decimals), optional effective_from / effective_to (dates).
+    Per class and validity window: starts at 0, contiguous, no overlap,
+    ascending, amounts >= 0, only the last band open."""
     content = _content()
     problems = []
     classes = content.SCHEDULE_CLASSES[rule_type]
@@ -307,8 +312,12 @@ def validate_schedule(rule_type: str, rows: list) -> list:
         for side in ("employee_amount", "employer_amount"):
             if row.get(side) is None or row[side] < 0:
                 problems.append(f"row {n}: {side} must be a number of at least 0")
-        by_class.setdefault(cls, []).append((lo, hi, n))
-    for cls, bands in by_class.items():
+        start, end = row.get("effective_from"), row.get("effective_to")
+        if start is not None and end is not None and end < start:
+            problems.append(f"row {n}: effective_to is before effective_from")
+        by_class.setdefault((cls, start, end), []).append((lo, hi, n))
+    for (cls, start, _end), bands in by_class.items():
+        cls = f"{cls} from {start.isoformat()}" if start else cls
         bands = sorted(bands, key=lambda b: (b[0] if b[0] is not None else Decimal("-1")))
         if bands[0][0] != 0:
             problems.append(f"{cls}: the first band must start at 0")
@@ -387,7 +396,8 @@ def replace_table(db: Session, pack_row_id: int, rule_type: str, rows: list, act
             db.add(TaxSlab(jurisdiction_pack_id=pack.id, organization_id=None, jurisdiction_country=MY,
                            rule_type=rule_type, filing_status=row["member_class"], tax_regime=side,
                            min_amount=row["wage_from"], max_amount=row["wage_to"], rate_pct=Decimal("0"),
-                           flat_amount=amount,
+                           flat_amount=amount, effective_from=row.get("effective_from"),
+                           effective_to=row.get("effective_to"),
                            rate_label=mys.pending_label(
                                f"{rule_type} {row['member_class']} {side} {format(row['wage_from'], 'f')}-{top}", 150),
                            tax_formula=f"{row['member_class']} {side} p.{page}"[:150],

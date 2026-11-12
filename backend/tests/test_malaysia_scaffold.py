@@ -253,7 +253,7 @@ def test_every_calculation_mode_is_blocked(mode):
     with pytest.raises(MYCalculationBlockedError) as raised:
         calculate_payroll(PayrollContext(gross=Decimal("5000"), basic=Decimal("5000"), country="MY"), mode)
     assert isinstance(raised.value, MissingComplianceConfigurationError)
-    expected = "MY_SIMPLE_MODE_UNSUPPORTED" if mode == "simple" else "MY_ENGINE_NOT_BUILT"
+    expected = "MY_SIMPLE_MODE_UNSUPPORTED" if mode == "simple" else "MY_PAY_DATE_MISSING"
     assert raised.value.key == expected
 
 

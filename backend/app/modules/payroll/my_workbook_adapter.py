@@ -30,7 +30,7 @@ EARNING = "Earning classes"
 P_HEADERS = ["key", "territory", "description", "kind", "allowed_values", "current_value", "status", "value",
              "employee_rate_pct", "employer_rate_pct", "source_document_id", "page", "note"]
 S_HEADERS = ["member_class", "wage_from", "wage_to", "employee_amount", "employer_amount", "source_document_id",
-             "page"]
+             "page", "effective_from", "effective_to"]
 H_HEADERS = ["date", "name", "holiday_state", "source_document_id", "page"]
 E_HEADERS = ["obligation", "component", "current_treatment", "status", "treatment", "source_document_id", "page"]
 
@@ -78,13 +78,14 @@ class MalaysiaWorkbookAdapter:
                 .order_by(TaxSlab.sort_order, TaxSlab.id).all())
 
     def _schedule_rows(self, db: Session, pack, rule_type: str) -> list:
-        """Current schedule as (class, from, to, employee, employer) tuples."""
+        """Current schedule as (class, from, to, employee, employer, eff_from, eff_to) tuples."""
         pairs = {}
         for s in self._slabs(db, pack, rule_type):
-            key = (s.filing_status, s.min_amount, s.max_amount)
+            key = (s.filing_status, s.min_amount, s.max_amount, s.effective_from, s.effective_to)
             pairs.setdefault(key, {})[s.tax_regime] = s.flat_amount
-        return sorted(((cls, lo, hi, v.get("EMPLOYEE"), v.get("EMPLOYER")) for (cls, lo, hi), v in pairs.items()),
-                      key=lambda r: (r[0], r[1]))
+        return sorted(((cls, lo, hi, v.get("EMPLOYEE"), v.get("EMPLOYER"), ef, et)
+                       for (cls, lo, hi, ef, et), v in pairs.items()),
+                      key=lambda r: (r[0], r[5] or date.min, r[1]))
 
     def _holiday_rows(self, db: Session, pack) -> list:
         out = []
@@ -118,10 +119,12 @@ class MalaysiaWorkbookAdapter:
                                          "page", "note"],
                                note="value = amount or text; percentages go in employee_rate_pct / employer_rate_pct.")]
         for rule in content.SCHEDULE_RULES:
-            rows = [[cls, lo, hi, ee, er, None, None] for cls, lo, hi, ee, er in self._schedule_rows(db, pack, rule)]
+            rows = [[cls, lo, hi, ee, er, None, None, ef, et]
+                    for cls, lo, hi, ee, er, ef, et in self._schedule_rows(db, pack, rule)]
             specs.append(wbk.SheetSpec(rule, S_HEADERS, rows, editable=S_HEADERS,
                                        note=f"Classes: {', '.join(content.SCHEDULE_CLASSES[rule])}. wage_from "
-                                            "exclusive, wage_to inclusive, first band from 0, last may be blank."))
+                                            "exclusive, wage_to inclusive, first band from 0, last may be blank; "
+                                            "effective_from / effective_to optional (YYYY-MM-DD)."))
         specs.append(wbk.SheetSpec(HOLIDAYS, H_HEADERS, [[d, n, s, None, None] for d, n, s in self._holiday_rows(db, pack)],
                                    editable=H_HEADERS,
                                    note=f"holiday_state blank = national; else one of {', '.join(content.HOLIDAY_STATES)}."))
@@ -214,8 +217,11 @@ class MalaysiaWorkbookAdapter:
                        "wage_from": _dec(r.get("wage_from"), "wage_from"), "wage_to": _dec(r.get("wage_to"), "wage_to"),
                        "employee_amount": _dec(r.get("employee_amount"), "employee_amount"),
                        "employer_amount": _dec(r.get("employer_amount"), "employer_amount"),
-                       "source_document_id": r.get("source_document_id"), "page": r.get("page")} for r in rows]
-        except ValueError as exc:
+                       "source_document_id": r.get("source_document_id"), "page": r.get("page"),
+                       "effective_from": _date(r["effective_from"]) if r.get("effective_from") not in (None, "") else None,
+                       "effective_to": _date(r["effective_to"]) if r.get("effective_to") not in (None, "") else None}
+                      for r in rows]
+        except (TypeError, ValueError) as exc:
             return wbk.RowResult(rule, rule, "INVALID", str(exc))
         problems = msa.validate_schedule(rule, parsed)
         for n, r in enumerate(parsed, start=1):
@@ -225,9 +231,10 @@ class MalaysiaWorkbookAdapter:
         if problems:
             return wbk.RowResult(rule, rule, "INVALID", "; ".join(problems[:5]))
         current = self._schedule_rows(db, pack, rule)
-        incoming = sorted((r["member_class"], r["wage_from"], r["wage_to"], r["employee_amount"], r["employer_amount"])
-                          for r in parsed)
-        if incoming == sorted(current):
+        incoming = sorted(((r["member_class"], r["wage_from"], r["wage_to"], r["employee_amount"], r["employer_amount"],
+                           r["effective_from"], r["effective_to"]) for r in parsed),
+                          key=lambda r: (r[0], r[5] or date.min, r[1]))
+        if incoming == current:
             return wbk.RowResult(rule, rule, "UNCHANGED")
         return wbk.RowResult(rule, rule, "CHANGED", f"{len(parsed)} band(s)",
                              change={"kind": "table", "rule": rule, "rows": parsed})

@@ -1028,6 +1028,19 @@ class PayrollContext:
     pl_organization_id: int = None
     pl_legal_entity_id: int = None
     pl_employee_id: int = None
+    # ── Malaysia (ZP-MY-ENG-001) — resolved by malaysia_service.calc_inputs as of
+    # the pay date. Never an identifier (NRIC / TIN / EPF / SOCSO numbers stay in
+    # the vault). None = not supplied -> the affected obligation BLOCKS.
+    my_pay_date: date = None                  # preferred over pay_date
+    my_profile: object = None                 # PayrollMyWorkerProfile in force (ACTIVE)
+    my_registration: object = None            # PayrollMyEmployerRegistration in force (ACTIVE)
+    my_assignment: object = None              # PayrollMyWorkAssignment in force (territory, holiday state)
+    my_components: dict = None                # {"BASIC_SALARY": ..., "OVERTIME": ...}; must add up to gross
+    my_declarations: list = None              # PayrollMyTaxDeclaration rows (only APPROVED in force count)
+    my_ytd: dict = None                       # {accumulator: sum before this pay date}
+    my_organization_id: int = None
+    my_legal_entity_id: int = None
+    my_employee_id: int = None
     # Phase 4 — bonus path (S1/S8) and lifecycle events (spec §11).
     jp_payment_kind: str = None                # "SALARY" (default) | "BONUS" (bonus-only payment)
     jp_prior_month_pay_after_si: Decimal = None  # selects the NTA bonus-rate band
@@ -1797,6 +1810,10 @@ class PayrollResult:
     # exceptions, trace and hashes). None for every other country. No PESEL,
     # NIP or bank data is ever placed here.
     pl_result: dict = None
+    # Malaysia (ZP-MY-ENG-001): the whole MY dict (coverage per obligation,
+    # separate bases, the schedule rows used, trace and hashes). None for every
+    # other country. No NRIC / TIN / EPF / SOCSO number is ever placed here.
+    my_result: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
     # The whole dict countries/brazil.py returns under 'br_result' key (spec,
