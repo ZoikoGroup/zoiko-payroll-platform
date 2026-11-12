@@ -21,6 +21,7 @@ import ZAComplianceCentreTab from "./ZAComplianceCentreTab";
 import JPComplianceCentreTab from "./JPComplianceCentreTab";
 import NZComplianceCentreTab from "./NZComplianceCentreTab";
 import PLComplianceCentreTab from "./PLComplianceCentreTab";
+import MYComplianceCentreTab from "./MYComplianceCentreTab";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -171,9 +172,13 @@ export default function CompliancePage() {
   // and PPK; generic Tax Configuration tab omitted like NZ/JP/ZA/NL/MX.
   const PL_TAB = "Poland Compliance Centre";
   const isPoland = normalizeCountryCode(companyDetails.jurisdictionCountry) === "PL";
+  // Malaysia (ZP-MY-ENG-001): national obligations + territorial labour law,
+  // versioned records; generic Tax Configuration tab omitted like PL/NZ/JP.
+  const MY_TAB = "Malaysia Compliance Centre";
+  const isMalaysia = normalizeCountryCode(companyDetails.jurisdictionCountry) === "MY";
   const baseTabs = isSwitzerland
     ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
-    : isNetherlands || isMexico || isSouthAfrica || isJapan || isNewZealand || isPoland
+    : isNetherlands || isMexico || isSouthAfrica || isJapan || isNewZealand || isPoland || isMalaysia
       ? BASE_TABS.filter((t) => t !== "Tax Configuration")
       : BASE_TABS;
   // Plan country entitlements — every org, every calculation mode.
@@ -193,6 +198,7 @@ export default function CompliancePage() {
     ...(isJapan ? [JP_TAB] : []),
     ...(isNewZealand ? [NZ_TAB] : []),
     ...(isPoland ? [PL_TAB] : []),
+    ...(isMalaysia ? [MY_TAB] : []),
   ];
   const selectedTab = countriesRequested ? tabs.indexOf(COUNTRIES_TAB) : activeTab;
   const currentTab = tabs[selectedTab];
@@ -439,6 +445,7 @@ export default function CompliancePage() {
       {currentTab === JP_TAB && <JPComplianceCentreTab />}
       {currentTab === NZ_TAB && <NZComplianceCentreTab />}
       {currentTab === PL_TAB && <PLComplianceCentreTab />}
+      {currentTab === MY_TAB && <MYComplianceCentreTab />}
 
     </div>
   );

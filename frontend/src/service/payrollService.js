@@ -3235,3 +3235,57 @@ export const downloadPayslipTemplateSamplePdf = async (payload) => {
 // PDF design-match import: analyse (nothing stored), then create a draft from the confirmed analysis.
 export const analyzePayslipPdf = (formData) => api.post(`${PST}/import-pdf/analyze`, formData);
 export const createPayslipTemplateFromPdf = (payload) => api.post(`${PST}/import-pdf/create`, payload);
+
+// ── Malaysia (ZP-MY-ENG-001 Phase 8b) — organisation statutory setup ──────
+// Every route lives in my_org_router (/api/payroll/malaysia), dormant (404)
+// until Malaysia onboarding is enabled. Versioned records are captured as
+// DRAFT and count only after a second user approves them; identifiers go to
+// the encrypted vault and come back masked.
+const MYP = "/api/payroll/malaysia";
+const myList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const myOne = (res) => res?.data ?? res;
+export const getMySummary = async () => myOne(await api.get(`${MYP}/summary`));
+export const listMyRegistrations = async () => myList(await api.get(`${MYP}/employer-registrations`));
+export const createMyRegistration = (body) => api.post(`${MYP}/employer-registrations`, body);
+export const approveMyRegistration = (id) => api.post(`${MYP}/employer-registrations/${id}/approve`, {});
+export const verifyMyRegistration = (id, outcome, reason) =>
+  api.post(`${MYP}/employer-registrations/${id}/verify`, { outcome, reason });
+export const listMyWorkerProfiles = async (employeeId) =>
+  myList(await api.get(`${MYP}/employees/${employeeId}/worker-profiles`));
+export const createMyWorkerProfile = (employeeId, body) => api.post(`${MYP}/employees/${employeeId}/worker-profiles`, body);
+export const approveMyWorkerProfile = (id) => api.post(`${MYP}/worker-profiles/${id}/approve`, {});
+export const listMyAssignments = async (employeeId) =>
+  myList(await api.get(`${MYP}/employees/${employeeId}/work-assignments`));
+export const createMyAssignment = (employeeId, body) => api.post(`${MYP}/employees/${employeeId}/work-assignments`, body);
+export const approveMyAssignment = (id) => api.post(`${MYP}/work-assignments/${id}/approve`, {});
+export const listMyDeclarations = async (employeeId) =>
+  myList(await api.get(`${MYP}/employees/${employeeId}/declarations`));
+export const createMyDeclaration = (employeeId, body) => api.post(`${MYP}/employees/${employeeId}/declarations`, body);
+export const approveMyDeclaration = (id) => api.post(`${MYP}/declarations/${id}/approve`, {});
+export const withdrawMyDeclaration = (id, reason, effectiveTo) =>
+  api.post(`${MYP}/declarations/${id}/withdraw`, { reason, effectiveTo });
+export const listMyIdentifiers = async (employeeId) => myList(await api.get(`${MYP}/employees/${employeeId}/identifiers`));
+export const createMyIdentifier = (employeeId, identifierType, value) =>
+  api.post(`${MYP}/employees/${employeeId}/identifiers`, { identifierType, value });
+export const requestMyIdentifierReveal = (vaultId, reason) =>
+  api.post(`${MYP}/identifiers/${vaultId}/reveal-request`, { reason });
+export const approveMyIdentifierReveal = (vaultId) => api.post(`${MYP}/identifiers/${vaultId}/reveal-approve`, {});
+export const revealMyIdentifier = async (vaultId) => myOne(await api.post(`${MYP}/identifiers/${vaultId}/reveal`, {}));
+export const deleteMyIdentifier = (vaultId, reason) => api.post(`${MYP}/identifiers/${vaultId}/delete`, { reason });
+export const getMyLeaveEntitlement = async (employeeId, asOf) =>
+  myOne(await api.get(`${MYP}/employees/${employeeId}/leave-entitlement`, { params: { asOf } }));
+export const getMyHolidays = async (employeeId, year) =>
+  myOne(await api.get(`${MYP}/employees/${employeeId}/holidays`, { params: { year } }));
+export const listMyEmployerEvents = async (employeeId) =>
+  myList(await api.get(`${MYP}/employees/${employeeId}/employer-events`));
+export const createMyEmployerEvent = (employeeId, body) => api.post(`${MYP}/employees/${employeeId}/employer-events`, body);
+export const submitMyEmployerEvent = (id, submittedOn, receiptRef, evidenceRef) =>
+  api.post(`${MYP}/employer-events/${id}/submitted`, { submittedOn, receiptRef, evidenceRef });
+export const cancelMyEmployerEvent = (id, reason) => api.post(`${MYP}/employer-events/${id}/cancel`, { reason });
+export const openMyClearanceHold = (eventId, openedOn, reason) =>
+  api.post(`${MYP}/employer-events/${eventId}/clearance-hold`, { openedOn, reason });
+export const requestMyHoldRelease = (holdId, releaseReference, evidenceRef) =>
+  api.post(`${MYP}/clearance-holds/${holdId}/release-request`, { releaseReference, evidenceRef });
+export const approveMyHoldRelease = (holdId) => api.post(`${MYP}/clearance-holds/${holdId}/release-approve`, {});
+export const getMyEmployeeSummary = async (employeeId) => myOne(await api.get(`${MYP}/employees/${employeeId}/summary`));
+export const getMyRunPreflight = async (runId) => myList(await api.get(`${MYP}/runs/${runId}/preflight`));

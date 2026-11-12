@@ -49,6 +49,8 @@ const INCOME_TAX_LABELS = {
   NZ: "PAYE (incl. ACC earner levy)",
   // Poland — the monthly PIT advance (zaliczka na podatek), ZP-PL-ENG-001 §4.
   PL: "PIT Advance (zaliczka)",
+  // Malaysia — monthly tax deduction (PCB / MTD), ZP-MY-ENG-001 §5.
+  MY: "PCB / MTD",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip
@@ -72,11 +74,15 @@ const EMPLOYER_PF_LABELS = { DE: "Employer Pension Insurance" };
 // employerEsi; FP/FS + FGSP + FEP -> employerPayrollTax; employer PPK ->
 // employerPension. The employee ZUS / health / PPK lines travel in
 // pl_employee_total and are shown by PLPayslipBreakdown from the snapshot.
+// Malaysia (ZP-MY-ENG-001) as countries/malaysia.py returns it: PCB -> tds;
+// EPF employer -> employerPension; SOCSO + EIS employer -> employerEsi; HRD
+// levy -> employerPayrollTax. Employee EPF / SOCSO / EIS travel in
+// my_employee_total and are shown by MYPayslipBreakdown from the snapshot.
 const EMPLOYER_ESI_LABELS = { DE: "Employer Social Insurance", CA: "Employer EI Contribution", ZA: "UIF (Employer)",
-  PL: "ZUS (Employer: pension, disability, accident)" };
+  PL: "ZUS (Employer: pension, disability, accident)", MY: "SOCSO + EIS (Employer)" };
 // Employer-only payroll levies carried on employer_payroll_tax.
 const EMPLOYER_PAYROLL_TAX_LABELS = { AU: "State Payroll Tax (Employer)", ZA: "SDL (Employer)",
-  PL: "FP/FS, FGŚP, FEP (Employer)" };
+  PL: "FP/FS, FGŚP, FEP (Employer)", MY: "HRD Levy (Employer)" };
 const SOCIAL_SECURITY_LABELS = {
   CA: "Canada Pension Plan (CPP)",
   BB: "NIS", DO: "SFS (Seguro Familiar de Salud)", GY: "NIS", JM: "NIS", TT: "NIS",
@@ -89,7 +95,7 @@ const SOCIAL_SECURITY_LABELS = {
 const EMPLOYER_SOCIAL_SECURITY_LABELS = { CA: "Employer CPP Contribution", BR: "CPP (Employer INSS)", SA: "GOSI SANED / Unemployment (Employer)" };
 const MEDICARE_LABELS = { AU: "Medicare Levy" };
 const EMPLOYER_PENSION_LABELS = { AU: "Superannuation (Employer)", HK: "MPF Mandatory Contribution (Employer)", SA: "GOSI Pension (Employer)",
-  PL: "PPK (Employer)" };
+  PL: "PPK (Employer)", MY: "EPF (Employer)" };
 const CHURCH_TAX_LABELS = { DE: "Kirchensteuer" };
 const SOLIDARITY_SURCHARGE_LABELS = { DE: "Solidaritätszuschlag" };
 // Trinidad reuses the `professionalTax` field for its Health Surcharge (see
@@ -186,6 +192,7 @@ const TAX_ID_LABELS = {
   JP: "Corporate Number / Labour Insurance Number",
   NZ: "IRD number / NZBN",
   PL: "NIP / REGON / KRS",
+  MY: "HASiL employer no. / EPF / PERKESO / HRD",
 };
 
 // "Professional Tax" is an India-specific, state-levied deduction — only

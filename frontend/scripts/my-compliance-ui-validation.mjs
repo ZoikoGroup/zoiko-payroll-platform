@@ -10,6 +10,8 @@
  *
  * Phase 8a: the Super Admin console and statutory workbook are wired to
  * declared backend routes; generic editors hidden; workbook never signs.
+ * Phase 8b: organisation screens call only my_org_router routes; vault field
+ * never persists; declarations carry no reason; breakdown reads the snapshot.
  */
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -126,6 +128,55 @@ check("territorial rows are read per territory, never defaulted", () => {
   const tabs = read("components/jurisdiction/malaysia/MYPackTabs.jsx");
   assert(tabs.includes("territoryKey(base, t)") && tabs.includes('<span className="text-error">missing</span>'),
     "a missing territorial row is shown, never filled");
+});
+
+// ── Phase 8b: organisation screens ─────────────────────────────────────────
+const orgRouter = readFileSync(resolve(BACKEND_ROOT, "payroll", "my_org_router.py"), "utf-8");
+const myOrgRoutes = new Set([...orgRouter.matchAll(/@router\.(get|post|put|patch|delete)\(\s*"([^"]+)"/g)]
+  .map(([, method, path]) => `${method.toUpperCase()} /api/payroll/malaysia${path.replace(/\{[^}]+\}/g, "{}")}`));
+const payrollServiceSource = read("service/payrollService.js");
+const myStart = payrollServiceSource.indexOf('const MYP = "/api/payroll/malaysia";');
+const myNext = payrollServiceSource.slice(myStart + 1).search(/\nconst [A-Z_]+ = "\/api\/payroll\//);
+const myBlock = payrollServiceSource.slice(myStart, myNext < 0 ? undefined : myStart + 1 + myNext);
+const myCalls = [...myBlock.matchAll(/api\.(get|post|put|delete)\(`([^`]+)`/g)]
+  .map(([, method, path]) => `${method.toUpperCase()} ${path.replace("${MYP}", "/api/payroll/malaysia").split("?")[0]
+    .replace(/\$\{[^}]+\}/g, "{}")}`);
+check("every Malaysia organisation client call matches a declared my_org_router route", () => {
+  assert(myStart >= 0, "MYP base");
+  assert(myCalls.length >= 30, `found ${myCalls.length} calls`);
+  const unknown = myCalls.filter((c) => !myOrgRoutes.has(c));
+  assert(unknown.length === 0, `no backend route for: ${unknown.join(" | ")}`);
+});
+check("the identifier vault field never persists or logs a value", () => {
+  const field = read("modules/payroll/Payroll_Employees/MYIdentifierField.jsx");
+  assert(!/localStorage|sessionStorage|console\.[a-z]+\(|searchParams/.test(field), "storage / console use in the vault field");
+  assert(/type="password"/.test(field) && /setValue\(""\)/.test(field), "typed value must be masked and cleared");
+  assert(/REVEAL_SECONDS \* 1000/.test(field), "revealed value must expire");
+});
+check("declarations are recorded without a change reason (the backend refuses one)", () => {
+  const panel = read("modules/payroll/Payroll_Employees/MalaysiaStatutoryProfilePanel.jsx");
+  const declarations = panel.split('testId="my-declarations"')[1].split("<JPRecordSection")[0];
+  assert(!declarations.includes("REASON_FIELD") && declarations.includes("transform={declarationPayload}"), "declaration form");
+  assert(!/nric|passport/i.test(panel.split("<MYIdentifierField")[0].replace(/nric_vault_id|NRIC vault id|NRIC \/ TIN/g, "")),
+    "no raw identifier field in the records panel");
+});
+check("the Malaysia centre, employee panel and run screens are wired in", () => {
+  const compliance = read("modules/payroll/Compliances/CompliancePage.jsx");
+  assert(compliance.includes("<MYComplianceCentreTab />") && /isMalaysia \? \[MY_TAB\]/.test(compliance), "compliance tab");
+  const detail = read("modules/payroll/Payroll_Employees/EmployeeDetailPanel.jsx");
+  assert(detail.includes('employee.countryCode === "MY"') && detail.includes("<MalaysiaStatutoryProfilePanel"), "employee panel");
+  const run = read("modules/payroll/PayRollRuns/RunDetailPanel.jsx");
+  assert(/=== "MY" && item\.myCalculationSnapshot && <MYPayslipBreakdown/.test(run), "breakdown");
+  assert(/=== "MY"\) && <MYRunPreflightPanel runId=\{run\.id\} \/>/.test(run), "preflight");
+  const schemas = readFileSync(resolve(BACKEND_ROOT, "payroll", "schemas.py"), "utf-8");
+  assert(/myCalculationSnapshot: Optional\[dict\] = None/.test(schemas), "snapshot declared in the response schema");
+});
+check("the payslip breakdown only reads the frozen my_result", () => {
+  const breakdown = read("modules/payroll/PayRollRuns/MYPayslipBreakdown.jsx");
+  assert(!/\b(api|fetch|calculate)\b\(/.test(breakdown) && !/import .*payrollService/.test(breakdown), "no recalculation / call");
+  assert(/s\.my_net/.test(breakdown) && /coverage\[name\]/.test(breakdown), "reads the snapshot fields");
+  const labels = read("utils/jurisdictionLabels.js");
+  assert(/MY: "PCB \/ MTD"/.test(labels) && /MY: "HRD Levy \(Employer\)"/.test(labels), "Malaysia payslip labels");
 });
 
 if (failures.length) {
