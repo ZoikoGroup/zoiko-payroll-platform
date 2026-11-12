@@ -17,8 +17,8 @@ from fastapi import HTTPException
 
 from tests._be_engine_helpers import PAY, build_pack
 
-EMPLOYER_IBAN = "BE68539007547034"          # published example IBAN (valid check digits), TEST ONLY
-EMPLOYEE_IBAN = "BE71096123456769"          # published example IBAN (valid check digits), TEST ONLY
+EMPLOYER_IBAN = "BE68539007547034"          # privacy-scan: allow (published example IBAN, valid check digits, TEST ONLY)
+EMPLOYEE_IBAN = "BE71096123456769"          # privacy-scan: allow (published example IBAN, valid check digits, TEST ONLY)
 NISS = "12312312312"                        # privacy-scan: allow (synthetic TEST ONLY value)
 
 

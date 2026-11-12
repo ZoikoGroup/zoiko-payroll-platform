@@ -215,7 +215,7 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 
 ## B3 — run lifecycle, payslip, corrections, payment
 
-- Commit: see `feat(belgium): block B3 run lifecycle, payslip, corrections and payment`.
+- Commit: ed734a1 `feat(belgium): block B3 run lifecycle, payslip, corrections and payment`.
 - G-29: ledger posting moved to run COMMIT (APPROVED in before_run_transition); the generation / add-item /
   regenerate / delete posting added in A3 is removed (service.py back to no ledger calls). Draft runs post
   nothing; correction runs post CORRECTION entries linked (reverses_id) to the original RUN entries.
@@ -247,3 +247,15 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 - Tests: test_belgium_run_lifecycle.py (new, 10: preflight, acknowledgements, four-eyes, retried approval,
   fingerprint, corrections lineage, payment batch + XSD, white-collar + manual month end to end, template);
   engine ledger tests rewritten for G-29. Belgium + NL payment / SEPA + shared: 1018 passed, 1 skipped.
+
+## End of Block B — full backend suite (chunked, reconciled)
+
+- Environment: PAYROLL_DATABASE_URL=sqlite:///<scratchpad>/testdb_<timestamp>/zp_test.db per chunk, ZP_TEST_POSTGRES_URL
+  unset, Python 3.11. 476 top-level test files in 12 chunks (+ golden / privacy dirs in chunk 11). Chunk 0 ran
+  on ed734a1 before an interrupted session; chunks 1-11 re-ran on the same commit (no code change in between).
+- Collected 10028 = executed 10028: 9878 passed, 16 failed, 132 skipped, 2 xfailed; every chunk reconciles.
+- 15 failures pre-existing (6 Germany ordering, 5 test_engine_jurisdiction_db_integration ordering, 1 HK CSV,
+  3 route-registry health routes from the uncommitted main.py). 1 NEW: tests/privacy/test_nonprod_data.py flagged
+  the two published example IBANs in test_belgium_run_lifecycle.py; fixed with the repository privacy-scan
+  allow marker (see the fix commit); privacy scan + lifecycle tests re-run: 18 passed.
+- Frontend at B3: build passed (14.5 s), lint clean on new files, npm test all 9 scripts pass.
