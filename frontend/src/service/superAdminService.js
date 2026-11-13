@@ -1139,3 +1139,40 @@ export const getBeGoldenCheck = (packRowId) => apiFetch(`${BE_SA}/packs/${packRo
 export const runBeGoldenCertification = (packRowId) =>
   apiFetch(`${BE_SA}/packs/${packRowId}/golden-certification`, { method: "POST", body: {} });
 export const getBeReadiness = () => apiFetch(`${BE_SA}/readiness`);
+// Block D3: content intake workbook (XLSX) and bulk signing. The import is a
+// dry run unless dryRun is false; it never signs and only targets Draft packs.
+async function beFetchRaw(path, init = {}) {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init, headers: { ...(init.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) {
+    let data = {};
+    try { data = await res.json(); } catch { data = {}; }
+    throw new Error(data.detail || data.message || "The request was refused.");
+  }
+  return res;
+}
+export async function downloadBeContentWorkbook(packRowId) {
+  const res = await beFetchRaw(`${BE_SA}/packs/${packRowId}/content-workbook`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `belgium-content-${packRowId}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+export async function importBeContentWorkbook(packRowId, file, reason, dryRun = true) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("reason", reason);
+  const query = dryRun ? "?dry_run=true" : "?dry_run=false";
+  const res = await beFetchRaw(`${BE_SA}/packs/${packRowId}/content-workbook/import` + query,
+    { method: "POST", body: form });
+  return res.json();
+}
+export const bulkSignBeRows = (packRowId, rows, reason) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/bulk-sign`, { method: "POST", body: { rows, reason } });

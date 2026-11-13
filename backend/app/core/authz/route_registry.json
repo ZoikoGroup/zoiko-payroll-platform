@@ -22131,11 +22131,59 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/bulk-sign",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "bulk-sign",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/configuration",
    "data_class": "platform",
    "action": "read",
    "resource": "configuration",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/content-workbook",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "content-workbook",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/content-workbook/import",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "import",
    "principals": [
     "super_admin"
    ],

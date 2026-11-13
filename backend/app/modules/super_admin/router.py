@@ -4967,6 +4967,47 @@ def belgium_readiness_view(current_user=Depends(get_current_super_admin), db: Se
     return belgium_readiness.be_readiness(db)
 
 
+# ── Belgium Block D3: content intake workbook and bulk signing ──────────────
+@router.get("/compliance/belgium/packs/{pack_row_id}/content-workbook",
+            summary="Export the Belgium content workbook (XLSX; content only, no personal data)")
+def belgium_content_workbook(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                             db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from app.modules.payroll import be_content_workbook
+
+    name, data = be_content_workbook.be_content_workbook_export(db, pack_row_id)
+    return Response(content=data,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/content-workbook/import",
+             summary="Import the Belgium content workbook into a Draft pack (dry run by default; never signs)")
+async def belgium_content_workbook_import(pack_row_id: int, file: UploadFile = File(...), reason: str = Form(...),
+                                          dry_run: bool = Query(True), current_user=Depends(get_current_super_admin),
+                                          db: Session = Depends(get_db)):
+    from app.modules.payroll import be_content_workbook
+
+    data = await file.read()
+    out = be_content_workbook.be_content_workbook_import(db, pack_row_id, data, getattr(current_user, "id", None),
+                                                         reason=reason, dry_run=dry_run)
+    if out["written"]:
+        db.commit()
+    return out
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/bulk-sign",
+             summary="Sign selected Belgium rows in one action (not the importer / editor; each row audited)")
+def belgium_bulk_sign(pack_row_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import be_content_workbook
+
+    out = be_content_workbook.be_bulk_sign_rows(db, pack_row_id, payload, getattr(current_user, "id", None))
+    db.commit()
+    return out
+
+
 @router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
              summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
 def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,

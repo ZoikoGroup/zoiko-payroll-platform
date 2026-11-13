@@ -190,6 +190,8 @@ _STRUCTURAL_NUMBERS = {
         1024: "bytes per KiB (file size limit)", 5000: "maximum rows per import (operational limit)",
     },
     "belgium_readiness.py": {0: "zero / none", 1: "one / any", 5: "items shown in a detail"},
+    "be_content_workbook.py": {0: "first sheet / zero", 1: "first column / header row", 2: "first data row",
+                               4: "YYYY width", 10: "YYYY-MM-DD width / refusals listed", 100: "period label width"},
     "belgium_payment_service.py": {0: "list index / zero amount", 1: "batch sequence (+1)",
                                    100: "idempotency key / column width 100", 200: "return reason column width"},
     "be_identifiers.py": {

@@ -447,3 +447,26 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   events, logs, the payroll-register CSV and error messages; route test (dormancy dependency, own org,
   org-admin writes, no org id input). Content + formula + security: 82 passed.
 - Registry diff: no route changed.
+
+## Block D3 — content intake tool
+
+- be_content_workbook.py: export (XLSX via openpyxl; sheets Instructions, Scalar keys, Parallel tolerances, Slab
+  keys (+ required fields, dimension format and one template line per key), Filing schema versions, Earning
+  classification, Calendar rows (+ template), Owner decisions, Sources S1-S24 with archive status); every cell is
+  text; content only. Import into a Draft pack only: dry run by default (every changed cell OK / ERROR with
+  `Sheet!Cell` and the reason; validation through the same governed writers update_row / add_slab_row, then
+  rolled back); a real import is all-or-nothing, needs a source per changed row, records the importer as the
+  editor (audit before / after images), never signs, never activates; calendar rows are created Draft.
+  Bulk signing: refused as a whole when the signer imported or edited any selected row; each row signed through
+  update_row with its own reviewed, archived source and audited on its own.
+- Routes (Super Admin, platform class): GET /compliance/belgium/packs/{id}/content-workbook,
+  POST .../content-workbook/import (dry_run=true default), POST .../bulk-sign. Registry diff: no existing route
+  changed.
+- Guard finding fixed before commit: an Instructions example used the spec's employee ONSS rate as a sample
+  number; the text now carries no figure.
+- UI: Belgium Signing status tab gains Export / Import (dry-run preview table, then Confirm) / Bulk sign.
+- Tests: test_belgium_content_workbook.py (new, 7): sheets and rows, no personal data, round trip without
+  changes, cell-referenced vocabulary / source / dimension / date errors and nothing written, valid import writes
+  unsigned rows + Draft calendar rows with the importer as editor, non-Draft pack refused, the importer cannot
+  bulk-sign while another Super Admin can (one audit row per row). Content + workbook + super admin + slab rows:
+  passing. Frontend: lint clean, be-console validation 19 checks.
