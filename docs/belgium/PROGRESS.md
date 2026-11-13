@@ -782,3 +782,17 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   no growth small → large, per-employee time ceilings. Ran once: 1 passed (76 s). Default run: skipped.
 - docs/belgium/PERFORMANCE.md: method, before / after table, memory, fixes, remaining super-linear causes,
   PostgreSQL / RLS items for CI / staging. Registry unchanged (fresh == stored).
+
+## Block J1 — rollback shim proven in CI
+
+- The shim was already committed in I1 (backend/scripts/belgium_rollback_shim.py, a5809df, with
+  tests/test_belgium_rollback_shim.py); DEPLOY_NOTES already used that path.
+- New tests/test_belgium_rollback_proof.py (ZP_BE_ROLLBACK_PROOF=1): runs scripts/be_rollback_orm_check.py — ORM
+  identical with the Belgian schema; plain revert refused by deploy_migrate.sh; revert + shim → deploy_migrate.sh
+  exit 0, drift clean, operations identical, pin tests passed >= 135 (now reported as pinTestsPassed). Local run:
+  1 passed (172 s, Git Bash, throwaway SQLite).
+- CI: two additive steps at the end of privacy-isolation (gates deploy) in backend-deploy.yml and
+  backend-deploy-staging.yml: fetch the pre-Belgium commit 6081174 (depth 1), run the proof. The proof's
+  subprocesses drop ZP_TEST_POSTGRES_URL / DATABASE_URL / ZP_REQUIRE_POSTGRES_TESTS (SQLite only).
+- Limitation: the proof simulates the revert as "main before the Belgium merge"; a later main migration chained
+  after 8a1f5ef9fa5d would need its own rollback review (the shim also refuses files changed after the merge).

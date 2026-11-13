@@ -127,6 +127,13 @@ No Belgian route, service, engine, setting or screen remains. Proven by the same
 `deploy_migrate.sh` exit 0, drift clean, identical payroll operations, and 135/135 pin tests passing in the
 shim tree.
 
+The shim is committed (`backend/scripts/belgium_rollback_shim.py`, unit tests in
+`tests/test_belgium_rollback_shim.py`). CI re-proves this whole path on every run, in the last steps of the
+`privacy-isolation` job of both deploy workflows. The job fetches the pre-Belgium commit and runs
+`tests/test_belgium_rollback_proof.py` (`ZP_BE_ROLLBACK_PROOF=1`). That job gates deploy, so a change that breaks
+the rollback path fails CI. Locally:
+`ZP_BE_ROLLBACK_PROOF=1 python -m pytest -q tests/test_belgium_rollback_proof.py` (needs the commit in history).
+
 Exact commands (repository root):
 
 ```bash
