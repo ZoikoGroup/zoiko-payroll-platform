@@ -113,9 +113,15 @@ _version = plan_catalog.create_plan_version(
     db=_db,
     plan_id=_plan.id,
     feature_set={"features": ["payroll_runs"]},
-    scale_limits={"max_entities": 5},
+    scale_limits={"max_entities": 5, "max_billable_worker_months": 1000},
     actor_user_id=_super.id,
 )
+# max_billable_worker_months: creating an employee is checked against it
+# (payroll/router.py, require_scope_limit(MAX_BWM)). Without the flag the
+# employee-creation tests passed only while BILLING_ENFORCEMENT_MODE was "warn";
+# another module sets "enforce" at import, so the full suite saw 403 "Your plan
+# does not include 'max_billable_worker_months'".
+plan_catalog.add_entitlement_flag(_db, _version.id, "max_billable_worker_months", 1000, actor_user_id=_super.id)
 plan_catalog.approve_plan_version(_db, _version.id, actor_user_id=_super.id)
 plan_catalog.publish_plan_version(_db, _version.id, published_by_user_id=_super.id)
 _db.refresh(_version)

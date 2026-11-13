@@ -14,15 +14,18 @@ from decimal import Decimal as D
 
 import pytest
 
-# Recorded at 6d081c9 (before the Mexican renderer), invariant mode.
+# Re-recorded 2026-11-13 when origin/main was merged into rugvedh: main's
+# payslip_line_items refactor changed every country's PDF. The merged code renders
+# exactly the bytes origin/main renders for these countries (checked side by side), so
+# the Mexican Recibo dispatch still changes none of them. (First recorded at 6d081c9.)
 PINNED = {
-    "UK": "e85c08392ecf7659f7857c20c3c230797574745242b00ff7ab8cb03f0d20388b",
-    "US": "a75b6cb007e6890cb896785c6741f67a381354ec7d3ca3bf5f2153d3f18fc19e",
-    "DE": "b500323df06d76b716f91ed342faf967af10aa0de4d833d7a5b8b61fe1d3d300",
-    "HK": "dd3968b9e1cc4b5fc11520606f1bbf72b68ac66aa860e9b9dda4b15b5f0f1db2",
-    "SG": "540fe16775ac3138d0d104fa5f49a805dbcabc0526d81e3e44cbfc2611fc226d",
-    "IN": "5c8af57c687b19719a2ad448a9f280871849944316a2d21dd8142c1c23658a49",
-    "NL": "689cf02730b015034d82c82c58d8b10f9bf7e4b34ec84cf2b94506fb8d5c55e3",
+    "UK": "612f7977eaf726f2bc0c5892f5b909800ca0d7ad4e54f4f8f26c94a3e6d62016",
+    "US": "a8beaac486777dcc32c306a80ecf714c94685a09e2570b67f63f12a91d59447f",
+    "DE": "75d3f257c5700c818cb929d002158cabeedb746e3567b5df2e5b16154f1c6ff9",
+    "HK": "398137dc36848c51bcdcfada657212cdb41d5b647760481159d09928448851f4",
+    "SG": "1aaf1f33a46b467e653c33dfdbe5087d9358b07258a2a1645305b52cefb42cf6",
+    "IN": "1e306447cb81d79d1878f9e6deb0da70d4ded448e78d360968b7a29fc7914cfb",
+    "NL": "d21ce206bdf8cf0bb2206261ac94d913b744014e03e31633b6dcbeecebd01ef1",
 }
 
 
