@@ -577,7 +577,7 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
 
 ## Block F2 — source acquisition list
 
-- docs/belgium/sources/DOWNLOAD_LIST.md: 34 documents in 7 groups (A Annex III withholding incl. the 24 Jul 2026 and
+- docs/belgium/sources/DOWNLOAD_LIST.md: 30 documents in 7 groups (A Annex III withholding incl. the 24 Jul 2026 and
   27 Sep 2026 / 1 Nov 2026 versions and the quarterly-declaration threshold; B ONSS 2026/3 instructions, quarterly
   rate files by EC x WC, BSSC scale, work bonus, structural / target-group reductions, company car; C manual-worker
   holiday contributions for the current holiday year and holiday-pay rules; D guaranteed-salary day bands,
@@ -585,3 +585,17 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   F Dimona / DmfA 2026/2-2026/3 / FinProf / Belcotax 281.10 schemas, codes, deadline table; G legal sources for
   G-13 / G-16 / G-21), each with publisher, version, URL found or official site + section, and workbook rows filled.
 - docs/belgium/sources/inbox/README.md: "save downloaded files here unchanged; do not rename" (+ optional meta file).
+
+## Block F3 — inbox parse run
+
+- Inbox at the time of the run: **0 documents** (only README) — nothing parsed, no workbook value changed, confidence
+  counts unchanged (HIGH 9 / MEDIUM 36 / LOW 187 / NOT FOUND 72).
+- scripts/be_source_inbox.py (rerun whenever files arrive): hashes every inbox file, writes
+  docs/belgium/sources/INBOX_MANIFEST.md (size, SHA-256, DOWNLOAD_LIST id, official flag from <file>.meta.txt) and,
+  with --register on a local / isolated database, records each file as a SourceArtifact (form number
+  ZP-BE-SRC-<hash prefix>); only a file marked official is archived (checksum + file path), others are
+  [UNVERIFIED]; idempotent by checksum. Value extraction stays a reviewed step with page / section references.
+- Annex III grammar: not assessed (no key-formula document yet); no grammar change.
+- D3 dry-run import of the committed workbook: 0 errors (test_belgium_content_workbook). Conflicts still listed
+  for the reviewer (no official dated document yet).
+- Tests: test_belgium_source_inbox.py (new, 2). DOWNLOAD_LIST count corrected to 30 documents.
