@@ -86,6 +86,22 @@ class Settings(BaseSettings):
     # IRD-number duplicate-detection key (32 bytes, Secret Manager). Never
     # rotated: fingerprints must stay comparable across keyring rotations.
     NZ_IRD_FINGERPRINT_KEY: str = ""
+    # Poland dormancy switch (ZP-PL-ENG-001 Phase 0, poland_dormancy). False = no
+    # organisation can become Polish and the Poland APIs refuse. Leave UNSET in
+    # production until the PL release gates G1-G7 are signed.
+    PL_TENANT_ONBOARDING_ENABLED: bool = False
+    # Canary (ZP-PL-ENG-001 Phase 9, AC-PL-08): comma-separated organisation ids that may use Poland
+    # while the flag above is off and Poland stays PLANNED for everyone else. Empty by default.
+    PL_CANARY_ORG_IDS: str = ""
+    # Poland identifier vault (ZP-PL-ENG-001 Phase 2, pl_identifiers; spec §13):
+    # PESEL, employee NIP and the employer's ZUS contribution account (NRS) are
+    # encrypted at rest. JSON object mapping key version -> 32-byte key from
+    # Secret Manager. Empty = encrypt/decrypt/fingerprint refuse, which is fine
+    # while Poland is dormant. No fallback to PAYROLL_SECRET_KEY.
+    PL_IDENTIFIER_KEYRING: str = ""
+    # Poland duplicate-detection key (32 bytes, Secret Manager). Never rotated:
+    # fingerprints must stay comparable across keyring rotations.
+    PL_IDENTIFIER_FINGERPRINT_KEY: str = ""
     # HMAC key for Mexican identity tokens (RFC / CURP / NSS) on the statutory
     # profile (Phase 4b, Q7). Required outside development/test once Mexico is
     # enabled — there is NO derived fallback in production. Secret Manager.

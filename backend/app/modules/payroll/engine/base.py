@@ -1012,6 +1012,22 @@ class PayrollContext:
     nz_final_pay_lines: list = None           # [{calculationId, purpose, amount}] of an APPROVED final-pay case
     nz_prior_four_week_gross: Decimal = None  # PAYE gross in the 4 weeks before the payday (extra-pay method)
     nz_run_options: dict = None               # {holidayAdvanceMethod, advancePeriods, lumpSumComponent, ...}
+    # ── Poland (ZP-PL-ENG-001) ────────────────────────────────────────────
+    # Everything countries/poland.py reads, resolved by poland_service.calc_inputs
+    # (Phase 4) as of the pay date. Missing facts BLOCK; nothing is defaulted.
+    pl_pay_date: date = None                  # preferred over pay_date
+    pl_profile: object = None                 # PayrollPlWorkerProfile in force (ACTIVE)
+    pl_registration: object = None            # PayrollPlEmployerRegistration in force (ACTIVE)
+    pl_components: dict = None                # {"SALARY": ..., "OVERTIME_50": ...}; must add up to gross
+    pl_declarations: list = None              # PayrollPlDeclaration rows (only APPROVED in force count)
+    pl_ppk: object = None                     # PayrollPlPpkParticipation in force
+    pl_ytd: dict = None                       # {accumulator: sum before this pay date}; missing key = unknown
+    pl_overtime_events: list = None           # [{kind, event_ref, hours, hourly_rate}] behind OVERTIME_* (PL-016)
+    pl_incapacity_episodes: list = None       # APPROVED episodes: dates, category, daily base — no medical data
+    pl_date_of_birth: date = None             # the sick-pay age test (spec §9)
+    pl_organization_id: int = None
+    pl_legal_entity_id: int = None
+    pl_employee_id: int = None
     # Phase 4 — bonus path (S1/S8) and lifecycle events (spec §11).
     jp_payment_kind: str = None                # "SALARY" (default) | "BONUS" (bonus-only payment)
     jp_prior_month_pay_after_si: Decimal = None  # selects the NTA bonus-rate band
@@ -1100,6 +1116,7 @@ class PayrollContext:
     # Phase 9e: an approved annual ISR adjustment applied to this ordinary payslip
     # ({id, difference, fiscal_year}); None for every other payslip and country.
     mx_annual_adjustment: dict = None
+    mx_decisions: dict = None                  # sweep S1: approved decision answers applied (decisions.applied)
 
     # ── Brazil (ZP-BR-ENG-001) — pre-resolved CLT payroll inputs ─────────────
     # Resolved by the service layer before dispatch; engine/countries/brazil.py
@@ -1776,6 +1793,11 @@ class PayrollResult:
     # New Zealand (ZP-NZ-ENG-001): the whole NZ dict (separate bases, obligations,
     # accumulator deltas, exceptions, trace and hashes). None for every other country.
     nz_result: dict = None
+    # Poland (ZP-PL-ENG-001): the whole PL dict (separate bases, every ZUS /
+    # health / PPK / fund component, applicability decisions, accumulator deltas,
+    # exceptions, trace and hashes). None for every other country. No PESEL,
+    # NIP or bank data is ever placed here.
+    pl_result: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
     # The whole dict countries/brazil.py returns under 'br_result' key (spec,

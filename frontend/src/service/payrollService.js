@@ -3140,8 +3140,123 @@ const mxPdf = async (path, filename) => {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 100);
 };
+// Poland (ZP-PL-ENG-001) — routes in backend/app/modules/payroll/pl_org_router.py,
+// mounted under /api/payroll/poland. Every route acts on the caller's own
+// organisation and answers 404 while PL_TENANT_ONBOARDING_ENABLED is off.
+// Versioned writes carry a `reason`; four-eyes approvals and the single-use
+// identifier reveal are enforced server-side. PESEL / NIP / NRS are only ever
+// sent on create; responses are masked except the reveal. Payload keys are the
+// backend's snake_case field names.
+const PL = "/api/payroll/poland";
+const plList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const plOne = (res) => res?.data ?? res;
+export const getPlSummary = async () => plOne(await api.get(`${PL}/summary`));
+export const listPlRegistrations = async () => plList(await api.get(`${PL}/employer-registrations`));
+export const createPlRegistration = (body) => api.post(`${PL}/employer-registrations`, body);
+export const approvePlRegistration = (id) => api.post(`${PL}/employer-registrations/${id}/approve`, {});
+export const verifyPlRegistration = (id, outcome, reason) =>
+  api.post(`${PL}/employer-registrations/${id}/verify`, { outcome, reason });
+export const setPlEmployerNrs = (id, nrs) => api.post(`${PL}/employer-registrations/${id}/nrs`, { nrs });
+export const listPlWorkerProfiles = async (employeeId) =>
+  plList(await api.get(`${PL}/employees/${employeeId}/worker-profiles`));
+export const createPlWorkerProfile = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/worker-profiles`, body);
+export const approvePlWorkerProfile = (id) => api.post(`${PL}/worker-profiles/${id}/approve`, {});
+export const listPlStatements = async (employeeId) => plList(await api.get(`${PL}/employees/${employeeId}/statements`));
+export const createPlStatement = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/statements`, body);
+export const approvePlStatement = (id) => api.post(`${PL}/statements/${id}/approve`, {});
+export const withdrawPlStatement = (id, reason, effectiveTo) =>
+  api.post(`${PL}/statements/${id}/withdraw`, { reason, effectiveTo });
+export const listPlPpk = async (employeeId) => plList(await api.get(`${PL}/employees/${employeeId}/ppk`));
+export const createPlPpk = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/ppk`, body);
+export const approvePlPpk = (id) => api.post(`${PL}/ppk/${id}/approve`, {});
+export const listPlPpkReenrolmentDue = async (on) => plList(await api.get(`${PL}/ppk/reenrolment-due`, { params: { on } }));
+export const listPlEpisodes = async (employeeId) =>
+  plList(await api.get(`${PL}/employees/${employeeId}/incapacity-episodes`));
+export const createPlEpisode = (employeeId, body) => api.post(`${PL}/employees/${employeeId}/incapacity-episodes`, body);
+export const approvePlEpisode = (id) => api.post(`${PL}/incapacity-episodes/${id}/approve`, {});
+export const cancelPlEpisode = (id, reason) => api.post(`${PL}/incapacity-episodes/${id}/cancel`, { reason });
+export const listPlIdentifiers = async (employeeId) => plList(await api.get(`${PL}/employees/${employeeId}/identifiers`));
+export const createPlIdentifier = (employeeId, identifierType, value) =>
+  api.post(`${PL}/employees/${employeeId}/identifiers`, { identifierType, value });
+export const requestPlIdentifierReveal = (vaultId, reason) =>
+  api.post(`${PL}/identifiers/${vaultId}/reveal-request`, { reason });
+export const approvePlIdentifierReveal = (vaultId) => api.post(`${PL}/identifiers/${vaultId}/reveal-approve`, {});
+export const revealPlIdentifier = async (vaultId) => plOne(await api.post(`${PL}/identifiers/${vaultId}/reveal`, {}));
+export const deletePlIdentifier = (vaultId, reason) => api.post(`${PL}/identifiers/${vaultId}/delete`, { reason });
+export const getPlAnnualCap = async (employeeId, year) =>
+  plOne(await api.get(`${PL}/employees/${employeeId}/annual-cap`, { params: { year } }));
+export const getPlLeaveEntitlement = async (employeeId, asOf) =>
+  plOne(await api.get(`${PL}/employees/${employeeId}/leave-entitlement`, { params: { asOf } }));
+export const getPlRunPreflight = async (runId) => plList(await api.get(`${PL}/runs/${runId}/preflight`));
+// Poland Phase 8 — filing payloads (no live transport, PL-021), settlements, journal.
+export const listPlFilings = async (params = {}) => plList(await api.get(`${PL}/filings`, { params }));
+export const getPlFiling = async (id) => plOne(await api.get(`${PL}/filings/${id}`));
+export const rebuildPlRunFilings = async (runId) => plList(await api.post(`${PL}/filings/rebuild/${runId}`, {}));
+export const buildPlAnnualFilings = async (year, legalEntityId) =>
+  plList(await api.post(`${PL}/filings/annual`, { year, legalEntityId }));
+export const buildPlRegistrationFiling = (body) => api.post(`${PL}/filings/registration`, body);
+export const approvePlFiling = (id) => api.post(`${PL}/filings/${id}/approve`, {});
+export const recordPlFilingSubmission = (id, submissionRef) => api.post(`${PL}/filings/${id}/submission`, { submissionRef });
+export const recordPlFilingResponse = (id, body) => api.post(`${PL}/filings/${id}/response`, body);
+export const listPlSettlements = async (params = {}) => plList(await api.get(`${PL}/settlements`, { params }));
+export const recordPlSettlementPayment = (id, body) => api.post(`${PL}/settlements/${id}/payments`, body);
+export const reconcilePlSettlement = async (id) => plOne(await api.post(`${PL}/settlements/${id}/reconcile`, {}));
+export const listPlVariances = async (params = {}) => plList(await api.get(`${PL}/variances`, { params }));
+export const resolvePlVariance = (id, reason) => api.post(`${PL}/variances/${id}/resolve`, { reason });
+export const getPlRunJournal = async (runId) => plOne(await api.get(`${PL}/runs/${runId}/journal`));
+// Poland Phase 9 — parallel payroll cycles (gate G6, AC-PL-03).
+export const listPlParallelImports = async () => plList(await api.get(`${PL}/parallel-imports`));
+export const createPlParallelImport = (body) => api.post(`${PL}/parallel-imports`, body);
+export const getPlParallelImport = async (id) => plOne(await api.get(`${PL}/parallel-imports/${id}`));
+export const acceptPlParallelImport = (id) => api.post(`${PL}/parallel-imports/${id}/accept`, {});
+export const withdrawPlParallelImport = (id, reason) => api.post(`${PL}/parallel-imports/${id}/withdraw`, { reason });
+export const explainPlParallelDifference = (id, reason) =>
+  api.post(`${PL}/parallel-differences/${id}/explain`, { reason });
+export const acceptPlParallelDifference = (id) => api.post(`${PL}/parallel-differences/${id}/accept`, {});
+
+// ── Payslip templates (organisation-owned presentation layouts) ──────────
+const PST = "/api/payroll/payslip-templates";
+export const getPayslipTemplates = () => api.get(PST);
+export const getPayslipTemplate = (id) => api.get(`${PST}/${id}`);
+export const createPayslipTemplate = (payload) => api.post(PST, payload);
+export const updatePayslipTemplate = (id, payload) => api.put(`${PST}/${id}`, payload);
+export const publishPayslipTemplate = (id) => api.post(`${PST}/${id}/publish`, {});
+export const archivePayslipTemplate = (id) => api.delete(`${PST}/${id}`);
+export const previewPayslipTemplate = (payload) => api.post(`${PST}/preview`, payload);
+export const importPayslipTemplate = (formData) => api.post(`${PST}/import`, formData);
+export const assignPayslipTemplate = (templateId, country) =>
+  api.post(`${PST}/assignments`, { templateId, country: country || "ALL" });
+export const unassignPayslipTemplate = (country) =>
+  api.delete(`${PST}/assignments/${encodeURIComponent(country || "ALL")}`);
+// 404 (no template assigned) / 409 (payslip not representable) -> show the standard payslip.
+export const getPayslipRenderedHtml = (payslipId) => api.get(`/api/payroll/payslips/${payslipId}/rendered`);
+// Sample PDF of a template (sample data): what a downloaded payslip will look like.
+export const downloadPayslipTemplateSamplePdf = async (payload) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}${PST}/preview-pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    let detail = "Could not create the sample PDF.";
+    try { detail = (await res.json())?.detail || detail; } catch { /* not JSON */ }
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "sample-payslip.pdf";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+};
 export const downloadMxReciboDuplicate = (payslipId) =>
   mxPdf(`/api/payroll/mexico/payslips/${payslipId}/recibo/duplicate`, `recibo-${payslipId}-duplicado.pdf`);
 export const downloadMxPayHistory = (employeeId, start, end) =>
   mxPdf(`/api/payroll/mexico/employees/${employeeId}/pay-history?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&format=pdf`,
     `historial-${employeeId}.pdf`);
+// PDF design-match import: analyse (nothing stored), then create a draft from the confirmed analysis.
+export const analyzePayslipPdf = (formData) => api.post(`${PST}/import-pdf/analyze`, formData);
+export const createPayslipTemplateFromPdf = (payload) => api.post(`${PST}/import-pdf/create`, payload);

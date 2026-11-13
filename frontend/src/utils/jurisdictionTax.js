@@ -115,13 +115,24 @@ export const JURISDICTION_TAX_SCHEMAS = {
     ],
   },
   // Mexico — mirrors backend core/jurisdiction.py JURISDICTION_TAX_SCHEMAS.MX
-  // exactly. Schema only: MX stays out of registration until its release
-  // gates G1–G8 are signed (mexico_dormancy).
+  // exactly. Offered at registration (owner decision 2026-11-11); onboarding
+  // still needs MX_TENANT_ONBOARDING_ENABLED (mexico_dormancy).
   MX: {
     label: "RFC / Registro Patronal IMSS",
     fields: [
       { key: "rfc", label: "RFC (SAT taxpayer registry, legal entity)", pattern: "^[A-ZÑ&]{3}[0-9]{6}[A-Z0-9]{3}$", example: "ABC010101AB1", primary: true },
       { key: "registro_patronal", label: "Registro Patronal (IMSS employer registration)", pattern: "^[A-Z0-9]{11}$", example: "Y1234567101", primary: false },
+    ],
+  },
+  // Poland (ZP-PL-ENG-001 Phase 0) — mirrors backend core/jurisdiction.py
+  // JURISDICTION_TAX_SCHEMAS.PL exactly. Schema only: PL stays out of
+  // registration until its release gates G1–G7 are signed.
+  PL: {
+    label: "NIP / REGON / KRS",
+    fields: [
+      { key: "nip", label: "NIP (tax identification number, 10 digits)", pattern: "^\\d{10}$", example: "1234563218", primary: true },
+      { key: "regon", label: "REGON (statistical number, 9 or 14 digits)", pattern: "^(\\d{9}|\\d{14})$", example: "123456785", primary: false },
+      { key: "krs", label: "KRS (National Court Register number, 10 digits)", pattern: "^\\d{10}$", example: "0000123456", primary: false },
     ],
   },
 };
@@ -148,6 +159,13 @@ const COUNTRY_NAME_TO_CODE = {
   mexico: "MX",
   "méxico": "MX",
   "estados unidos mexicanos": "MX",
+  // Poland — never the bare "pl" (that is the paid-leave attendance code);
+  // the code "PL" itself resolves through JURISDICTION_TAX_SCHEMAS above.
+  poland: "PL",
+  polska: "PL",
+  "rzeczpospolita polska": "PL",
+  "republic of poland": "PL",
+  pol: "PL",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -163,6 +181,7 @@ const CODE_TO_COUNTRY_NAME = {
   NL: "Netherlands",
   ZA: "South Africa",
   MX: "Mexico",
+  PL: "Poland",
 };
 
 export function getJurisdictionCode(country) {

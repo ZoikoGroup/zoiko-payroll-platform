@@ -854,10 +854,10 @@ def _stripe_session(org_id, *, subscription="sub_CONFIRM_001", status="complete"
     }, "sk_test_FAKE")
 
 
-def _confirm(client, email, session):
+def _confirm(client, email, session, token=None):
     with patch.object(stripe.checkout.Session, "retrieve", return_value=session):
         return client.post("/api/billing/checkout/confirm", json={"session_id": "cs_test_CONFIRM"},
-                           headers=_auth(_login(client, email)))
+                           headers=_auth(token or _login(client, email)))
 
 
 def test_checkout_success_url_carries_the_session_id_template(client):
@@ -937,3 +937,123 @@ def test_confirm_deferred_checkout_is_trialing_and_never_undoes_a_later_payment(
     _db.expire_all()
     sub = _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _deferred_org.id).one()
     assert sub.status == SubscriptionStatus.ACTIVE.value
+
+
+# ── The whole platform reflects the payment: add employees afterwards ──────
+# The reported bug: payment succeeded, but the employee page kept answering
+# "Your organization doesn't have a plan yet" (payroll_router's own
+# require_active_subscription gate) because activation depended on the
+# webhook. Confirming the success page must clear that gate for both an
+# immediate charge and a deferred (TRIALING) commencement.
+
+def _seed_org_with_admin(org_code, email, *, workspace_type="PRODUCTION"):
+    db = SessionLocal()
+    try:
+        org = Organization(
+            organization_name=f"{org_code.title()} Corp",
+            organization_code=org_code,
+            workspace_type=workspace_type,
+            country="DE",
+            is_active=True,
+            billing_classification="COMMERCIAL_ACTIVE",
+            charge_enabled=True,
+        )
+        db.add(org)
+        db.flush()
+        user = User(
+            email=email,
+            hashed_password=hash_password("strong-password"),
+            role=UserRole.ORG_ADMIN,
+            first_name="Employee",
+            last_name="Admin",
+            organization_id=org.id,
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(org)
+        return org.id
+    finally:
+        db.close()
+
+
+def _token_for(email):
+    """Mint an MFA-complete token directly — this module already signs in nine
+    users and the login endpoint is rate-limited to 10/minute."""
+    from app.modules.auth import service as auth_service
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        assert user is not None
+        return auth_service.issue_access_token(user, mfa_at=int(time.time()))
+    finally:
+        db.close()
+
+
+def _de_employee_payload(steuer_id, employee_code="EMP001"):
+    """Minimal valid German employee (DE validation requires Steuer-ID,
+    Steuerklasse, Krankenkasse and IBAN)."""
+    return {
+        "employee_code": employee_code,
+        "name": "Post Payment Employee",
+        "email": "post-payment.employee@example.com",
+        "designation": "Engineer",
+        "employmentType": "Full-time",
+        "dateOfJoining": "2026-01-15",
+        "ctc": 60000,
+        "complianceFields": {
+            "steuer_id": steuer_id,
+            "steuerklasse": "I",
+            "krankenkasse": "TK",
+            "iban": "DE89370400440532013000",
+        },
+    }
+
+
+def test_confirm_immediate_checkout_unlocks_employee_creation(client):
+    org_id = _seed_org_with_admin("EMPAYCHK", "emp-after-pay@example.com")
+    token = _token_for("emp-after-pay@example.com")
+
+    # Before confirmation this PRODUCTION org has no subscription at all —
+    # payroll_router's require_active_subscription gate is exactly what the
+    # user saw as "can't add employees".
+    blocked = client.get("/api/payroll/employees", headers=_auth(token))
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["trace"]["reason"] == "no_subscription"
+
+    r = _confirm(client, "emp-after-pay@example.com",
+                 _stripe_session(org_id, subscription="sub_EMPLOYEE_PAID"), token=token)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "ACTIVE" and r.json()["workspace_type"] == "PRODUCTION"
+
+    listed = client.get("/api/payroll/employees", headers=_auth(token))
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == []
+
+    created = client.post("/api/payroll/employees", json=_de_employee_payload("12345678901"),
+                          headers=_auth(token))
+    assert created.status_code == 200, created.text
+    assert created.json()["name"] == "Post Payment Employee"
+
+
+def test_confirm_deferred_checkout_unlocks_employee_creation(client):
+    org_id = _seed_org_with_admin("EMPDEFCHK", "emp-after-deferred@example.com", workspace_type="EVALUATION")
+    token = _token_for("emp-after-deferred@example.com")
+
+    later = datetime.utcnow() + timedelta(days=30)
+    r = _confirm(client, "emp-after-deferred@example.com",
+                 _stripe_session(org_id, subscription="sub_EMPLOYEE_DEFERRED",
+                                 payment_status="no_payment_required", commencement=later),
+                 token=token)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "TRIALING" and r.json()["deferred"] is True
+
+    # TRIALING is within its active window (not GRACE_READONLY/CLOSED) and
+    # the EVALUATION workspace passes require_active_subscription — the
+    # customer gets full payroll access while nothing is charged yet.
+    listed = client.get("/api/payroll/employees", headers=_auth(token))
+    assert listed.status_code == 200, listed.text
+    created = client.post("/api/payroll/employees", json=_de_employee_payload("12345678902"),
+                          headers=_auth(token))
+    assert created.status_code == 200, created.text

@@ -307,6 +307,7 @@ export const getNzDecisions = () => apiFetch(`${NZ_SA}/decisions`);
 // Replays a pack's Inland Revenue examples through the engine (read-only; gate G1).
 export const runNzGoldenCheck = (packRowId) => apiFetch(`${NZ_SA}/packs/${packRowId}/golden-check`, { method: "POST" });
 export const seedNzDraftPack = (reason) => apiFetch(`${NZ_SA}/seed-draft`, { method: "POST", body: { reason } });
+
 export const getZaReadiness = () => apiFetch(`${ZA_SA}/readiness`);
 export const getZaGateChecklists = () => apiFetch(`${ZA_SA}/readiness/gate-checklists`);
 
@@ -1096,3 +1097,19 @@ export const getSaReadiness = (packId) =>
 export const previewSaudiArabiaCalculation = (payload) =>
   apiFetch(`${SA_SA}/calculation-preview`, { method: "POST", body: payload });
 
+// Poland (ZP-PL-ENG-001 P7a): the same governed signing console. Undefined
+// policies may be signed NOT_SUPPORTED (recorded; the engine keeps blocking them).
+const PL_SA = "/api/super-admin/compliance/poland";
+// The summary is served by the generic statutory-summary route (hook statutory_summary).
+export const getPlSummary = () => apiFetch("/api/super-admin/compliance/jurisdictions/PL/statutory-summary");
+export const listPlPacks = () => apiFetch(`${PL_SA}/packs`);
+export const getPlConfiguration = (packRowId) => apiFetch(`${PL_SA}/packs/${packRowId}/configuration`);
+export const getPlSigningStatus = (packRowId) => apiFetch(`${PL_SA}/packs/${packRowId}/signing-status`);
+export const updatePlRow = (kind, rowId, payload) =>
+  apiFetch(`${PL_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
+export const getPlDecisions = () => apiFetch(`${PL_SA}/decisions`);
+export const seedPlDraftPack = (reason) => apiFetch(`${PL_SA}/seed-draft`, { method: "POST", body: { reason } });
+// Poland Phase 9 — authority examples and the golden check (gate G1, AC-PL-02).
+export const addPlAuthorityExample = (packRowId, payload) =>
+  apiFetch(`${PL_SA}/packs/${packRowId}/authority-examples`, { method: "POST", body: payload });
+export const runPlGoldenCheck = (packRowId) => apiFetch(`${PL_SA}/packs/${packRowId}/golden-check`, { method: "POST" });

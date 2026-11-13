@@ -319,6 +319,27 @@ function Japan() {
   );
 }
 
+function Poland() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="8" fill="#fff" />
+      <rect y="8" width="24" height="8" fill="#DC143C" />
+    </svg>
+  );
+}
+
+function SaudiArabia() {
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      <rect width="24" height="16" fill="#006C35" />
+      <path d="M5 5.2 H19" stroke="#fff" strokeWidth="1.1" strokeLinecap="round" />
+      <path d="M6 8 H18" stroke="#fff" strokeWidth="0.9" strokeLinecap="round" />
+      <path d="M5 11.5 H15" stroke="#fff" strokeWidth="1" strokeLinecap="round" />
+      <path d="M16.5 11.8 L18.8 11.2" stroke="#fff" strokeWidth="0.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function NewZealand() {
   const star = (cx, cy, r) => {
     const points = Array.from({ length: 10 }, (_, i) => {
@@ -341,10 +362,10 @@ function NewZealand() {
 }
 
 const FLAGS = {
-  IN: India, US: UnitedStates, UK: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
+  IN: India, US: UnitedStates, UK: UnitedKingdom, GB: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
 PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
-  NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica, JP: Japan, NZ: NewZealand,
+  NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica, JP: Japan, NZ: NewZealand, PL: Poland, SA: SaudiArabia,
 };
 
 export default function CountryFlag({ code, className = "", fallback = null }) {

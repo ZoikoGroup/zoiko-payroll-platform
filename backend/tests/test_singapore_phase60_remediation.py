@@ -273,12 +273,13 @@ def test_f2_opt_in_is_singapore_only():
     under ZP-SA-ENG-001 §30, the Netherlands under ZP-NL-ENG-001
     (fail-closed), Mexico under ZP-MX-ENG-001 Phase 2 (four-eyes), Brazil
     under ZP-BR-ENG-001 (fail-closed) and South Africa under
-    ZP-ZA-ENG-001 Phase 5 (fail-closed/four-eyes). No other country is
+    ZP-ZA-ENG-001 Phase 5 (fail-closed/four-eyes) and Poland under
+    ZP-PL-ENG-001 Phase 4 (fail-closed/four-eyes). No other country is
     silently widened."""
     from app.modules.payroll.service import _APPROVER_NOT_ACTIVATOR_COUNTRIES
 
     assert _APPROVER_NOT_ACTIVATOR_COUNTRIES == (
-        "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA")
+        "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL")
 
 
 # ══ F3 — 2026 / 2027 pack effective periods ════════════════════════════════

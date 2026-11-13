@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, ListTree } from "lucide-react";
+import { X, ListTree, LayoutTemplate, Table } from "lucide-react";
 import StatutoryTraceDrawer from "../../../components/payroll/StatutoryTraceDrawer";
 import { formatCurrency } from "../../../utils/currency";
 import { getPayrollLabels, getIdentityField, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
 import { bankPaymentModeLabel, bankBtfLabel, combineRoutingValue } from "../Payroll_Employees/bankFieldsFor";
 import { nlEmployeeLines, nlEmployerLines } from "../PayRollRuns/nlPayslipLines";
-import { getPayslipById } from "../../../service/payrollService";
+import { getPayslipById, getPayslipRenderedHtml } from "../../../service/payrollService";
 import MexicoRecibo from "./MexicoRecibo";
 
 const printStyles = `
@@ -78,6 +78,21 @@ const ukDate = (iso) => {
 
 export default function PayslipStub({ payslip, onClose, currencyCode = "INR", company = null }) {
   const [traceOpen, setTraceOpen] = useState(false);
+  // Payslip templates: only when the organisation has assigned one (and the
+  // payslip can be shown through it) does the server return a rendered
+  // document; otherwise (404/409) the standard statutory payslip stays.
+  const [templateState, setTemplateState] = useState({ id: null, doc: null });
+  const [viewMode, setViewMode] = useState("template");
+  useEffect(() => {
+    if (!payslip?.id) return undefined;
+    let cancelled = false;
+    getPayslipRenderedHtml(payslip.id)
+      .then((res) => { if (!cancelled && res?.renderedHtml) setTemplateState({ id: payslip.id, doc: res }); })
+      .catch(() => { /* no template for this payslip: statutory view */ });
+    return () => { cancelled = true; };
+  }, [payslip?.id]);
+  const templateDoc = templateState.id === payslip?.id ? templateState.doc : null;
+  const showTemplate = viewMode === "template" && !!templateDoc;
   // UK: tax code/basis, NI category, tax period, employer refs and
   // year-to-date totals come from the single-payslip API (ukPayslip).
   const [ukDetails, setUkDetails] = useState(null);
@@ -282,6 +297,21 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
               )}
             </div>
             <div className="flex items-center gap-2">
+              {templateDoc && (
+                <div className="ps-no-print flex items-center rounded-[10px] bg-white/10 p-0.5">
+                  <button type="button" onClick={() => setViewMode("template")}
+                    title={`Template: ${templateDoc.metadata?.templateName || ""} v${templateDoc.metadata?.versionNumber || ""}`}
+                    className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1 text-xs font-semibold transition-all duration-200 ${
+                      viewMode === "template" ? "bg-white text-brand-navy-deep" : "text-white/80 hover:text-white"}`}>
+                    <LayoutTemplate size={13} /> Template
+                  </button>
+                  <button type="button" onClick={() => setViewMode("standard")}
+                    className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1 text-xs font-semibold transition-all duration-200 ${
+                      viewMode === "standard" ? "bg-white text-brand-navy-deep" : "text-white/80 hover:text-white"}`}>
+                    <Table size={13} /> Standard
+                  </button>
+                </div>
+              )}
               {chSnapshot?.trace && (
                 <button type="button" onClick={() => setTraceOpen(true)}
                   className="ps-no-print flex items-center gap-1.5 rounded-[10px] bg-white/15 px-2.5 py-1.5 text-xs font-semibold hover:bg-white/25 transition-all duration-200">
@@ -295,6 +325,19 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
           </div>
 
           {/* MAIN CONTENT */}
+          {showTemplate ? (
+            <div className="ps-main bg-white">
+              {/* Empty sandbox: no scripts, no same-origin access, no navigation.
+                  The document also carries its own script-blocking CSP. */}
+              <iframe
+                srcDoc={templateDoc.renderedHtml}
+                title="Payslip"
+                sandbox=""
+                referrerPolicy="no-referrer"
+                className="w-full h-[1000px] border-0 bg-white"
+              />
+            </div>
+          ) : (
           <div className="ps-main px-7 py-6">
             {/* PAYSLIP TITLE */}
             <div className="text-center mb-6">
@@ -576,6 +619,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
               <p className="text-[11px] text-foreground-muted">This is a computer-generated payslip and does not require a signature.</p>
             </div>
           </div>
+          )}
         </div>
       </div>
       <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}

@@ -25,6 +25,12 @@ SHARED = {"payslip_items": {"nz_correction_of_id"}, "payroll_runs": {"nz_run_opt
           "payroll_nz_leave_events": {"leave_pay_calculation_id"}}
 
 
+# Mexico m21 (efc56f3235e2, sweep S1) is the head after this chain: its columns are pending too.
+MX_M21 = {"payroll_mx_terminations": {"indemnity_daily_salary", "indemnity_salary_evidence_ref"},
+          "payroll_mx_labor_policies": {"hourly_rate_daily_hours", "special_pay_withholding_method"},
+          "payroll_employee_statutory_profiles": {"mx_union_member", "mx_sdi_operator_entered", "mx_sdi_evidence_ref"}}
+
+
 def _load(prefix=REVISION):
     path = next(VERSIONS.glob(f"{prefix}_*.py"))
     spec = importlib.util.spec_from_file_location(f"rev_{prefix}", path)
@@ -135,12 +141,25 @@ def test_drift_filter_explains():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    # Main's Google OAuth chain and P8 (dd8a60634320) are pending on the same head.
+    # Main's Google OAuth chain and P8 (dd8a60634320) are pending on the same head; so is Poland P2 (1ee3bbde33bb).
     assert tables == set(NEW_TABLES) | {"google_pending", "payroll_nz_filings", "payroll_nz_remittances",
                                         "payroll_nz_remittance_lines", "payroll_nz_settlements",
-                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences"} | MX_LIFECYCLE_TABLES
-    assert columns == {**SHARED, **MX_LIFECYCLE_COLUMNS, "users": {"auth_provider", "google_id", "avatar_url"},
-                       "payroll_nz_employer_profiles": {"nz_journal_accounts"}}
+                                        "payroll_nz_run_exceptions", "payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
+                                        "payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
+                                        "payroll_pl_employer_registrations", "payroll_pl_worker_profiles",
+                                        "payroll_pl_declarations", "payroll_pl_ppk_participations",
+                                        "payroll_pl_accumulator_entries",
+                                        "payroll_pl_incapacity_episodes",  # + Poland P6 (e11c2c36df17)
+                                        "payroll_pl_filings", "payroll_pl_settlements",
+                                        "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
+                                        "payroll_pl_parallel_imports",
+                                        "payroll_pl_parallel_differences",
+                                        "payroll_payslip_templates", "payroll_payslip_template_versions",
+                                        "payroll_payslip_template_assignments"} | MX_LIFECYCLE_TABLES  # + Poland P9 (e7ec6c1933b4)
+    pl_shared = {"payslip_items": {"pl_calculation_snapshot", "template_version_id"}, "payroll_runs": {"pl_approval_fingerprint"}}
+    assert columns == {**{t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}},
+                       "users": {"auth_provider", "google_id", "avatar_url"},
+                       "payroll_nz_employer_profiles": {"nz_journal_accounts"}, **MX_M21, **MX_LIFECYCLE_COLUMNS}
 
 
 def test_single_child_literal_and_manifest():

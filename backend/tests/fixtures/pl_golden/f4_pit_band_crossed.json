@@ -1,0 +1,42 @@
+{
+  "name": "f4_pit_band_crossed",
+  "spec": "ZP-PL-ENG-001 v1.0",
+  "payDate": "2026-03-31",
+  "source": "hand-computed from poland_content values + TEST fixtures in tests/_pl_engine_helpers.py",
+  "description": "YTD taxable income 118,000: 2,000 at 12% and 4,773 at 32% (cumulative, spec §4).",
+  "inputs": {
+    "gross": "8000",
+    "ytd": {
+      "PIT_TAXABLE_INCOME": "118000"
+    }
+  },
+  "expected": {
+    "pit": "1467.00",
+    "pit_base": "6773.00",
+    "zus_employee": {
+      "EMERYTALNE": "780.80",
+      "RENTOWE": "120.00",
+      "CHOROBOWE": "196.00"
+    },
+    "zus_employer": {
+      "EMERYTALNE": "780.80",
+      "RENTOWE": "520.00",
+      "WYPADKOWE": "133.60"
+    },
+    "health": "621.29",
+    "ppk_employee": "160.00",
+    "ppk_employer": "120.00",
+    "funds": {
+      "FP_FS": "196.00",
+      "FGSP": "8.00",
+      "FEP": "0.00"
+    },
+    "employee_total": "1878.09",
+    "employer_total": "1758.40",
+    "net": "4654.91",
+    "exceptions": []
+  },
+  "hand": [
+    "2000x12%=240.00 + 4773x32%=1527.36 = 1767.36; -300 = 1467.36 -> 1467"
+  ]
+}

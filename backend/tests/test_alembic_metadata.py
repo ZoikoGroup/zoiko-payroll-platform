@@ -297,9 +297,19 @@ def test_alembic_heads_is_single_head():
     # 9f1e2d3c4b5a and 7a3c9e1f2b4d add Google OAuth columns and pending state.
     # 5739c5ccf50c merges the Google OAuth and New Zealand leave-pay heads.
     # dd8a60634320 (New Zealand P8 nz_filings) is the single child of 5739c5ccf50c;
-    # a8cde2482ef0 (New Zealand P9 nz_parallel_cycles) is its single child.
-    # b5e1c7d9a3f2 (Mexico CFDI lifecycle) is the single child of a8cde2482ef0.
-    assert heads == ["b5e1c7d9a3f2"]
+    # a8cde2482ef0 (New Zealand P9 nz_parallel_cycles) is its single child;
+    # 1ee3bbde33bb (2026-11-05, Poland P2 pl_foundation) is the single child of a8cde2482ef0;
+    # e11c2c36df17 (Poland P6 pl_incapacity_episodes) is its single child;
+    # e75b9219e1f8 (Poland P8 pl_filing_settlement) is the single child of that;
+    # e7ec6c1933b4 (Poland P9 pl_parallel_cycles) is its single child.
+    # efc56f3235e2 (Mexico mx_decision_inputs_m21, sweep S1): seven nullable columns the
+    # decision options read (terminations, labour policies, statutory profiles); written on
+    # 3880223bfaa0, re-parented (never applied) onto e7ec6c1933b4.
+    # f3a9c1d7e2b4 (2026-11-11, payslip templates) is the single child of efc56f3235e2
+    # (re-parented, never applied, when origin/main was merged into venu) - single head.
+    # b5e1c7d9a3f2 (Mexico CFDI lifecycle, rugvedh) is the other child of a8cde2482ef0;
+    # 2defe5c4edd6 merges it with f3a9c1d7e2b4 (origin/main merged into rugvedh) - single head.
+    assert heads == ["2defe5c4edd6"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -311,7 +321,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["b5e1c7d9a3f2"]
+    assert list(script.get_heads()) == ["2defe5c4edd6"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -338,7 +348,11 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         # 998877665544: main's Singapore chain (c3d9e1f4a7b2) and venu's
         # 7c3e1a9d5f20 both grow from it; rejoined by merge 66072e2d80a9.
         "998877665544",
-        "a3f5c9d1b2e4", "b6c7d8e9f0a1",
+        "a3f5c9d1b2e4",
+        # a8cde2482ef0: rugvedh's Mexico CFDI lifecycle (b5e1c7d9a3f2) and main's Poland
+        # chain (1ee3bbde33bb) both grow from it; rejoined by merge 2defe5c4edd6.
+        "a8cde2482ef0",
+        "b6c7d8e9f0a1",
         # b8bd939fffca: Google OAuth and New Zealand leave-pay both descend
         # from Japan P9; merge 5739c5ccf50c rejoins their heads.
         "b8bd939fffca", "c1f5a9d22e10",
@@ -364,7 +378,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 255   # + b5e1c7d9a3f2 (Mexico CFDI lifecycle, child of a8cde2482ef0)
+    assert len(revs) == 262   # + 2defe5c4edd6 (merge) + b5e1c7d9a3f2 (Mexico CFDI lifecycle) + + f3a9c1d7e2b4 (payslip templates, child of efc56f3235e2) + efc56f3235e2 (Mexico mx_decision_inputs_m21, child of e7ec6c1933b4) + e7ec6c1933b4 (Poland P9 pl_parallel_cycles, child of e75b9219e1f8)
 
 
 def test_germany_head_chain_wiring_is_intact():

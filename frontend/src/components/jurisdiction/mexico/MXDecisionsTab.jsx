@@ -9,8 +9,9 @@ import { Messages, btn, btnPrimary, card, input, useLoad } from "./mxShared";
 // (DECISIONS_PENDING.md, gap register C4 / C5 / C12) with its options and
 // sources; a gate owner proposes an answer, a different Super Admin approves
 // it (the server enforces four-eyes, the typed grammar and immutability).
-// An approved decision changes no calculation: it yields a transcription
-// ticket for the next Draft pack.
+// Sweep S1: an approved answer is configuration — it switches the engine,
+// report or CFDI behaviour with no code change (a pack-row answer fills the
+// row the pack does not carry); while unanswered, the case keeps blocking.
 const STATUS_TONE = {
   OPEN: "text-foreground-muted", PROPOSED: "text-warning", APPROVED: "text-success", TRANSCRIBED: "text-success",
   WITHDRAWN: "text-foreground-muted", SUPERSEDED: "text-foreground-muted",
@@ -22,11 +23,27 @@ function Proposal({ d, onDone }) {
   const [form, setForm] = useState({ chosenOption: "", rationale: "", citedSources: "", ownerRole: d.ownerRole || "" });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const typed = d.allowedValues && d.allowedValues.length;
+  const parts = d.configuration?.parts;
+  const [picked, setPicked] = useState({});
+  const pick = (part) => (e) => {
+    const next = { ...picked, [part]: e.target.value };
+    setPicked(next);
+    setForm((f) => ({ ...f, chosenOption: parts.every((p) => next[p]) ? parts.map((p) => `${p}=${next[p]}`).join(";") : "" }));
+  };
   return (
     <form className="mt-2 grid gap-2 md:grid-cols-2" aria-label={`Propose ${d.code}`}
           onSubmit={(e) => { e.preventDefault(); onDone({ ...form, citedSources: form.citedSources.split(",").map((s) => s.trim()).filter(Boolean) }); }}>
       <label className="text-[12px] text-foreground-secondary">Chosen option
-        {typed
+        {parts
+          ? <span className="mt-1 flex flex-col gap-1" data-testid="mx-decision-parts">
+              {parts.map((part) => (
+                <select key={part} aria-label={`Part ${part}`} className={`${input} w-full`} value={picked[part] || ""} onChange={pick(part)} required>
+                  <option value="">— {part} —</option>
+                  {d.allowedValues.filter((v) => v.startsWith(`${part}=`)).map((v) => <option key={v} value={v.split("=")[1]}>{v}</option>)}
+                </select>
+              ))}
+            </span>
+          : typed
           ? <select aria-label="Chosen option" className={`${input} mt-1 w-full`} value={form.chosenOption} onChange={set("chosenOption")} required>
               <option value="">— choose —</option>{d.allowedValues.map((v) => <option key={v}>{v}</option>)}
             </select>
@@ -76,16 +93,35 @@ function Decision({ d, act }) {
             Populates: {d.contentKeys.length ? d.contentKeys.map((k) => <code key={k} className="mr-1">{k}</code>) : "—"} ·
             Question rests on: {d.questionSources.join(", ") || "—"} · Owner: {d.ownerRole || "—"}
           </p>
+          {d.configuration && (
+            <div className="rounded border border-border bg-surface p-2" data-testid="mx-decision-configuration">
+              <p><span className="font-semibold">Answering changes:</span> {d.configuration.changes}</p>
+              <p><span className="font-semibold">Still needs:</span> {d.configuration.needs || "nothing — answering completes it"}</p>
+              {d.configuration.notBuilt && Object.entries(d.configuration.notBuilt).map(([k, why]) => (
+                <p key={k} className="text-foreground-muted">Not built: <code>{k}</code> — {why}</p>
+              ))}
+            </div>
+          )}
           {d.chosenOption && (
             <p data-testid="mx-decision-answer">
-              <span className="font-semibold">Answer:</span> <code>{d.chosenOption}</code> — {d.rationale}
+              <span className="font-semibold">Answer:</span> <code className="break-all">{d.chosenOption}</code> — {d.rationale}
               <span className="ml-1 text-foreground-muted">(sources {d.citedSources.join(", ")}; hash {String(d.contentHash || "").slice(0, 12)})</span>
             </p>
           )}
           {d.ticket && (
             <div className="rounded border border-success/40 bg-success/5 p-2" data-testid="mx-decision-ticket">
-              <p className="font-semibold">Transcription ticket{d.ticket.transcribed ? ` — transcribed (${d.ticket.transcriptionRef})` : ""}</p>
-              <p>Set {d.ticket.contentKeys.join(", ") || "—"} = <code>{d.ticket.value}</code>, citing <code>{d.ticket.citation}</code>, in {d.ticket.target}; then {d.ticket.then}.</p>
+              {d.ticket.inForce ? (
+                <>
+                  <p className="font-semibold">In force{d.ticket.transcribed ? ` — transcribed (${d.ticket.transcriptionRef})` : ""}</p>
+                  <p><code className="break-all">{d.ticket.value}</code> — {d.ticket.changes}; {d.ticket.then}.</p>
+                  {d.ticket.stillNeeds && <p className="text-foreground-muted">Still needs: {d.ticket.stillNeeds}</p>}
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold">Transcription ticket{d.ticket.transcribed ? ` — transcribed (${d.ticket.transcriptionRef})` : ""}</p>
+                  <p>Set {d.ticket.contentKeys.join(", ") || "—"} = <code>{d.ticket.value}</code>, citing <code>{d.ticket.citation}</code>, in {d.ticket.target}; then {d.ticket.then}.</p>
+                </>
+              )}
             </div>
           )}
           {d.status === "OPEN" && <Proposal d={d} onDone={(form) => act(proposeMxDecision, d.id, form)} />}
@@ -151,7 +187,8 @@ export default function MXDecisionsTab() {
         <h3 className="text-[14px] font-semibold text-foreground">Decision register</h3>
         <p className="mt-1 text-[12px] text-foreground-muted">
           Each open question from DECISIONS_PENDING.md, with its options and sources. A proposal is approved by a different Super Admin;
-          an approved decision is immutable and changes no calculation by itself — it becomes a transcription ticket for the next Draft pack.
+          an approved answer is immutable and is in force at once — it switches the behaviour each decision lists, with no code
+          change (a pack-row answer fills the row the pack does not carry). Unanswered, each case keeps blocking with its own code.
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           <select aria-label="Filter by gate" className={input} value={gate} onChange={(e) => setGate(e.target.value)}>

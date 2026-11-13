@@ -1,6 +1,6 @@
 import { MpfAccountReveal } from "../Compliances/HKMpfAccessControls";
 import React, { useEffect, useState } from "react";
-import { X, Edit, Trash2, Calculator, Scale, ShieldCheck, Landmark, Clock } from "lucide-react";
+import { X, ArrowLeft, Edit, Trash2, Calculator, Scale, ShieldCheck, Landmark, Clock } from "lucide-react";
 import EmployeeForm from "./EmployeeForm";
 import { currencyInfoForCountry } from "../../../utils/currency";
 import UKStatutoryPayCalculatorModal from "./UKStatutoryPayCalculatorModal";
@@ -20,6 +20,7 @@ import BrazilStatutoryProfilePanel from "./BrazilStatutoryProfilePanel";
 import SouthAfricaStatutoryProfilePanel from "./SouthAfricaStatutoryProfilePanel";
 import JapanStatutoryProfilePanel from "./JapanStatutoryProfilePanel";
 import NewZealandStatutoryProfilePanel from "./NewZealandStatutoryProfilePanel";
+import PolandStatutoryProfilePanel from "./PolandStatutoryProfilePanel";
 import ZADeductionOrdersBlock from "./ZADeductionOrdersBlock";
 import CHFamilyAllowancePanel from "./CHFamilyAllowancePanel";
 import CHAbsenceEventsPanel from "./CHAbsenceEventsPanel";
@@ -116,6 +117,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
   const [showZaStatutory, setShowZaStatutory] = useState(false);
   const [showJpStatutory, setShowJpStatutory] = useState(false);
   const [showNzStatutory, setShowNzStatutory] = useState(false);
+  const [showPlStatutory, setShowPlStatutory] = useState(false);
   const [showChFamily, setShowChFamily] = useState(false);
   const [showChAbsence, setShowChAbsence] = useState(false);
   const [showHkForms, setShowHkForms] = useState(false);
@@ -152,9 +154,21 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-5 border-b border-border">
-          <h2 className="text-[15px] font-bold text-foreground">
-            {mode === "edit" ? "Edit employee" : employee.name}
-          </h2>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={mode === "edit" ? () => setMode("view") : onClose}
+              aria-label="Back"
+              title="Back"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-muted px-2.5 py-1.5 text-xs font-semibold text-foreground-muted hover:bg-surface hover:text-foreground transition-all duration-150 shrink-0"
+            >
+              <ArrowLeft size={13} />
+              <span>Back</span>
+            </button>
+            <h2 className="text-[15px] font-bold text-foreground">
+              {mode === "edit" ? "Edit employee" : employee.name}
+            </h2>
+          </div>
           <button
             onClick={onClose}
             aria-label="Close panel"
@@ -529,6 +543,27 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                 </div>
               )}
 
+              {employee.countryCode === "PL" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4" data-testid="pl-employee-block">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Poland statutory records
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowPlStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Worker profile and coverage, PIT / PPK statements, PPK participation, incapacity episodes, PESEL /
+                    NIP (masked, vault) and the annual cap — each approved by a second user before Polish payroll uses it.
+                  </p>
+                </div>
+              )}
+
 {employee.countryCode === "IT" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
                   <div className="flex items-center justify-between">
@@ -733,6 +768,9 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
       )}
       {showNzStatutory && (
         <NewZealandStatutoryProfilePanel employee={employee} onClose={() => setShowNzStatutory(false)} />
+      )}
+      {showPlStatutory && (
+        <PolandStatutoryProfilePanel employee={employee} onClose={() => setShowPlStatutory(false)} />
       )}
       {showSwissStatutory && (
         <SwitzerlandStatutoryProfilePanel employee={employee} onClose={() => setShowSwissStatutory(false)} />

@@ -205,15 +205,18 @@ def _difference(db: Session, org_id: int, diff_id: int):
 
 
 def _materiality(db: Session):
-    """The release owner's approved D-25 threshold (MXN), or None."""
+    """The release owner's approved D-25 threshold, or None (sweep S1: an MXN
+    amount, a percentage of the legacy amount, or per concept)."""
+    from app.modules.payroll import mexico_decision_config
+
     D = _m().PayrollMxDecision
     row = (db.query(D).filter(D.code == MATERIALITY_DECISION, D.status.in_(("APPROVED", "TRANSCRIBED")))
            .order_by(D.version.desc()).first())
     if row is None:
         return None
     try:
-        return Decimal(str(row.chosen_option))
-    except (InvalidOperation, ValueError):
+        return mexico_decision_config.threshold(MATERIALITY_DECISION, str(row.chosen_option))
+    except BadRequestException:
         return None
 
 
@@ -251,6 +254,8 @@ def _diff_view(r, refs: dict) -> dict:
 
 def parallel_summary(db: Session, imp) -> dict:
     """Counts per state and concept, and the cycle's clean verdict against D-25."""
+    from app.modules.payroll import mexico_decision_config
+
     m = _m()
     rows = db.query(m.PayrollMxParallelDifference).filter(m.PayrollMxParallelDifference.import_id == imp.id).all()
     states = {s: sum(1 for r in rows if r.state == s) for s in ("MATCH", "UNEXPLAINED", "EXPLAINED", "ACCEPTED")}
@@ -268,11 +273,12 @@ def parallel_summary(db: Session, imp) -> dict:
                              "declared clean.")
         material = None
     else:
-        material = sum(1 for r in rows if r.state in OPEN_STATES and abs(r.delta) > threshold)
+        material = sum(1 for r in rows if r.state in OPEN_STATES
+                       and mexico_decision_config.exceeds(threshold, r.delta, r.legacy_amount, r.concept, strict=True))
         clean = material == 0 and not unmatched.get("legacyOnly") and not unmatched.get("zoikoOnly")
         note = None if clean else "Material differences are not all accepted, or some employees are unmatched."
     return {"states": states, "concepts": {k: {**v, "absDelta": str(v["absDelta"])} for k, v in concepts.items()},
-            "materiality": {"decision": MATERIALITY_DECISION, "threshold": str(threshold) if threshold is not None
+            "materiality": {"decision": MATERIALITY_DECISION, "threshold": threshold["raw"] if threshold is not None
                             else None, "openMaterial": material},
             "clean": clean, "note": note}
 

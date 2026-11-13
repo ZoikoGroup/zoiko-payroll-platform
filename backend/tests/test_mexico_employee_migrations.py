@@ -95,6 +95,9 @@ def sqlite_engine(tmp_path):
 
     eng = sa.create_engine(f"sqlite:///{tmp_path / 'm3.db'}")
     Base.metadata.create_all(eng)
+    from tests.test_mexico_decision_inputs_migrations import _run as _run_m21
+
+    _run_m21(eng, "downgrade")                                          # the later sweep-S1 columns (m21) first
     with eng.begin() as c:                                              # start from the pre-m3 schema
         _run(c, "downgrade")
     return eng

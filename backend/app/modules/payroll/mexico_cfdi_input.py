@@ -49,6 +49,49 @@ _TZ = "Referencias del Huso Horario"
 #                 description gives (COA / NLE / TAM: -6 / -5)
 #   "SWAPPED"     the row's two offsets exchanged (-7 winter / -6 summer)
 TIMEZONE_INCONSISTENT_ROW_READING: Optional[str] = None
+
+
+def _sdi_imss_sbc(result: dict, prof) -> Optional[Decimal]:
+    """C4 (b): the IMSS SBC of the period's last contribution segment."""
+    segments = ((result or {}).get("sbc") or {}).get("segments") or []
+    return Decimal(str(segments[-1]["sbc"])) if segments and segments[-1].get("sbc") is not None else None
+
+
+def _sdi_lft_84(result: dict, prof) -> Optional[Decimal]:
+    """C4 (a): LFT Art. 84 integrated salary — the daily salary × the labour
+    policy's integration factor the SBC was built with (aguinaldo, vacation premium)."""
+    comps = ((result or {}).get("sbc") or {}).get("components") or {}
+    if comps.get("daily_salary") is None or comps.get("factor") is None:
+        return None
+    return Decimal(str(comps["daily_salary"])) * Decimal(str(comps["factor"]))
+
+
+def sindicalizado(prof) -> Optional[str]:
+    """C12 (sweep S1): OMIT (or unanswered) leaves Sindicalizado out — it is
+    optional in nomina12.xsd, read as "not associated"; FROM_PROFILE writes
+    "Sí" / "No" from the worker's Mexican profile, refusing while it is not recorded."""
+    from app.modules.payroll.engine.jurisdictions.mexico.decisions import switch
+
+    if switch("C12") != "FROM_PROFILE":
+        return None
+    member = getattr(prof, "mx_union_member", None)
+    if member is None:
+        _missing(["Sindicalizado (union membership on the Mexican profile)"], "employee")
+    return "Sí" if member else "No"
+
+
+def _sdi_operator_entered(result: dict, prof) -> Optional[Decimal]:
+    """C4 (c), sweep S1 — the counterpart of D-12 (c): the SalarioDiarioIntegrado
+    an operator entered on the worker's Mexican profile, with its evidence."""
+    value = getattr(prof, "mx_sdi_operator_entered", None)
+    if value is None or not getattr(prof, "mx_sdi_evidence_ref", None):
+        _missing(["SalarioDiarioIntegrado entered by an operator, with its evidence (C4 OPERATOR_ENTERED)"],
+                 "employee")
+    return Decimal(str(value))
+
+
+# C4 (sweep S1): the source of SalarioDiarioIntegrado once answered.
+SDI_SOURCES = {"LFT_84_INTEGRATED": _sdi_lft_84, "IMSS_SBC": _sdi_imss_sbc, "OPERATOR_ENTERED": _sdi_operator_entered}
 TIMEZONE_READINGS = ("SAME_LABEL", "SWAPPED")
 
 
@@ -107,7 +150,11 @@ def _inconsistent_offsets(set_id: str, attrs: dict, winter: int, summer: int) ->
 
     from app.modules.payroll import mexico_cfdi_schema
 
-    reading = TIMEZONE_INCONSISTENT_ROW_READING
+    from app.modules.payroll.engine.jurisdictions.mexico.decisions import switch
+
+    reading = switch("D-21", TIMEZONE_INCONSISTENT_ROW_READING)
+    if reading == "KEEP_REFUSING":                       # D-21 (c): answered, but keep refusing until SAT corrects
+        reading = None
     refused = (f"the place of issue's c_CodigoPostal row gives a summer offset ({summer}) that is not one hour ahead "
                f"of its winter offset ({winter}) — inconsistent in the SAT catalog (S30)")
     if reading is None:
@@ -307,7 +354,15 @@ def _concept_lines(db: Session, release_id: int, set_id: str, result: dict, on):
 
 def document_input(db: Session, run, item, release, base: dict) -> dict:
     """`base` (payslip id, folio, issuedAtUtc, replacesUuid, ...) + everything
-    the receipt needs. Refuses (MXBlock) instead of guessing a value."""
+    the receipt needs. Refuses (MXBlock) instead of guessing a value. The
+    register's approved decisions (D-21 …) apply (sweep S1)."""
+    from app.modules.payroll import mexico_decision_config
+
+    with mexico_decision_config.applying(db):
+        return _document_input(db, run, item, release, base)
+
+
+def _document_input(db: Session, run, item, release, base: dict) -> dict:
     from app.modules.payroll import mexico_cfdi_catalog_service, mexico_employee_service, mexico_employer_service
     from app.modules.payroll.models import PayrollEmployee, PayrollMxImssRegistration
 
@@ -344,12 +399,19 @@ def document_input(db: Session, run, item, release, base: dict) -> dict:
     missing = [f for f in needed if not receiver.get(f)]
     if missing:
         _missing(missing, "employee")
+    from app.modules.payroll.engine.jurisdictions.mexico.decisions import switch
+
+    receiver["unionized"] = sindicalizado(prof)
+    sdi_source = SDI_SOURCE
+    answered = switch("C4")
+    if answered is not None:
+        sdi_source = SDI_SOURCES[answered]
     if reg is not None:
-        if SDI_SOURCE is None:
+        if sdi_source is None:
             raise MXBlock("MX_CFDI_INPUT_MISSING",
                           "SalarioDiarioIntegrado (S4 p. 40, LFT Art. 84) has no recorded source — the engine computes "
                           "the IMSS SBC (S4 p. 39 treats it as SalarioBaseCotApor); a G1 decision is needed")
-        receiver["sdi"] = SDI_SOURCE(result, prof) if callable(SDI_SOURCE) else None
+        receiver["sdi"] = sdi_source(result, prof) if callable(sdi_source) else None
         if not receiver["sdi"]:
             _missing(["SalarioDiarioIntegrado"], "employee")
     perceptions, deductions, others, unmapped = _concept_lines(db, release.id, set_id, result, on)

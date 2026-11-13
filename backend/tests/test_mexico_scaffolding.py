@@ -189,9 +189,11 @@ def test_mx_hook_module_registered_with_full_contract():
     from app.modules.payroll import jurisdiction_hooks, mexico_service
 
     assert jurisdiction_hooks._MODULES["MX"] == "app.modules.payroll.mexico_service"
-    # The 13 shared hooks, plus Mexico's optional Phase 2 approval gate.
-    assert set(mexico_service.JURISDICTION_HOOKS) == _HOOK_KEYS | {"pack_approval_refusal"}
-    for name in _HOOK_KEYS | {"pack_approval_refusal"}:
+    # The 13 shared hooks, plus Mexico's optional Phase 2 approval gate and its
+    # pre-transition pack-status check (sweep S1, D-27).
+    optional = {"pack_approval_refusal", "before_pack_status"}
+    assert set(mexico_service.JURISDICTION_HOOKS) == _HOOK_KEYS | optional
+    for name in _HOOK_KEYS | optional:
         assert callable(jurisdiction_hooks.get("MX", name)), name
 
 
@@ -211,6 +213,8 @@ def test_other_hook_modules_unchanged():
         "JP": "app.modules.payroll.japan_service",
         # New Zealand (ZP-NZ-ENG-001) Phase 4 – all 13 hooks, fail-closed module.
         "NZ": "app.modules.payroll.new_zealand_service",
+        # Poland (ZP-PL-ENG-001) Phase 4 – all 13 hooks, fail-closed module.
+        "PL": "app.modules.payroll.poland_service",
     }
 
 

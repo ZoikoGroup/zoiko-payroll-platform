@@ -948,6 +948,22 @@ MX_IMSS_MOVEMENT_DEADLINE: Optional[MovementDeadlineRule] = MovementDeadlineRule
     "Art. 15 I: 'comunicar sus altas y bajas, las modificaciones de su salario y los demas datos, dentro de plazos "
     "no mayores de cinco dias habiles', PDF p. 6")
 MX_OFFICIAL_HOLIDAYS: dict = {}       # year -> (tuple of dates, source, source_ref); EMPTY until transcribed
+# Sweep S1 (D-16): the days that are NOT business days under each reading, for the years transcribed
+# (log TL-CAL-3, [PENDING G1]). Answering D-16 selects one list; until then MX_OFFICIAL_HOLIDAYS (empty)
+# applies and every movement stays DUE_DATE_UNSOURCED. Not datable from the saved sources, so not in
+# either list: election days (LFT Art. 74 IX), the fiscal authorities' general vacations (CFF Art. 12 ¶2),
+# days the labour authorities suspend work (LFT Art. 715).
+_HOLIDAYS_2026_LFT = (date(2026, 1, 1), date(2026, 2, 2), date(2026, 3, 16), date(2026, 5, 1), date(2026, 9, 16),
+                      date(2026, 11, 16), date(2026, 12, 25))
+MX_OFFICIAL_HOLIDAY_LISTS: dict = {
+    "LFT_74_715": {2026: (_HOLIDAYS_2026_LFT, "S26/S26_DIP_LFT.pdf",
+                          "Art. 74: 'Son dias de descanso obligatorio'; 'El primer lunes de febrero en conmemoracion "
+                          "del 5 de febrero'; 'El tercer lunes de marzo en conmemoracion del 21 de marzo'; 'El "
+                          "tercer lunes de noviembre en conmemoracion del 20 de noviembre', PDF p. 23")},
+    "CFF_12": {2026: (tuple(sorted(_HOLIDAYS_2026_LFT + (date(2026, 5, 5),))), "S35/S35_DIP_CFF.pdf",
+                      "Art. 12: 'En los plazos fijados en dias no se contaran los sabados, los domingos ni el 1o. de "
+                      "enero', PDF p. 7")},
+}
 
 # Phase 8: which filing-calendar report type (payroll_statutory_filing_calendar,
 # seeded only from verified MX_FILING_CALENDAR rules) dates each authority

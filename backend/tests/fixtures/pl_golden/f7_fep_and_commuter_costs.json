@@ -1,0 +1,56 @@
+{
+  "name": "f7_fep_and_commuter_costs",
+  "spec": "ZP-PL-ENG-001 v1.0",
+  "payDate": "2026-03-31",
+  "source": "hand-computed from poland_content values + TEST fixtures in tests/_pl_engine_helpers.py",
+  "description": "Evidenced FEP work (1.5% on the capped pension base) and a commuter-costs statement (300 PLN).",
+  "inputs": {
+    "gross": "8000",
+    "profile": {
+      "fep_qualifying": true,
+      "fep_from": "2026-01-01"
+    },
+    "declarations": [
+      [
+        "PIT2",
+        {
+          "allocation": "FULL"
+        }
+      ],
+      [
+        "COSTS_COMMUTER",
+        {}
+      ]
+    ]
+  },
+  "expected": {
+    "pit": "507.00",
+    "pit_base": "6723.00",
+    "zus_employee": {
+      "EMERYTALNE": "780.80",
+      "RENTOWE": "120.00",
+      "CHOROBOWE": "196.00"
+    },
+    "zus_employer": {
+      "EMERYTALNE": "780.80",
+      "RENTOWE": "520.00",
+      "WYPADKOWE": "133.60"
+    },
+    "health": "621.29",
+    "ppk_employee": "160.00",
+    "ppk_employer": "120.00",
+    "funds": {
+      "FP_FS": "196.00",
+      "FGSP": "8.00",
+      "FEP": "120.00"
+    },
+    "employee_total": "1878.09",
+    "employer_total": "1878.40",
+    "net": "5614.91",
+    "exceptions": []
+  },
+  "hand": [
+    "FEP 8000x1.5% = 120.00",
+    "PIT 8120-1096.80-300=6723.20 -> 6723; x12%=806.76-300=506.76 -> 507"
+  ]
+}

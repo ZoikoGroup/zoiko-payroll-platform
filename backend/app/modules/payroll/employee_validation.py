@@ -1931,6 +1931,109 @@ class ZAEmployeeValidation(EmployeeValidationStrategy):
                 "South African ID number fails the YYMMDD date check or the Luhn check digit.")
 
 
+# ── Poland (ZP-PL-ENG-001 Phase 0) ─────────────────────────────────────────
+# Published identifier checksums (identifier FORMAT, not statutory payroll
+# content, so they live in code like the ZA Luhn check). Never echo a value.
+_PL_PESEL_WEIGHTS = (1, 3, 7, 9, 1, 3, 7, 9, 1, 3)
+_PL_NIP_WEIGHTS = (6, 5, 7, 2, 3, 4, 5, 6, 7)
+_PL_REGON9_WEIGHTS = (8, 9, 2, 3, 4, 5, 6, 7)
+_PL_REGON14_WEIGHTS = (2, 4, 8, 5, 0, 9, 7, 3, 6, 1, 2, 4, 8)
+# PESEL month offset -> century (the birth month carries the century).
+_PL_PESEL_CENTURIES = ((80, 1800), (60, 2200), (40, 2100), (20, 2000), (0, 1900))
+
+
+def _pl_digits(value) -> str:
+    return re.sub(r"[\s-]", "", str(value or ""))
+
+
+def pl_pesel_birth_date(value) -> Optional[date]:
+    """The date of birth encoded in a PESEL, or None if it is not a real date."""
+    raw = _pl_digits(value)
+    if not re.fullmatch(r"\d{11}", raw):
+        return None
+    yy, mm, dd = int(raw[0:2]), int(raw[2:4]), int(raw[4:6])
+    for offset, century in _PL_PESEL_CENTURIES:
+        if offset < mm <= offset + 12:
+            try:
+                return date(century + yy, mm - offset, dd)
+            except ValueError:
+                return None
+    return None
+
+
+def pl_pesel_is_valid(value) -> bool:
+    raw = _pl_digits(value)
+    if not re.fullmatch(r"\d{11}", raw) or pl_pesel_birth_date(raw) is None:
+        return False
+    total = sum(int(d) * w for d, w in zip(raw[:10], _PL_PESEL_WEIGHTS))
+    return (10 - total % 10) % 10 == int(raw[10])
+
+
+def pl_nip_is_valid(value) -> bool:
+    raw = _pl_digits(value)
+    if not re.fullmatch(r"\d{10}", raw):
+        return False
+    check = sum(int(d) * w for d, w in zip(raw[:9], _PL_NIP_WEIGHTS)) % 11
+    return check != 10 and check == int(raw[9])
+
+
+def pl_regon_is_valid(value) -> bool:
+    raw = _pl_digits(value)
+    if re.fullmatch(r"\d{9}", raw):
+        check = sum(int(d) * w for d, w in zip(raw[:8], _PL_REGON9_WEIGHTS)) % 11
+        return (0 if check == 10 else check) == int(raw[8])
+    if re.fullmatch(r"\d{14}", raw):
+        if not pl_regon_is_valid(raw[:9]):
+            return False
+        check = sum(int(d) * w for d, w in zip(raw[:13], _PL_REGON14_WEIGHTS)) % 11
+        return (0 if check == 10 else check) == int(raw[13])
+    return False
+
+
+class PLEmployeeValidation(EmployeeValidationStrategy):
+    """Poland (ZP-PL-ENG-001) - employee fields that are NOT vault-only.
+
+    DORMANT: consulted only while PL_TENANT_ONBOARDING_ENABLED is on.
+    PESEL and NIP are held ONLY in the encrypted identifier vault
+    (payroll_pl_identifier_vault via /api/payroll/poland/employees/{id}/
+    identifiers, spec section 13, PL-025): a compliance field carrying either
+    is refused, never stored, and the refusal never echoes the value. The run
+    preflight requires a vault PESEL or a passport number (MISSING_IDENTIFIER).
+    The IBAN must be a Polish IBAN passing ISO 13616 mod-97 (masked
+    platform-wide, PLATFORM_SENSITIVE_COMPLIANCE_FIELDS).
+    """
+
+    country_code = "PL"
+    duplicate_field = "passport_number"
+    SENSITIVE_FIELDS = ("passport_number",)
+    FIELD_SPECS = {
+        "passport_number": {
+            "required": False, "upper": True, "strip_chars": " -",
+            "pattern": re.compile(r"^[A-Z0-9]{6,20}$"),
+            "error": "Passport number must be 6-20 letters or digits.",
+        },
+        "iban": {"required": False, "upper": True, "strip_chars": " "},
+    }
+    _VAULT_ONLY = ("national_id", "pesel", "tax_number", "nip", "tax_id")
+
+    @classmethod
+    def validate(cls, compliance: dict) -> dict:
+        keys = {str(k).strip().lower() for k in (compliance or {})}
+        if keys & set(cls._VAULT_ONLY):
+            raise BadRequestException("Polish PESEL and NIP are held only in the encrypted identifier vault "
+                                      "(/api/payroll/poland/employees/{id}/identifiers), never as an "
+                                      "employee field.")
+        return super().validate(compliance)
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        iban = cleaned.get("iban")
+        if iban:
+            if not re.fullmatch(r"PL\d{26}", iban) or not iban_checksum_ok(iban):
+                raise BadRequestException(
+                    "Polish IBAN must be PL followed by 26 digits with a valid check digit.")
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -1993,6 +2096,8 @@ _DORMANT_STRATEGIES = {
     "ZA": ZAEmployeeValidation,
     # New Zealand (ZP-NZ-ENG-001 Phase 4): dormant until NZ_TENANT_ONBOARDING_ENABLED.
     "NZ": NZEmployeeValidation,
+    # Poland (ZP-PL-ENG-001 Phase 0): dormant until PL_TENANT_ONBOARDING_ENABLED.
+    "PL": PLEmployeeValidation,
 }
 
 
@@ -2014,6 +2119,12 @@ def _dormant_strategy(code: str):
         # The flag, or any Option 3 canary organisation: only an organisation the
         # organisation-level gate admitted can hold a New Zealand employee.
         return strategy if nz_dormancy.onboarding_enabled() or nz_dormancy.canary_organization_ids() else None
+    if code == "PL":
+        from app.modules.payroll import poland_dormancy
+
+        # The flag, or any canary organisation: only an organisation the
+        # organisation-level gate admitted can hold a Polish employee.
+        return strategy if poland_dormancy.onboarding_enabled() or poland_dormancy.canary_organization_ids() else None
     from app.modules.payroll import mexico_dormancy
 
     # Phase 10e: the kill switch only — no session here. A Mexican employee
