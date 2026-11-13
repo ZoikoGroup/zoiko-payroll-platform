@@ -516,3 +516,12 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   was created.
 - Tests: test_belgium_content_workbook.py +2 (source reference and draft sources; the committed AI draft imports
   with 0 errors and signs nothing). Workbook + content: 32 passed. Registry diff: no route changed.
+
+## Block E3 — reviewer pack
+
+- docs/belgium/BELGIUM_REVIEWER_GUIDE.md: counts (HIGH 9 / MEDIUM 36 / LOW 187 / NOT FOUND 72); the NOT FOUND list
+  and LOW items first with what to check and where; the three conflicts found (RMMMG periods, 1.60% vs 1.69%,
+  10.27% year); 10 worked payslips (white-collar / manual; low / median / high; with / without dependants; weekday
+  and Sunday overtime; double holiday pay) line by line from drafted values only — withholding, work bonus and BSSC
+  are shown as NOT DRAFTED, so each stops at "net before withholding and BSSC"; the two-reviewer import / review /
+  bulk-sign procedure; the explicit note that these examples do not satisfy golden certification.
