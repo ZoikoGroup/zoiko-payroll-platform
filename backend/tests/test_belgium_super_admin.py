@@ -291,7 +291,8 @@ def test_activation_refusal_accepts_signed_not_supported_and_refuses_unsigned(db
     c = _c()
     src = _verified_source(db)
     _sign_everything(db, seeded, src.id)
-    assert belgium_service.be_pack_activation_refusal(db, seeded, actor_id=ACTIVATOR) is None
+    # content complete: what remains is the Block C2 golden gate (no authority example yet)
+    assert "the authority examples do not replay exactly" in belgium_service.be_pack_activation_refusal(db, seeded, actor_id=ACTIVATOR)
     row = _rate(db, seeded, "be_wage_rmmmg")
     row.label = f"{row.label} {c.PENDING_MARK}"                     # one unsigned row
     db.commit()
@@ -395,8 +396,8 @@ def test_owner_decisions_and_summary(db, seeded):
 
     decisions = belgium_service.owner_decisions(db)
     assert {d["key"] for d in decisions} >= {"G-11", "G-16", "G-21"} and {d["state"] for d in decisions} == {"OPEN"}
-    summary = belgium_service.statutory_summary(db)
-    assert summary["status"] == "NOT_BUILT" and set(summary["gates"].values()) == {"NOT MET"}
+    summary = belgium_service.be_statutory_summary(db)
+    assert summary["status"] == "NOT_CERTIFIED" and set(summary["gates"].values()) == {"NOT MET"}
     assert summary["packs"][0]["pendingRows"] == len(_c().KEYS)
 
 

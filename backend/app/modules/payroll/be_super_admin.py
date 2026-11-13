@@ -558,8 +558,9 @@ def joint_committees(db: Session) -> list:
 
 def add_authority_example(db: Session, pack_row_id: int, data: dict, actor_id) -> dict:
     """Register one official / independently prepared worked example (gate G1).
-    REGISTER ONLY in Phase 3A: no engine exists to replay it (Phase 10 golden
-    checks). Needs its reviewed source (the signing rule) and a reason."""
+    Block C2: an optional replayable `case` ("inputs => expected", see
+    belgium_golden) is stored in formula_expression and replayed exactly by the
+    golden check. Needs its reviewed source (the signing rule) and a reason."""
     from app.modules.payroll.models import TaxSlab
     from app.modules.payroll.service import _require_editable_pack
 
@@ -567,7 +568,7 @@ def add_authority_example(db: Session, pack_row_id: int, data: dict, actor_id) -
     pack = _pack(db, pack_row_id)
     _require_editable_pack(pack)
     data = dict(data or {})
-    unknown = set(data) - {"name", "description", "sourceDocumentId", "reason"}
+    unknown = set(data) - {"name", "description", "sourceDocumentId", "reason", "case"}
     if unknown:
         raise BadRequestException(f"not a field of an authority example: {', '.join(sorted(unknown))}")
     reason = _reason(data)
@@ -578,6 +579,16 @@ def add_authority_example(db: Session, pack_row_id: int, data: dict, actor_id) -
     description = " ".join(str(data.get("description") or "").split())
     if not description:
         raise BadRequestException("An authority example needs a description of the worked case.")
+    # Block C2: the replayable case "inputs => expected" (belgium_golden); an
+    # example without one is registered but never passes the golden check.
+    case = " ".join(str(data.get("case") or "").split()) or None
+    if case is not None:
+        from app.modules.payroll import belgium_golden
+
+        try:
+            belgium_golden.be_parse_example(case)
+        except ValueError as exc:
+            raise BadRequestException(f"The worked case is malformed: {exc}.")
     if db.query(TaxSlab.id).filter(TaxSlab.jurisdiction_pack_id == pack.id,
                                    TaxSlab.rule_type == content.AUTHORITY_EXAMPLE_RULE,
                                    TaxSlab.filing_status == name).first():
@@ -585,11 +596,12 @@ def add_authority_example(db: Session, pack_row_id: int, data: dict, actor_id) -
     row = TaxSlab(jurisdiction_pack_id=pack.id, organization_id=None, jurisdiction_country=BE,
                   rule_type=content.AUTHORITY_EXAMPLE_RULE, min_amount=Decimal("0"), max_amount=None,
                   rate_pct=Decimal("0"), filing_status=name, rate_label=f"Authority example {name}"[:150],
-                  tax_formula=description[:150], source_document_id=source.id, sort_order=9000)
+                  tax_formula=description[:150], formula_expression=case, source_document_id=source.id,
+                  sort_order=9000)
     db.add(row)
     db.flush()
     _finish(db, pack, actor_id, "be_statutory_slab", row.id, {},
-            {"ruleType": content.AUTHORITY_EXAMPLE_RULE, "name": name}, reason)
+            {"ruleType": content.AUTHORITY_EXAMPLE_RULE, "name": name, "case": case}, reason)
     return slab_view(row)
 
 

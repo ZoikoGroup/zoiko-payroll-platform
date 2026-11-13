@@ -1133,3 +1133,9 @@ export const addBeSlabRow = (packRowId, key, payload) =>
 export const retireBeSlabRow = (rowId, reason) =>
   apiFetch(`${BE_SA}/configuration/slab-rows/${rowId}`, { method: "DELETE", params: { reason } });
 export const listBeJointCommittees = () => apiFetch(`${BE_SA}/joint-committees`);
+// Block C2: golden replay of the authority examples, the shared BE certification
+// run the activation reads, and the release gates computed from evidence.
+export const getBeGoldenCheck = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/golden-check`);
+export const runBeGoldenCertification = (packRowId) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/golden-certification`, { method: "POST", body: {} });
+export const getBeReadiness = () => apiFetch(`${BE_SA}/readiness`);

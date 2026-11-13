@@ -11,6 +11,7 @@ import { REASON_FIELD, errorText, period } from "../../../components/jurisdictio
 import { BEResolverResult, BelgiumEmployeeRecords } from "../Payroll_Employees/BelgiumStatutoryProfilePanel";
 import { registrationPayload } from "../Payroll_Employees/beOrgPayloads";
 import BEFilingSettlementPanel from "./BEFilingSettlementPanel";
+import BEParallelCyclesSection from "./BEParallelCyclesSection";
 
 // Belgium Compliance Centre (ZP-BE-ENG-001 §2 / §15; Block A4). Employer
 // registration per legal employer (enterprise number, ONSS employer category,
@@ -342,6 +343,7 @@ export default function BEComplianceCentreTab() {
       <ResolverBlockers employees={employees} />
       <EmployeeRecords employees={employees} />
       <BEFilingSettlementPanel employees={employees} />
+      <BEParallelCyclesSection />
     </div>
   );
 }

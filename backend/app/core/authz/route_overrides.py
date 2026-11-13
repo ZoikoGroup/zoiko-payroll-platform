@@ -90,6 +90,8 @@ _set("GET", "/api/super-admin/compliance/jurisdictions/{country}/statutory-summa
      data_class="aggregate", note="per-jurisdiction statutory summary returns counts only")
 _set("GET", "/api/super-admin/compliance/singapore/statutory-summary", data_class="aggregate",
      note="Singapore statutory summary returns counts only")
+_set("GET", "/api/super-admin/compliance/belgium/readiness", data_class="aggregate",
+     note="Belgium release gates G1-G7: counts and organisation ids only (G2 counts uncovered employment lines)")
 _set("GET", "/api/super-admin/compliance/policies/{id}/impact-preview", data_class="aggregate",
      note="policy impact preview returns affected counts only")
 _set("GET", "/api/super-admin/dashboard/stats", data_class="aggregate",

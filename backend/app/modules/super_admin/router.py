@@ -4938,6 +4938,35 @@ def belgium_joint_committees(current_user=Depends(get_current_super_admin), db: 
     return be_super_admin.joint_committees(db)
 
 
+# ── Belgium Block C2: golden certification and release-gate readiness ───────
+@router.get("/compliance/belgium/packs/{pack_row_id}/golden-check",
+            summary="Replay the Belgium pack's authority examples exactly (read-only; G1)")
+def belgium_golden_check(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin, belgium_golden
+
+    return belgium_golden.be_golden_check(db, be_super_admin._pack(db, pack_row_id))
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/golden-certification",
+             summary="Record the Belgium golden-vector certification run (the shared certification the activation reads)")
+def belgium_golden_certification(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                                 db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin, belgium_golden
+
+    run, check = belgium_golden.record_be_golden_certification(db, be_super_admin._pack(db, pack_row_id),
+                                                               getattr(current_user, "id", None))
+    db.commit()
+    return {"runId": run.id, "status": run.status, "check": check}
+
+
+@router.get("/compliance/belgium/readiness", summary="Belgium release gates G1-G7 computed from evidence")
+def belgium_readiness_view(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_readiness
+
+    return belgium_readiness.be_readiness(db)
+
+
 @router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
              summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
 def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,

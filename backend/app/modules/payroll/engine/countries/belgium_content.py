@@ -267,10 +267,16 @@ KEYS = {
     "be_filing_dmfa_schema_versions": ("filing", KIND_VERSION, "§10, BE-034, G-08", "DmfA schema versions"),
     "be_filing_finprof_schema_versions": ("filing", KIND_VERSION, "§10, G-08", "FinProf schema versions"),
     "be_filing_belcotax_schema_versions": ("filing", KIND_VERSION, "§10, BE-014, G-08",
-                                           "Belcotax fiche schema versions"),
+                                           "Belcotax fiche schema versions"),    # parallel (§16, Block C2): agreed rounding tolerance per obligation; unsigned = exact
+    "be_parallel_tolerance_gross": ("parallel", KIND_AMOUNT, "§16, G4", "Parallel-run tolerance: gross (EUR)"),
+    "be_parallel_tolerance_withholding": ("parallel", KIND_AMOUNT, "§16, G4", "Parallel-run tolerance: withholding (EUR)"),
+    "be_parallel_tolerance_onss_employee": ("parallel", KIND_AMOUNT, "§16, G4", "Parallel-run tolerance: employee ONSS (EUR)"),
+    "be_parallel_tolerance_work_bonus_social": ("parallel", KIND_AMOUNT, "§16, G4", "Parallel-run tolerance: social work bonus (EUR)"),
+    "be_parallel_tolerance_net": ("parallel", KIND_AMOUNT, "§16, G4", "Parallel-run tolerance: net pay (EUR)"),
+    "be_parallel_tolerance_employer_onss": ("parallel", KIND_AMOUNT, "§16, G4", "Parallel-run tolerance: employer contributions (EUR)"),
 }
 GROUPS = ("policy", "withholding", "onss_employee", "onss_employer", "reductions", "holiday", "wages",
-          "working_time", "absence", "holidays", "earning_class", "filing")
+          "working_time", "absence", "holidays", "earning_class", "filing", "parallel")
 CATEGORY_LABELS = {
     "policy": "Scope, Policy & Rounding", "withholding": "Professional Withholding (Annex III)",
     "onss_employee": "ONSS/RSZ Employee", "onss_employer": "ONSS/RSZ Employer (reference; by employer/worker code)",
@@ -278,6 +284,7 @@ CATEGORY_LABELS = {
     "working_time": "Working Time & Overtime", "absence": "Absence & Guaranteed Salary",
     "holidays": "Public Holidays", "earning_class": "Earning Classification",
     "filing": "Authority Filing Schemas",
+    "parallel": "Parallel-Run Tolerances",
 }
 
 # TaxSlab rule type carrying each band / formula / table key's content.

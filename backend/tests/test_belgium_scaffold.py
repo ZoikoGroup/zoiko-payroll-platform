@@ -357,8 +357,8 @@ def test_specified_inert_values(db):
     from app.modules.payroll import jurisdiction_hooks as jh
 
     assert jh.call("BE", "pack_holidays", db, 2026) == []
-    summary = jh.call("BE", "statutory_summary", db)            # Phase 3A: pack + gate status, engine NOT_BUILT
-    assert summary["country"] == "BE" and summary["status"] == "NOT_BUILT" and summary["available"] is False
+    summary = jh.call("BE", "statutory_summary", db)            # Block C2: real gate states; not certified
+    assert summary["country"] == "BE" and summary["status"] == "NOT_CERTIFIED" and summary["available"] is False
     assert summary["gates"] == {g: "NOT MET" for g in ("G1", "G2", "G3", "G4", "G5", "G6", "G7")}
     assert jh.call("BE", "payslip_hold_view", SimpleNamespace(country_code="BE")) is None
 
@@ -429,14 +429,14 @@ def test_registry_cannot_open_belgium_and_the_refusal_is_audited(db):
     from app.modules.payroll.models import TaxConfigurationAudit
 
     _registry_row(db)
-    with pytest.raises(BadRequestException, match="Belgium release gates G1–G7 not met"):
+    with pytest.raises(BadRequestException, match="Statutory content"):    # Block C2: the real red gates
         service.transition_jurisdiction_service_registry(db, "BE", "AVAILABLE", "go live", actor_id=1)
     row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == "BE").one()
     assert row.availability == "PLANNED"
     audit = (db.query(TaxConfigurationAudit)
              .filter(TaxConfigurationAudit.entity_type == "jurisdiction_service_registry",
                      TaxConfigurationAudit.action == "refused").all())
-    assert len(audit) == 1 and "G1–G7" in audit[0].reason
+    assert len(audit) == 1 and "Statutory content" in audit[0].reason            # Block C2: real gates
 
 
 # ── pack governance ────────────────────────────────────────────────────────

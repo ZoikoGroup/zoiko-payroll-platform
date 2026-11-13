@@ -181,6 +181,15 @@ _STRUCTURAL_NUMBERS = {
         64: "sha256 hex width (key column)", 100: "reference column width (String(100))",
         200: "XSD error message width", 300: "note / message column width (String(300))",
     },
+    "belgium_golden.py": {0: "zero / first row", 1: "first day of the year / split once",
+                          5: "names shown in a refusal", 400: "case text width (formula_expression)"},
+    "belgium_parallel.py": {
+        0: "zero / no tolerance", 1: "first day of the cycle month", 2: "file size factor / first data line",
+        10: "enterprise-number SHAPE (ten digits; refused in an import)", 11: "NISS / BIS SHAPE (eleven digits)",
+        16: "Belgian IBAN SHAPE (BE + 14)", 100: "source name width", 300: "note width",
+        1024: "bytes per KiB (file size limit)", 5000: "maximum rows per import (operational limit)",
+    },
+    "belgium_readiness.py": {0: "zero / none", 1: "one / any", 5: "items shown in a detail"},
     "belgium_payment_service.py": {0: "list index / zero amount", 1: "batch sequence (+1)",
                                    100: "idempotency key / column width 100", 200: "return reason column width"},
     "be_identifiers.py": {
@@ -203,6 +212,7 @@ _STRUCTURAL_STRINGS = {
     ("belgium_service.py", "[a-z0-9_-]{1,50}"): "policy allowance key slug shape (column width 50)",
     ("belgium_service.py", "0.01"): "ledger amount column scale Numeric(14, 2) (storage precision, not rounding)",
     ("belgium_filing.py", "0.01"): "filing amount scale Numeric(14, 2) (storage precision, not rounding)",
+    ("belgium_parallel.py", "0.01"): "amount scale of an imported figure (two decimals; storage precision)",
     ("belgium_filing.py", "281.10"): "the Belcotax fiche NAME (form identifier, not a statutory value)",
     ("be_identifiers.py", r"^\d{5,16}$"): "ONSS employer number shape (5-16 digits; format only, G-16)",
     ("belgium_service.py", "^[A-Z0-9]{1,10}$"): "ONSS category / sub-committee code shape (1-10 letters / digits)",

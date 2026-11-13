@@ -268,7 +268,8 @@ def test_activation_refused_while_a_band_key_has_no_signed_rows(db, seeded, sour
     for s in db.query(TaxSlab).filter(TaxSlab.rule_type == "BE_RED_SOCIAL_WORK_BONUS"):
         s.rate_label = s.rate_label.replace(_c().PENDING_MARK, "").strip()
     db.commit()
-    assert belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER) is None
+    # content complete: what remains is the Block C2 golden gate (no authority example yet)
+    assert "the authority examples do not replay exactly" in belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER)
 
 
 # ── BePack over slab rows ──────────────────────────────────────────────────

@@ -683,3 +683,61 @@ def be_filing_calendar(year: Optional[int] = None, current_user=Depends(get_curr
 @router.get("/filing-exceptions", summary="The Belgian filing / payment exception queue")
 def be_filing_exceptions(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
     return _bf().exception_queue(db, _org_id(current_user))
+
+
+# ── Block C2: parallel payroll cycles (gate G4) ──────────────────────────────
+def _bp():
+    from app.modules.payroll import belgium_parallel
+
+    return belgium_parallel
+
+
+@router.get("/parallel-imports", summary="Belgian parallel-run imports")
+def be_list_parallel_imports(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _bp().list_be_parallel_imports(db, _org_id(current_user))
+
+
+@router.get("/parallel-imports/{import_id}", summary="One parallel-run import with its differences")
+def be_parallel_import(import_id: int, current_user=Depends(get_current_payroll_operator),
+                       db: Session = Depends(get_db)):
+    return _bp().be_parallel_summary(db, _org_id(current_user), import_id)
+
+
+@router.post("/parallel-imports", summary="Import an independent payroll output for a committed run (no identifiers)")
+def be_import_parallel(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                       db: Session = Depends(get_db)):
+    out = _bp().import_be_parallel(db, _org_id(current_user), body, _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.post("/parallel-differences/{difference_id}/explain", summary="Explain a parallel-run difference")
+def be_explain_parallel_difference(difference_id: int, body: Dict[str, Any] = Body(...),
+                                   current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    out = _bp().explain_be_parallel_difference(db, _org_id(current_user), difference_id, body.get("reason"), _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.post("/parallel-differences/{difference_id}/accept", summary="Accept an explained difference (four-eyes)")
+def be_accept_parallel_difference(difference_id: int, current_user=Depends(get_current_org_admin),
+                                  db: Session = Depends(get_db)):
+    out = _bp().accept_be_parallel_difference(db, _org_id(current_user), difference_id, _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.post("/parallel-imports/{import_id}/accept", summary="Accept a clean parallel cycle (four-eyes)")
+def be_accept_parallel_import(import_id: int, current_user=Depends(get_current_org_admin),
+                              db: Session = Depends(get_db)):
+    out = _bp().accept_be_parallel_import(db, _org_id(current_user), import_id, _actor(current_user))
+    db.commit()
+    return out
+
+
+@router.post("/parallel-imports/{import_id}/withdraw", summary="Withdraw an open parallel import (reason)")
+def be_withdraw_parallel_import(import_id: int, body: Dict[str, Any] = Body(...),
+                                current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    out = _bp().withdraw_be_parallel_import(db, _org_id(current_user), import_id, body.get("reason"), _actor(current_user))
+    db.commit()
+    return out

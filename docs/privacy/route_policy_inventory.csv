@@ -231,6 +231,13 @@ POST,/api/payroll/belgium/obligations/onss-advances,tenant_config,create,onss-ad
 POST,/api/payroll/belgium/obligations/{obligation_id}/payments,tenant_config,create,payments,org_admin,tenant,,,,no,
 POST,/api/payroll/belgium/obligations/{obligation_id}/reconcile,tenant_config,create,reconcile,org_admin,tenant,,,,no,
 GET,/api/payroll/belgium/options,tenant_config,read,options,org_admin|payroll_admin,tenant,,,,no,
+POST,/api/payroll/belgium/parallel-differences/{difference_id}/accept,worker,approve,accept,org_admin,tenant,,,payroll_be_parallel_differences,no,
+POST,/api/payroll/belgium/parallel-differences/{difference_id}/explain,worker,create,explain,org_admin,tenant,,,payroll_be_parallel_differences,no,
+GET,/api/payroll/belgium/parallel-imports,tenant_config,read,parallel-imports,org_admin|payroll_admin,tenant,,,,no,
+POST,/api/payroll/belgium/parallel-imports,worker,create,parallel-imports,org_admin,tenant,,,payroll_be_parallel_differences|payroll_employees|payslip_items,no,
+GET,/api/payroll/belgium/parallel-imports/{import_id},worker,read,parallel-imports,org_admin|payroll_admin,tenant,,,payroll_be_parallel_differences,no,
+POST,/api/payroll/belgium/parallel-imports/{import_id}/accept,worker,approve,accept,org_admin,tenant,,,payroll_be_parallel_differences,no,
+POST,/api/payroll/belgium/parallel-imports/{import_id}/withdraw,tenant_config,create,withdraw,org_admin,tenant,,,,no,
 GET,/api/payroll/belgium/payment-batches,tenant_config,read,payment-batches,org_admin|payroll_admin,tenant,,,,no,
 GET,/api/payroll/belgium/payment-batches/{batch_id},worker,read,payment-batches,org_admin|payroll_admin,tenant,,,payroll_be_payment_items,no,
 POST,/api/payroll/belgium/payment-batches/{batch_id}/approve,worker,approve,approve,org_admin,tenant,,,payroll_be_payment_items,no,
@@ -1149,8 +1156,11 @@ PUT,/api/super-admin/compliance/belgium/joint-committees/{agreement_id}/wage-mod
 GET,/api/super-admin/compliance/belgium/packs,platform,read,packs,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/belgium/packs/{pack_row_id}/authority-examples,platform,create,authority-examples,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/belgium/packs/{pack_row_id}/configuration,platform,read,configuration,super_admin,platform,,,,no,
+POST,/api/super-admin/compliance/belgium/packs/{pack_row_id}/golden-certification,platform,create,golden-certification,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/belgium/packs/{pack_row_id}/golden-check,platform,read,golden-check,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/belgium/packs/{pack_row_id}/signing-status,platform,read,signing-status,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/belgium/packs/{pack_row_id}/slab-rows/{key},platform,create,slab-rows,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/belgium/readiness,aggregate,read,readiness,super_admin,platform,,,payroll_be_employment_classifications|payroll_be_worker_profiles|payroll_employees,yes,Belgium release gates G1-G7: counts and organisation ids only (G2 counts uncovered employment lines)
 POST,/api/super-admin/compliance/belgium/seed-draft,platform,create,seed-draft,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/brazil/employees,worker,read,employees,,tenant,,worker-level data requires a live JIT support grant (ZP-PRIV A/B),payroll_employees,yes,"lists Brazilian employees (names, codes) of one organization"
 GET,/api/super-admin/compliance/brazil/employees/{employee_id},worker,read,employees,,tenant,,worker-level data requires a live JIT support grant (ZP-PRIV A/B),payroll_employees,yes,"one Brazilian employee's statutory profile, dependants, alimony and VT (Phase 4)"

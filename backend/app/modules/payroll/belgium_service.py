@@ -158,7 +158,11 @@ def be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[str
         shown = ", ".join(problems[:8]) + (f" (+{len(problems) - 8} more)" if len(problems) > 8 else "")
         return (f"Belgium pack {pack.pack_id} cannot be activated: {len(problems)} required row(s) are missing, "
                 f"empty, unsourced or unsigned: {shown}. Gate G1 must sign them (ZP-BE-ENG-001 §17).")
-    return None
+    # Block C2: the authority examples replay exactly and the shared BE golden-
+    # vector certification run passed (belgium_golden).
+    from app.modules.payroll import belgium_golden
+
+    return belgium_golden.be_golden_refusal(db, pack)
 
 
 def _be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[str]:
@@ -218,9 +222,12 @@ def _be_retention_settings():
 
 # ── 7. service_registry_transition (type a) ─────────────────────────────────
 def be_unmet_requirements(db: Session) -> list:
-    """Phase 1: the release gates are never met (readiness arrives in Phase 10)."""
-    return [{"key": "BE_RELEASE_GATES_G1_G7", "label": RELEASE_GATES_UNMET,
-             "detail": "ZP-BE-ENG-001 §17; the Belgian engine is not built"}]
+    """Block C2: every red release gate (G1-G7, computed from real evidence by
+    belgium_readiness) and every open launch-blocking owner decision. PLANNED ->
+    AVAILABLE is refused while this list is not empty."""
+    from app.modules.payroll import belgium_readiness
+
+    return belgium_readiness.be_unmet(db)
 
 
 def _be_service_registry_transition(db: Session, target: str, reason: str, actor_id=None, as_of=None):
@@ -256,9 +263,10 @@ def ensure_be_service_registry_row(db: Session) -> str:
 RELEASE_GATES = ("G1", "G2", "G3", "G4", "G5", "G6", "G7")
 
 
-def statutory_summary(db: Session) -> dict:
-    """Pack + signing status; the engine is NOT_BUILT and every release gate is
-    NOT MET (gates are computed in Phase 10)."""
+def be_statutory_summary(db: Session) -> dict:
+    """Pack + signing status and the REAL release-gate states (Block C2,
+    belgium_readiness): MET only when every check of the gate passes."""
+    from app.modules.payroll import belgium_readiness
     from app.modules.payroll.models import ContributionRate, JurisdictionPack
 
     content = _content()
@@ -274,8 +282,12 @@ def statutory_summary(db: Session) -> dict:
                     "rows": len(rates),
                     "pendingRows": sum(1 for r in rates if content.PENDING_MARK in (r.label or "")),
                     "activationRefusal": be_pack_activation_refusal(db, p)})
-    return {"country": BE, "jurisdiction": BE, "spec": SPEC, "status": "NOT_BUILT", "available": False,
-            "packs": out, "gates": {g: "NOT MET" for g in RELEASE_GATES}}
+    readiness = belgium_readiness.be_readiness(db)
+    gates = {g["gate"]: "MET" if g["passed"] else "NOT MET" for g in readiness["gates"]}
+    return {"country": BE, "jurisdiction": BE, "spec": SPEC,
+            "status": "CERTIFIED" if readiness["allPassed"] else "NOT_CERTIFIED", "available": False,
+            "packs": out, "gates": gates, "gateDetails": readiness["gates"],
+            "launchEmployers": readiness["launchEmployers"]}
 
 
 def _evidence(db: Session, tag: str):
@@ -450,7 +462,7 @@ JURISDICTION_HOOKS = {
     "pack_activation_refusal": "_be_pack_activation_refusal",
     "retention_settings": "_be_retention_settings",
     "service_registry_transition": "_be_service_registry_transition",
-    "statutory_summary": "statutory_summary",
+    "statutory_summary": "be_statutory_summary",       # be_-unique: the callgraph links by simple name
     "statutory_editors": "_be_statutory_editors",
     "template_activation_refusal": "_be_template_activation_refusal",
     "pack_holidays": "_be_pack_holidays",

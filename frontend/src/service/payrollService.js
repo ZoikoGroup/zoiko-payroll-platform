@@ -3239,6 +3239,15 @@ export const listBeVariances = async () => beList(await api.get(`${BE}/variances
 export const resolveBeVariance = (id, resolution) => api.post(`${BE}/variances/${id}/resolve`, { resolution });
 export const listBeFilingCalendar = async (year) => beList(await api.get(`${BE}/filing-calendar`, { params: { year } }));
 export const listBeFilingExceptions = async () => beList(await api.get(`${BE}/filing-exceptions`));
+// Block C2 — parallel cycles (gate G4); no identifier may appear in the file.
+export const listBeParallelImports = async () => beList(await api.get(`${BE}/parallel-imports`));
+export const createBeParallelImport = (body) => api.post(`${BE}/parallel-imports`, body);
+export const getBeParallelImport = async (id) => beOne(await api.get(`${BE}/parallel-imports/${id}`));
+export const acceptBeParallelImport = (id) => api.post(`${BE}/parallel-imports/${id}/accept`, {});
+export const withdrawBeParallelImport = (id, reason) => api.post(`${BE}/parallel-imports/${id}/withdraw`, { reason });
+export const explainBeParallelDifference = (id, reason) =>
+  api.post(`${BE}/parallel-differences/${id}/explain`, { reason });
+export const acceptBeParallelDifference = (id) => api.post(`${BE}/parallel-differences/${id}/accept`, {});
 
 // Poland (ZP-PL-ENG-001) — routes in backend/app/modules/payroll/pl_org_router.py,
 // mounted under /api/payroll/poland. Every route acts on the caller's own
