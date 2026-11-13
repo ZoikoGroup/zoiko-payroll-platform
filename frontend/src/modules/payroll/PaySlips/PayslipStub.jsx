@@ -474,6 +474,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
 
             {!isBlocked && beSnapshot && !beSnapshot.correctionOf && (
             <div className="mb-5 rounded-[8px] border border-border p-4" data-testid="be-payslip-section">
+              {beSnapshot.demo && <p className="mb-2 rounded-md border-2 border-error bg-error/10 px-2 py-1 text-center text-[13px] font-bold uppercase tracking-wider text-error" data-testid="be-demo-watermark">DEMO — NOT FOR PAYROLL</p>}
               <p className="mb-2 text-[12px] font-bold uppercase tracking-wider text-foreground-muted">
                 Belgium — employer contributions and obligations (not deducted from your pay)
               </p>

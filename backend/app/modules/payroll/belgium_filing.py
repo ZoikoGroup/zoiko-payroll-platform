@@ -261,7 +261,9 @@ def _key_parts(organization_id, legal_entity_id, form_code, key, subject, kind, 
 
 def rendition(payload: dict) -> str:
     """The human-readable rendition (BE-037): one "path: value" line per leaf."""
-    lines = []
+    from app.modules.payroll import belgium_demo
+
+    lines = [belgium_demo.DEMO_LABEL] if (payload or {}).get("demo") else []
 
     def walk(prefix, value):
         if isinstance(value, dict):
@@ -401,7 +403,10 @@ def _dimona_lines(db: Session, organization_id: int, employee_id: int) -> list:
 def _dimona_payload(db, organization_id, employee, line, event, start, end, extra=None) -> dict:
     P = be._models().PayrollBeWorkerProfile
     profile = be._latest_for(db, P, organization_id, start, employee_id=employee.id)
-    return {"form": "DIMONA", "event": event, "canonical": True,
+    from app.modules.payroll import belgium_demo
+
+    demo = {"demo": True, "demoLabel": belgium_demo.DEMO_LABEL} if belgium_demo.be_is_demo_org(organization_id) else {}
+    return {"form": "DIMONA", "event": event, "canonical": True, **demo,
             "employer": _employer(db, organization_id, getattr(employee, "legal_entity_id", None), start),
             "worker": {**_worker(db, organization_id, employee),
                        "workerCategory": getattr(profile, "worker_category", None),
@@ -525,6 +530,29 @@ def _entries(db: Session, organization_id: int, legal_entity_id, start: date, en
     return query.order_by(Entry.employee_id, Entry.id).all()
 
 
+def _be_items_demo(db: Session, item_ids) -> bool:
+    """Block E4: any DEMO payslip among the sources makes the filing DEMO."""
+    from app.modules.payroll import belgium_demo
+    from app.modules.payroll.models import PayslipItem
+
+    ids = sorted(i for i in item_ids if i)
+    return bool(ids) and any(belgium_demo.be_snapshot_is_demo(i.be_calculation_snapshot)
+                             for i in db.query(PayslipItem).filter(PayslipItem.id.in_(ids)).all())
+
+
+def _be_mark_demo(payload: dict, demo: bool) -> dict:
+    from app.modules.payroll import belgium_demo
+
+    return {**payload, "demo": True, "demoLabel": belgium_demo.DEMO_LABEL} if demo else payload
+
+
+def _be_refuse_demo_filing(row, action: str) -> None:
+    from app.modules.payroll import belgium_demo
+
+    if (row.payload or {}).get("demo"):
+        _conflict("BE_DEMO_FILING", f"{belgium_demo.DEMO_LABEL}: a demo filing is never {action}.")
+
+
 def _employer_contributions(db: Session, item_ids) -> dict:
     """{payslip_item_id: employer total} from the frozen BE snapshots (a
     correction payslip carries its employerTotalDelta)."""
@@ -606,6 +634,7 @@ def build_be_dmfa(db: Session, organization_id: int, quarter: str, legal_entity_
                           "employerContributions": _s(totals["employerContributions"]),
                           "socialWorkBonus": _s(totals["WORK_BONUS_SOCIAL"]), "onssDue": _s(onss_due),
                           "holidayFund": _s(totals["holidayFund"])}}
+    payload = _be_mark_demo(payload, _be_items_demo(db, {e.payslip_item_id for e in entries}))
     due, _why = due_on(db, "DMFA", key)
     filing = upsert_filing(db, organization_id, legal_entity_id, "DMFA", key, payload, _run_ids(entries), due, actor_id)
     obligations = [upsert_obligation(db, organization_id, legal_entity_id, "ONSS_QUARTER", key, onss_due, filing,
@@ -651,6 +680,7 @@ def build_be_withholding(db: Session, organization_id: int, period: str, legal_e
                "fiscalWorkBonus": _s(sums["WORK_BONUS_FISCAL"]), "totalWithheld": _s(total),
                # the FinProf nature-of-income codes are content (G-08)
                "coding": "PENDING_CONTENT"}
+    payload = _be_mark_demo(payload, _be_items_demo(db, {e.payslip_item_id for e in entries}))
     due, _why = due_on(db, "FINPROF", period)
     filing = upsert_filing(db, organization_id, legal_entity_id, "FINPROF", period, payload, _run_ids(entries), due,
                            actor_id)
@@ -694,6 +724,8 @@ def build_be_belcotax(db: Session, organization_id: int, income_year: int, legal
                    "workBonus": {"social": _s(sums["WORK_BONUS_SOCIAL"]), "fiscal": _s(sums["WORK_BONUS_FISCAL"])},
                    # the 281.10 box codes are content (G-08)
                    "coding": "PENDING_CONTENT"}
+        payload = _be_mark_demo(payload, _be_items_demo(db, {x.payslip_item_id for x in entries
+                                                              if x.employee_id == employee_id}))
         out.append(upsert_filing(db, organization_id, legal_entity_id, "BELCOTAX", str(year), payload,
                                  _run_ids([x for x in entries if x.employee_id == employee_id]), due, actor_id,
                                  subject=f"E{employee_id}"))
@@ -1016,6 +1048,7 @@ def approve_be_filing(db: Session, organization_id: int, filing_id: int, actor_i
 def transmit_be_filing(db: Session, organization_id: int, filing_id: int, actor_id):
     """Automatic transmission: refused while gate G3 is not certified (D9)."""
     row = _filing(db, organization_id, filing_id)
+    _be_refuse_demo_filing(row, "transmitted")
     if row.status != "APPROVED":
         raise BadRequestException("Only an APPROVED Belgian filing can be transmitted.")
     renderer = RENDERERS.get((row.form_code, row.schema_version))
@@ -1033,6 +1066,7 @@ def record_be_filing_submission(db: Session, organization_id: int, filing_id: in
         raise BadRequestException("submissionRef is required.")
     mandate = str(payload.get("mandateRef") or "").strip()[:100] or None
     row = _filing(db, organization_id, filing_id)
+    _be_refuse_demo_filing(row, "submitted to an authority")
     if row.status in SENT or row.status == "REJECTED":
         if row.submission_ref == ref:
             return row                                                     # idempotent retry
@@ -1109,7 +1143,7 @@ def filing_view(row, include_payload: bool = False) -> dict:
            "transmittedById": row.transmitted_by_id,
            "transmittedAt": row.transmitted_at.isoformat() if row.transmitted_at else None,
            "respondedAt": row.responded_at.isoformat() if row.responded_at else None,
-           "event": (row.payload or {}).get("event")}
+           "event": (row.payload or {}).get("event"), "demo": bool((row.payload or {}).get("demo"))}
     if include_payload:
         out["payload"] = row.payload                                        # masked identifiers only
         out["rendition"] = row.rendition

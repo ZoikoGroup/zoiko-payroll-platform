@@ -525,3 +525,32 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   and Sunday overtime; double holiday pay) line by line from drafted values only — withholding, work bonus and BSSC
   are shown as NOT DRAFTED, so each stops at "net before withholding and BSSC"; the two-reviewer import / review /
   bulk-sign procedure; the explicit note that these examples do not satisfy golden certification.
+
+## Block E4 — DEMO pack (non-production only)
+
+- belgium_demo.py: BE-DEMO-2026 "DEMO — NOT FOR PAYROLL" built from the AI-drafted workbook; NOT FOUND rows take
+  clearly fake placeholders from docs/belgium/content/BE_DEMO_PLACEHOLDERS.json (generated from the synthetic
+  TEST ONLY engine pack; no value in code). Every row labelled DEMO, signed and Active ONLY via be_seed_demo_pack.
+- Guards: new settings BE_DEMO_PACKS_ENABLED (default false) and BE_DEMO_ORG_IDS; production = ENVIRONMENT /
+  APP_ENV production / prod / live, or none set with DEBUG false -> demo refused everywhere. Calc inputs refuse a
+  DEMO pack for a non-demo organisation; _be_pack_for returns no pack (preflight BE_PACK_MISSING); governed
+  activation refuses DEMO packs; assignment refused unless every organisation is a demo organisation (shared
+  assign_pack_to_organizations BE branch now passes the organisation ids — additive, BE-guarded).
+- Watermark and money / authority stops: payslip snapshots carry demo + "DEMO — NOT FOR PAYROLL"; DEMO payment
+  batches can be built and approved but never submitted, never released as pain.001, never given a bank result;
+  filings built from DEMO payslips (and a demo organisation's Dimona) carry demo, the rendition starts with the
+  DEMO label, transmission and submission are refused. A demo organisation's run replaces the Dimona IN block by a
+  non-blocking BE_DEMO_DIMONA_SIMULATED item (its Dimona is never transmitted). UI: DEMO watermark on the payslip
+  stub and breakdown, DEMO badge on payment batches and filings.
+- scripts/seed_belgium_demo.py: local / staging only (_local_db_guard, flag, non-production); creates the demo
+  pack, a demo organisation (BE-DEMO), two demo employees (white-collar 495, manual 015) and one demo month
+  (setup -> preview -> approve -> payslips -> DRAFT payment batch -> DmfA draft). Creates NO user account: it needs
+  two existing, different user ids (--preparer, --approver).
+- Registry diff: 10 existing Belgian routes changed, all intended (demo checks read payslip snapshots / payment
+  items): 9 gain scan tables only; GET /payment-batches tenant_config -> worker (the list flags DEMO batches;
+  stricter, principals unchanged). Registry + inventory regenerated.
+- Tests: test_belgium_demo.py (new, 8): off by default and refused in production (incl. DEBUG-off default),
+  seed refused when disabled / production, demo pack labelled / signed / Active while the real pack stays Draft and
+  unsigned, governed activation and assignment refuse it, a non-demo organisation never calculates with it,
+  end-to-end demo month never paid or transmitted, switching demo off blocks the demo organisation, the seed never
+  creates accounts. Belgium files + privacy: 825 passed, 16 skipped, 3 known health-route failures.

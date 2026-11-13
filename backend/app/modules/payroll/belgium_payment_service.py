@@ -191,6 +191,26 @@ def _batch(db: Session, organization_id: int, batch_id: int):
     return row
 
 
+def _be_batch_is_demo(db: Session, row) -> bool:
+    """Block E4: a batch paying any DEMO payslip is a DEMO batch."""
+    from app.modules.payroll import belgium_demo
+    from app.modules.payroll.models import PayslipItem
+
+    Item = _models().PayrollBePaymentItem
+    for (pid,) in db.query(Item.payslip_item_id).filter(Item.batch_id == row.id):
+        item = db.get(PayslipItem, pid) if pid else None
+        if item is not None and belgium_demo.be_snapshot_is_demo(item.be_calculation_snapshot):
+            return True
+    return False
+
+
+def _be_refuse_demo(db: Session, row, action: str) -> None:
+    from app.modules.payroll import belgium_demo
+
+    if _be_batch_is_demo(db, row):
+        raise PaymentServiceError(f"{belgium_demo.DEMO_LABEL}: a demo payment batch is never {action}.")
+
+
 def approve_payment_batch(db: Session, organization_id: int, batch_id: int, actor_id: int):
     """Four-eyes: the approver is not the creator (the database also refuses it)."""
     row = _batch(db, organization_id, batch_id)
@@ -212,6 +232,7 @@ def _move(row, action: str) -> None:
 
 def submit_payment_batch(db: Session, organization_id: int, batch_id: int, actor_id: int):
     row = _batch(db, organization_id, batch_id)
+    _be_refuse_demo(db, row, "submitted to a bank")
     _move(row, "submit")
     row.submitted_at = datetime.utcnow()
     Item = _models().PayrollBePaymentItem
@@ -226,6 +247,7 @@ def record_bank_result(db: Session, organization_id: int, batch_id: int, outcome
     if outcome not in ("ACCEPTED", "REJECTED", "UNKNOWN"):
         raise PaymentServiceError("outcome must be ACCEPTED, REJECTED or UNKNOWN.")
     row = _batch(db, organization_id, batch_id)
+    _be_refuse_demo(db, row, "paid (no bank result is recorded)")
     _move(row, outcome)
     db.flush()
     return row
@@ -261,7 +283,11 @@ def batch_view(db: Session, organization_id: int, batch_id: int) -> dict:
     row = _batch(db, organization_id, batch_id)
     Item = _models().PayrollBePaymentItem
     items = db.query(Item).filter(Item.batch_id == row.id).order_by(Item.id).all()
+    from app.modules.payroll import belgium_demo
+
+    demo = _be_batch_is_demo(db, row)
     return {"id": row.id, "runId": row.payroll_run_id, "status": row.status, "messageId": row.message_id,
+            "demo": demo, "demoLabel": belgium_demo.DEMO_LABEL if demo else None,
             "sha256": row.pain001_sha256, "createdById": row.created_by_id, "approvedById": row.approved_by_id,
             "items": [{"employeeId": i.employee_id, "payslipItemId": i.payslip_item_id, "amount": str(i.amount),
                        "iban": mask_iban(i.iban_token), "endToEndId": i.end_to_end_id, "status": i.status,
@@ -274,11 +300,13 @@ def list_payment_batches(db: Session, organization_id: int, run_id: Optional[int
     if run_id is not None:
         q = q.filter(Batch.payroll_run_id == run_id)
     return [{"id": b.id, "runId": b.payroll_run_id, "status": b.status, "messageId": b.message_id,
-             "createdById": b.created_by_id, "approvedById": b.approved_by_id} for b in q.order_by(Batch.id)]
+             "createdById": b.created_by_id, "approvedById": b.approved_by_id, "demo": _be_batch_is_demo(db, b)}
+            for b in q.order_by(Batch.id)]
 
 
 def batch_file(db: Session, organization_id: int, batch_id: int) -> Tuple[str, str]:
     row = _batch(db, organization_id, batch_id)
+    _be_refuse_demo(db, row, "released as a pain.001 file")
     if row.status in ("DRAFT",):
         raise PaymentServiceError("The pain.001 file is released only after a second person approves the batch.")
     return f"{row.message_id}.xml", row.pain001_xml

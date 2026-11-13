@@ -229,7 +229,8 @@ function Filings() {
       {loading ? <p className="text-[12px] text-foreground-muted">Loading…</p> : (
         <Table rows={rows} empty="No Belgian filings yet."
           columns={[
-            { label: "Form", key: "formCode" }, { label: "Event", render: (r) => r.event || "—" },
+            { label: "Form", render: (r) => (r.demo ? <span>{r.formCode} <strong className="text-error">DEMO</strong></span> : r.formCode) },
+            { label: "Event", render: (r) => r.event || "—" },
             { label: "Period", key: "periodKey" }, { label: "Kind", render: (r) => `${r.kind} v${r.version}` },
             { label: "Status", key: "status" },
             { label: "Schema", render: (r) => r.schemaVersion || "—" },

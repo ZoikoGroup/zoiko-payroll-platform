@@ -27,6 +27,7 @@ export default function BEPayslipBreakdown({ snapshot, employeeName }) {
   const correction = snapshot.correctionOf;
   return (
     <div className="mt-2 rounded-lg border border-border bg-surface-muted/40 p-3" data-testid="be-payslip-breakdown">
+      {snapshot.demo && <p className="mb-2 rounded-md border-2 border-error bg-error/10 px-2 py-1 text-center text-[13px] font-bold uppercase tracking-wider text-error" data-testid="be-demo-watermark">DEMO — NOT FOR PAYROLL</p>}
       <p className="text-[12px] font-semibold text-foreground">
         Belgium — {employeeName}{snapshot.identifierMasked ? ` · ${snapshot.identifierMasked}` : ""}
         {snapshot.documentVersion ? ` · ${snapshot.documentVersion}` : ""}

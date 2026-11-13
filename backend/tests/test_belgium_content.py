@@ -190,6 +190,12 @@ _STRUCTURAL_NUMBERS = {
         1024: "bytes per KiB (file size limit)", 5000: "maximum rows per import (operational limit)",
     },
     "belgium_readiness.py": {0: "zero / none", 1: "one / any", 5: "items shown in a detail"},
+    "belgium_demo.py": {
+        0: "zero / first sheet row", 1: "first day / header", 4: "repository root (parents index)",
+        10: "YYYY-MM-DD width", 100: "label width", 150: "slab label / formula width",
+        2025: "DEMO employees' illustrative hire year", 2026: "DEMO month year", 9: "DEMO month (September)",
+        30: "DEMO month end day",
+    },
     "be_content_workbook.py": {0: "first sheet / zero", 1: "first column / header row", 2: "first data row",
                                4: "YYYY width", 10: "YYYY-MM-DD width / refusals listed", 100: "period label width",
                                50: "source form-number width", 200: "source agency width", 300: "source title width"},

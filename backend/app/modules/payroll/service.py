@@ -20117,7 +20117,7 @@ def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids
         # assigned. Every other country's assignment behaviour is unchanged.
         from app.modules.payroll.belgium_service import be_pack_assignment_refusal
 
-        be_refusal = be_pack_assignment_refusal(pack)
+        be_refusal = be_pack_assignment_refusal(pack, organization_ids)
         if be_refusal:
             raise BadRequestException(be_refusal)
     is_tax = pack.pack_type == "tax"

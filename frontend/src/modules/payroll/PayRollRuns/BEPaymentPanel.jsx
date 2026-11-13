@@ -45,6 +45,7 @@ export default function BEPaymentPanel({ runId }) {
           <li key={b.id} className="flex flex-wrap items-center gap-2 text-[12px]" data-testid={`be-payment-batch-${b.id}`}>
             <span className="font-mono">{b.messageId}</span>
             <span className="font-semibold">{b.status}</span>
+            {b.demo && <span className="rounded bg-error/10 px-1 font-bold text-error" data-testid="be-demo-batch">DEMO — NEVER PAID</span>}
             {b.status === "DRAFT" && (
               <button type="button" className={btn} disabled={state.busy}
                 onClick={() => act(() => approveBePaymentBatch(b.id), "Batch approved.")}>Approve</button>

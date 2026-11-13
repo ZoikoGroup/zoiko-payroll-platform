@@ -3173,7 +3173,8 @@
    "scan_worker_tables": [
     "payroll_be_accumulator_entries",
     "payroll_be_identifier_vault",
-    "payroll_employees"
+    "payroll_employees",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -4298,7 +4299,7 @@
   {
    "method": "GET",
    "path": "/api/payroll/belgium/payment-batches",
-   "data_class": "tenant_config",
+   "data_class": "worker",
    "action": "read",
    "resource": "payment-batches",
    "principals": [
@@ -4309,7 +4310,10 @@
    "field_classes": [],
    "retired_reason": null,
    "note": null,
-   "scan_worker_tables": [],
+   "scan_worker_tables": [
+    "payroll_be_payment_items",
+    "payslip_items"
+   ],
    "overridden": false
   },
   {
@@ -4327,7 +4331,8 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_be_payment_items"
+    "payroll_be_payment_items",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -4345,7 +4350,8 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_be_payment_items"
+    "payroll_be_payment_items",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -4363,7 +4369,8 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_be_payment_items"
+    "payroll_be_payment_items",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -4380,7 +4387,10 @@
    "field_classes": [],
    "retired_reason": null,
    "note": null,
-   "scan_worker_tables": [],
+   "scan_worker_tables": [
+    "payroll_be_payment_items",
+    "payslip_items"
+   ],
    "overridden": false
   },
   {
@@ -4397,7 +4407,8 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_be_payment_items"
+    "payroll_be_payment_items",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -4415,7 +4426,8 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_be_payment_items"
+    "payroll_be_payment_items",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -4433,7 +4445,8 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_be_payment_items"
+    "payroll_be_payment_items",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -4623,7 +4636,8 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_be_accumulator_entries",
-    "payroll_be_identifier_vault"
+    "payroll_be_identifier_vault",
+    "payslip_items"
    ],
    "overridden": false
   },

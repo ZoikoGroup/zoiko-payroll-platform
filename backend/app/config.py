@@ -109,6 +109,12 @@ class Settings(BaseSettings):
     # Belgium duplicate-detection key (32 bytes, Secret Manager). Never rotated:
     # fingerprints must stay comparable across keyring rotations.
     BE_IDENTIFIER_FINGERPRINT_KEY: str = ""
+    # Belgium DEMO pack (ZP-BE-ENG-001 Block E4): BE-DEMO-2026 ("DEMO — NOT FOR
+    # PAYROLL") exists and is used only when this is true AND the environment is
+    # not production; only the organisations listed in BE_DEMO_ORG_IDS
+    # (comma-separated ids) may use it. Leave both unset in production.
+    BE_DEMO_PACKS_ENABLED: bool = False
+    BE_DEMO_ORG_IDS: str = ""
     # Poland identifier vault (ZP-PL-ENG-001 Phase 2, pl_identifiers; spec §13):
     # PESEL, employee NIP and the employer's ZUS contribution account (NRS) are
     # encrypted at rest. JSON object mapping key version -> 32-byte key from

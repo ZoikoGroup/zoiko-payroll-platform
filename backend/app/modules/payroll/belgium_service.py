@@ -62,6 +62,15 @@ def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of=
     if pay_date is None:
         raise BadRequestException("Belgian payroll needs the run's pay date: every rule is selected by it.")
     pack = resolved_pack[2] if resolved_pack else None
+    if pack is None:
+        pack = _be_active_pack_row(db, _as_date(pay_date, "payDate"))
+    # Block E4: a DEMO pack is refused for every organisation that is not a demo
+    # organisation (and everywhere when demo packs are disabled / production).
+    from app.modules.payroll import belgium_demo
+
+    refusal = belgium_demo.be_demo_pack_refusal(employee.organization_id, pack) if pack is not None else None
+    if refusal:
+        raise BadRequestException(refusal)
     version = (f"{getattr(pack, 'pack_id', None) or getattr(pack, 'id', None)}@{getattr(pack, 'version', None)}"
                if pack is not None else None)
     run_period = (getattr(run, "period_start", None), getattr(run, "period_end", None)) if run is not None else period
@@ -119,6 +128,11 @@ def be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[str
 
     if (getattr(pack, "jurisdiction_country", None) or "").upper() != BE:
         return None
+    from app.modules.payroll import belgium_demo
+
+    if belgium_demo.be_is_demo_pack(pack):
+        return (f"{pack.pack_id} is a {belgium_demo.DEMO_LABEL} pack: it is activated only by the demo seed in a "
+                "non-production environment, never through the governed activation.")
     if actor_id is not None:
         # Four-eyes, completing the shared rules (editors never approve; the
         # approver never activates; the LAST editor never activates): nobody who
@@ -411,8 +425,16 @@ def be_agreement_refusal(agreement_code) -> Optional[str]:
     return None
 
 
-def be_pack_assignment_refusal(pack) -> Optional[str]:
-    """A Belgian pack can be assigned to organisations only once Active."""
+def be_pack_assignment_refusal(pack, organization_ids=None) -> Optional[str]:
+    """A Belgian pack can be assigned to organisations only once Active; a DEMO
+    pack only to demo organisations (Block E4)."""
+    from app.modules.payroll import belgium_demo
+
+    if belgium_demo.be_is_demo_pack(pack):
+        bad = [o for o in (organization_ids or []) if belgium_demo.be_demo_pack_refusal(o, pack)]
+        if bad or not belgium_demo.be_demo_enabled():
+            return (f"{pack.pack_id} is a {belgium_demo.DEMO_LABEL} pack: it can be assigned only to demo "
+                    f"organisations (BE_DEMO_ORG_IDS) where demo packs are enabled; refused for {bad or 'all'}.")
     if (getattr(pack, "jurisdiction_country", None) or "").upper() == BE and pack.status != "Active":
         return (f"Belgium pack {pack.pack_id} v{pack.version} is {pack.status}; only an Active Belgian pack can be "
                 "assigned to organisations.")
@@ -1216,6 +1238,16 @@ def _be_registration_for(db: Session, organization_id: int, legal_entity_id, on:
     return row or _latest_for(db, R, organization_id, on, legal_entity_id=None)
 
 
+def _be_active_pack_row(db: Session, on: date):
+    """The Active Belgian pack row resolved for `on`, or None."""
+    from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
+
+    try:
+        return resolve_tax_configuration(db, BE, payroll_date=on)[2]
+    except Exception:  # an unresolvable pack is "no pack"
+        return None
+
+
 def _be_pack_for(db: Session, organization_id: int, on: date):
     from app.modules.payroll.engine.jurisdictions.belgium.pack import BePack
     from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
@@ -1225,6 +1257,10 @@ def _be_pack_for(db: Session, organization_id: int, on: date):
     except Exception:  # an unresolvable pack is "no pack" (the resolver blocks on it)
         return None
     if pack is None:
+        return None
+    from app.modules.payroll import belgium_demo
+
+    if belgium_demo.be_demo_pack_refusal(organization_id, pack):        # Block E4: DEMO pack = no pack
         return None
     rate_map: dict = {}
     for r in rates:
@@ -1507,6 +1543,10 @@ def be_payslip_snapshot(result, frozen: Optional[dict] = None) -> Optional[dict]
     snapshot = dict(r)
     if frozen is not None:
         snapshot["frozenContext"] = frozen
+    from app.modules.payroll import belgium_demo
+
+    if belgium_demo.be_is_demo_version((snapshot.get("trace") or {}).get("packVersion")):
+        snapshot["demo"], snapshot["demoLabel"] = True, belgium_demo.DEMO_LABEL     # Block E4 watermark
     return _json_safe(snapshot)
 
 
@@ -1649,7 +1689,13 @@ def be_run_preflight(db: Session, run) -> list:
             problems.append({"code": exception["code"], "employeeId": item.employee_id,
                              "severity": "ACKNOWLEDGED" if done else "BLOCK", "exception": True,
                              "message": exception.get("detail") or exception["code"]})
-        if not snapshot.get("correctionOf"):
+        from app.modules.payroll import belgium_demo
+
+        if belgium_demo.be_snapshot_is_demo(snapshot) and belgium_demo.be_is_demo_org(run.organization_id):
+            problems.append({"code": "BE_DEMO_DIMONA_SIMULATED", "employeeId": item.employee_id,
+                             "severity": PREFLIGHT_PENDING, "message": f"{belgium_demo.DEMO_LABEL}: a demo "
+                             "organisation's Dimona is never transmitted, so it is not required for a demo run."})
+        elif not snapshot.get("correctionOf"):
             from app.modules.payroll import belgium_filing
 
             dimona = belgium_filing.dimona_status(db, run.organization_id, item.employee_id,
