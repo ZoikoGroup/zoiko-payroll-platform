@@ -1128,6 +1128,9 @@ export const signMyRows = (refs, reason, sourceDocumentId) =>
   apiFetch(`${MY_SA}/configuration/sign`, { method: "POST", body: { refs, reason, sourceDocumentId } });
 export const getMyDecisions = () => apiFetch(`${MY_SA}/decisions`);
 export const seedMyDraftPack = (reason) => apiFetch(`${MY_SA}/seed-draft`, { method: "POST", body: { reason } });
+export const getMyRolloverPlan = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/rollover`);
+export const rolloverMyPack = (packRowId, reason) =>
+  apiFetch(`${MY_SA}/packs/${packRowId}/rollover`, { method: "POST", body: { reason } });
 export const downloadMyWorkbook = async (packRowId) => {
   const token = getAccessToken();
   const res = await fetch(`${API_BASE}${MY_SA}/packs/${packRowId}/workbook/export`, {

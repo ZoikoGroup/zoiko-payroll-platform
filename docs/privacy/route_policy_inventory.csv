@@ -1310,6 +1310,8 @@ GET,/api/super-admin/compliance/malaysia/packs,platform,read,packs,super_admin,p
 POST,/api/super-admin/compliance/malaysia/packs/{pack_row_id}/authority-examples,platform,create,authority-examples,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/malaysia/packs/{pack_row_id}/configuration,platform,read,configuration,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/malaysia/packs/{pack_row_id}/golden-check,platform,create,golden-check,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/malaysia/packs/{pack_row_id}/rollover,platform,read,rollover,super_admin,platform,,,,no,
+POST,/api/super-admin/compliance/malaysia/packs/{pack_row_id}/rollover,platform,create,rollover,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/malaysia/packs/{pack_row_id}/signing-status,platform,read,signing-status,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/malaysia/packs/{pack_row_id}/tables/{rule_type},platform,create,tables,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/malaysia/packs/{pack_row_id}/workbook/apply,platform,create,apply,super_admin,platform,,,,no,

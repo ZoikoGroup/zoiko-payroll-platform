@@ -550,6 +550,20 @@ def seed_draft(db: Session, data: dict, actor_id) -> dict:
     return {"packs": list_packs(db), "availability": availability}
 
 
+def rollover_plan(db: Session, pack_row_id: int) -> dict:
+    """Read-only: what rolling this pack into the next tax year would create."""
+    return mys.my_rollover_plan(db, _pack(db, pack_row_id))
+
+
+def rollover(db: Session, pack_row_id: int, data: dict, actor_id) -> dict:
+    """Create next year's Draft pack from this one (every row PENDING G1;
+    holidays, PCB tables and authority examples not copied). Reason required;
+    refused when that year's pack already exists. Audited."""
+    reason = _reason(data)
+    pack = mys.rollover_malaysia_pack(db, _pack(db, pack_row_id), actor_id, reason)
+    return {"packs": list_packs(db), "created": {"id": pack.id, "packId": pack.pack_id, "status": pack.status}}
+
+
 def _adapter():
     from app.modules.payroll.my_workbook_adapter import MalaysiaWorkbookAdapter
 

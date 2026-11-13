@@ -4903,6 +4903,26 @@ def malaysia_seed_draft(payload: dict = Body(...), current_user=Depends(get_curr
     return result
 
 
+@router.get("/compliance/malaysia/packs/{pack_row_id}/rollover",
+            summary="What rolling this Malaysia pack into the next tax year would create (read-only)")
+def malaysia_rollover_plan(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    return my_super_admin.rollover_plan(db, pack_row_id)
+
+
+@router.post("/compliance/malaysia/packs/{pack_row_id}/rollover",
+             summary="Create next year's Draft Malaysia pack from this one (every row PENDING G1; reason; audited)")
+def malaysia_rollover(pack_row_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import my_super_admin
+
+    result = my_super_admin.rollover(db, pack_row_id, payload, current_user.id)
+    db.commit()
+    return result
+
+
 @router.post("/compliance/malaysia/packs/{pack_row_id}/authority-examples",
              summary="Add an official / independent worked example to a Malaysia pack (reviewed source; gate G1)")
 def malaysia_add_authority_example(pack_row_id: int, payload: dict = Body(...),

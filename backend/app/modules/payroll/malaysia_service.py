@@ -15,7 +15,7 @@ only when signed through my_super_admin (source stored, hashed and reviewed
 by a second Super Admin).
 """
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -235,6 +235,120 @@ def my_seed_blockers(db: Session) -> list:
             blockers.append(f"{pack.pack_id} is already being signed ({len(editors)} editor(s), {signed} signed "
                             f"row(s), {tables} schedule/holiday/table row(s)) — re-seeding would erase that work")
     return blockers
+
+
+# ── Year rollover (copy a pack to the next tax year as Draft) ───────────────
+# Malaysia's tax year is the calendar year. The next year's pack is a Draft
+# copy of the previous one with EVERY row re-marked [PENDING G1]: values are
+# prefilled for convenience but nothing is calculable until a Super Admin
+# re-signs each row against the new year's official source, and a distinct
+# approver activates it (my_pack_activation_refusal). Year-specific tables —
+# public holidays, PCB tables, authority examples — are NOT copied: they must
+# be loaded fresh for the new year. Rows that expired before the new year are
+# dropped; rows that started earlier start on 1 January of the new year.
+_ROLLOVER_SKIP_COLUMNS = ("id", "created_at", "updated_at", "jurisdiction_pack_id")
+
+
+def _rollover_skipped_tables() -> tuple:
+    content = _content()
+    return (content.MY_PUBLIC_HOLIDAY_RULE, content.MY_PCB_TABLE_RULE, content.MY_AUTHORITY_EXAMPLE_RULE)
+
+
+def _rollover_window(source) -> tuple:
+    start = source.effective_to + timedelta(days=1)
+    return f"MY-PAYROLL-{start.year}", start, date(start.year, 12, 31)
+
+
+def _repend(label: Optional[str], limit: int) -> str:
+    base = " ".join((label or "").replace(PENDING_G1_SUFFIX.strip(), " ").split())
+    return pending_label(base, limit)
+
+
+def _rollover_rows(db: Session, source, start: date) -> tuple:
+    """(rates, slabs) of the source pack's canonical rows that carry into a
+    pack starting on ``start``."""
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    def alive(row):
+        return row.effective_to is None or row.effective_to >= start
+
+    rates = [r for r in (db.query(ContributionRate)
+                         .filter(ContributionRate.jurisdiction_pack_id == source.id,
+                                 ContributionRate.organization_id.is_(None))
+                         .order_by(ContributionRate.sort_order, ContributionRate.id).all()) if alive(r)]
+    slabs = [s for s in (db.query(TaxSlab)
+                         .filter(TaxSlab.jurisdiction_pack_id == source.id, TaxSlab.organization_id.is_(None),
+                                 TaxSlab.rule_type.notin_(_rollover_skipped_tables()))
+                         .order_by(TaxSlab.sort_order, TaxSlab.id).all()) if alive(s)]
+    return rates, slabs
+
+
+def my_rollover_plan(db: Session, source) -> dict:
+    """Read-only: what rolling ``source`` into the next tax year would create,
+    and why it is refused (``refusal``), never writing anything."""
+    from app.modules.payroll.models import JurisdictionPack
+
+    if (getattr(source, "jurisdiction_country", None) or "").upper() != MY or source.pack_type != "tax":
+        return {"refusal": "Only a Malaysia tax pack can be rolled over."}
+    if source.effective_to is None:
+        return {"refusal": f"{source.pack_id} has no end date, so the next tax year cannot be derived."}
+    target_id, start, end = _rollover_window(source)
+    rates, slabs = _rollover_rows(db, source, start)
+    existing = (db.query(JurisdictionPack)
+                .filter(JurisdictionPack.jurisdiction_country == MY, JurisdictionPack.pack_id == target_id).first())
+    refusal = None
+    if existing is not None:
+        refusal = (f"{target_id} already exists ({existing.status}); change it through the signing console or the "
+                   "workbook instead.")
+    return {"refusal": refusal, "sourcePackId": source.pack_id, "sourceStatus": source.status,
+            "targetPackId": target_id, "effectiveFrom": start.isoformat(), "effectiveTo": end.isoformat(),
+            "rates": len(rates), "slabs": len(slabs),
+            "notCopied": sorted(_rollover_skipped_tables())}
+
+
+def rollover_malaysia_pack(db: Session, source, actor_id=None, reason: str = "") -> "JurisdictionPack":
+    """Create next year's Draft pack from ``source`` (see the section note).
+    Refused when the plan refuses; never touches the source pack."""
+    from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSlab
+    from app.modules.payroll.service import record_tax_audit
+
+    plan = my_rollover_plan(db, source)
+    if plan["refusal"]:
+        raise BadRequestException(plan["refusal"])
+    target_id, start, end = _rollover_window(source)
+    rates, slabs = _rollover_rows(db, source, start)
+    pack = JurisdictionPack(pack_id=target_id, version="1.0", jurisdiction_country=MY, pack_type="tax",
+                            status="Draft", effective_from=start, effective_to=end, tax_year=str(start.year),
+                            currency=source.currency, regulatory_authority=source.regulatory_authority,
+                            source_document_id=source.source_document_id,
+                            change_summary=(f"Rolled over from {source.pack_id} v{source.version} — every row "
+                                            f"PENDING G1 until re-signed against {start.year} sources.")[:500])
+    if actor_id is not None:
+        pack.updated_by_id = actor_id
+    db.add(pack)
+    db.flush()
+
+    def clone(model, row, label_field, limit):
+        values = {c.name: getattr(row, c.name) for c in model.__table__.columns if c.name not in _ROLLOVER_SKIP_COLUMNS}
+        values[label_field] = _repend(values.get(label_field), limit)
+        if values.get("effective_from") is not None and values["effective_from"] < start:
+            values["effective_from"] = start
+        db.add(model(jurisdiction_pack_id=pack.id, **values))
+
+    for row in rates:
+        clone(ContributionRate, row, "label", 100)
+    for row in slabs:
+        clone(TaxSlab, row, "rate_label", 150)
+    db.flush()
+    record_tax_audit(db, actor_id=actor_id, action="create", entity_type="jurisdiction_pack", entity_id=pack.id,
+                     jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference=SPEC,
+                     old_value={"sourcePackId": source.pack_id, "sourceStatus": source.status},
+                     new_value={"status": pack.status, "rates": len(rates), "slabs": len(slabs)},
+                     reason=(f"{reason} - " if reason else "") + f"{target_id} rolled over from {source.pack_id} "
+                            "as Draft; every row PENDING G1; holidays, PCB tables and authority examples not copied.",
+                     auto_commit=False)
+    db.flush()
+    return pack
 
 
 def my_seed_summary(db: Session) -> dict:
