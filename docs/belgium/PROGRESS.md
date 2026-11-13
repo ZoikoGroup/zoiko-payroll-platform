@@ -484,3 +484,22 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
 - Final checks: single Alembic head 8a1f5ef9fa5d (1d76678ef1a1 <- efc56f3235e2, 2943a0490b5b <- 1d76678ef1a1,
   8a1f5ef9fa5d <- 2943a0490b5b); manifest / drift / metadata tests 13 passed; npm test all 9 scripts pass; lint
   clean on every Belgian frontend file; frontend build passed (16 s). No push.
+
+## Block E — product decisions
+
+- G-11 MONTHLY only, G-12 high-risk list, G-13 operator English recorded DECIDED in BELGIUM_GAPS_AND_DECISIONS.md.
+- G-12 verified against the code: every listed change is four-eyes. Finding F-G12-1 (recorded, not changed — the
+  signing code stays as built): one Super Admin can edit and sign the same row in a single console call; content
+  four-eyes is enforced at pack approval / activation and in bulk sign.
+
+## Block E1 — AI-drafted statutory content
+
+- docs/belgium/content/BE_2026_AI_DRAFT.xlsx: the D3 workbook of BE-PAYROLL-2026 with a proposal for every row and
+  the review columns proposedValue / sourceUrlOrSpec / retrievalDate / confidence / reviewerNote; sheets Draft
+  sources (11 references D01-D11), Band proposals (after code lists), Decision proposals (G-01, G-02, G-06/17,
+  G-13, G-16, G-21, G-26, G-30 — all OPEN), NOT FOUND.
+- Counts: HIGH 9, MEDIUM 36, LOW 187 (180 of them earning classes), NOT FOUND 72. Sources: the spec first; ONSS
+  2026/3 instructions, DmfA deadline table and 2026/3 glossary, Royal Observatory holiday calendar; Securex /
+  Partena as secondary (conflicts noted). Web searches on 2026-11-13; no value invented: Annex III, reductions,
+  rounding, BSSC, day bands, schema versions other than DmfA, tolerances and most calendar rows are NOT FOUND.
+- The generator stayed in the scratchpad (no statutory value in repository code); the workbook is the artifact.
