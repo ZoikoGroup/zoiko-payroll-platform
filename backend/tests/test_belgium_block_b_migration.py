@@ -16,8 +16,8 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
 
-from tests.test_belgium_migrations import (BACKEND, VERSIONS, _CaptureBind, _cols, _indexes, _load, _metadata,
-                                           _policies, classified)  # noqa: F401  (pytest fixture)
+from tests.test_belgium_migrations import (BACKEND, PG_URL, VERSIONS, _CaptureBind, _cols, _indexes, _load,
+                                           _metadata, _policies, classified, pg_round_trip)  # noqa: F401  (pytest fixture)
 
 REVISION = "2943a0490b5b"
 PARENT = "1d76678ef1a1"
@@ -286,3 +286,9 @@ def test_the_ledger_accepts_the_block_b_accumulators(model_engine):
                               "HOLIDAY_DOUBLE_PAID", "ADDITIONAL_HOLIDAY_ADVANCE", "GUARANTEED_SALARY_DAYS")):
         _insert(engine, metadata, "payroll_be_accumulator_entries", organization_id=1, employee_id=1, year=2026,
                 accumulator=name, pay_date=date(2026, 3, 31), amount=1, entry_kind="RUN", payslip_item_id=100 + i)
+
+
+@pytest.mark.skipif(not PG_URL, reason="ZP_TEST_POSTGRES_URL not set (disposable Postgres only)")
+def test_postgres_round_trip_with_row_level_security():
+    """The revision on a real PostgreSQL with row-level security (CI privacy-isolation job)."""
+    pg_round_trip(REVISION, NEW_TABLES, TENANT, WORKER, COLUMNS)

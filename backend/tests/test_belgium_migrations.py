@@ -586,12 +586,16 @@ def test_ledger_and_access_events_have_no_updated_at():
 PG_URL = os.environ.get("ZP_TEST_POSTGRES_URL")
 
 
-@pytest.mark.skipif(not PG_URL, reason="ZP_TEST_POSTGRES_URL not set (disposable Postgres only)")
-def test_postgres_round_trip_with_row_level_security():
-    """Schema from the models + d7f9b1c3e5a6's RLS, then the Belgium revision
-    downgrade -> upgrade -> upgrade (replay) -> downgrade -> upgrade on a real
-    PostgreSQL. After each upgrade all nine tables exist, RLS is enabled and
-    forced, and the zoiko_rls policy is present on each."""
+def pg_round_trip(revision, new_tables, tenant, worker, columns=None):
+    """Schema from the models + d7f9b1c3e5a6's RLS, then `revision`'s
+    downgrade -> upgrade -> upgrade (replay) -> downgrade -> upgrade on a real,
+    DISPOSABLE PostgreSQL. After each upgrade every table of the revision exists
+    with RLS enabled and forced and the zoiko_rls policy present (TENANT /
+    WORKER "org" predicate as derived); after each downgrade none of them exists
+    and its added columns are gone. Only the revision's OWN objects are checked:
+    later Belgium revisions' tables stay. Used by the Phase 2, Block B and
+    Block C migration tests (CI privacy-isolation job)."""
+    columns = columns or {}
     metadata = _metadata()
     engine = sa.create_engine(PG_URL, connect_args={"sslmode": "disable"} if "sslmode" not in PG_URL else {})
     try:
@@ -605,7 +609,7 @@ def test_postgres_round_trip_with_row_level_security():
         def step(name):
             with engine.begin() as conn:
                 with Operations.context(MigrationContext.configure(conn)):
-                    getattr(_load(), name)()
+                    getattr(_load(revision), name)()
 
         def state():
             with engine.connect() as conn:
@@ -614,30 +618,35 @@ def test_postgres_round_trip_with_row_level_security():
                     "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
                     "WHERE relname LIKE 'payroll_be_%' AND relkind = 'r'"))}
                 policies = {r[0] for r in conn.execute(sa.text(
-                    "SELECT tablename FROM pg_policies WHERE policyname = 'zoiko_rls' "
-                    "AND tablename LIKE 'payroll_be_%'"))}
-                cols = {t: {c["name"] for c in sa.inspect(conn).get_columns(t)} for t in SHARED}
+                    "SELECT tablename FROM pg_policies WHERE policyname = 'zoiko_rls'"))}
+                cols = {t: {c["name"] for c in sa.inspect(conn).get_columns(t)} for t in columns}
             return tables, rls, policies, cols
 
+        mine = set(new_tables)
         step("downgrade")
         tables, rls, policies, cols = state()
-        assert not set(NEW_TABLES) & tables and not policies
-        assert all(not (SHARED[t] & cols[t]) for t in SHARED)
+        assert not mine & tables and not mine & policies
+        assert all(not (columns[t] & cols[t]) for t in columns)
         for name in ("upgrade", "upgrade", "downgrade", "upgrade"):
             step(name)
             tables, rls, policies, cols = state()
             if name == "downgrade":
-                assert not set(NEW_TABLES) & tables
+                assert not mine & tables
                 continue
-            assert set(NEW_TABLES) <= tables
-            assert policies == set(NEW_TABLES), policies
-            assert all(rls[t] == (True, True) for t in NEW_TABLES), rls
-            assert all(SHARED[t] <= cols[t] for t in SHARED)
+            assert mine <= tables
+            assert mine <= policies, mine - policies
+            assert all(rls[t] == (True, True) for t in mine), rls
+            assert all(columns[t] <= cols[t] for t in columns)
         with engine.connect() as conn:
             qual = dict(conn.execute(sa.text(
                 "SELECT tablename, qual FROM pg_policies WHERE policyname = 'zoiko_rls' "
                 "AND tablename LIKE 'payroll_be_%'")).all())
-        assert all("organization_id IS NULL" in qual[t] for t in TENANT)            # TENANT predicate
-        assert all("organization_id IS NULL" not in qual[t] for t in WORKER)        # WORKER "org" predicate
+        assert all("organization_id IS NULL" in qual[t] for t in tenant)            # TENANT predicate
+        assert all("organization_id IS NULL" not in qual[t] for t in worker)        # WORKER "org" predicate
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(not PG_URL, reason="ZP_TEST_POSTGRES_URL not set (disposable Postgres only)")
+def test_postgres_round_trip_with_row_level_security():
+    pg_round_trip(REVISION, NEW_TABLES, TENANT, WORKER, SHARED)

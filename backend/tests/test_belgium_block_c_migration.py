@@ -17,8 +17,8 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
 
-from tests.test_belgium_migrations import (BACKEND, VERSIONS, _CaptureBind, _cols, _indexes, _load, _metadata,
-                                           _policies, classified)  # noqa: F401  (pytest fixture)
+from tests.test_belgium_migrations import (BACKEND, PG_URL, VERSIONS, _CaptureBind, _cols, _indexes, _load,
+                                           _metadata, _policies, classified, pg_round_trip)  # noqa: F401  (pytest fixture)
 
 REVISION = "8a1f5ef9fa5d"
 PARENT = "2943a0490b5b"
@@ -264,3 +264,9 @@ def test_parallel_rules(model_engine):
                                          approved_by_id=1))
     _insert(engine, metadata, d, **dict(diff, concept="net", status="ACCEPTED", explanation="x", explained_by_id=1,
                                         approved_by_id=2))
+
+
+@pytest.mark.skipif(not PG_URL, reason="ZP_TEST_POSTGRES_URL not set (disposable Postgres only)")
+def test_postgres_round_trip_with_row_level_security():
+    """The revision on a real PostgreSQL with row-level security (CI privacy-isolation job)."""
+    pg_round_trip(REVISION, NEW_TABLES, TENANT, WORKER)

@@ -373,3 +373,63 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 - Frontend: build passed; lint clean on the Block C files; npm test all 9 scripts pass (be-console 19 checks).
 - Merge gates before any push: CI PostgreSQL run (RLS of the five Block C tables, the filing / obligation CHECKs),
   Python 3.12, frontend build; the full chunked suite with reconciliation at the end of the phase.
+
+## Block D1 — complete verification
+
+### Full backend suite (end of the Belgium phase), on 9f18e28..b97c366 + D1 test changes
+
+Env: PAYROLL_DATABASE_URL = a fresh scratchpad SQLite per piece (safe_env.sh), ZP_TEST_POSTGRES_URL unset,
+Python 3.11. Collected = `pytest --collect-only` on the same files; executed = passed + failed + skipped + xfailed.
+
+| Batch | Files | Collected | Passed | Failed | Skipped | xfail | Reconciled |
+|-------|-------|-----------|--------|--------|---------|-------|------------|
+| 0 | 1-40 | 667 | 663 | 0 | 4 | 0 | yes |
+| 1 | 41-80 (4 pieces of 10) | 587 | 585 | 0 | 2 | 0 | yes (see note) |
+| 2 | 81-120 | 1,637 | 1,624 | 10 | 1 | 2 | yes |
+| 3 | 121-160 | 891 | 889 | 1 | 1 | 0 | yes |
+| 4 | 161-200 | 942 | 941 | 0 | 1 | 0 | yes |
+| 5 | 201-240 | 610 | 580 | 0 | 30 | 0 | yes |
+| 6 | 241-280 | 384 | 354 | 0 | 30 | 0 | yes |
+| 7 | 281-320 | 631 | 617 | 0 | 14 | 0 | yes |
+| 8 | 321-360 | 783 | 751 | 0 | 32 | 0 | yes |
+| 9 | 361-400 (5 pieces) | 1,309 | 1,305 | 0 | 4 | 0 | yes |
+| 10 | 401-440 (4 pieces) | 712 | 711 | 0 | 1 | 0 | yes |
+| 11 | 441-479 (2 pieces) | 624 | 623 | 0 | 1 | 0 | yes |
+| 11x | golden + privacy dirs | 310 | 294 | 3 | 13 | 0 | yes |
+| **Total** | 479 files + 7 dirs | **10,087** | **9,937** | **14** | **134** | **2** | **10,087 = 10,087** |
+
+Batches 2-8 ran on 77de922 (identical non-test code; D1 changed only Belgium migration tests and CI); their
+collected counts were re-taken now and match exactly. Batch 0 was re-run on the current tree (it holds the
+two new PostgreSQL round-trip tests, skipped locally).
+
+Batch 1 note: files 51-60 (Brazil inapp / phase1 / phase2 / rls / router / scaffolding, bs_report_forms,
+bulk_employees, business_plan) reach 100% when run together and the process then exits without printing a
+summary (a teardown problem, not a failure); each file run on its own passes (7+15+23+55+5+18+26+4+3+6 = 162 =
+collected). This is why "chunk 1" never reported a result. No Belgium file is involved.
+
+The 14 failures are all on the known pre-existing list: 5 test_engine_jurisdiction_db_integration (ordering),
+5 test_germany_full_business_acceptance (ordering), 1 test_hong_kong_configuration (CSV), 3
+tests/privacy/test_route_registry.py (health routes of the uncommitted main.py). No new failure; no baseline
+run was needed.
+
+### G-18 recorded
+BELGIUM_GAPS_AND_DECISIONS.md: G-18 DECIDED + DELIVERED with every enforcement point (belgium_service
+before_run_transition / _input_creators / be_approval_fingerprint / post_be_accumulators, the approve_*
+four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove them.
+
+### CI
+- `.github/workflows/backend-deploy.yml` (+ the staging copy): job `test` (Python 3.12, full `pytest -q` on
+  SQLite: collects every test_belgium_*.py); job `privacy-isolation` (PostgreSQL 15 service,
+  ZP_TEST_POSTGRES_URL, ZP_REQUIRE_POSTGRES_TESTS=1, Python 3.12) runs tests/privacy only — its
+  test_postgres_guards builds the schema from the models + derived RLS, so every payroll_be_* table is
+  covered by "every derived worker / tenant table has FORCE RLS"; `frontend-build.yml`: Node 20 `npm ci` +
+  `npm run build`.
+- Gap found: the Belgium PostgreSQL round trip (test_belgium_migrations) was never collected by the
+  PostgreSQL job, and Blocks B / C had none; the Phase 2 test would also have failed on its first PostgreSQL
+  run (it asserted that NO payroll_be_* policy remains after its own downgrade, but later Belgium tables keep
+  theirs).
+- Fix (additive): a shared `pg_round_trip()` helper checking only the revision's own tables; PostgreSQL
+  round-trip tests for 2943a0490b5b and 8a1f5ef9fa5d; a last step in the privacy-isolation job of both
+  workflows running the three Belgium migration test files on its PostgreSQL. Not runnable locally (no
+  disposable PostgreSQL here): these run in CI only.
+- Registry diff: no route changed.
