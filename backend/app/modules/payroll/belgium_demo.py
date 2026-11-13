@@ -199,7 +199,7 @@ def be_seed_demo_pack(db: Session, actor_id=None, workbook: Optional[bytes] = No
         slab(rule, f"AI draft {key}", min_amount=_val(row.get("minAmount")), flat_amount=_val(row.get("flatAmount")),
              rate_pct=_val(row.get("ratePct")), tax_formula=_val(row.get("name")), filing_status=_val(row.get("dimension")),
              effective_from=date.fromisoformat(day) if day else None, effective_to=date.fromisoformat(day) if day else None)
-    for row in sheets.get("Band proposals (after code lists)", []):
+    for row in sheets.get("Band proposals (post code list)", []):
         key = row.get("key")
         if key in content.RULE_TYPES:
             drafted_rules.add(content.RULE_TYPES[key])

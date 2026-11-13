@@ -13,6 +13,25 @@ its source, retrieval date and confidence). Nothing in it is signed; the engine 
 | LOW | 187 | inferred (180 of them are earning-class treatments) |
 | NOT FOUND | 72 | left empty; where it should come from is stated |
 
+
+## 1a. Review in this order (highest payroll impact first) — Block F4
+
+1. **Withholding (Annex III)** — every be_wht_* row and the withholding rounding: all NOT FOUND; needs DOWNLOAD_LIST
+   A1-A5 (three 2026 versions: 1 Jan, 1 Aug, 1 Nov). Without it no net pay exists.
+2. **ONSS** — the HIGH rows (13.07 %, 8 % manual uplift, 1.60 % / 1.69 %, 8.86 %), the employer EC x WC bands (Band
+   proposals sheet; B2 rate file), wage moderation (B4), fund contributions.
+3. **BSSC** — the special social security contribution scale (B3).
+4. **Work bonus** — social (B5) and fiscal (A2) work bonus.
+5. **Holiday** — manual-worker contributions for the current holiday year (C1), white-collar double holiday 92 %,
+   departure / additional holidays (C2).
+6. **Absence** — guaranteed-salary days and manual-worker day bands (D1), maternity / birth leave (D2).
+7. Then wages and working time (E1-E4), earning-class patterns (section 2.4), filing schemas (F1-F6), calendar
+   rows, tolerances.
+
+Sources to collect: `docs/belgium/sources/DOWNLOAD_LIST.md` (30 documents); save them unchanged in
+`docs/belgium/sources/inbox/` and ask for the parse run (scripts/be_source_inbox.py + reviewed extraction).
+Inbox at the last run (2026-11-13): 0 documents, so counts are unchanged.
+
 ## 2. Check these first
 
 ### 2.1 NOT FOUND (empty — must be supplied)
@@ -82,6 +101,26 @@ its source, retrieval date and confidence). Nothing in it is signed; the engine 
 | Earning classification (180 rows) | see the sheet; INCLUDED / EXCLUDED with a one-line reason each | every component x obligation, especially double / departure holiday pay, bonus vs regular withholding, benefit in kind, meal vouchers, ecocheques, profit sharing | ONSS instructions 'notion de remuneration'; Annex III (FPS Finance) |
 | Employer band rows (Band proposals sheet) | EC=000 x WC=015/495 at 24.92% | to be added only after the EC / WC code lists are signed; reference-only rate | ONSS rate file per quarter |
 
+
+### 2.4 Earning-class patterns (Block F4) — approve per pattern
+
+The 180 earning-class cells form 8 patterns: components that share the same INCLUDED / EXCLUDED
+treatment in all ten obligations. The workbook sheet **Patterns** lists each pattern's member cells (sheet!cell),
+reason, source and a reviewerDecision column. Approve per pattern; in the console the Bulk sign panel's
+"Earning-class patterns" list selects a pattern's pending cells in one click — each cell is still signed and
+audited on its own, by a Super Admin who did not edit it (four-eyes unchanged).
+
+| Pattern | Name | Components | INCLUDED in | Cells |
+|---------|------|------------|-------------|-------|
+| P01 | ecocheque, meal voucher employer, profit sharing, reimbursement | ECOCHEQUE, MEAL_VOUCHER_EMPLOYER, PROFIT_SHARING, REIMBURSEMENT | none | 40 |
+| P02 | arrears, bonus, thirteenth month | ARREARS, BONUS, THIRTEENTH_MONTH | ONSS_EMPLOYEE, ONSS_EMPLOYER, ONSS_MANUAL_108, TAX_FICHE_281_10, WITHHOLDING_EXCEPTIONAL | 30 |
+| P03 | benefit in kind, holiday pay simple | BENEFIT_IN_KIND, HOLIDAY_PAY_SIMPLE | ONSS_EMPLOYEE, ONSS_EMPLOYER, TAX_FICHE_281_10, WITHHOLDING_REGULAR | 20 |
+| P04 | birth leave pay, guaranteed salary | BIRTH_LEAVE_PAY, GUARANTEED_SALARY | HOLIDAY_BASE, ONSS_EMPLOYEE, ONSS_EMPLOYER, ONSS_MANUAL_108, TAX_FICHE_281_10, WITHHOLDING_REGULAR | 20 |
+| P05 | departure holiday pay, holiday pay double | DEPARTURE_HOLIDAY_PAY, HOLIDAY_PAY_DOUBLE | ONSS_EMPLOYEE, TAX_FICHE_281_10, WITHHOLDING_EXCEPTIONAL | 20 |
+| P06 | Regular pay | HOURLY_PAY, SALARY | HOLIDAY_BASE, ONSS_EMPLOYEE, ONSS_EMPLOYER, ONSS_MANUAL_108, OVERTIME_BASE, SECTOR_MIN_WAGE, SICK_PAY_BASE, TAX_FICHE_281_10, WITHHOLDING_REGULAR | 20 |
+| P07 | overtime premium, sunday holiday premium | OVERTIME_PREMIUM, SUNDAY_HOLIDAY_PREMIUM | ONSS_EMPLOYEE, ONSS_EMPLOYER, ONSS_MANUAL_108, TAX_FICHE_281_10, WITHHOLDING_REGULAR | 20 |
+| P08 | sector premium | SECTOR_PREMIUM | HOLIDAY_BASE, ONSS_EMPLOYEE, ONSS_EMPLOYER, ONSS_MANUAL_108, SECTOR_MIN_WAGE, SICK_PAY_BASE, TAX_FICHE_281_10, WITHHOLDING_REGULAR | 10 |
+
 ### 2.3 Conflicts found
 
 - `be_wage_rmmmg`: the spec proposes EUR 2,233.61 from 1 Jul 2026; Securex shows EUR 2,189.81 from 1 Apr 2026. Confirm every 2026 period with the National Labour Council (CCT 43) and split the row by effective date.
@@ -89,6 +128,8 @@ its source, retrieval date and confidence). Nothing in it is signed; the engine 
 - `be_hol_manual_annual_debit` 10.27%: the official page found is for an earlier holiday year.
 
 ## 3. Worked payslip examples (for comparison with an independent Belgian payroll calculator)
+
+**Status after Block F4: all 10 examples are still PARTIAL** — withholding (Annex III), the work bonus and the BSSC are not sourced yet (inbox empty), so no example reaches full net pay. They are recomputed to full net pay by the parse run as soon as DOWNLOAD_LIST A1-A3, B3 and B5 are in the inbox and extracted.
 
 Inputs are illustrative. Every rate is a DRAFTED value (confidence shown). Rounding: cent half-up as an
 assumption (rounding is G-02, NOT FOUND). Withholding, the work bonus and the special social security

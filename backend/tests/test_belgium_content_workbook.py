@@ -238,3 +238,19 @@ def test_the_committed_ai_draft_imports_without_error_and_signs_nothing(db, seed
     by_key = {r.component_key: r for r in rates}
     assert by_key["be_supported_pay_frequencies"].text_value == "MONTHLY"                    # G-11
     assert str(by_key["be_onss_employee_rate"].employee_rate_pct).rstrip("0").rstrip(".") == "13.07"
+
+
+def test_the_committed_ai_draft_has_valid_sheet_names_and_patterns_covering_every_class():
+    from pathlib import Path
+
+    from openpyxl import load_workbook
+
+    c = _c()
+    path = Path(__file__).resolve().parents[2] / "docs" / "belgium" / "content" / "BE_2026_AI_DRAFT.xlsx"
+    book = load_workbook(path, read_only=True)
+    assert all(len(name) <= 31 for name in book.sheetnames)                          # Excel's sheet-name limit
+    rows = list(book["Patterns"].iter_rows(values_only=True))
+    header, data = rows[0], rows[1:]
+    cells = [cell for row in data for cell in row[header.index("memberCells")].split("; ")]
+    assert len(cells) == len(set(cells)) == len(c.COMPONENTS) * len(c.OBLIGATIONS)    # each class cell once
+    assert all(row[header.index("reason")] and row[header.index("source")] for row in data)

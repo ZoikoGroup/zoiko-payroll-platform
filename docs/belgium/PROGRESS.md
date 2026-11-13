@@ -496,7 +496,7 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
 
 - docs/belgium/content/BE_2026_AI_DRAFT.xlsx: the D3 workbook of BE-PAYROLL-2026 with a proposal for every row and
   the review columns proposedValue / sourceUrlOrSpec / retrievalDate / confidence / reviewerNote; sheets Draft
-  sources (11 references D01-D11), Band proposals (after code lists), Decision proposals (G-01, G-02, G-06/17,
+  sources (11 references D01-D11), Band proposals (post code list), Decision proposals (G-01, G-02, G-06/17,
   G-13, G-16, G-21, G-26, G-30 — all OPEN), NOT FOUND.
 - Counts: HIGH 9, MEDIUM 36, LOW 187 (180 of them earning classes), NOT FOUND 72. Sources: the spec first; ONSS
   2026/3 instructions, DmfA deadline table and 2026/3 glossary, Royal Observatory holiday calendar; Securex /
@@ -599,3 +599,17 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
 - D3 dry-run import of the committed workbook: 0 errors (test_belgium_content_workbook). Conflicts still listed
   for the reviewer (no official dated document yet).
 - Tests: test_belgium_source_inbox.py (new, 2). DOWNLOAD_LIST count corrected to 30 documents.
+
+## Block F4 — reviewer efficiency
+
+- Workbook: new "Patterns" sheet — the 180 earning-class cells form 8 patterns (components with the same
+  INCLUDED / EXCLUDED treatment in all ten obligations), each with member cells (sheet!cell), reason, source,
+  confidence and a reviewerDecision column. Console Bulk sign: "Earning-class patterns" list selects a pattern's
+  pending cells (each cell still signed and audited individually; four-eyes unchanged).
+- Fix found on the way: the E1 sheet "Band proposals (after code lists)" was 33 characters (Excel's limit is 31,
+  so Excel could refuse the file); renamed "Band proposals (post code list)" in the workbook and the demo seed.
+- Worked payslips: all 10 still PARTIAL (no withholding / BSSC / work-bonus source yet).
+- BELGIUM_REVIEWER_GUIDE.md: review-in-this-order list (withholding, ONSS, BSSC, work bonus, holiday, absence, …),
+  the patterns table, the conflicts, examples status; counts unchanged (HIGH 9 / MEDIUM 36 / LOW 187 / NOT FOUND 72).
+- Tests: +1 workbook test (sheet names <= 31, patterns cover the 180 cells exactly once); workbook + demo: 18 passed.
+  Frontend: lint clean, be-console validation 19 checks.

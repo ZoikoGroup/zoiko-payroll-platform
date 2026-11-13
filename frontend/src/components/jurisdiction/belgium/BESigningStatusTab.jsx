@@ -101,6 +101,26 @@ function BulkSign({ pack }) {
       .map((r) => ({ kind: "slab", id: r.id, label: `${r.ruleType} ${r.component || r.taxFormula || ""}`.trim() })),
   ];
   const chosen = pending.filter((r) => selected[`${r.kind}:${r.id}`]);
+  // Block F4: earning classes grouped into patterns (components with the same
+  // treatment in every obligation); selecting a pattern selects its pending cells.
+  const byComponent = {};
+  for (const r of config.earningClasses || []) {
+    (byComponent[r.component] = byComponent[r.component] || []).push(r);
+  }
+  const patterns = {};
+  for (const [component, cells] of Object.entries(byComponent)) {
+    const signature = cells.map((c) => `${c.obligation}:${c.treatment}`).sort().join("|");
+    const entry = (patterns[signature] = patterns[signature] || { components: [], cells: [], byTreatment: {} });
+    entry.components.push(component);
+    entry.cells.push(...cells);
+    entry.byTreatment = {};
+    for (const c of cells) (entry.byTreatment[c.treatment] = entry.byTreatment[c.treatment] || []).push(c.obligation);
+  }
+  const selectPattern = (p) => {
+    const next = { ...selected };
+    for (const c of p.cells) if (!c.signed) next[`slab:${c.id}`] = true;
+    setSelected(next);
+  };
   const sign = async () => {
     setState({ busy: true, error: null, notice: null });
     try {
@@ -119,6 +139,18 @@ function BulkSign({ pack }) {
         Only a Super Admin who neither imported nor edited the selected rows can sign them; each row is signed with its
         own reviewed, archived source and audited on its own.
       </p>
+      <div className="rounded-lg border border-border p-2" data-testid="be-class-patterns">
+        <p className="text-[12px] font-semibold text-foreground">Earning-class patterns</p>
+        {Object.values(patterns).map((p) => (
+          <div key={p.components.join(",")} className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-foreground">
+            <span className="font-semibold">{p.components.join(", ")}</span>
+            <span className="text-foreground-muted">
+              {Object.entries(p.byTreatment).map(([t, obls]) => `${t}: ${obls.sort().join(", ")}`).join(" · ")} · {p.cells.length} cells
+            </span>
+            <button type="button" className={btnCls} onClick={() => selectPattern(p)}>Select pending cells</button>
+          </div>
+        ))}
+      </div>
       <div className="max-h-64 overflow-auto rounded-lg border border-border p-2">
         {pending.map((r) => (
           <label key={`${r.kind}:${r.id}`} className="flex items-center gap-2 text-[11px] text-foreground">
