@@ -99,7 +99,10 @@ def salary_payment_preview(db: Session, organization_id: int, run_id: int) -> Di
     """Payable items and exceptions of the run's Belgian salary batch (nothing built)."""
     m = _models()
     run = _run(db, organization_id, run_id)
-    payslips = (db.query(m.PayslipItem).filter(m.PayslipItem.payroll_run_id == run.id, m.PayslipItem.country_code == BE)
+    from sqlalchemy.orm import undefer
+
+    payslips = (db.query(m.PayslipItem).options(undefer(m.PayslipItem.be_calculation_snapshot))   # one query (J2)
+                .filter(m.PayslipItem.payroll_run_id == run.id, m.PayslipItem.country_code == BE)
                 .order_by(m.PayslipItem.employee_id).all())
     payable, exceptions = [], []
     for slip in payslips:
@@ -196,12 +199,12 @@ def _be_batch_is_demo(db: Session, row) -> bool:
     from app.modules.payroll import belgium_demo
     from app.modules.payroll.models import PayslipItem
 
+    from app.modules.payroll import belgium_service as be
+
     Item = _models().PayrollBePaymentItem
-    for (pid,) in db.query(Item.payslip_item_id).filter(Item.batch_id == row.id):
-        item = db.get(PayslipItem, pid) if pid else None
-        if item is not None and belgium_demo.be_snapshot_is_demo(item.be_calculation_snapshot):
-            return True
-    return False
+    ids = [pid for (pid,) in db.query(Item.payslip_item_id).filter(Item.batch_id == row.id) if pid]
+    return bool(ids) and any(be._be_demo_facts(f) for f in be.be_snapshot_facts(          # one query (J2)
+        db, (PayslipItem.id.in_(ids),), demo="demo", packVersion=("trace", "packVersion")))
 
 
 def _be_refuse_demo(db: Session, row, action: str) -> None:

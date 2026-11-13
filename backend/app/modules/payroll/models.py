@@ -36,7 +36,7 @@ from sqlalchemy import (
     ForeignKey, Text, Numeric, SmallInteger, UniqueConstraint, Index, JSON, text,
 )
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, deferred
 from sqlalchemy.sql import func
 from app.database import Base
 from app.modules.payroll.bank_routing import resolve_routing
@@ -2044,7 +2044,10 @@ class PayslipItem(Base):
     # Belgium (ZP-BE-ENG-001): frozen BE inputs + be_result (independent ONSS /
     # withholding / holiday / sector bases, BE-007) + trace, replayed exactly as
     # computed; NULL for non-BE payslips (1d76678ef1a1). Never a NISS.
-    be_calculation_snapshot = Column(JSON, nullable=True)
+    # Block J2: deferred — a PayslipItem query (any country's run listing,
+    # notifications …) no longer loads every Belgian snapshot; Belgian readers
+    # load the paths they need (belgium_service.be_snapshot_facts) or undefer.
+    be_calculation_snapshot = deferred(Column(JSON, nullable=True))
     # Payslip templates (f3a9c1d7e2b4): the organisation's published template
     # version this payslip is shown with, frozen when its run is approved so a
     # later template change never alters an issued payslip. NULL = the

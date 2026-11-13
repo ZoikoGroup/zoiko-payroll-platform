@@ -1339,8 +1339,12 @@ def freeze_run_templates(db: Session, run: PayrollRun) -> None:
     try:
         with db.begin_nested():
             cache: dict = {}
+            from sqlalchemy import func, or_
+
             items = db.query(PayslipItem).filter(
-                PayslipItem.payroll_run_id == run.id, PayslipItem.template_version_id.is_(None)).all()
+                PayslipItem.payroll_run_id == run.id, PayslipItem.template_version_id.is_(None),
+                # Belgium (Block H1 / J2): never pinned — and not even loaded (their snapshots are large).
+                or_(PayslipItem.country_code.is_(None), func.upper(PayslipItem.country_code) != "BE")).all()
             for it in items:
                 key = (it.country_code or "").upper()
                 if key == "BE":     # Belgium (Block H1): never pinned to a template

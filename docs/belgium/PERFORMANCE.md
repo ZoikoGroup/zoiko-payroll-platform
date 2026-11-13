@@ -84,7 +84,7 @@ Peak Python allocations per step at **500 employees** (tracemalloc), plus the wh
 
 The tracemalloc run at 2,000 was stopped: it is about 6× slower, and acknowledging alone took 326 s.
 
-**This is the main capacity finding.** Every step that reads the whole run loads every payslip's 240 KB snapshot
+**This was the main capacity finding (Block I2). It is resolved by Block J2: see the J2 section.** Every step that reads the whole run loads every payslip's 240 KB snapshot
 into Python objects:
 - preflight;
 - approval (preflight, fingerprint and ledger);
@@ -97,6 +97,92 @@ changes the stored audit format. Until then, size the backend worker's memory fo
 the needed JSON paths instead of whole snapshots, was considered and not done in this block. It would have to
 reproduce the approval fingerprint byte for byte and the empty-snapshot semantics, and it is best done together with
 the slimming.
+
+## Block J2 — snapshot version 2 and memory (owner decision: fix now)
+
+### The version-2 format (JSON shape only, no migration)
+
+`payslip_items.be_calculation_snapshot` now carries `"snapshot_version": 2`. The changes from version 1:
+
+| Part | Version 1 | Version 2 |
+|------|-----------|-----------|
+| Pack rows in `frozenContext` | Full copy: `rateMap` + `slabs`, about 110 KB | `frozenContext.version: 2` + `packRef`: pack row id, `packVersion`, the exact rate / slab **row ids** the resolver handed to the engine (in order), and `rowsHash` (sha256 of their frozen fields, the same fields version 1 copied) |
+| Used content rows | Twice: `usedRows` + `trace.contentUsed`, about 60 KB each | Once, in `usedRows`, compact and lossless: null fields omitted, `"usedRowsFormat": "compact"`. `trace.contentUsedRef: "usedRows"` points at them |
+| Size (one payslip) | about 238 KB | about 50 KB |
+
+How each version is read:
+- **Replay of version 2** (`be_thaw_context(frozen, db)`, `be_replay`) reloads the referenced rows by id. It
+  refuses if a row is missing or if `rowsHash` no longer matches: a payslip is never replayed with rules that
+  differ from the ones it was calculated with.
+- **Version 1** replays from its own copy, as before.
+- `be_snapshot_used_rows()` and the payslip API (`be_payslip_view`) return the used rows in their full form for
+  both versions. The expanded list hashes to the engine's own `hashes.content`, so the compact form is verified
+  on every payslip.
+- A row that cannot be referenced (no id or pack) falls back to the version-1 copy, so nothing is ever left
+  unreplayable.
+
+No auditable fact is removed:
+- every version-1 top-level key is still present;
+- the rows are recoverable exactly, and hash-verified;
+- the engine output, and with it `hashes`, the approval fingerprint and golden certification, is unchanged.
+
+`tests/test_belgium_snapshot_v2.py` replays a **captured version-1 snapshot**
+(`tests/fixtures/belgium_snapshot_v1.json`) through every reader:
+- replay;
+- the payslip view and PDF;
+- the DmfA / Belcotax employer totals and the demo flag;
+- the parallel-run amounts.
+
+It also proves the version-2 properties:
+- exact replay, and refusal without the database;
+- refusal when a referenced row has changed;
+- a correction of a version-2 payslip is itself version 2.
+
+### Readers no longer materialise every snapshot
+
+| Change | Where |
+|--------|-------|
+| Run-wide readers fetch only the JSON paths they need (`be_snapshot_facts`, JSON-path extraction) | preflight, approval hook, fingerprint (byte-identical payload), ledger posting, DmfA / Belcotax / FinProf totals and the demo flag, the payment batch demo check, the parallel import |
+| `be_calculation_snapshot` is a **deferred** column, so a `PayslipItem` query, including shared ones (the approval e-mail notification, any country's listings), no longer loads Belgian snapshots | `models.py` (the Belgian column only) |
+| Belgian loops that need whole snapshots load them in one query (`undefer`) | payment preview, correction checks |
+| Template freezing skips Belgian payslips in SQL, so it doesn't load them | `payslip_template_service.freeze_run_templates` (the H1 Belgian guard, moved into the query) |
+
+Cost: the single-payslip view and PDF read their deferred snapshot with one extra query (3 and 6 statements per
+payslip, from 2 and 5).
+
+### Before / after (J2)
+
+Python peak per step (tracemalloc), MiB at 500 employees, with MiB per employee in brackets:
+
+| Step | Before J2 | After J2 |
+|------|----------:|---------:|
+| generate | 651 (1.30) | **236 (0.47)** |
+| approve | 1,100 (2.20) | **231 (0.46)** |
+| preflight | 642 | 4.5 |
+| DmfA quarter | 648 | 10.2 |
+| Belcotax | 651 | 11.8 |
+| parallel import | 643 | 5.4 |
+| payslip view ×50 / PDF ×50 | 47 / 10 | 31 / 9 |
+
+Process peak (psutil):
+- **2,000 employees: 4,323 MiB → 1,435 MiB.**
+- At 500 employees after J2: 847 MiB.
+- Marginal cost between 500 and 2,000: **0.39 MiB per employee**, against the about 0.5 MiB target.
+
+Wall time at 2,000 employees (seconds; statements per item unchanged and flat):
+
+| Step | After I2 | After J2 |
+|------|---------:|---------:|
+| generate | 63.2 | 49.8 |
+| preflight | 13.2 | 5.0 |
+| approve | 75.0 | 24.6 |
+| DmfA | 13.0 | 6.6 |
+| Belcotax | 13.2 | 7.3 |
+| parallel import (2,000 rows) | 10.2 | 2.7 |
+| acknowledge, one by one | 41.4 | 31.4 (bulk: Block J3) |
+
+Guard: `tests/perf/test_belgium_scale.py` (slow, `ZP_BE_SCALE=1`) now also asserts generation and approval stay at
+or under **0.6 MiB per employee**. The view / PDF statement ceilings are 4 / 7.
 
 ## What was fixed (Belgian code only)
 
@@ -126,7 +212,7 @@ Statements per item are flat. From 500 to 2,000 employees (4×), generate grows 
 | Step | Growth | Cause | Recommendation |
 |------|--------|-------|----------------|
 | acknowledge | 8.9× | Each acknowledgement rewrites the run's JSON list of acknowledgements, so one click is O(N): about 24 ms at 2,000 | A **bulk acknowledge** ("acknowledge every `BE_BSSC_PENDING` in this run"; new route and UI), or an acknowledgement table (schema). Owner decision |
-| approve, DmfA | 5.3×, 4.4× | **Snapshot size.** Each Belgian payslip stores about 240 KB of JSON: the frozen context holds the whole pack (slabs about 82 KB, rates about 27 KB), and the used content rows are stored twice (`trace.contentUsed` and `usedRows`, about 60 KB each). At 2,000 employees that is about 480 MB per run, written at generation and decoded, more than once, at approval. **The same cause drives the memory peak above** | Freeze a content-addressed pack reference instead of a pack copy (pack rows are immutable once Active), and keep the used rows once. This changes the stored audit format, so it's a decision for the owner and specialist; not changed here |
+| approve, DmfA | 5.3×, 4.4× | **Snapshot size.** Each Belgian payslip stores about 240 KB of JSON: the frozen context holds the whole pack (slabs about 82 KB, rates about 27 KB), and the used content rows are stored twice (`trace.contentUsed` and `usedRows`, about 60 KB each). At 2,000 employees that is about 480 MB per run, written at generation and decoded, more than once, at approval. **The same cause drives the memory peak above** | Freeze a content-addressed pack reference instead of a pack copy (pack rows are immutable once Active), and keep the used rows once. **Done in Block J2** (owner decision): version-2 snapshots, see the J2 section |
 
 ## PostgreSQL / staging should measure
 

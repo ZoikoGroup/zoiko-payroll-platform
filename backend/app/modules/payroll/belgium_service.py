@@ -1549,36 +1549,127 @@ _BE_SLAB_FIELDS = ("id", "rule_type", "filing_status", "tax_regime", "assessment
                    "effective_from", "effective_to")
 
 
+# Block J2: snapshot data-shape versions (JSON only, no migration).
+#   snapshot_version 2 = the used content rows are stored once (usedRows; trace.contentUsedRef points at it) and
+#   frozenContext.version 2 references the pack (packRef: pack row id, version, the exact rate / slab row ids the
+#   resolver handed to the engine, and a hash of their frozen fields) instead of copying every rate and slab.
+#   Version 1 (frozen copy, contentUsed in the trace) stays readable everywhere.
+SNAPSHOT_VERSION = 2
+
+
+def _be_pick(row, fields):
+    return {f: (row.get(f) if isinstance(row, dict) else getattr(row, f, None)) for f in fields}
+
+
+def _be_rate_items(value) -> list:
+    return list(value) if isinstance(value, (list, tuple)) else [value]
+
+
+def _be_rows_hash(rate_map: dict, slabs: list) -> str:
+    """sha256 of the frozen rate / slab fields (exactly what a version-1 frozenContext would have stored)."""
+    import hashlib
+    import json as _json
+
+    return hashlib.sha256(_json.dumps(_json_safe({"rateMap": rate_map, "slabs": slabs}), sort_keys=True,
+                                      separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _be_pack_ref(ctx, rate_frozen: dict, slab_frozen: list) -> Optional[dict]:
+    """The pack reference, or None when a row lacks its id / pack (then the version-1 copy is kept)."""
+    raw_rates = {k: _be_rate_items(r) for k, r in (getattr(ctx, "rate_map", None) or {}).items()}
+    raw_slabs = list(getattr(ctx, "slabs", None) or [])
+    rows = [r for items in raw_rates.values() for r in items] + raw_slabs
+    if not rows:
+        return None
+    packs, rate_ids, slab_ids = set(), {}, []
+    for key, items in raw_rates.items():
+        rate_ids[key] = []
+        for r in items:
+            rid, pack = _be_pick(r, ("id", "jurisdiction_pack_id")).values()
+            if rid is None or pack is None:
+                return None
+            rate_ids[key].append(int(rid))
+            packs.add(int(pack))
+    for r in raw_slabs:
+        rid, pack = _be_pick(r, ("id", "jurisdiction_pack_id")).values()
+        if rid is None or pack is None:
+            return None
+        slab_ids.append(int(rid))
+        packs.add(int(pack))
+    if len(packs) != 1:
+        return None
+    return {"packRowId": packs.pop(), "packVersion": getattr(ctx, "be_pack_version", None), "rateIds": rate_ids,
+            "slabIds": slab_ids, "rowsHash": _be_rows_hash(rate_frozen, slab_frozen)}
+
+
 def be_freeze_context(ctx, calculation_mode: str = "standard") -> dict:
     """Immutable input snapshot (spec §13): records, rows and dates as JSON.
-    Vault ids and credential references are never in it."""
-    def pick(row, fields):
-        return {f: (row.get(f) if isinstance(row, dict) else getattr(row, f, None)) for f in fields}
-
-    def rates(value):
-        items = value if isinstance(value, (list, tuple)) else [value]
-        return [pick(r, _BE_RATE_FIELDS) for r in items]
-
-    return _json_safe({
-        "version": 1, "calculationMode": calculation_mode,
+    Vault ids and credential references are never in it. Version 2 references
+    the pack rows (packRef) instead of copying them; version 1 (the copy) is
+    kept only when a row cannot be referenced."""
+    rate_frozen = {k: [_be_pick(r, _BE_RATE_FIELDS) for r in _be_rate_items(v)]
+                   for k, v in (getattr(ctx, "rate_map", None) or {}).items()}
+    slab_frozen = [_be_pick(r, _BE_SLAB_FIELDS) for r in (getattr(ctx, "slabs", None) or [])]
+    frozen = {
+        "calculationMode": calculation_mode,
         "ctx": {k: getattr(ctx, k, None) for k in _BE_CTX_DECIMALS + _BE_CTX_PLAIN + _BE_CTX_DATES},
         "records": {k: _strip(getattr(ctx, k, None)) for k in _BE_RECORD_KEYS},
         "lists": {k: [_strip(r) for r in (getattr(ctx, k, None) or [])] for k in _BE_LIST_KEYS},
         "maps": {k: {str(i): _strip(r) for i, r in (getattr(ctx, k, None) or {}).items()} for k in _BE_MAP_KEYS},
         "ytd": getattr(ctx, "be_ytd", None),
-        "rateMap": {k: rates(r) for k, r in (getattr(ctx, "rate_map", None) or {}).items()},
-        "slabs": [pick(s, _BE_SLAB_FIELDS) for s in (getattr(ctx, "slabs", None) or [])],
-    })
+    }
+    ref = _be_pack_ref(ctx, rate_frozen, slab_frozen)
+    if ref is not None:
+        frozen.update(version=2, packRef=ref)
+    else:
+        frozen.update(version=1, rateMap=rate_frozen, slabs=slab_frozen)
+    return _json_safe(frozen)
 
 
-def be_thaw_context(frozen: dict):
+def _be_resolve_pack_ref(db: Session, ref: dict) -> tuple:
+    """(rate_map, slabs) of a version-2 packRef, rebuilt from the referenced rows in their frozen order and
+    verified against rowsHash — a row changed since the calculation refuses the replay (fail closed)."""
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    pack_row = int(ref["packRowId"])
+    rate_ids = [int(i) for ids in (ref.get("rateIds") or {}).values() for i in ids]
+    slab_ids = [int(i) for i in ref.get("slabIds") or []]
+    rates = {r.id: r for r in (db.query(ContributionRate).filter(ContributionRate.id.in_(rate_ids),
+                                                                 ContributionRate.jurisdiction_pack_id == pack_row)
+                               .all() if rate_ids else [])}
+    slabs = {r.id: r for r in (db.query(TaxSlab).filter(TaxSlab.id.in_(slab_ids),
+                                                        TaxSlab.jurisdiction_pack_id == pack_row).all()
+                               if slab_ids else [])}
+    if len(rates) != len(set(rate_ids)) or len(slabs) != len(set(slab_ids)):
+        raise BadRequestException("This Belgian payslip references pack rows that no longer exist; it cannot be "
+                                  "replayed.")
+    rate_frozen = {k: [_be_pick(rates[int(i)], _BE_RATE_FIELDS) for i in ids]
+                   for k, ids in (ref.get("rateIds") or {}).items()}
+    slab_frozen = [_be_pick(slabs[i], _BE_SLAB_FIELDS) for i in slab_ids]
+    if _be_rows_hash(rate_frozen, slab_frozen) != ref.get("rowsHash"):
+        raise BadRequestException("The Belgian pack content this payslip was calculated with has changed since; the "
+                                  "payslip is not replayed with different rules.")
+    rate_map = {k: [{**_json_safe(row), "id": int(i), "jurisdiction_pack_id": pack_row}
+                    for row, i in zip(rate_frozen[k], ids)] for k, ids in (ref.get("rateIds") or {}).items()}
+    slab_list = [{**_json_safe(row), "jurisdiction_pack_id": pack_row} for row in slab_frozen]
+    return rate_map, slab_list
+
+
+def be_thaw_context(frozen: dict, db: Optional[Session] = None):
     """The engine reads records, rows and dates through tolerant readers (ISO
     strings, decimal strings), so the frozen JSON replays as-is; the platform
-    money fields are restored to Decimal and map keys to ints."""
+    money fields are restored to Decimal and map keys to ints. Version 1 carries
+    its pack rows; version 2 resolves its packRef (needs `db`)."""
     from app.modules.payroll.engine.base import PayrollContext
 
-    if not frozen or frozen.get("version") != 1:
+    if not frozen or frozen.get("version") not in (1, 2):
         raise BadRequestException("This payslip has no replayable Belgium calculation context.")
+    if frozen.get("version") == 2:
+        if db is None:
+            raise BadRequestException("Replaying a version-2 Belgian payslip needs the database (pack reference).")
+        rate_map, slabs = _be_resolve_pack_ref(db, frozen.get("packRef") or {})
+    else:
+        rate_map, slabs = dict(frozen.get("rateMap") or {}), list(frozen.get("slabs") or [])
     ctx = {}
     for key, value in (frozen.get("ctx") or {}).items():
         if key in _BE_CTX_DECIMALS:
@@ -1595,15 +1686,55 @@ def be_thaw_context(frozen: dict):
         **{k: records.get(k) for k in _BE_RECORD_KEYS},
         **{k: list(lists.get(k) or []) for k in _BE_LIST_KEYS},
         **{k: {int(i): r for i, r in (maps.get(k) or {}).items()} for k in _BE_MAP_KEYS},
-        be_ytd=frozen.get("ytd"), rate_map=dict(frozen.get("rateMap") or {}),
-        slabs=list(frozen.get("slabs") or []))
+        be_ytd=frozen.get("ytd"), rate_map=rate_map, slabs=slabs)
 
 
-def be_replay(frozen: dict):
-    """Recalculate a frozen Belgium payslip exactly as it was calculated."""
+def be_replay(frozen: dict, db: Optional[Session] = None):
+    """Recalculate a frozen Belgium payslip exactly as it was calculated (version 1 or 2)."""
     from app.modules.payroll.engine.resolver import calculate_payroll
 
-    return calculate_payroll(be_thaw_context(frozen), frozen.get("calculationMode") or "standard")
+    return calculate_payroll(be_thaw_context(frozen, db), frozen.get("calculationMode") or "standard")
+
+
+# Version 2 stores usedRows compactly and losslessly: a null effective date or value field is omitted
+# (absent == null). Expanding restores the exact list the engine produced — its sha256 is the engine's own
+# hashes.content, so the round trip is verifiable on every payslip.
+_BE_USED_VALUE_FIELDS = {
+    "rate": ("employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value"),
+    "slab": ("min_amount", "max_amount", "rate_pct", "flat_amount", "assessment_basis", "tax_formula",
+             "formula_expression"),
+}
+USED_ROWS_COMPACT = "compact"
+
+
+def _be_compact_used(entry: dict) -> dict:
+    out = {k: v for k, v in entry.items() if k != "value" and (v is not None or k in ("kind", "id"))}
+    value = entry.get("value")
+    if isinstance(value, dict):
+        out["value"] = {k: v for k, v in value.items() if v is not None}
+    elif value is not None:
+        out["value"] = value
+    return out
+
+
+def _be_expand_used(entry: dict) -> dict:
+    fields = _BE_USED_VALUE_FIELDS.get(entry.get("kind"), ())
+    value = entry.get("value") or {}
+    return {"kind": entry.get("kind"), "id": entry.get("id"), "effectiveFrom": entry.get("effectiveFrom"),
+            "effectiveTo": entry.get("effectiveTo"),
+            "value": {f: value.get(f) for f in fields} if isinstance(value, dict) else value}
+
+
+def be_snapshot_used_rows(snapshot) -> list:
+    """The content rows a payslip's calculation used, exactly as the engine produced them — usedRows (version 2:
+    stored once, compact), or the version-1 copy."""
+    s = snapshot or {}
+    rows = s.get("usedRows")
+    if rows is None:
+        rows = (s.get("trace") or {}).get("contentUsed")
+    if s.get("usedRowsFormat") == USED_ROWS_COMPACT:
+        return [_be_expand_used(r) for r in rows or []]
+    return list(rows or [])
 
 
 def be_payslip_snapshot(result, frozen: Optional[dict] = None) -> Optional[dict]:
@@ -1612,6 +1743,15 @@ def be_payslip_snapshot(result, frozen: Optional[dict] = None) -> Optional[dict]
     if not r:
         return None
     snapshot = dict(r)
+    snapshot["snapshot_version"] = SNAPSHOT_VERSION
+    trace = snapshot.get("trace")
+    if isinstance(trace, dict) and "contentUsed" in trace and trace["contentUsed"] == snapshot.get("usedRows"):
+        trace = {k: v for k, v in trace.items() if k != "contentUsed"}     # stored once, in usedRows (J2)
+        trace["contentUsedRef"] = "usedRows"
+        snapshot["trace"] = trace
+    if isinstance(snapshot.get("usedRows"), list):
+        snapshot["usedRows"] = [_be_compact_used(u) for u in snapshot["usedRows"]]
+        snapshot["usedRowsFormat"] = USED_ROWS_COMPACT
     if frozen is not None:
         snapshot["frozenContext"] = frozen
     from app.modules.payroll import belgium_demo
@@ -1622,9 +1762,12 @@ def be_payslip_snapshot(result, frozen: Optional[dict] = None) -> Optional[dict]
 
 
 def be_payslip_view(snapshot) -> Optional[dict]:
-    """The payslip serializer's BE block: be_result without the frozen inputs."""
+    """The payslip serializer's BE block: be_result without the frozen inputs (used rows in their full form)."""
     if not snapshot:
         return None
+    if snapshot.get("usedRowsFormat") == USED_ROWS_COMPACT:
+        snapshot = {**{k: v for k, v in snapshot.items() if k != "usedRowsFormat"},
+                    "usedRows": be_snapshot_used_rows(snapshot)}
     return {k: v for k, v in snapshot.items() if k != "frozenContext"}
 
 
@@ -1648,8 +1791,8 @@ def post_be_accumulators(db: Session, run, actor_id=None) -> int:
     if start is None or end is None:
         start = end = None
     added = 0
-    items = (db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == BE)
-             .order_by(PayslipItem.id).all())
+    items = _be_run_facts(db, run, order_by=(PayslipItem.id,), accumulatorDeltas="accumulatorDeltas",  # J2
+                          inputHash=("hashes", "input"), correctionOf="correctionOf", employmentLine="employmentLine")
     # I2: one read for what is already posted and one for the employees (was one query per entry / per payslip;
     # each existence check also autoflushed the pending inserts).
     ids = [i.id for i in items]
@@ -1661,13 +1804,12 @@ def post_be_accumulators(db: Session, run, actor_id=None) -> int:
     employees = {e.id: e for e in organization_scoped(db, PayrollEmployee, run.organization_id)
                  .filter(PayrollEmployee.id.in_(employee_ids)).all()} if employee_ids else {}
     for item in items:
-        snapshot = item.be_calculation_snapshot or {}
-        deltas = snapshot.get("accumulatorDeltas") or {}
+        deltas = item.accumulatorDeltas or {}
         if not deltas:
             continue
         employee = employees.get(item.employee_id)
-        result_hash = (snapshot.get("hashes") or {}).get("input")
-        correction_of = snapshot.get("correctionOf")
+        result_hash = item.inputHash
+        correction_of = item.correctionOf
         kind = "CORRECTION" if correction_of else "RUN"
         for accumulator, amount in sorted(deltas.items()):
             if (item.id, accumulator, kind) in posted:
@@ -1681,7 +1823,7 @@ def post_be_accumulators(db: Session, run, actor_id=None) -> int:
             quarter = (pay_date.month - 1) // 3 + 1 if accumulator in _ONSS_QUARTER_ACCUMULATORS else None
             db.add(Entry(organization_id=run.organization_id,
                          legal_entity_id=getattr(employee, "legal_entity_id", None), employee_id=item.employee_id,
-                         employment_line=snapshot.get("employmentLine"), year=pay_date.year, quarter=quarter,
+                         employment_line=item.employmentLine, year=pay_date.year, quarter=quarter,
                          accumulator=accumulator, pay_date=pay_date, source_period_start=start, source_period_end=end,
                          amount=Decimal(str(amount)), entry_kind=kind, run_id=run.id, payslip_item_id=item.id,
                          reverses_id=reverses, result_hash=result_hash, created_by_id=actor_id))
@@ -1693,6 +1835,43 @@ def post_be_accumulators(db: Session, run, actor_id=None) -> int:
 # ── B3: run preflight, approval fingerprint, four-eyes (G-18) ───────────────
 BLOCKING_EXCEPTION_PREFIXES = ()        # every engine exception stops approval (spec §12)
 PREFLIGHT_PENDING = "PENDING"           # a placeholder that does not block (Block C items)
+
+
+class _BeItemFacts(dict):
+    """A payslip's columns + the requested snapshot paths, without loading the whole snapshot (J2)."""
+    __getattr__ = dict.get
+
+
+def be_snapshot_facts(db: Session, query_filter, order_by=None, **paths) -> list:
+    """[_BeItemFacts] for the Belgian payslips matching `query_filter`: id, employee_id, notes, status, gross_pay,
+    net_pay + each requested snapshot path (name=key or name=(key, subkey)). JSON-path extraction, so a run-wide
+    reader never materialises every payslip's full snapshot (J2 memory). An absent path reads as None."""
+    from app.modules.payroll.models import PayslipItem
+
+    snap = PayslipItem.be_calculation_snapshot
+    base = ("id", "employee_id", "notes", "status", "gross_pay", "net_pay")
+    cols = [getattr(PayslipItem, c).label(c) for c in base] + [snap[path].label(f"path_{n}") for n, path in paths.items()]
+    query = db.query(*cols).filter(PayslipItem.country_code == BE, *query_filter)
+    query = query.order_by(*(order_by if order_by is not None else (PayslipItem.employee_id, PayslipItem.id)))
+    out = []
+    for row in query.all():
+        values = row._mapping
+        facts = _BeItemFacts({c: values[c] for c in base})
+        facts.update({n: values[f"path_{n}"] for n in paths})
+        out.append(facts)
+    return out
+
+
+def _be_run_facts(db: Session, run, order_by=None, **paths) -> list:
+    from app.modules.payroll.models import PayslipItem
+
+    return be_snapshot_facts(db, (PayslipItem.payroll_run_id == run.id,), order_by, **paths)
+
+
+def _be_demo_facts(facts) -> bool:
+    from app.modules.payroll import belgium_demo
+
+    return belgium_demo.be_snapshot_is_demo({"demo": facts.get("demo"), "trace": {"packVersion": facts.get("packVersion")}})
 
 
 def _be_run_items(db: Session, run) -> list:
@@ -1708,12 +1887,11 @@ def be_approval_fingerprint(db: Session, run) -> Optional[str]:
     import hashlib
     import json as _json
 
-    items = _be_run_items(db, run)
+    items = _be_run_facts(db, run, hashes="hashes", be_net="be_net")          # J2: only the fingerprinted paths
     if not items:
         return None
-    payload = [{"item": i.id, "employeeId": i.employee_id, "hashes": (i.be_calculation_snapshot or {}).get("hashes"),
-                "net": (i.be_calculation_snapshot or {}).get("be_net"), "status": str(getattr(i.status, "value", i.status))}
-               for i in items]
+    payload = [{"item": i.id, "employeeId": i.employee_id, "hashes": i.hashes, "net": i.be_net,
+                "status": str(getattr(i.status, "value", i.status))} for i in items]
     return hashlib.sha256(_json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -1744,7 +1922,9 @@ def be_run_preflight(db: Session, run) -> list:
     Block C: every employee's employment line needs an ACCEPTED Dimona IN
     (BE-033); a correction payslip re-declares through DmfA, not Dimona."""
     problems = []
-    items = _be_run_items(db, run)
+    items = _be_run_facts(db, run, hashes="hashes", be_net="be_net", correctionOf="correctionOf",  # J2: paths only
+                          exceptions="exceptions", employmentLine="employmentLine", demo="demo",
+                          packVersion=("trace", "packVersion"))
     pay_date = getattr(run, "pay_date", None)
     pack = _be_pack_for(db, run.organization_id, pay_date) if pay_date is not None else None   # once per run (I2)
     acknowledged = {(a["employeeId"], a["code"]) for a in _acknowledgements(run)}
@@ -1752,12 +1932,11 @@ def be_run_preflight(db: Session, run) -> list:
         problems.append({"code": "BE_PACK_MISSING", "employeeId": None, "severity": "BLOCK",
                          "message": "No active Belgium rule pack is in force on the pay date (content pending)."})
     for item in items:
-        snapshot = item.be_calculation_snapshot or {}
-        if not snapshot:
+        if item.hashes is None and item.be_net is None:              # no Belgian calculation stored
             problems.append({"code": "BE_PAYSLIP_BLOCKED", "employeeId": item.employee_id, "severity": "BLOCK",
                              "message": item.notes or "The Belgian calculation is blocked for this employee."})
             continue
-        if pay_date is not None and not snapshot.get("correctionOf"):
+        if pay_date is not None and not item.correctionOf:
             try:
                 decision = resolve_be_classification(db, run.organization_id, item.employee_id, pay_date,
                                                      period_start=getattr(run, "period_start", None), pack=pack)
@@ -1767,22 +1946,22 @@ def be_run_preflight(db: Session, run) -> list:
             except (BadRequestException, NotFoundException) as error:
                 problems.append({"code": "BE_RESOLVER_FAILED", "employeeId": item.employee_id, "severity": "BLOCK",
                                  "message": getattr(error, "detail", str(error))})
-        for exception in snapshot.get("exceptions") or []:
+        for exception in item.exceptions or []:
             done = (item.employee_id, exception["code"]) in acknowledged
             problems.append({"code": exception["code"], "employeeId": item.employee_id,
                              "severity": "ACKNOWLEDGED" if done else "BLOCK", "exception": True,
                              "message": exception.get("detail") or exception["code"]})
         from app.modules.payroll import belgium_demo
 
-        if belgium_demo.be_snapshot_is_demo(snapshot) and belgium_demo.be_is_demo_org(run.organization_id):
+        if _be_demo_facts(item) and belgium_demo.be_is_demo_org(run.organization_id):
             problems.append({"code": "BE_DEMO_DIMONA_SIMULATED", "employeeId": item.employee_id,
                              "severity": PREFLIGHT_PENDING, "message": f"{belgium_demo.DEMO_LABEL}: a demo "
                              "organisation's Dimona is never transmitted, so it is not required for a demo run."})
-        elif not snapshot.get("correctionOf"):
+        elif not item.correctionOf:
             from app.modules.payroll import belgium_filing
 
             dimona = belgium_filing.dimona_status(db, run.organization_id, item.employee_id,
-                                                  snapshot.get("employmentLine"), pay_date)
+                                                  item.employmentLine, pay_date)
             if not dimona["ok"]:
                 problems.append({"code": dimona["code"], "employeeId": item.employee_id, "severity": "BLOCK",
                                  "message": dimona["message"]})
@@ -1818,7 +1997,7 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
     (G-18 commit idempotency); the ledger post itself is idempotent."""
     from app.modules.payroll.models import PayrollStatus
 
-    items = _be_run_items(db, run)
+    items = _be_run_facts(db, run)                                   # J2: ids only, no snapshot
     if not items:
         return
     status_name = getattr(next_status, "value", next_status)
@@ -1904,7 +2083,10 @@ def create_be_correction(db: Session, organization_id: int, payslip_item_id: int
     source_run = db.get(PayrollRun, original.payroll_run_id)
     if str(getattr(source_run.status, "value", source_run.status)) not in ("Approved", "Authorized", "Paid", "Closed"):
         raise BadRequestException("Only a committed (approved) payslip is corrected; regenerate a draft run instead.")
-    open_corrections = [i for i in db.query(PayslipItem).filter(PayslipItem.organization_id == organization_id,
+    from sqlalchemy.orm import undefer
+
+    open_corrections = [i for i in db.query(PayslipItem).options(undefer(PayslipItem.be_calculation_snapshot))
+                        .filter(PayslipItem.organization_id == organization_id,
                                                                 PayslipItem.country_code == BE,
                                                                 PayslipItem.employee_id == original.employee_id).all()
                         if (i.be_calculation_snapshot or {}).get("correctionOf") == original.id
@@ -1916,7 +2098,7 @@ def create_be_correction(db: Session, organization_id: int, payslip_item_id: int
     if not delta_inputs or unknown:
         raise BadRequestException(f"inputDelta may change only: {', '.join(CORRECTABLE_INPUTS)}.")
     frozen = original.be_calculation_snapshot.get("frozenContext")
-    ctx = be_thaw_context(frozen)
+    ctx = be_thaw_context(frozen, db)
     for key, value in delta_inputs.items():
         setattr(ctx, key, value if key == "be_components" else Decimal(str(value)))
     try:
@@ -1924,7 +2106,8 @@ def create_be_correction(db: Session, organization_id: int, payslip_item_id: int
     except BECalculationBlockedError as error:
         raise BadRequestException(f"The correction cannot be calculated ({error.key}): {error.reason}")
     before = original.be_calculation_snapshot
-    prior = [i.be_calculation_snapshot for i in db.query(PayslipItem).filter(
+    prior = [i.be_calculation_snapshot for i in db.query(PayslipItem).options(
+        undefer(PayslipItem.be_calculation_snapshot)).filter(
         PayslipItem.organization_id == organization_id, PayslipItem.country_code == BE,
         PayslipItem.employee_id == original.employee_id).all()
         if (i.be_calculation_snapshot or {}).get("correctionOf") == original.id]
@@ -1958,7 +2141,8 @@ def create_be_correction(db: Session, organization_id: int, payslip_item_id: int
     run.run_code = generate_business_code(db, organization_id, "PY", PayrollRun, "run_code", "%Y%m")
     db.add(run)
     db.flush()
-    snapshot = {"paymentKind": "CORRECTION", "correctionOf": original.id, "reason": reason, "evidenceRef": evidence,
+    snapshot = {"snapshot_version": SNAPSHOT_VERSION, "paymentKind": "CORRECTION", "correctionOf": original.id,
+                "reason": reason, "evidenceRef": evidence,
                 "inputDelta": _json_safe(delta_inputs), "grossDelta": str(gross_delta), "netDelta": str(net_delta),
                 "withholdingDelta": str(tds_delta), "employerTotalDelta": str(employer_delta),
                 "be_net": str(net_delta),

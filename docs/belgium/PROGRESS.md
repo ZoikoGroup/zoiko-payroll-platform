@@ -796,3 +796,23 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   subprocesses drop ZP_TEST_POSTGRES_URL / DATABASE_URL / ZP_REQUIRE_POSTGRES_TESTS (SQLite only).
 - Limitation: the proof simulates the revert as "main before the Belgium merge"; a later main migration chained
   after 8a1f5ef9fa5d would need its own rollback review (the shim also refuses files changed after the merge).
+
+## Block J2 — snapshot version 2 (memory)
+
+- `"snapshot_version": 2`. frozenContext.version 2 = packRef (pack row id, packVersion, exact rate / slab row
+  ids, rowsHash) instead of the rate / slab copy; usedRows stored once (trace.contentUsedRef) in a lossless compact
+  form (usedRowsFormat "compact", nulls omitted; expansion hashes to the engine's hashes.content). Version 1 stays
+  readable; a version-2 replay resolves the reference and refuses a changed / missing row (fail closed). No
+  migration; engine output unchanged.
+- Readers: be_snapshot_facts (JSON-path extraction) for preflight, approval hook, fingerprint, ledger, DmfA /
+  Belcotax / FinProf totals, payment demo check, parallel import; be_calculation_snapshot deferred (models.py,
+  BE column only); undefer where Belgian code loops; freeze_run_templates skips BE in SQL; payslip API through
+  be_payslip_view (full used rows, same shape for v1 / v2).
+- tests/test_belgium_snapshot_v2.py (6) with the captured version-1 fixture tests/fixtures/belgium_snapshot_v1.json
+  (synthetic DEMO; no IBAN / NISS / names).
+- Memory (tracemalloc, 500): generate 651 → 236 MiB (0.47 / employee), approve 1,100 → 231 MiB (0.46); preflight /
+  DmfA / Belcotax / parallel 642-651 → 4-12 MiB. Process peak at 2,000: 4,323 → 1,435 MiB; marginal 0.39 MiB /
+  employee. Snapshot 238 KB → 50 KB. Statements per item flat (view / PDF +1: deferred load).
+- Guard: memory ceiling 0.6 MiB / employee (generate, approve) added to tests/perf; ceilings view 4 / PDF 7.
+  ZP_BE_SCALE=1: 2 passed. Registry: fresh == stored (an aliased model name hid payslip_items from the scanner —
+  fixed by using the real name).

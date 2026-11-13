@@ -566,8 +566,8 @@ def _be_items_demo(db: Session, item_ids) -> bool:
     from app.modules.payroll.models import PayslipItem
 
     ids = sorted(i for i in item_ids if i)
-    return bool(ids) and any(belgium_demo.be_snapshot_is_demo(i.be_calculation_snapshot)
-                             for i in db.query(PayslipItem).filter(PayslipItem.id.in_(ids)).all())
+    return bool(ids) and any(be._be_demo_facts(i) for i in be.be_snapshot_facts(          # J2: paths only
+        db, (PayslipItem.id.in_(ids),), demo="demo", packVersion=("trace", "packVersion")))
 
 
 def _be_mark_demo(payload: dict, demo: bool) -> dict:
@@ -591,15 +591,17 @@ def _employer_contributions(db: Session, item_ids, demo_out: Optional[list] = No
     from app.modules.payroll.models import PayslipItem
 
     out = {}
-    for item in db.query(PayslipItem).filter(PayslipItem.id.in_(sorted(item_ids))).all() if item_ids else []:
-        s = item.be_calculation_snapshot or {}
-        if demo_out is not None and belgium_demo.be_snapshot_is_demo(s):
+    facts = be.be_snapshot_facts(db, (PayslipItem.id.in_(sorted(item_ids)),), correctionOf="correctionOf",  # J2
+                                 employerTotalDelta="employerTotalDelta", employerTotal="be_employer_total",
+                                 holidayFund=("obligationDeltas", "HOLIDAY_FUND_QUARTERLY"), demo="demo",
+                                 packVersion=("trace", "packVersion")) if item_ids else []
+    for item in facts:
+        if demo_out is not None and be._be_demo_facts(item):
             demo_out.append(item.id)
-        if s.get("correctionOf"):
-            out[item.id] = (_dec(s.get("employerTotalDelta")), None)
+        if item.correctionOf:
+            out[item.id] = (_dec(item.employerTotalDelta), None)
         else:
-            out[item.id] = (_dec(s.get("be_employer_total")), _dec((s.get("obligationDeltas") or {})
-                                                                   .get("HOLIDAY_FUND_QUARTERLY")))
+            out[item.id] = (_dec(item.employerTotal), _dec(item.holidayFund))
     return out
 
 

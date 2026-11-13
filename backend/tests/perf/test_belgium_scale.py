@@ -28,8 +28,8 @@ MAX_STATEMENTS_PER_ITEM = {
     "preflight": 4,                 # (3.0)
     "acknowledge exceptions": 5,    # (4.0)
     "approve": 16,                  # (13.6)
-    "payslip view x50": 3,          # (2.0)
-    "payslip PDF x50": 6,           # (5.0)
+    "payslip view x50": 4,          # (3.0: + the deferred Belgian snapshot loaded for the one payslip, J2)
+    "payslip PDF x50": 7,           # (6.0: idem)
     "DmfA quarter build": 4,        # (3.0)
     "Belcotax 281.10 build": 6,     # (5.0)
 }
@@ -38,12 +38,12 @@ MAX_SECONDS_PER_EMPLOYEE = {"preview": 0.05, "generate": 0.12, "preflight": 0.03
                             "approve": 0.10, "DmfA quarter build": 0.03, "Belcotax 281.10 build": 0.03}
 
 
-def _measure(n: int, tmp_path: Path) -> dict:
+def _measure(n: int, tmp_path: Path, memory: bool = False) -> dict:
     env = {k: v for k, v in os.environ.items() if k not in ("ZP_TEST_POSTGRES_URL", "DATABASE_URL")}
     env["ENVIRONMENT"] = "development"
-    done = subprocess.run([sys.executable, "-m", "tests.perf.be_scale_harness", "--employees", str(n),
-                           "--db", str(tmp_path / f"be_scale_{n}.db")], cwd=BACKEND, env=env, capture_output=True,
-                          text=True, timeout=3600)
+    args = [sys.executable, "-m", "tests.perf.be_scale_harness", "--employees", str(n),
+            "--db", str(tmp_path / f"be_scale_{n}{'_mem' if memory else ''}.db")] + (["--memory"] if memory else [])
+    done = subprocess.run(args, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=3600)
     line = next((ln for ln in done.stdout.splitlines() if ln.startswith("BE-SCALE ")), None)
     assert done.returncode == 0 and line, (done.stdout[-2000:], done.stderr[-3000:])
     out = json.loads(line[len("BE-SCALE "):])
@@ -59,3 +59,15 @@ def test_belgian_paths_scale_linearly_without_n_plus_one(tmp_path):
     for step, ceiling in MAX_SECONDS_PER_EMPLOYEE.items():
         assert large[step]["seconds"] / large_n <= ceiling, (step, large[step])
     assert large["parallel"]["perItem"] <= 3, large["parallel"]
+
+
+# Block J2: Python peak memory per employee (tracemalloc) for the two steps that hold a whole run — after J2
+# 0.47 / 0.46 MiB at 500 employees (before: 1.30 / 2.20 MiB).
+MAX_MIB_PER_EMPLOYEE = {"generate": 0.6, "approve": 0.6}
+
+
+def test_belgian_run_memory_stays_under_the_per_employee_ceiling(tmp_path):
+    n = int(os.environ.get("ZP_BE_SCALE_N", "200"))
+    steps = _measure(n, tmp_path, memory=True)
+    for step, ceiling in MAX_MIB_PER_EMPLOYEE.items():
+        assert steps[step]["peakMiB"] / n <= ceiling, (step, steps[step])

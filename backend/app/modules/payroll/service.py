@@ -33828,8 +33828,10 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
             if (item.country_code or country) == "PL" and item.pl_calculation_snapshot else None),
         # Belgium (ZP-BE-ENG-001 Block A3): the frozen be_result; the frozen
         # inputs (frozenContext) stay server-side.
+        # Block J2: be_payslip_view also expands version-2 compact usedRows, so
+        # the API shape is the same for version 1 and version 2 snapshots.
         "beCalculationSnapshot": (
-            {k: v for k, v in (item.be_calculation_snapshot or {}).items() if k != "frozenContext"}
+            _be_snapshot_view(item.be_calculation_snapshot)
             if (item.country_code or country) == "BE" and item.be_calculation_snapshot else None),
     }
 
@@ -33855,6 +33857,13 @@ def list_payslips(db: Session, organization_id: int = None, search: str = None,
     # default only for rows generated before that column existed.
     org_country = _resolve_org_country(db, organization_id)
     return [_serialize_payslip(item, run, country=item.country_code or org_country) for item, run in rows]
+
+
+def _be_snapshot_view(snapshot):
+    """Belgium (Block J2): the payslip's BE block without the frozen inputs, used rows in full form."""
+    from app.modules.payroll import belgium_service
+
+    return belgium_service.be_payslip_view(snapshot)
 
 
 def get_payslip_by_id(db: Session, payslip_id: int, organization_id: int = None) -> dict:
