@@ -46,7 +46,10 @@ def seed_demo(db, preparer_id: int, approver_id: int, org_name: str = "DEMO Belg
     pack = belgium_demo.be_seed_demo_pack(db, preparer_id)
     org = db.query(Organization).filter(Organization.organization_code == "BE-DEMO").first()
     if org is None:
-        org = Organization(organization_name=f"{org_name} ({belgium_demo.DEMO_LABEL})", organization_code="BE-DEMO")
+        # EVALUATION workspace: the payroll screens open without a paid plan, and every PDF also carries the
+        # platform's "PREVIEW — EVALUATION ONLY" watermark next to the DEMO one (Block H3).
+        org = Organization(organization_name=f"{org_name} ({belgium_demo.DEMO_LABEL})", organization_code="BE-DEMO",
+                           workspace_type="EVALUATION")
         db.add(org)
         db.flush()
         db.add(CompanyComplianceDetails(organization_id=org.id, name=org.organization_name, jurisdiction_country="BE"))

@@ -182,3 +182,6 @@ def test_the_seed_script_never_creates_accounts(db, enabled):
     before = db.query(User).count()
     out = seed_demo(db, t.users[0].id, t.users[1].id)
     assert out["status"] == "Approved" and out["demo"] is True and db.query(User).count() == before
+    from app.modules.organizations.models import Organization
+
+    assert db.get(Organization, out["organizationId"]).workspace_type == "EVALUATION"   # screens open without a plan

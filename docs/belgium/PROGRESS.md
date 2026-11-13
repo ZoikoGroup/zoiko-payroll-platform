@@ -678,3 +678,16 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   verified) BEFORE the code revert. After a code revert the three revision files are gone (alembic cannot
   downgrade), and check_schema_drift refuses the next deploy on the two shared columns the reverted models do not
   declare. The "already reverted" recovery path is documented.
+
+## Block H3 — staging rehearsal; CI fix
+
+- docs/belgium/STAGING_REHEARSAL.md: staging-only switches (+ staging-only identifier keys for the NISS steps),
+  seed command, 17-step click-through with expected results, turning the demo off, clean-up (restore preferred;
+  read-only inventory SQL; no scripted delete).
+- Fix found while writing it: the demo organisation was created as a PRODUCTION workspace without a plan → the
+  plan guard would answer 403 on every payroll screen. scripts/seed_belgium_demo.py now creates it as EVALUATION
+  (test asserts it); demo PDFs then also carry the evaluation watermark.
+- CI privacy-isolation failure (user report): the Belgian PostgreSQL round trips' single `DROP SCHEMA public
+  CASCADE` over the privacy suite's 373-table schema exhausted the lock table ("out of shared memory"). Reproduced
+  on a disposable local PostgreSQL with CI defaults (max_locks_per_transaction 64, 100 connections); fixed with
+  pg_reset_public_schema (25 tables per transaction). The 3 BE migration files: 69 passed, round trips executed.
