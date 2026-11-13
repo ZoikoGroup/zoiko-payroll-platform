@@ -737,3 +737,17 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   support playbook. tests/test_belgium_ops_runbook.py (3): undocumented code, stale entry or stale file fails.
 - Tests: test_belgium_observability.py (3, real flows captured: no NISS / name / IBAN / amount in any record);
   all Belgian tests green (guard: observability regex shapes registered).
+
+## Block I4 — user guides (docs/belgium/guides/)
+
+- SUPER_ADMIN_GUIDE.md: content lifecycle (Create the Draft pack → Export workbook → Dry run / Confirm import →
+  Earning-class patterns / Select pending cells → Sign N selected (second person) → Register example / Record
+  certification run → Approve → activation runbook → Assign Organizations), release gates, demo pack.
+- ORG_ADMIN_GUIDE.md: employer registration, establishment units, special contribution (workforce test) status,
+  pay component mappings, employee statutory records, contracts and Dimona, NISS reveal, running payroll and the
+  Belgium preflight, payment batches, filing centre, obligations, parallel cycles.
+- PAYSLIP_EXPLAINER.md: each payslip section in plain English with its be.payslip.* content keys (nl / fr / de
+  ready; header / net keys marked as proposed — not yet content-keyed in the code).
+- Every screen label taken from the UI code (BEComplianceCentreTab, BEFilingSettlementPanel, BEParallelCycles,
+  BelgiumStatutoryProfilePanel, BEIdentifierField, BERunPreflightPanel, BEPaymentPanel, BEOverviewDashboard,
+  BESigningStatusTab, JurisdictionLayout / OrgsTab).
