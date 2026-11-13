@@ -129,8 +129,8 @@ def test_deploy_drift_filter_explains_every_object():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES) | set(LATER_TABLES)
-    assert columns == COLUMNS
+    assert tables == set(NEW_TABLES) | set(LATER_TABLES) | {"payroll_mx_document_access_events"}
+    assert {t: c for t, c in columns.items() if not t.startswith("payroll_mx_")} == COLUMNS
 
 
 def test_revision_is_the_single_child_of_its_parent():

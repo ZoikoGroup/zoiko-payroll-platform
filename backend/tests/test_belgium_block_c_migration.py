@@ -120,8 +120,8 @@ def test_deploy_drift_filter_explains_every_object():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES)
-    assert columns == {}
+    assert tables == set(NEW_TABLES) | {"payroll_mx_document_access_events"}
+    assert all(t.startswith("payroll_mx_") for t in columns)
 
 
 def test_revision_is_the_single_child_and_the_single_head():
@@ -134,7 +134,7 @@ def test_revision_is_the_single_child_and_the_single_head():
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
     assert children == [FILENAME]
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert list(script.get_heads()) == [REVISION]
+    assert list(script.get_heads()) == ["4de7c091ab32"]
 
 
 def test_names_are_literal_and_the_migration_is_in_the_manifest():

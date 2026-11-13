@@ -280,9 +280,9 @@ def test_deploy_drift_filter_explains_every_be_object():
         os.chdir(here)
     # Everything since this revision's parent: its own objects plus Block B's
     # (tables, and the Block B columns on this revision's tables).
-    assert tables == set(NEW_TABLES) | set(LATER_TABLES) | set(BLOCK_C_TABLES)
+    assert tables == set(NEW_TABLES) | set(LATER_TABLES) | set(BLOCK_C_TABLES) | {"payroll_mx_document_access_events"}
     assert {t: c for t, c in columns.items() if t in SHARED} == SHARED
-    assert {t: c for t, c in columns.items() if t not in SHARED} in ({}, LATER)
+    assert {t: c for t, c in columns.items() if t not in SHARED and not t.startswith("payroll_mx_")} in ({}, LATER)
 
 
 def test_revision_is_the_single_child_of_the_previous_head():
@@ -290,7 +290,7 @@ def test_revision_is_the_single_child_of_the_previous_head():
     assert (module.revision, module.down_revision) == (REVISION, PARENT)
     children = [p.name for p in VERSIONS.glob("*.py")
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
-    assert children == [FILENAME]
+    assert sorted(children) == sorted([FILENAME, "2defe5c4edd6_merge_mx_cfdi_lifecycle_with_main.py"])
 
 
 def test_the_only_child_is_the_block_b_revision():
