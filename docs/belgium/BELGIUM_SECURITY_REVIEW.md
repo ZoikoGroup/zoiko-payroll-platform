@@ -13,6 +13,8 @@ every Belgium file and every hunk in a shared file. Reviewed 2026-11-13 on branc
 | F4 | C2 callgraph collisions (generic function names; `statutory_summary`) re-classified 13 existing NZ / PL / MX routes; caught by the standing registry diff before commit. | Medium (would have mis-stated other countries' data access) | Fixed in C2 (be_-unique names; the hook maps to `be_statutory_summary`). Recorded here for completeness. |
 | F5 | The Super Admin readiness route first read worker tables (G2 per-employee detail) and was classified **worker**, which a platform role may not use. | Medium (privacy) | Fixed in C2: counts and organisation ids only; reviewed `aggregate` override in route_overrides.py. |
 
+| F-G12-1 | (Block E, G-12 verification) In the Belgian console one Super Admin could edit AND sign the same content row in one action; four-eyes on content was enforced only at pack approval / activation and in bulk sign. | Medium (four-eyes) | **FIXED in Block F1** (be_super_admin only): a row is never edited and signed in one action, and no user who edited a row in the current pack version (created it or changed a value; signing alone is not an edit) can sign it; slab rows are always added PENDING; a re-edit un-signs the row and its editor cannot re-sign. Bulk sign and activation keep their rules; other countries' consoles unchanged. Tests: tests/test_belgium_signing_four_eyes.py. The Belgian console UI no longer offers "Save and sign" / "Add and sign". |
+
 No finding in shared code required a non-additive change (stop condition (a) not triggered).
 
 ## 1. NISS / BIS / ONSS number

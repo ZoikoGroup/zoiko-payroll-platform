@@ -561,3 +561,16 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   02 FinProf + Belcotax-on-web access (FPS Finance), 03 XSD / technical documentation download list (URLs found on
   2026-11-13) + request, 04 mandate template per launch employer. Every company value [TO FILL]; every address not
   verified in this session [TO CONFIRM]. Nothing sent.
+
+## Block F1 — F-G12-1 fixed
+
+- be_super_admin: update_row refuses signing when the same call changes a value ("never edited and signed in one
+  action") and when the signer edited the row in this pack version (be_row_editors: created it or changed a value;
+  signing alone is not an edit); changes are now collected and applied only after the check (nothing is mutated on
+  refusal). add_slab_row refuses specialistVerified: new rows are always added PENDING. Bulk sign and activation
+  rules unchanged; other countries' consoles untouched.
+- UI: the Belgian row editor refuses sign-with-changes before sending ("Sign (no changes)"); the add-row form never
+  sends the signing flag.
+- Tests: test_belgium_signing_four_eyes.py (new, 8); super-admin and slab-row tests moved to edit-then-sign by a
+  second user. Belgium files: 539 passed, 3 skipped (PostgreSQL round trips). PL / NZ console tests pass. Registry
+  diff: no route changed. BELGIUM_SECURITY_REVIEW.md and the gaps register record F-G12-1 as FIXED.

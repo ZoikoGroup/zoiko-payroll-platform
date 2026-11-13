@@ -41,7 +41,8 @@ function AddRowForm({ pack, rowKey, spec, onClose, onSaved }) {
     setSaving(true);
     setError(null);
     try {
-      await addBeSlabRow(pack.id, rowKey, { ...payload, ...governancePayload(governance) });
+      // F-G12-1 (Block F1): a new row is always added PENDING; another Super Admin signs it.
+      await addBeSlabRow(pack.id, rowKey, { ...payload, ...governancePayload(governance), specialistVerified: false });
       onSaved();
     } catch (err) {
       setError(err.message || "The row was refused.");
@@ -75,7 +76,7 @@ function AddRowForm({ pack, rowKey, spec, onClose, onSaved }) {
           className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-semibold text-foreground-secondary">Cancel</button>
         <button type="button" onClick={save} disabled={saving}
           className="rounded-lg bg-primary px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
-          {saving ? "Saving…" : governance.specialistVerified ? "Add and sign" : "Add (stays pending)"}
+          {saving ? "Saving…" : "Add (stays pending — another Super Admin signs it)"}
         </button>
       </div>
     </div>

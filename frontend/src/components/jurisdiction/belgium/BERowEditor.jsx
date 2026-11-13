@@ -89,10 +89,16 @@ export default function BERowEditor({ kind, row, config, onClose, onSaved }) {
   async function save() {
     const problem = governanceError(governance);
     if (problem) { setError(problem); return; }
+    const edits = changed(values, initial);
+    // F-G12-1 (Block F1): a row is edited OR signed, never both; the editor never signs it.
+    if (governance.specialistVerified && Object.keys(edits).length) {
+      setError("Four-eyes: save the change first (it stays pending); another Super Admin who did not edit the row signs it.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      onSaved(await updateBeRow(kind, row.id, { ...changed(values, initial), ...governancePayload(governance) }));
+      onSaved(await updateBeRow(kind, row.id, { ...edits, ...governancePayload(governance) }));
     } catch (err) {
       setError(err.message || "The change was refused.");
     } finally {
@@ -147,7 +153,7 @@ export default function BERowEditor({ kind, row, config, onClose, onSaved }) {
         </button>
         <button type="button" onClick={save} disabled={saving}
           className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-          {saving ? "Saving…" : governance.specialistVerified ? "Save and sign" : "Save (stays pending)"}
+          {saving ? "Saving…" : governance.specialistVerified ? "Sign (no changes)" : "Save (stays pending)"}
         </button>
       </div>
     </Modal>

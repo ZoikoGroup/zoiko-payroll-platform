@@ -202,8 +202,29 @@ def _parse(column: str, value, name: str):
     return parsed
 
 
+def be_row_editors(db: Session, kind: str, row_id: int) -> set:
+    """Super Admins who EDITED this row in its pack version (F-G12-1): created
+    it, or changed a value in an audited edit. Signing alone (signed flag /
+    source only) is not an edit. Rows belong to one pack version, so the audit
+    rows of the row are the edits of this version."""
+    from app.modules.payroll.models import TaxConfigurationAudit as A
+
+    editors = set()
+    for audit in db.query(A).filter(A.entity_type == f"be_statutory_{kind}", A.entity_id == row_id):
+        if audit.actor_id is None:
+            continue
+        new = audit.new_value if isinstance(audit.new_value, dict) else {}
+        old = audit.old_value if isinstance(audit.old_value, dict) else {}
+        if new.get("action") == "added" or any(k not in ("signed", "sourceDocumentId") and old.get(k) != v
+                                               for k, v in new.items()):
+            editors.add(audit.actor_id)
+    return editors
+
+
 def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id) -> dict:
-    """Edit and/or sign one canonical BE row of an editable pack version."""
+    """Edit OR sign one canonical BE row of an editable pack version — never
+    both in one action, and never signed by a user who edited the row in this
+    pack version (F-G12-1, Block F1)."""
     from app.modules.payroll.models import ContributionRate, TaxSlab
     from app.modules.payroll.service import _require_editable_pack
 
@@ -230,7 +251,7 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id) -> dic
         raise BadRequestException(f"not editable here: {', '.join(sorted(unknown))}")
     key_kind = content.KEYS.get(row.component_key, (None, None))[1] if kind == "rate" else None
 
-    old, new, changed = {}, {}, False
+    old, new, changed, pending = {}, {}, False, {}
     for name, column in allowed.items():
         if name not in data:
             continue
@@ -248,6 +269,17 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id) -> dic
         old[name], new[name] = _safe(getattr(row, column)), _safe(value)
         if getattr(row, column) != value:
             changed = True
+        pending[column] = value
+    if verify:
+        # F-G12-1 (Block F1): four-eyes per row. A row is never edited and signed
+        # in one action, and nobody who edited it in this pack version signs it.
+        if changed:
+            raise BadRequestException("Four-eyes: a Belgian row is never edited and signed in one action. Save the "
+                                      "change; another Super Admin who did not edit the row signs it.")
+        if actor_id is not None and actor_id in be_row_editors(db, kind, row.id):
+            raise BadRequestException("Four-eyes: you edited this row in this pack version; another Super Admin "
+                                      "must sign it.")
+    for column, value in pending.items():
         setattr(row, column, value)
     start, end = row.effective_from or pack.effective_from, row.effective_to or pack.effective_to
     if start and end and end < start:
@@ -435,6 +467,10 @@ def add_slab_row(db: Session, pack_row_id: int, key: str, data: dict, actor_id) 
     data = dict(data or {})
     reason = _reason(data)
     verify = data.get("specialistVerified") is True
+    if verify:
+        # F-G12-1 (Block F1): the creator of a row is its editor and never signs it.
+        raise BadRequestException("Four-eyes: a new Belgian row is always added PENDING; another Super Admin who did "
+                                  "not add it signs it.")
     source = _source(db, data, verify)
     unknown = set(data) - set(SLAB_ROW_FIELDS) - {"reason", "sourceDocumentId", "specialistVerified"}
     if unknown:

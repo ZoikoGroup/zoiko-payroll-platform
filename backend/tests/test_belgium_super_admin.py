@@ -173,13 +173,13 @@ def test_signing_needs_a_reviewed_archived_source_and_a_value(db, seeded):
     row = _rate(db, seeded, "be_wage_rmmmg")
     seeded_source = db.query(SourceArtifact).filter(SourceArtifact.form_number == "ZP-BE-ENG-001 S8").one()
     with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        _update(db, "rate", row.id, SIGNER, flatAmount="10", reason="r", sourceDocumentId=seeded_source.id,
+        _update(db, "rate", row.id, SIGNER, reason="r", sourceDocumentId=seeded_source.id,
                 specialistVerified=True)                     # S1-S24 are not archived yet
     src = _verified_source(db)
     with pytest.raises(BadRequestException, match="has no value"):
         _update(db, "rate", row.id, SIGNER, reason="r", sourceDocumentId=src.id, specialistVerified=True)
-    view = _update(db, "rate", row.id, SIGNER, flatAmount="10", reason="sign", sourceDocumentId=src.id,
-                   specialistVerified=True)
+    _update(db, "rate", row.id, EDITOR, flatAmount="10", reason="edit", sourceDocumentId=src.id)
+    view = _update(db, "rate", row.id, SIGNER, reason="sign", sourceDocumentId=src.id, specialistVerified=True)
     assert view["signed"] and c.PENDING_MARK not in _rate(db, seeded, "be_wage_rmmmg").label
     _update(db, "rate", row.id, EDITOR, flatAmount="11", reason="change", sourceDocumentId=src.id)
     assert c.PENDING_MARK in _rate(db, seeded, "be_wage_rmmmg").label          # re-marked pending
@@ -212,8 +212,8 @@ def test_earning_class_treatment_only(db, seeded):
         _update(db, "slab", cls.id, EDITOR, ratePct="5", reason="r", sourceDocumentId=src.id)
     with pytest.raises(BadRequestException, match="treatment"):
         _update(db, "slab", cls.id, EDITOR, treatment="MAYBE", reason="r", sourceDocumentId=src.id)
-    view = _update(db, "slab", cls.id, SIGNER, treatment="INCLUDED", reason="r", sourceDocumentId=src.id,
-                   specialistVerified=True)
+    _update(db, "slab", cls.id, EDITOR, treatment="INCLUDED", reason="r", sourceDocumentId=src.id)
+    view = _update(db, "slab", cls.id, SIGNER, reason="r", sourceDocumentId=src.id, specialistVerified=True)
     assert view["treatment"] == "INCLUDED" and view["signed"]
 
 
@@ -238,8 +238,10 @@ def test_an_editor_or_signer_can_never_approve(db, seeded):
     src = _verified_source(db)
     _update(db, "rate", _rate(db, seeded, "be_bssc_pending").id, EDITOR, textValue="NOT_SUPPORTED",
             reason="r", sourceDocumentId=src.id)
-    _update(db, "rate", _rate(db, seeded, "be_wage_rmmmg").id, SIGNER, flatAmount="10", reason="r",
-            sourceDocumentId=src.id, specialistVerified=True)
+    _update(db, "rate", _rate(db, seeded, "be_wage_rmmmg").id, EDITOR, flatAmount="10", reason="r",
+            sourceDocumentId=src.id)
+    _update(db, "rate", _rate(db, seeded, "be_wage_rmmmg").id, SIGNER, reason="r", sourceDocumentId=src.id,
+            specialistVerified=True)
     assert jurisdiction_hooks.call("BE", "statutory_editors", db, seeded) == {EDITOR, SIGNER}
     for actor in (EDITOR, SIGNER):
         with pytest.raises(BadRequestException):
@@ -253,8 +255,10 @@ def test_the_same_person_cannot_sign_and_activate(db, seeded):
     from app.modules.payroll import belgium_service
 
     src = _verified_source(db)
-    _update(db, "rate", _rate(db, seeded, "be_wage_rmmmg").id, SIGNER, flatAmount="10", reason="r",
-            sourceDocumentId=src.id, specialistVerified=True)
+    _update(db, "rate", _rate(db, seeded, "be_wage_rmmmg").id, EDITOR, flatAmount="10", reason="r",
+            sourceDocumentId=src.id)
+    _update(db, "rate", _rate(db, seeded, "be_wage_rmmmg").id, SIGNER, reason="r", sourceDocumentId=src.id,
+            specialistVerified=True)
     refusal = belgium_service.be_pack_activation_refusal(db, seeded, actor_id=SIGNER)
     assert "cannot also activate" in refusal
     assert "cannot also activate" not in belgium_service.be_pack_activation_refusal(db, seeded, actor_id=ACTIVATOR)

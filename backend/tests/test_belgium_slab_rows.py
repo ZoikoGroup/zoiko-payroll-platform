@@ -62,10 +62,22 @@ def _sign_codes(db, pack, src, ec="EC1,EC2", wc="WC1"):
     from app.modules.payroll import be_super_admin
 
     for key, value in (("be_onss_supported_employer_categories", ec), ("be_onss_supported_worker_codes", wc)):
-        be_super_admin.update_row(db, "rate", _rate(db, pack, key).id,
-                                  {"textValue": value, "reason": "r", "sourceDocumentId": src.id,
-                                   "specialistVerified": True}, SIGNER)
+        row_id = _rate(db, pack, key).id
+        be_super_admin.update_row(db, "rate", row_id, {"textValue": value, "reason": "r",
+                                                       "sourceDocumentId": src.id}, EDITOR)      # edit
+        be_super_admin.update_row(db, "rate", row_id, {"reason": "r", "sourceDocumentId": src.id,
+                                                       "specialistVerified": True}, SIGNER)      # sign (F1)
     db.commit()
+
+
+def _sign_slab(db, row_id, src_id, actor=None):
+    """F1: rows are added PENDING; another Super Admin signs them."""
+    from app.modules.payroll import be_super_admin
+
+    out = be_super_admin.update_row(db, "slab", row_id, {"reason": "r", "sourceDocumentId": src_id,
+                                                         "specialistVerified": True}, actor or SIGNER)
+    db.commit()
+    return out
 
 
 # ── composite dimension ────────────────────────────────────────────────────
@@ -116,12 +128,15 @@ def test_signing_needs_a_reviewed_source(db, seeded, source):
     from app.modules.payroll.models import SourceArtifact
 
     unarchived = db.query(SourceArtifact).filter(SourceArtifact.form_number == "ZP-BE-ENG-001 S24").one()
+    pending = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=unarchived.id,
+                   minAmount="0", ratePct="1")
     with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=unarchived.id, minAmount="0",
-             ratePct="1", specialistVerified=True)
-    view = _add(db, seeded, "be_red_social_work_bonus", SIGNER, reason="r", sourceDocumentId=source.id,
-                minAmount="0", ratePct="1", specialistVerified=True)
-    assert view["signed"] is True
+        _sign_slab(db, pending["id"], unarchived.id)
+    db.rollback()
+    view = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="1",
+                ratePct="1")
+    assert view["signed"] is False
+    assert _sign_slab(db, view["id"], source.id)["signed"] is True
 
 
 def test_onss_employer_dimensions_need_the_signed_code_lists(db, seeded, source):
@@ -203,8 +218,9 @@ def test_retire_is_draft_only_with_a_full_before_image(db, seeded, source):
     from app.modules.payroll import be_super_admin
     from app.modules.payroll.models import TaxConfigurationAudit, TaxSlab
 
-    view = _add(db, seeded, "be_red_social_work_bonus", SIGNER, reason="r", sourceDocumentId=source.id,
-                minAmount="0", maxAmount="100", ratePct="1", specialistVerified=True)
+    view = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id,
+                minAmount="0", maxAmount="100", ratePct="1")
+    view = _sign_slab(db, view["id"], source.id)
     with pytest.raises(BadRequestException, match="reason"):
         be_super_admin.retire_slab_row(db, view["id"], {}, EDITOR)
     out = be_super_admin.retire_slab_row(db, view["id"], {"reason": "duplicate"}, EDITOR)
@@ -261,8 +277,9 @@ def test_activation_refused_while_a_band_key_has_no_signed_rows(db, seeded, sour
     _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="0", ratePct="1")
     assert "be_red_social_work_bonus (slab rows missing or unsigned)" in \
         belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER)   # added but unsigned
-    _add(db, seeded, "be_red_social_work_bonus", SIGNER, reason="r", sourceDocumentId=source.id, minAmount="10",
-         ratePct="1", specialistVerified=True)
+    added = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="10",
+                 ratePct="1")
+    _sign_slab(db, added["id"], source.id)
     from app.modules.payroll.models import TaxSlab
 
     for s in db.query(TaxSlab).filter(TaxSlab.rule_type == "BE_RED_SOCIAL_WORK_BONUS"):
