@@ -18,14 +18,16 @@ import pytest
 # payslip_line_items refactor changed every country's PDF. The merged code renders
 # exactly the bytes origin/main renders for these countries (checked side by side), so
 # the Mexican Recibo dispatch still changes none of them. (First recorded at 6d081c9.)
+# Re-recorded again with page compression off, so the pin no longer depends on the
+# zlib build and matches on every platform.
 PINNED = {
-    "UK": "612f7977eaf726f2bc0c5892f5b909800ca0d7ad4e54f4f8f26c94a3e6d62016",
-    "US": "a8beaac486777dcc32c306a80ecf714c94685a09e2570b67f63f12a91d59447f",
-    "DE": "75d3f257c5700c818cb929d002158cabeedb746e3567b5df2e5b16154f1c6ff9",
-    "HK": "398137dc36848c51bcdcfada657212cdb41d5b647760481159d09928448851f4",
-    "SG": "1aaf1f33a46b467e653c33dfdbe5087d9358b07258a2a1645305b52cefb42cf6",
-    "IN": "1e306447cb81d79d1878f9e6deb0da70d4ded448e78d360968b7a29fc7914cfb",
-    "NL": "d21ce206bdf8cf0bb2206261ac94d913b744014e03e31633b6dcbeecebd01ef1",
+    "UK": "42bcf01326a957d5be7ffb6c4d1d05e1addd0b318da61eb0858a55c7feabf27d",
+    "US": "143ffbc3d4a016b62f2f7b317a98e8f846ed9ea833e645d75c88f1af1cef5d3d",
+    "DE": "dd2a891479f22a0794e3d100c6f49877835e52c64101fc63b59fd7d0e161ff28",
+    "HK": "085ef8e25953016449f01dd30e49cedd59a3b4b9330821ef95fd4734975ea2e5",
+    "SG": "158310ad85abac42ae1271b06d668a29243b9ea59a5135b827dad38c5fc79518",
+    "IN": "bc339db05eae09a89776e843c3f605e7c08966b5459a487531c5a0fea012b7fc",
+    "NL": "eda3e9a880db606633089e965a9bbf6ff8043d8b01af4b417653fba8994b8403",
 }
 
 
@@ -36,6 +38,10 @@ def _render(db, organization, country, monkeypatch):
     from app.modules.payroll.models import PayrollEmployee, PayrollRun, PayslipItem
 
     monkeypatch.setattr(rl_config, "invariant", 1)
+    # Uncompressed page streams: compressed bytes depend on the zlib build
+    # (stock zlib on the Linux CI/production image, zlib-ng in Windows CPython
+    # 3.14), so a compressed pin can only ever match one platform.
+    monkeypatch.setattr(rl_config, "pageCompression", 0)
     emp = PayrollEmployee(organization_id=organization.id, name="Pin Employee", employee_code=f"PIN-{country}",
                           email=f"pin-{country.lower()}@example.com", country_code=country)
     db.add(emp)
