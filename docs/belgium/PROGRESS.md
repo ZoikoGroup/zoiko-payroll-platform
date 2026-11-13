@@ -554,3 +554,10 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   unsigned, governed activation and assignment refuse it, a non-demo organisation never calculates with it,
   end-to-end demo month never paid or transmitted, switching demo off blocks the demo organisation, the seed never
   creates accounts. Belgium files + privacy: 825 passed, 16 skipped, 3 known health-route failures.
+
+## Block E5 — authority onboarding drafts
+
+- docs/belgium/authority/: README (index, owners), 01 Dimona / DmfA channel access + test environment (ONSS),
+  02 FinProf + Belcotax-on-web access (FPS Finance), 03 XSD / technical documentation download list (URLs found on
+  2026-11-13) + request, 04 mandate template per launch employer. Every company value [TO FILL]; every address not
+  verified in this session [TO CONFIRM]. Nothing sent.
