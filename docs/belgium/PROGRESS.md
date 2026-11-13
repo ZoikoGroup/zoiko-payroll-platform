@@ -363,7 +363,7 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
 
 - Backend full suite: PARTIAL, by the user's 2026-11-13 rule (full suite only at the end of the whole phase;
   more Belgium phases follow). Chunks 0 and 2-8 of 12 ran on 77de922 (PAYROLL_DATABASE_URL = fresh scratchpad
-  SQLite per chunk, ZP_TEST_POSTGRES_URL unset, Python 3.11): 6,419 passed, 11 failed, 80 skipped, 2 xfailed.
+  SQLite per chunk, ZP_TEST_POSTGRES_URL unset, Python 3.11): 6,419 passed, 11 failed, 111 skipped, 2 xfailed.
   The 11 failures are the known pre-existing ones (5 test_engine_jurisdiction_db_integration ordering,
   5 Germany full-business ordering, 1 HK configuration CSV); none is a Belgium test. Chunk 1 (twice ended with
   no summary; the run was stopped while investigating it) and chunks 9-11 are NOT run: they run with the
