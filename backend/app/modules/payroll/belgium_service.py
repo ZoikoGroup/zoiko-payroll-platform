@@ -59,11 +59,14 @@ def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of=
     """be_* context fields in force on the run's pay date. Without a pay date
     the calculation refuses (every Belgian rule is selected by it)."""
     pay_date = getattr(run, "pay_date", None) or as_of
+    from app.modules.payroll.belgium_observability import be_bind_run
+
+    be_bind_run(getattr(run, "id", None))                    # I3: engine-level events carry the run id
     if pay_date is None:
         raise BadRequestException("Belgian payroll needs the run's pay date: every rule is selected by it.")
     pack = resolved_pack[2] if resolved_pack else None
     if pack is None:
-        pack = _be_active_pack_row(db, _as_date(pay_date, "payDate"))
+        pack = _be_cached_active_pack(db, _as_date(pay_date, "payDate"))
     # Block E4: a DEMO pack is refused for every organisation that is not a demo
     # organisation (and everywhere when demo packs are disabled / production).
     from app.modules.payroll import belgium_demo
@@ -1049,6 +1052,11 @@ def _vault_event(db: Session, row, action: str, actor_id, reason=None, purpose=N
                   previous_version_id=previous_id)
     db.add(event)
     db.flush()
+    if action.startswith("REVEAL") or action == "REVEALED":                       # I3: ids + state only
+        from app.modules.payroll.belgium_observability import be_log_event
+
+        be_log_event("be.identifier.reveal", state=action, organization_id=row.organization_id,
+                     employee_id=row.employee_id, vault_id=row.id)
     return event
 
 
@@ -1238,6 +1246,22 @@ def _be_registration_for(db: Session, organization_id: int, legal_entity_id, on:
     return row or _latest_for(db, R, organization_id, on, legal_entity_id=None)
 
 
+def _be_cached_active_pack(db: Session, on: date):
+    """_be_active_pack_row, resolved once per session and pay date (I2: a preview resolved the whole pack, every
+    rate and slab, once PER EMPLOYEE). Only an Active row is kept, and it is re-checked on every use, so a pack
+    superseded in the same session is resolved again."""
+    cache = db.info.setdefault("be_active_pack_row", {})
+    row = cache.get(on)
+    if row is not None and getattr(row, "status", None) == "Active":
+        return row
+    row = _be_active_pack_row(db, on)
+    if row is not None:
+        cache[on] = row
+    else:
+        cache.pop(on, None)
+    return row
+
+
 def _be_active_pack_row(db: Session, on: date):
     """The Active Belgian pack row resolved for `on`, or None."""
     from app.modules.payroll.engine.tax_resolver import resolve_tax_configuration
@@ -1246,6 +1270,9 @@ def _be_active_pack_row(db: Session, on: date):
         return resolve_tax_configuration(db, BE, payroll_date=on)[2]
     except Exception:  # an unresolvable pack is "no pack"
         return None
+
+
+_UNRESOLVED = object()          # resolve_be_classification: "resolve the pack yourself" (I2: once per run instead)
 
 
 def _be_pack_for(db: Session, organization_id: int, on: date):
@@ -1269,7 +1296,7 @@ def _be_pack_for(db: Session, organization_id: int, on: date):
 
 
 def resolve_be_classification(db: Session, organization_id: int, employee_id: int, pay_date, *,
-                              period_start=None) -> dict:
+                              period_start=None, pack=_UNRESOLVED) -> dict:
     """POST /classification/resolve: the decision, its evidence and every
     blocking reason for one employee on one pay date. Reads only; writes
     nothing and never calculates (spec §13)."""
@@ -1283,8 +1310,7 @@ def resolve_be_classification(db: Session, organization_id: int, employee_id: in
     employee = _employee(db, organization_id, employee_id)
 
     def rows(model):
-        return db.query(model).filter(model.organization_id == organization_id,
-                                      model.employee_id == employee.id).order_by(model.id).all()
+        return _be_employee_rows(db, model, organization_id, employee.id)
 
     classifications = rows(m.PayrollBeEmploymentClassification)
     unit_ids = {c.establishment_unit_id for c in classifications if c.establishment_unit_id is not None}
@@ -1298,7 +1324,8 @@ def resolve_be_classification(db: Session, organization_id: int, employee_id: in
     registration = _be_registration_for(db, organization_id, getattr(employee, "legal_entity_id", None), on)
     profile = _latest_for(db, m.PayrollBeWorkerProfile, organization_id, on, employee_id=employee.id)
     result = applicability.resolve(
-        _be_pack_for(db, organization_id, on), on, registration=_facts(registration), profile=_facts(profile),
+        _be_pack_for(db, organization_id, on) if pack is _UNRESOLVED else pack, on, registration=_facts(registration),
+        profile=_facts(profile),
         classifications=[_facts(c) for c in classifications],
         schedules=[_facts(s) for s in rows(m.PayrollBeWorkSchedule)], units=units, agreements=agreements,
         declarations=[_facts(d) for d in rows(m.PayrollBeDeclaration)],
@@ -1320,14 +1347,55 @@ def _strip(record):
     return {k: v for k, v in record.items() if k not in _BE_FROZEN_EXCLUDE}
 
 
+def _be_is_record(obj) -> bool:
+    return type(obj).__name__.startswith("PayrollBe")
+
+
+def _be_read_cache(db: Session) -> dict:
+    """Per-session cache of org-wide Belgian record reads (I2: batch loading instead of one query per employee per
+    table). Cleared on every commit / rollback and on any flush that writes a Belgian record; a pending Belgian
+    record is flushed first (when the session autoflushes), exactly as a plain query would have done."""
+    info = db.info
+    if "be_read_cache" not in info:
+        from sqlalchemy import event
+
+        info["be_read_cache"] = {}
+
+        def _clear(*_args, **_kwargs):
+            info.get("be_read_cache", {}).clear()
+
+        def _after_flush(session, _context):
+            if any(_be_is_record(o) for o in (*session.new, *session.dirty, *session.deleted)):
+                _clear()
+
+        event.listen(db, "after_flush", _after_flush)
+        for name in ("after_commit", "after_rollback", "after_soft_rollback"):
+            event.listen(db, name, _clear)
+    if db.autoflush and any(_be_is_record(o) for o in (*db.new, *db.dirty, *db.deleted)):
+        db.flush()
+    return info["be_read_cache"]
+
+
+def _be_employee_rows(db: Session, model, organization_id: int, employee_id: int) -> list:
+    """Every row of `model` for one employee, ordered by id - from ONE org-wide read per session (I2)."""
+    cache = _be_read_cache(db)
+    key = ("rows", model.__tablename__, organization_id)
+    grouped = cache.get(key)
+    if grouped is None:
+        grouped = {}
+        for row in db.query(model).filter(model.organization_id == organization_id).order_by(model.id).all():
+            grouped.setdefault(row.employee_id, []).append(row)
+        cache[key] = grouped
+    return list(grouped.get(employee_id, ()))
+
+
 def _be_records(db: Session, organization_id: int, employee, on: date) -> dict:
     """Every Belgian record the resolver and engine read, as plain dicts. Vault
     ids and credential references are stripped (never frozen, never hashed)."""
     m = _models()
 
     def rows(model):
-        return db.query(model).filter(model.organization_id == organization_id,
-                                      model.employee_id == employee.id).order_by(model.id).all()
+        return _be_employee_rows(db, model, organization_id, employee.id)
 
     classifications = rows(m.PayrollBeEmploymentClassification)
     unit_ids = {c.establishment_unit_id for c in classifications if c.establishment_unit_id is not None}
@@ -1402,19 +1470,12 @@ def _be_holiday_absence_inputs(db: Session, organization_id: int, employee, pay_
 
     m = _models()
     service_year = pay_date.year - 1
-    episodes = (db.query(m.PayrollBeAbsenceEpisode)
-                .filter(m.PayrollBeAbsenceEpisode.organization_id == organization_id,
-                        m.PayrollBeAbsenceEpisode.employee_id == employee.id,
-                        m.PayrollBeAbsenceEpisode.status == STATUS_ACTIVE,
-                        m.PayrollBeAbsenceEpisode.start_date <= pay_date)
-                .order_by(m.PayrollBeAbsenceEpisode.start_date).all())
-    certificates = (db.query(m.PayrollBeHolidayCertificate)
-                    .filter(m.PayrollBeHolidayCertificate.organization_id == organization_id,
-                            m.PayrollBeHolidayCertificate.employee_id == employee.id,
-                            m.PayrollBeHolidayCertificate.status == "APPROVED").all())
-    profiles = (db.query(m.PayrollBeWorkerProfile)
-                .filter(m.PayrollBeWorkerProfile.organization_id == organization_id,
-                        m.PayrollBeWorkerProfile.employee_id == employee.id).order_by(m.PayrollBeWorkerProfile.id).all())
+    episodes = sorted((e for e in _be_employee_rows(db, m.PayrollBeAbsenceEpisode, organization_id, employee.id)
+                       if e.status == STATUS_ACTIVE and e.start_date is not None and e.start_date <= pay_date),
+                      key=lambda e: e.start_date)
+    certificates = [c for c in _be_employee_rows(db, m.PayrollBeHolidayCertificate, organization_id, employee.id)
+                    if c.status == "APPROVED"]
+    profiles = _be_employee_rows(db, m.PayrollBeWorkerProfile, organization_id, employee.id)
     Entry = m.PayrollBeAccumulatorEntry
     base_rows = (db.query(Entry.pay_date, Entry.amount)
                  .filter(Entry.organization_id == organization_id, Entry.employee_id == employee.id,
@@ -1577,20 +1638,28 @@ def post_be_accumulators(db: Session, run, actor_id=None) -> int:
     if start is None or end is None:
         start = end = None
     added = 0
-    for item in (db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == BE)
-                 .order_by(PayslipItem.id).all()):
+    items = (db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == BE)
+             .order_by(PayslipItem.id).all())
+    # I2: one read for what is already posted and one for the employees (was one query per entry / per payslip;
+    # each existence check also autoflushed the pending inserts).
+    ids = [i.id for i in items]
+    posted = {(r[0], r[1], r[2]) for r in db.query(Entry.payslip_item_id, Entry.accumulator, Entry.entry_kind)
+              .filter(Entry.payslip_item_id.in_(ids)).all()} if ids else set()
+    employee_ids = sorted({i.employee_id for i in items})
+    employees = {e.id: e for e in db.query(PayrollEmployee).filter(PayrollEmployee.id.in_(employee_ids)).all()}         if employee_ids else {}
+    for item in items:
         snapshot = item.be_calculation_snapshot or {}
         deltas = snapshot.get("accumulatorDeltas") or {}
         if not deltas:
             continue
-        employee = db.get(PayrollEmployee, item.employee_id)
+        employee = employees.get(item.employee_id)
         result_hash = (snapshot.get("hashes") or {}).get("input")
         correction_of = snapshot.get("correctionOf")
         kind = "CORRECTION" if correction_of else "RUN"
         for accumulator, amount in sorted(deltas.items()):
-            if db.query(Entry.id).filter(Entry.payslip_item_id == item.id, Entry.accumulator == accumulator,
-                                         Entry.entry_kind == kind).first():
+            if (item.id, accumulator, kind) in posted:
                 continue
+            posted.add((item.id, accumulator, kind))
             reverses = None
             if correction_of:
                 original = db.query(Entry).filter(Entry.payslip_item_id == correction_of,
@@ -1664,7 +1733,9 @@ def be_run_preflight(db: Session, run) -> list:
     problems = []
     items = _be_run_items(db, run)
     pay_date = getattr(run, "pay_date", None)
-    if pay_date is not None and _be_pack_for(db, run.organization_id, pay_date) is None:
+    pack = _be_pack_for(db, run.organization_id, pay_date) if pay_date is not None else None   # once per run (I2)
+    acknowledged = {(a["employeeId"], a["code"]) for a in _acknowledgements(run)}
+    if pay_date is not None and pack is None:
         problems.append({"code": "BE_PACK_MISSING", "employeeId": None, "severity": "BLOCK",
                          "message": "No active Belgium rule pack is in force on the pay date (content pending)."})
     for item in items:
@@ -1676,14 +1747,13 @@ def be_run_preflight(db: Session, run) -> list:
         if pay_date is not None and not snapshot.get("correctionOf"):
             try:
                 decision = resolve_be_classification(db, run.organization_id, item.employee_id, pay_date,
-                                                     period_start=getattr(run, "period_start", None))
+                                                     period_start=getattr(run, "period_start", None), pack=pack)
                 for blocked in decision["blocking"]:
                     problems.append({"code": blocked["code"], "employeeId": item.employee_id, "severity": "BLOCK",
                                      "message": blocked["reason"]})
             except (BadRequestException, NotFoundException) as error:
                 problems.append({"code": "BE_RESOLVER_FAILED", "employeeId": item.employee_id, "severity": "BLOCK",
                                  "message": getattr(error, "detail", str(error))})
-        acknowledged = {(a["employeeId"], a["code"]) for a in _acknowledgements(run)}
         for exception in snapshot.get("exceptions") or []:
             done = (item.employee_id, exception["code"]) in acknowledged
             problems.append({"code": exception["code"], "employeeId": item.employee_id,
@@ -1742,6 +1812,13 @@ def before_run_transition(db: Session, run, next_status, actor_id) -> None:
     if next_status == PayrollStatus.APPROVED:
         blocking = [p for p in be_run_preflight(db, run) if p["severity"] == "BLOCK"]
         if blocking:
+            from collections import Counter
+
+            from app.modules.payroll.belgium_observability import be_log_event
+
+            for code, count in sorted(Counter(p["code"].split(":")[0] for p in blocking).items()):
+                be_log_event("be.run.approval_refused", code=code, count=count, organization_id=run.organization_id,
+                             run_id=run.id)
             listing = "; ".join(f"{p['code']}" + (f" (employee #{p['employeeId']})" if p["employeeId"] else "")
                                 for p in blocking[:10])
             raise _conflict(f"Belgium: the run cannot be approved: {listing}")
@@ -1943,7 +2020,15 @@ def approve_be_component_mapping(db: Session, organization_id: int, row_id: int,
 
 
 def be_component_mapping_index(db: Session, organization_id: int, on: date) -> dict:
-    """{"SOURCE:key": BE component code} of the mappings in force on `on`."""
+    """{"SOURCE:key": BE component code} of the mappings in force on `on` (read once per session and date, I2)."""
+    cache = _be_read_cache(db)
+    key = ("mapping_index", organization_id, on)
+    if key not in cache:
+        cache[key] = _be_component_mapping_index(db, organization_id, on)
+    return dict(cache[key])
+
+
+def _be_component_mapping_index(db: Session, organization_id: int, on: date) -> dict:
     M = _models().PayrollBeComponentMapping
     rows = (_in_force(db.query(M).filter(M.organization_id == organization_id,
                                          M.status.in_((STATUS_ACTIVE, STATUS_SUPERSEDED))), M, on)
@@ -2186,7 +2271,14 @@ def acknowledge_be_run_exception(db: Session, organization_id: int, run_id: int,
     except (TypeError, ValueError):
         raise BadRequestException("employeeId is required.")
     code = str(payload.get("code") or "").strip()
-    present = {(p["employeeId"], p["code"]) for p in be_run_preflight(db, run) if p.get("exception")}
+    # The preflight lists an exception exactly when the employee's Belgian payslip in this run carries it; read
+    # only that payslip instead of re-running the whole-run preflight per acknowledgement (I2: was O(N^2)).
+    from app.modules.payroll.models import PayslipItem
+
+    mine = (db.query(PayslipItem.be_calculation_snapshot)
+            .filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == BE,
+                    PayslipItem.employee_id == employee_id).all())
+    present = {(employee_id, e.get("code")) for (snap,) in mine for e in ((snap or {}).get("exceptions") or [])}
     if (employee_id, code) not in present:
         raise BadRequestException("That exception is not raised for this employee in this run.")
     entry = {"employeeId": employee_id, "code": code, "reason": reason, "by": actor_id,

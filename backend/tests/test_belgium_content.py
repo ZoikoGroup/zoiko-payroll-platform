@@ -213,6 +213,10 @@ _STRUCTURAL_NUMBERS = {
 }
 # Strings that look numeric but are not statutory values.
 _STRUCTURAL_STRINGS = {
+    ("belgium_observability.py", r"^BE_[A-Z0-9_]{2,60}(:[a-z0-9_.\-]{1,60})?$"):
+        "log event code shape (code + optional content key), not a value",
+    ("belgium_observability.py", "^[A-Z0-9_]{2,20}$"): "log event form-code shape, not a value",
+    ("belgium_observability.py", "^[A-Z_]{2,30}$"): "log event state shape, not a value",
     ("belgium_payslip_pdf.py", "0.00"): "a zero amount line is not printed (payslip layout, not a value)",
     ("engine/jurisdictions/belgium/pack.py", "0.01"): "EUR cent unit (the signed rounding rule picks it)",
     ("engine/countries/belgium_content.py", "^[A-Z0-9]{1,10}$"):

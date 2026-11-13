@@ -77,7 +77,19 @@ FICHE_LEDGER = TAX_LEDGER + ("ONSS_EMPLOYEE", "WORK_BONUS_SOCIAL")
 RENDERERS: dict = {}
 
 
+def _be_filing_events() -> None:
+    from app.modules.payroll.belgium_observability import be_register_filing_events
+
+    be_register_filing_events()
+
+
+_be_filing_events()                       # I3: filing state changes are logged wherever they happen
+
+
 def _conflict(code: str, message: str):
+    from app.modules.payroll.belgium_observability import be_log_event
+
+    be_log_event("be.filing.refused", code=code)                                     # I3: the code only
     raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Belgium ({code}): {message}")
 
 
@@ -553,14 +565,18 @@ def _be_refuse_demo_filing(row, action: str) -> None:
         _conflict("BE_DEMO_FILING", f"{belgium_demo.DEMO_LABEL}: a demo filing is never {action}.")
 
 
-def _employer_contributions(db: Session, item_ids) -> dict:
+def _employer_contributions(db: Session, item_ids, demo_out: Optional[list] = None) -> dict:
     """{payslip_item_id: employer total} from the frozen BE snapshots (a
-    correction payslip carries its employerTotalDelta)."""
+    correction payslip carries its employerTotalDelta). `demo_out` (a list)
+    receives whether any of them is DEMO, from the same read (I2)."""
+    from app.modules.payroll import belgium_demo
     from app.modules.payroll.models import PayslipItem
 
     out = {}
     for item in db.query(PayslipItem).filter(PayslipItem.id.in_(sorted(item_ids))).all() if item_ids else []:
         s = item.be_calculation_snapshot or {}
+        if demo_out is not None and belgium_demo.be_snapshot_is_demo(s):
+            demo_out.append(item.id)
         if s.get("correctionOf"):
             out[item.id] = (_dec(s.get("employerTotalDelta")), None)
         else:
@@ -586,13 +602,17 @@ def build_be_dmfa(db: Session, organization_id: int, quarter: str, legal_entity_
     if not entries:
         _conflict("BE_NO_COMMITTED_PAYROLL", f"no committed Belgian payroll in {key} for this employer.")
     employer = _employer(db, organization_id, legal_entity_id, end)
-    employer_by_item = _employer_contributions(db, {e.payslip_item_id for e in entries if e.payslip_item_id})
+    demo_items: list = []
+    employer_by_item = _employer_contributions(db, {e.payslip_item_id for e in entries if e.payslip_item_id},
+                                               demo_items)
     workers, totals = {}, {a: ZERO for a in ONSS_LEDGER}
     totals["employerContributions"], totals["holidayFund"] = ZERO, ZERO
     seen_items = set()
     for e in entries:
-        employee = db.get(PayrollEmployee, e.employee_id)
-        w = workers.setdefault(e.employee_id, {**_worker(db, organization_id, employee), "lines": {}})
+        w = workers.get(e.employee_id)
+        if w is None:                                     # once per employee, not once per ledger entry (I2)
+            employee = db.get(PayrollEmployee, e.employee_id)
+            w = workers[e.employee_id] = {**_worker(db, organization_id, employee), "lines": {}}
         line = w["lines"].setdefault(e.employment_line or "-", {a: ZERO for a in ONSS_LEDGER}
                                      | {"employerContributions": ZERO, "payslipItemIds": set()})
         line[e.accumulator] += _dec(e.amount)
@@ -634,7 +654,7 @@ def build_be_dmfa(db: Session, organization_id: int, quarter: str, legal_entity_
                           "employerContributions": _s(totals["employerContributions"]),
                           "socialWorkBonus": _s(totals["WORK_BONUS_SOCIAL"]), "onssDue": _s(onss_due),
                           "holidayFund": _s(totals["holidayFund"])}}
-    payload = _be_mark_demo(payload, _be_items_demo(db, {e.payslip_item_id for e in entries}))
+    payload = _be_mark_demo(payload, bool(demo_items))
     due, _why = due_on(db, "DMFA", key)
     filing = upsert_filing(db, organization_id, legal_entity_id, "DMFA", key, payload, _run_ids(entries), due, actor_id)
     obligations = [upsert_obligation(db, organization_id, legal_entity_id, "ONSS_QUARTER", key, onss_due, filing,
@@ -706,9 +726,13 @@ def build_be_belcotax(db: Session, organization_id: int, income_year: int, legal
     if not entries:
         _conflict("BE_NO_COMMITTED_PAYROLL", f"no committed Belgian payroll in {year} for this employer.")
     employer = _employer(db, organization_id, legal_entity_id, date(year, 12, 31))
-    per = {}
+    per, mine = {}, {}
     for e in entries:
         per.setdefault(e.employee_id, {a: ZERO for a in FICHE_LEDGER})[e.accumulator] += _dec(e.amount)
+        mine.setdefault(e.employee_id, []).append(e)               # grouped once (I2: was rescanned per employee)
+    demo_items: list = []
+    _employer_contributions(db, {e.payslip_item_id for e in entries if e.payslip_item_id}, demo_items)
+    demo_items = set(demo_items)
     due, _why = due_on(db, "BELCOTAX", str(year))
     out = []
     for employee_id in sorted(per):
@@ -724,11 +748,9 @@ def build_be_belcotax(db: Session, organization_id: int, income_year: int, legal
                    "workBonus": {"social": _s(sums["WORK_BONUS_SOCIAL"]), "fiscal": _s(sums["WORK_BONUS_FISCAL"])},
                    # the 281.10 box codes are content (G-08)
                    "coding": "PENDING_CONTENT"}
-        payload = _be_mark_demo(payload, _be_items_demo(db, {x.payslip_item_id for x in entries
-                                                              if x.employee_id == employee_id}))
+        payload = _be_mark_demo(payload, any(x.payslip_item_id in demo_items for x in mine[employee_id]))
         out.append(upsert_filing(db, organization_id, legal_entity_id, "BELCOTAX", str(year), payload,
-                                 _run_ids([x for x in entries if x.employee_id == employee_id]), due, actor_id,
-                                 subject=f"E{employee_id}"))
+                                 _run_ids(mine[employee_id]), due, actor_id, subject=f"E{employee_id}"))
     return out
 
 

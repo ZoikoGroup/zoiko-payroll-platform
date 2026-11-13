@@ -4482,11 +4482,6 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_be_declarations",
-    "payroll_be_employment_classifications",
-    "payroll_be_work_schedules",
-    "payroll_be_worker_profiles",
-    "payroll_employees",
     "payslip_items"
    ],
    "overridden": false
