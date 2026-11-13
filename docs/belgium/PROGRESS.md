@@ -691,3 +691,20 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   CASCADE` over the privacy suite's 373-table schema exhausted the lock table ("out of shared memory"). Reproduced
   on a disposable local PostgreSQL with CI defaults (max_locks_per_transaction 64, 100 connections); fixed with
   pg_reset_public_schema (25 tables per transaction). The 3 BE migration files: 69 passed, round trips executed.
+
+## Block I1 — rollback decision
+
+- Default rollback (owner decision) = revert the code, keep the additive schema. Proof:
+  `scripts/be_rollback_orm_check.py` runs main's pre-Belgium code 6081174 against CONTROL (its own schema) and
+  BELGIAN (8a1f5ef9fa5d: 19 tables + 2 columns + Draft BE pack). Basic IN payroll operations (org, employees, run,
+  generate 2 payslips, advance, read / list / PDF, updates) are identical → ORM compatible.
+- Finding: a PLAIN revert is not deployable. `alembic upgrade head` → "Can't locate revision 8a1f5ef9fa5d";
+  deploy_migrate.sh → orphan path → "Refusing to stamp" on payslip_items.be_calculation_snapshot /
+  payroll_runs.be_approval_fingerprint → exit 1 before the restart.
+- `scripts/belgium_rollback_shim.py` (run after `git revert -m 1`): restores the 3 revision files + manifest
+  lines (sorted), the 2 nullable column declarations and the 10 re-pinned alembic / drift-set tests; idempotent,
+  dry-run, refuses a file changed on main after the merge. Revert + shim: deploy_migrate.sh exit 0, drift clean,
+  operations identical, 135/135 pin tests in the shim tree. tests/test_belgium_rollback_shim.py (2).
+- DEPLOY_NOTES §4 rewritten: 4.0 behaviour only, 4.1 default revert + shim (exact commands), 4.2 what stays,
+  4.3 schema removal only if required (checks → downgrade with the files present → revert without the shim).
+  Supersedes the H2d rollback order.
