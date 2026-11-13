@@ -816,3 +816,19 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
 - Guard: memory ceiling 0.6 MiB / employee (generate, approve) added to tests/perf; ceilings view 4 / PDF 7.
   ZP_BE_SCALE=1: 2 passed. Registry: fresh == stored (an aliased model name hid payslip_items from the scanner —
   fixed by using the real name).
+
+## Block J3 — bulk acknowledge
+
+- `POST /api/payroll/belgium/runs/{run_id}/exceptions/acknowledge-bulk` {items: [{employeeId, code}], reason}: same
+  dependencies as the single route (get_current_org_admin + the router's require_be_tenant), same registry policy
+  (worker / create / org_admin / tenant / payslip_items). Shared implementation `_be_acknowledge`: one presence read
+  (snapshot paths), one write of the approval record, one audit row per item identical to one-by-one; all or
+  nothing; duplicates collapsed. The single route now calls the same implementation (one item).
+- Screen (BERunPreflightPanel): checkbox per exception, "Select all exceptions (N)", "Acknowledge selected (N)" with
+  one reason; one selected row uses the single route; the per-row Acknowledge stays. UI check added
+  (be-scaffold-ui-validation: 9 checks); lint clean; vite build passes.
+- 2,000 employees, 4,000 exceptions: bulk 2.36 s (3 SELECT + 1 UPDATE + 4,000 audit INSERTs) vs one by one 31.4 s
+  (after J2) / 41.4 s (after I2).
+- tests/test_belgium_bulk_acknowledge.py (3): bulk == one-by-one (approval record + audit rows), all-or-nothing +
+  refusals (other organisation, approved run, malformed / empty / no reason), route authorization identical.
+- Registry: only the new route (fresh == stored after regeneration). ORG_ADMIN_GUIDE + runbook playbook updated.

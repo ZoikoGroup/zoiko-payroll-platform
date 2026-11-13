@@ -4488,6 +4488,24 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/belgium/runs/{run_id}/exceptions/acknowledge-bulk",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "acknowledge-bulk",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/belgium/runs/{run_id}/payment-batches",
    "data_class": "worker",
    "action": "create",

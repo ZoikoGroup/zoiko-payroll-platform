@@ -507,6 +507,15 @@ def be_acknowledge_exception(run_id: int, body: Dict[str, Any] = Body(...), curr
     return out
 
 
+@router.post("/runs/{run_id}/exceptions/acknowledge-bulk",
+             summary="Acknowledge several engine exceptions of one run in one batched write (reason; audited per item)")
+def be_acknowledge_exceptions_bulk(run_id: int, body: Dict[str, Any] = Body(...),
+                                   current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    out = be.acknowledge_be_run_exceptions(db, _org_id(current_user), run_id, body, _actor(current_user))
+    db.commit()
+    return out
+
+
 # ── Block C1: filings, obligations, calendar, exception queue (spec §10 / §13) ──
 # Every builder is idempotent (the same payload returns the same row); every
 # filing write is scoped to the caller's organisation in belgium_filing.

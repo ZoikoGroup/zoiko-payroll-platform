@@ -2448,46 +2448,87 @@ def _acknowledgements(run) -> list:
     return list(data.get("acknowledgements") or [])
 
 
-def acknowledge_be_run_exception(db: Session, organization_id: int, run_id: int, payload: dict, actor_id) -> dict:
-    """An engine EXCEPTION (not a blocking reason) of one employee stops the
-    run's approval until an org admin acknowledges it with a reason — e.g. the
-    BSSC that is never computed (D7) is settled outside the engine. Audited;
-    the acknowledgements are part of the approval record. Only before approval."""
-    from app.modules.payroll.models import PayrollRun
+def _be_acknowledge(db: Session, organization_id: int, run_id: int, wanted: list, reason, actor_id) -> list:
+    """Acknowledge [(employee_id, code)] of one run in ONE batched write: one presence read, one update of the
+    approval record, one audit row per item (the same row a one-by-one acknowledgement writes). All or nothing:
+    a single item that is not raised refuses the whole request and writes nothing."""
+    from app.modules.payroll.models import PayrollRun, PayslipItem
 
-    if not isinstance(payload, dict):
-        raise BadRequestException("The request body must be an object.")
-    reason = _reason(payload.get("reason"))
+    reason = _reason(reason)
     run = db.query(PayrollRun).filter(PayrollRun.id == run_id, PayrollRun.organization_id == organization_id).first()
     if run is None:
         raise NotFoundException("Payroll run")
     if str(getattr(run.status, "value", run.status)) not in ("Draft", "Review"):
         raise BadRequestException("Exceptions are acknowledged before the run is approved.")
+    if not wanted:
+        raise BadRequestException("Choose at least one exception to acknowledge.")
+    # The preflight lists an exception exactly when the employee's Belgian payslip in this run carries it: read only
+    # those payslips' exception lists (I2 / J2), once for the whole request.
+    employee_ids = sorted({e for e, _c in wanted})
+    present = {(f.employee_id, x.get("code"))
+               for f in be_snapshot_facts(db, (PayslipItem.payroll_run_id == run.id,
+                                               PayslipItem.employee_id.in_(employee_ids)), exceptions="exceptions")
+               for x in (f.exceptions or [])}
+    missing = [w for w in wanted if w not in present]
+    if missing:
+        if len(wanted) == 1:
+            raise BadRequestException("That exception is not raised for this employee in this run.")
+        listing = "; ".join(f"{c} (employee #{e})" for e, c in missing[:10])
+        raise BadRequestException(f"Not raised in this run, nothing was acknowledged: {listing}")
+    entries = [{"employeeId": e, "code": c, "reason": reason, "by": actor_id, "at": datetime.utcnow().isoformat()}
+               for e, c in wanted]
+    keys = set(wanted)
+    current = dict(run.be_approval_fingerprint) if isinstance(run.be_approval_fingerprint, dict) else {}
+    current["acknowledgements"] = [a for a in _acknowledgements(run)
+                                   if (a["employeeId"], a["code"]) not in keys] + entries
+    run.be_approval_fingerprint = current
+    db.flush()
+    for e, c in wanted:
+        _audit(db, actor_id, "acknowledged", "be_run_exception", run.id, new={"employeeId": e, "code": c},
+               reason=reason)
+    return entries
+
+
+def acknowledge_be_run_exception(db: Session, organization_id: int, run_id: int, payload: dict, actor_id) -> dict:
+    """An engine EXCEPTION (not a blocking reason) of one employee stops the
+    run's approval until an org admin acknowledges it with a reason — e.g. the
+    BSSC that is never computed (D7) is settled outside the engine. Audited;
+    the acknowledgements are part of the approval record. Only before approval."""
+    if not isinstance(payload, dict):
+        raise BadRequestException("The request body must be an object.")
+    _reason(payload.get("reason"))
     try:
         employee_id = int(payload.get("employeeId"))
     except (TypeError, ValueError):
         raise BadRequestException("employeeId is required.")
     code = str(payload.get("code") or "").strip()
-    # The preflight lists an exception exactly when the employee's Belgian payslip in this run carries it; read
-    # only that payslip instead of re-running the whole-run preflight per acknowledgement (I2: was O(N^2)).
-    from app.modules.payroll.models import PayslipItem
+    return _be_acknowledge(db, organization_id, run_id, [(employee_id, code)], payload.get("reason"), actor_id)[0]
 
-    mine = (db.query(PayslipItem.be_calculation_snapshot)
-            .filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == BE,
-                    PayslipItem.employee_id == employee_id).all())
-    present = {(employee_id, e.get("code")) for (snap,) in mine for e in ((snap or {}).get("exceptions") or [])}
-    if (employee_id, code) not in present:
-        raise BadRequestException("That exception is not raised for this employee in this run.")
-    entry = {"employeeId": employee_id, "code": code, "reason": reason, "by": actor_id,
-             "at": datetime.utcnow().isoformat()}
-    current = dict(run.be_approval_fingerprint) if isinstance(run.be_approval_fingerprint, dict) else {}
-    current["acknowledgements"] = [a for a in _acknowledgements(run)
-                                   if (a["employeeId"], a["code"]) != (employee_id, code)] + [entry]
-    run.be_approval_fingerprint = current
-    db.flush()
-    _audit(db, actor_id, "acknowledged", "be_run_exception", run.id, new={"employeeId": employee_id, "code": code},
-           reason=reason)
-    return entry
+
+def acknowledge_be_run_exceptions(db: Session, organization_id: int, run_id: int, payload: dict, actor_id) -> dict:
+    """Block J3: acknowledge many exceptions of one run at once — {items: [{employeeId, code}], reason}. Same
+    rules, same approval record entries and the same audit row per item as one-by-one; one batched write."""
+    if not isinstance(payload, dict):
+        raise BadRequestException("The request body must be an object.")
+    _reason(payload.get("reason"))
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise BadRequestException("items must be a non-empty list of {employeeId, code}.")
+    wanted, seen = [], set()
+    for raw in items:
+        if not isinstance(raw, dict):
+            raise BadRequestException("Each item is an object {employeeId, code}.")
+        try:
+            pair = (int(raw.get("employeeId")), str(raw.get("code") or "").strip())
+        except (TypeError, ValueError):
+            raise BadRequestException("Each item needs an employeeId.")
+        if not pair[1]:
+            raise BadRequestException("Each item needs a code.")
+        if pair not in seen:
+            seen.add(pair)
+            wanted.append(pair)
+    entries = _be_acknowledge(db, organization_id, run_id, wanted, payload.get("reason"), actor_id)
+    return {"runId": run_id, "acknowledged": entries, "count": len(entries)}
 
 
 def _be_identifier_masked(db: Session, organization_id: int, employee_id: int) -> Optional[str]:

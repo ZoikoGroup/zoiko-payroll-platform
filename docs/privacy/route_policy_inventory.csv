@@ -248,6 +248,7 @@ POST,/api/payroll/belgium/payment-batches/{batch_id}/returns,worker,create,retur
 POST,/api/payroll/belgium/payment-batches/{batch_id}/submit,worker,approve,submit,org_admin,tenant,,,payroll_be_payment_items|payslip_items,no,
 POST,/api/payroll/belgium/payslips/{payslip_item_id}/corrections,worker,create,corrections,org_admin,tenant,,,payslip_items,no,
 POST,/api/payroll/belgium/runs/{run_id}/exceptions/acknowledge,worker,create,acknowledge,org_admin,tenant,,,payslip_items,no,
+POST,/api/payroll/belgium/runs/{run_id}/exceptions/acknowledge-bulk,worker,create,acknowledge-bulk,org_admin,tenant,,,payslip_items,no,
 POST,/api/payroll/belgium/runs/{run_id}/payment-batches,worker,create,payment-batches,org_admin,tenant,,,payroll_be_payment_items|payroll_employees|payslip_items,no,
 GET,/api/payroll/belgium/runs/{run_id}/payment-preview,worker,read,payment-preview,org_admin|payroll_admin,tenant,,,payroll_employees|payslip_items,no,
 GET,/api/payroll/belgium/runs/{run_id}/preflight,worker,read,preflight,org_admin|payroll_admin,tenant,,,payroll_be_declarations|payroll_be_employment_classifications|payroll_be_work_schedules|payroll_be_worker_profiles|payroll_employees|payslip_items,no,

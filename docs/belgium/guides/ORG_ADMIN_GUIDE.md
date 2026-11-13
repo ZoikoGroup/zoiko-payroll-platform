@@ -79,7 +79,9 @@ Every step is logged (identifier access log) without the number.
 3. **Belgium preflight** (run detail) lists everything that stops approval:
    - **BLOCK** items (a missing record, missing Dimona, unsigned content): fix the cause and regenerate.
    - **Exceptions** (for example `BE_BSSC_PENDING`, `BE_MINIMUM_WAGE_BREACH`): the payslip is calculated, but
-     approval waits. Click **Acknowledge** with a reason, after checking it. Exceptions are never paid automatically.
+     approval waits. Click **Acknowledge** with a reason, after checking it. To handle many at once, tick them, or
+     **Select all exceptions**, then **Acknowledge selected (N)** with one reason. It is one request, and each
+     acknowledgement is still recorded and audited on its own. Exceptions are never paid automatically.
 4. Submit for review, then a **different** user approves. The approver can't be the preparer, or anyone who created
    a Belgian record these payslips use (four-eyes). Approval stores a fingerprint of the calculation and posts the
    ledger.

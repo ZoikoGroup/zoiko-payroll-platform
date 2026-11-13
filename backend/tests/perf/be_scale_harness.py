@@ -80,7 +80,7 @@ class Meter:
         return value
 
 
-def build(n: int, memory: bool = False) -> dict:
+def build(n: int, memory: bool = False, bulk_ack: bool = False) -> dict:
     from app.config import settings
     from app.core import code_generation
     from app.database import Base, SessionLocal, engine
@@ -175,12 +175,16 @@ def build(n: int, memory: bool = False) -> dict:
                                               if p.get("exception") and p["severity"] == "BLOCK"], per=n)
 
     def acknowledge():
-        for p in pending:
-            be.acknowledge_be_run_exception(db, org.id, run.id, {"employeeId": p["employeeId"], "code": p["code"],
-                                                                 "reason": "DEMO"}, a)
+        if bulk_ack:                                   # Block J3: one batched request for every pending exception
+            be.acknowledge_be_run_exceptions(db, org.id, run.id, {
+                "items": [{"employeeId": p["employeeId"], "code": p["code"]} for p in pending], "reason": "DEMO"}, a)
+        else:
+            for p in pending:
+                be.acknowledge_be_run_exception(db, org.id, run.id, {"employeeId": p["employeeId"],
+                                                                     "code": p["code"], "reason": "DEMO"}, a)
         db.commit()
         return len(pending)
-    meter.run(f"acknowledge exceptions", acknowledge, per=max(len(pending), 1))
+    meter.run("acknowledge exceptions", acknowledge, per=max(len(pending), 1))
 
     def approve():
         service.advance_payroll_run_status(db, run.id, b, org.id)             # Review -> Approved (ledger)
@@ -235,13 +239,14 @@ def main() -> int:
     ap.add_argument("--employees", type=int, required=True)
     ap.add_argument("--db", required=True, help="a NEW throwaway SQLite file (deleted first)")
     ap.add_argument("--memory", action="store_true", help="also record Python peak memory (slower)")
+    ap.add_argument("--bulk-ack", action="store_true", help="acknowledge every exception in one bulk request (J3)")
     a = ap.parse_args()
     path = pathlib.Path(a.db).resolve()
     if path.suffix != ".db":
         raise SystemExit("Refused: --db must be a throwaway .db file.")
     path.unlink(missing_ok=True)
     configure(path)
-    out = build(a.employees, memory=a.memory)
+    out = build(a.employees, memory=a.memory, bulk_ack=a.bulk_ack)
     print(f"{'step':28s} {'seconds':>9s} {'queries':>9s} {'q/item':>8s} {'peak MiB':>9s}")
     for r in out["steps"]:
         print(f"{r['step']:28s} {r['seconds']:9.3f} {r['queries']:9d} {str(r['perItem']):>8s} {str(r['peakMiB']):>9s}")

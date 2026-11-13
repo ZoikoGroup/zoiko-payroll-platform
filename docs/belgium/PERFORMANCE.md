@@ -179,7 +179,8 @@ Wall time at 2,000 employees (seconds; statements per item unchanged and flat):
 | DmfA | 13.0 | 6.6 |
 | Belcotax | 13.2 | 7.3 |
 | parallel import (2,000 rows) | 10.2 | 2.7 |
-| acknowledge, one by one | 41.4 | 31.4 (bulk: Block J3) |
+| acknowledge, one by one | 41.4 | 31.4 |
+| **acknowledge, bulk (J3)**, all 4,000 exceptions in one request | — | **2.36** (3 SELECT + 1 UPDATE + 4,000 audit rows) |
 
 Guard: `tests/perf/test_belgium_scale.py` (slow, `ZP_BE_SCALE=1`) now also asserts generation and approval stay at
 or under **0.6 MiB per employee**. The view / PDF statement ceilings are 4 / 7.
@@ -211,7 +212,7 @@ Statements per item are flat. From 500 to 2,000 employees (4×), generate grows 
 
 | Step | Growth | Cause | Recommendation |
 |------|--------|-------|----------------|
-| acknowledge | 8.9× | Each acknowledgement rewrites the run's JSON list of acknowledgements, so one click is O(N): about 24 ms at 2,000 | A **bulk acknowledge** ("acknowledge every `BE_BSSC_PENDING` in this run"; new route and UI), or an acknowledgement table (schema). Owner decision |
+| acknowledge (one by one) | 8.9× | **Bulk acknowledge (Block J3): 2.36 s for 4,000 at 2,000 employees.** Each one-by-one acknowledgement rewrites the run's JSON list of acknowledgements, so one click is O(N): about 24 ms at 2,000 | A **bulk acknowledge** ("acknowledge every `BE_BSSC_PENDING` in this run"; new route and UI), or an acknowledgement table (schema). Owner decision |
 | approve, DmfA | 5.3×, 4.4× | **Snapshot size.** Each Belgian payslip stores about 240 KB of JSON: the frozen context holds the whole pack (slabs about 82 KB, rates about 27 KB), and the used content rows are stored twice (`trace.contentUsed` and `usedRows`, about 60 KB each). At 2,000 employees that is about 480 MB per run, written at generation and decoded, more than once, at approval. **The same cause drives the memory peak above** | Freeze a content-addressed pack reference instead of a pack copy (pack rows are immutable once Active), and keep the used rows once. **Done in Block J2** (owner decision): version-2 snapshots, see the J2 section |
 
 ## PostgreSQL / staging should measure

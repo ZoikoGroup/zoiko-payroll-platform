@@ -279,8 +279,9 @@ PLAYBOOK = """## Support playbook
 3. Content codes (`BE_CONTENT_PENDING`, `BE_ROW_MISSING`, `BE_TABLE_EMPTY`, `BE_EARNING_CLASS_*`): nothing the
    organisation can do; the Super Admin / Belgian specialist signs the row (four-eyes). Never edit a value to unblock.
 4. Setup / employee codes: the org admin records or approves the named record (a second person approves).
-5. Exceptions (kind EXCEPTION) are acknowledged per employee with a reason before approval; they are never paid
-   automatically.
+5. Exceptions (kind EXCEPTION) are acknowledged with a reason before approval: one by one (**Acknowledge**), or
+   ticked / **Select all exceptions** → **Acknowledge selected (N)**. That is one request, still audited per item.
+   They are never paid automatically.
 6. Logs: `be.calculation.blocked` and `be.run.approval_refused` events carry the code, organisation, run and employee
    ids (never names, NISS or amounts); filter by the request's correlation id.
 

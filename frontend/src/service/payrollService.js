@@ -3186,6 +3186,9 @@ export const listBeSubstituteDays = async (year) => beList(await api.get(`${BE}/
 export const createBeSubstituteDay = (body) => api.post(`${BE}/substitute-days`, body);
 export const getBeRunPreflight = async (runId) => beOne(await api.get(`${BE}/runs/${runId}/preflight`));
 export const acknowledgeBeRunException = (runId, body) => api.post(`${BE}/runs/${runId}/exceptions/acknowledge`, body);
+// Block J3: several exceptions of one run in one batched write — body { items: [{ employeeId, code }], reason }.
+export const acknowledgeBeRunExceptions = (runId, body) =>
+  api.post(`${BE}/runs/${runId}/exceptions/acknowledge-bulk`, body);
 export const createBeCorrection = (payslipItemId, body) => api.post(`${BE}/payslips/${payslipItemId}/corrections`, body);
 export const getBePaymentPreview = async (runId) => beOne(await api.get(`${BE}/runs/${runId}/payment-preview`));
 export const listBePaymentBatches = async (runId) => beList(await api.get(`${BE}/payment-batches`, { params: { runId } }));
