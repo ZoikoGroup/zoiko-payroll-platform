@@ -340,6 +340,25 @@ def _be_statutory_editors(db: Session, pack) -> set:
 
 
 # ── Draft pack seed (scripts/seed_belgium_canonical_packs.py, Super Admin) ──
+def be_register_evidence_sources(db: Session) -> dict:
+    """The evidence register S1-S24 as payroll_source_artifacts (title + URL, no checksum: not archived), create-only
+    (an existing artifact is never changed). {code: artifact id}. Used by seed_belgium_pack and the post-deploy
+    setup (scripts/belgium_post_deploy_setup.py)."""
+    from app.modules.payroll.models import SourceArtifact
+
+    sources = {}
+    for code, agency, title, url in _content().SOURCE_REFERENCES:
+        form = f"ZP-BE-ENG-001 {code}"
+        artifact = db.query(SourceArtifact).filter(SourceArtifact.form_number == form).first()
+        if artifact is None:
+            artifact = SourceArtifact(agency=agency[:200], title=f"{code} {title} [UNVERIFIED: not archived]"[:300],
+                                      form_number=form, source_url=url)
+            db.add(artifact)
+            db.flush()
+        sources[code] = artifact.id
+    return sources
+
+
 def seed_belgium_pack(db: Session):
     """Write the belgium_content catalogue into the Draft BE-PAYROLL-2026 pack.
 
@@ -364,16 +383,7 @@ def seed_belgium_pack(db: Session):
     if pack is not None and pack.status != "Draft":
         raise BadRequestException(f"{pack_id} is {pack.status}, not Draft — it is never re-seeded.")
 
-    sources = {}
-    for code, agency, title, url in content.SOURCE_REFERENCES:
-        form = f"ZP-BE-ENG-001 {code}"
-        artifact = db.query(SourceArtifact).filter(SourceArtifact.form_number == form).first()
-        if artifact is None:
-            artifact = SourceArtifact(agency=agency[:200], title=f"{code} {title} [UNVERIFIED: not archived]"[:300],
-                                      form_number=form, source_url=url)
-            db.add(artifact)
-            db.flush()
-        sources[code] = artifact.id
+    sources = be_register_evidence_sources(db)
 
     if pack is None:
         pack = JurisdictionPack(pack_id=pack_id, version="1.0", jurisdiction_country=BE, pack_type="tax",

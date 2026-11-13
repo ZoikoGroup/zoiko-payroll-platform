@@ -751,3 +751,17 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
 - Every screen label taken from the UI code (BEComplianceCentreTab, BEFilingSettlementPanel, BEParallelCycles,
   BelgiumStatutoryProfilePanel, BEIdentifierField, BERunPreflightPanel, BEPaymentPanel, BEOverviewDashboard,
   BESigningStatusTab, JurisdictionLayout / OrgsTab).
+
+## Block I5 — post-deploy setup command
+
+- `backend/scripts/belgium_post_deploy_setup.py`: `--environment <name>` (must match ENVIRONMENT / APP_ENV),
+  `--confirm` to write, `--dry-run` plan + checks. Create-only: PLANNED registry row (existing row never changed),
+  Draft BE-PAYROLL-2026 when no Belgian pack exists (audited), S1-S24 sources; then the DEPLOY_NOTES §3 checks
+  (PASS / FAIL, exit 1 on a failure, 2 on a refusal). Never signs / approves / activates / assigns, sets no
+  setting, never creates the DEMO pack (refuses BE_DEMO_PACKS_ENABLED in production), no other country, no
+  create_all. `be_register_evidence_sources` extracted from seed_belgium_pack (same behaviour).
+- tests/test_belgium_post_deploy_setup.py (4): refusals, dry run writes nothing, create-only + idempotent + nothing
+  signed / Active / assigned / DEMO + other country and settings untouched, a non-Draft pack never re-seeded.
+  CLI exercised on a throwaway SQLite at the head: dry run 8 PASS; no --confirm refused (exit 2); confirm DONE x3
+  + 8 PASS; second run "nothing to do".
+- DEPLOY_NOTES §5 step 1 is now this command (console "Create the Draft pack" kept as the alternative).

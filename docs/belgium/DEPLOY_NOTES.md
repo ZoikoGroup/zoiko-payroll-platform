@@ -194,17 +194,29 @@ backup is the last resort.
 Nothing Belgian is seeded by the deploy or by app startup (`docs/belgium/PROGRESS.md`, Block H2c). When the owner
 decides to start content work:
 
-1. **Registry row PLANNED and Draft pack.** Preferred: Super Admin console → Belgium → Overview → "No Belgium pack yet" → enter a reason
-   → **Create the Draft pack** (`POST /api/super-admin/compliance/belgium/seed-draft`; audited). It runs inside the deployed app and creates both the Draft `BE-PAYROLL-2026`, with
-   every row `[PENDING G1]`, and the PLANNED registry row, only while no Belgian pack exists. The scripts do the same
-   on a host whose database is local:
-   - `python -m scripts.seed_belgium_registry` (PLANNED row only);
-   - `python -m scripts.seed_belgium_canonical_packs` (Draft pack and PLANNED row).
+1. **Run the post-deploy setup** on the backend host, from `backend/` with the venv active:
 
-   Both refuse a non-local database (`scripts/_local_db_guard.py`).
-2. **Verify:** re-run §3.5 and §3.6. Expect `PLANNED` and one `Draft` pack.
+   ```bash
+   python -m scripts.belgium_post_deploy_setup --environment production --dry-run    # plan + checks, writes nothing
+   python -m scripts.belgium_post_deploy_setup --environment production --confirm    # do it (idempotent)
+   ```
+
+   It is create-only:
+   - it ensures the BE registry row is **PLANNED** (an existing row is never changed);
+   - it seeds the Draft `BE-PAYROLL-2026`, every row `[PENDING G1]`, if no Belgian pack exists;
+   - it registers the S1–S24 sources;
+   - it then prints the §3 checks as `PASS` / `FAIL`. Exit 0 means all passed; exit 2 means it refused.
+
+   It never signs, approves, activates or assigns anything, sets no setting, never creates the DEMO pack (it refuses
+   if `BE_DEMO_PACKS_ENABLED` is set in production) and touches no other country. `--environment` must match the
+   process's `ENVIRONMENT`. Writes need `--confirm`.
+
+   Console alternative (same result, inside the app): Super Admin → Belgium → **Overview** → "No Belgium pack yet"
+   → reason → **Create the Draft pack**. This one does not register the sources separately; the pack seed does.
+2. **Verify:** the setup's own output (§3.5 `PLANNED`, §3.6 no Active pack). Re-running it is safe and reports
+   "nothing to do".
 3. **Import the AI-drafted content, unsigned.** Console → Belgium → **Signing status** tab → "Content workbook (specialist intake)" → choose
-   `docs/belgium/content/BE_2026_AI_DRAFT.xlsx` → **Dry run** (the default) → review the report → **Import**. Rows
+   `docs/belgium/content/BE_2026_AI_DRAFT.xlsx` → **Dry run** → review the report → **Confirm import**. Rows
    arrive UNSIGNED with their sources. Signing is the Belgian specialist's job (four-eyes, per row,
    `BELGIUM_REVIEWER_GUIDE.md`). Nothing becomes Active.
 
