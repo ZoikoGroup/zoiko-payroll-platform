@@ -34406,6 +34406,11 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     if country == "UK":
         return _render_uk_payslip_pdf_bytes(db, data, item, run, company_name, company_address,
                                             evaluation=evaluation)
+    # Mexico (Recibo de nómina v2.0): its own document — the default layout
+    # below is India's (HRA, LOP, NEFT) and has no CFDI / payment states.
+    if country == "MX" or (item.country_code or "").upper() == "MX":
+        return _render_mx_payslip_pdf_bytes(db, data, item, run, company_name, company_address,
+                                            evaluation=evaluation)
     sym = _get_currency_symbol(country)
 
     def fmt(val):
@@ -34778,6 +34783,43 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     c.showPage()
     c.save()
     return buf.getvalue()
+
+
+def _render_mx_payslip_pdf_bytes(db: Session, data: dict, item: PayslipItem, run: PayrollRun,
+                                 company_name: str, company_address: str,
+                                 *, evaluation: bool = False, duplicate: bool = False) -> bytes:
+    """Recibo de nómina v2.0 (docs/mexico/MEXICO_RECIBO_REPORT.md). Every
+    figure, state and (masked) identifier is decided by
+    mexico_payslip_service.recibo_view; this only adds the existing
+    watermarks. A payslip with no committed Mexican result gets the blocked
+    document — never a layout of fabricated zeros."""
+    from app.modules.payroll import mexico_payslip_pdf, mexico_payslip_service
+    from app.modules.payroll.mexico_pilot_service import PILOT_WATERMARK
+
+    snap = item.mx_calculation_snapshot or {}
+    if snap.get("blocked") or not snap.get("result"):
+        return _render_blocked_payslip_pdf_bytes(data, item, run, company_name, company_address, evaluation=evaluation)
+    view = mexico_payslip_service.recibo_view(db, item, run, duplicate=duplicate)
+    marks = (["PREVIEW — EVALUATION ONLY"] if evaluation else []) + ([PILOT_WATERMARK] if view["pilot"] else [])
+
+    def watermark(c, width, height):
+        for text in marks:
+            _draw_evaluation_watermark(c, width, height, "Helvetica-Bold", text=text)
+
+    return mexico_payslip_pdf.render_recibo(view, watermark if marks else None)
+
+
+def generate_mx_payslip_duplicate_pdf_bytes(db: Session, payslip_id: int, organization_id: int) -> bytes:
+    """MX24-PAY-010: the same recibo re-rendered and marked DUPLICADO — a
+    read, never a new issuance (no document, report or payslip row changes)."""
+    data, item, run = get_payslip_by_id(db, payslip_id, organization_id)
+    if (item.country_code or "").upper() != "MX":
+        raise BadRequestException(f"payslip {payslip_id} is not a Mexican payslip")
+    snap = item.mx_calculation_snapshot or {}
+    if item.status == PayslipStatus.FAILED or snap.get("blocked") or not snap.get("result"):
+        raise BadRequestException(f"payslip {payslip_id} has no Mexican calculation — there is nothing to duplicate")
+    return _render_mx_payslip_pdf_bytes(db, data, item, run, "", "",
+                                        evaluation=_is_evaluation_workspace(db, organization_id), duplicate=True)
 
 
 _UK_YTD_RUN_STATUSES = (
@@ -38895,6 +38937,9 @@ def get_dashboard_breakdowns(db: Session, organization_id: int = None, year: int
         # with a nonzero value for them.
         "BB": "PAYE", "DO": "ISR", "GY": "PAYE", "JM": "PAYE", "TT": "PAYE",
         "PR": "Hacienda Withholding",
+        # Mexico (ZP-MX-ENG-001): ISR after the employment subsidy arrives as
+        # `tds` (countries/mexico.py) — mirrors jurisdictionLabels.js.
+        "MX": "ISR (Impuesto sobre la Renta)",
     }
     pf_esi_labels = {
         "DE": {"pf": "Pension Insurance", "esi": "Social Insurance (Health / Unemployment / Care)"},

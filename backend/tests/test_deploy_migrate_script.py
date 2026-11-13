@@ -14,6 +14,7 @@ docs/SINGAPORE_FINAL_IMPLEMENTATION_STATUS.md §17). No database is touched.
 
 import re
 from pathlib import Path
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy_migrate.sh"
 
@@ -89,7 +90,14 @@ def test_the_filter_explains_only_what_the_pending_migrations_create():
 def test_pending_objects_are_read_from_the_real_migration_chain():
     import os
 
-    from scripts.drift_pending_filter import pending_objects
+    from scripts.drift_pending_filter import pending_objects as _pending_objects
+
+    def pending_objects(stamp):
+        tables, columns = _pending_objects(stamp)
+        assert MX_LIFECYCLE_TABLES <= tables
+        assert {table: columns.get(table) for table in MX_LIFECYCLE_COLUMNS} == MX_LIFECYCLE_COLUMNS
+        return tables - MX_LIFECYCLE_TABLES, {table: value for table, value in columns.items()
+                                               if table not in MX_LIFECYCLE_COLUMNS}
 
     here = os.getcwd()
     os.chdir(Path(__file__).resolve().parents[1])
@@ -188,7 +196,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
 
         tables, columns = pending_objects("f6c2a9d1e4b7")        # production since PR #125
         assert_google_pending(tables, columns)
-        assert tables == ({"payroll_mx_cfdi_system_concepts"} | brazil_tables | za_tables
+        assert tables - MX_LIFECYCLE_TABLES == ({"payroll_mx_cfdi_system_concepts"} | brazil_tables | za_tables
                           | mx_final_mile | country | jp_tables | google_tables)
         # Brazil Phases 3-6 (a6ca8aab2043 -> e4ba9fc8c17c) and Phases 1/4.2
         # (135dbbeb9818, 8f90dde5f7b5), on top of production a8e4c1f7d3b5: every
@@ -196,7 +204,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         # self-heal refuses.
         tables, columns = pending_objects("a8e4c1f7d3b5")
         assert_google_pending(tables, columns)
-        assert tables == brazil_tables | za_tables | mx_final_mile | country | jp_tables | google_tables
+        assert tables - MX_LIFECYCLE_TABLES == brazil_tables | za_tables | mx_final_mile | country | jp_tables | google_tables
         assert columns["payroll_runs"] == {"br_approval_fingerprint", "payment_channel", "za_approval_fingerprint",
                                            "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
         assert columns["payroll_jp_work_conditions"] == {"scheduled_weekdays", "statutory_day_off_weekday",
@@ -211,7 +219,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                 "created_by_id", "updated_at"} == columns["payroll_br_establishments"]
         tables, columns = pending_objects("8f90dde5f7b5")        # production since PR #129
         assert_google_pending(tables, columns)
-        assert tables == za_tables | mx_final_mile | country | jp_tables | google_tables
+        assert tables - MX_LIFECYCLE_TABLES == za_tables | mx_final_mile | country | jp_tables | google_tables
         assert columns["payroll_mx_approved_hours"] == {"overtime_dates"}                   # Mexico m18
         assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
         assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot", "nz_calculation_snapshot", "nz_correction_of_id",
@@ -221,7 +229,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         # (447f57564983 -> c15d5b87d6f5) both grow from it, joined by merge 92c67cab49fc.
         tables, columns = pending_objects("c7d2e9a4f1b6")
         assert_google_pending(tables, columns)
-        assert tables == (za_tables | mx_final_mile | country | jp_tables | nz_tables | google_tables)
+        assert tables - MX_LIFECYCLE_TABLES == (za_tables | mx_final_mile | country | jp_tables | nz_tables | google_tables)
         assert "payroll_mx_approved_hours" not in columns
         assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint", "jp_payment_kind", *nz_run_columns}
         assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot", "nz_calculation_snapshot", "nz_correction_of_id",
@@ -229,7 +237,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         assert len(columns["payroll_employee_statutory_profiles"]) == 13 + 3   # + Mexico m21 (union member, SDI + evidence)
         tables, columns = pending_objects("b9f3d5a1c7e2")
         assert_google_pending(tables, columns)
-        assert tables == (za_tables | mx_final_mile | country | jp_tables | google_tables)
+        assert tables - MX_LIFECYCLE_TABLES == (za_tables | mx_final_mile | country | jp_tables | google_tables)
         assert "payroll_mx_approved_hours" not in columns
         # Mexico m21 (efc56f3235e2, sweep S1) is the head: pending from every earlier stamp.
         mx_m21 = {"payroll_mx_terminations": {"indemnity_daily_salary", "indemnity_salary_evidence_ref"},
@@ -240,7 +248,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         # counts every head ancestor the stamp lacks, not only the stamp -> head path).
         tables, columns = pending_objects("c15d5b87d6f5")      # a database at South Africa P8
         assert_google_pending(tables, columns)
-        assert tables == mx_final_mile | country | jp_tables | google_tables | {"payroll_za_payroll_overrides",
+        assert tables - MX_LIFECYCLE_TABLES == mx_final_mile | country | jp_tables | google_tables | {"payroll_za_payroll_overrides",
                                                       "payroll_za_parallel_imports",
                                                       "payroll_za_parallel_differences"}
         assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
@@ -249,12 +257,12 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                            **tz_columns, **google_columns, **mx_m21}
         tables, columns = pending_objects("d3f8b2a6c1e9")      # a database at Mexico m20
         assert_google_pending(tables, columns)
-        assert tables == za_tables | country | jp_tables | google_tables
+        assert tables - MX_LIFECYCLE_TABLES == za_tables | country | jp_tables | google_tables
         # Production since PR #140 (South Africa P9): Phase 10, the country
         # entitlement ledger and Japan Phase 2 are pending.
         tables, columns = pending_objects("3880223bfaa0")
         assert_google_pending(tables, columns)
-        assert tables == ({"payroll_za_parallel_imports", "payroll_za_parallel_differences"}
+        assert tables - MX_LIFECYCLE_TABLES == ({"payroll_za_parallel_imports", "payroll_za_parallel_differences"}
                           | country | jp_tables | google_tables)
         assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
         assert columns == {**jp_columns, **tz_columns, **google_columns, **mx_m21}

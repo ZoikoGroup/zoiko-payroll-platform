@@ -3120,6 +3120,26 @@ export const explainNzParallelDifference = (id, reason) =>
   api.post(`${NZ}/parallel-differences/${id}/explain`, { reason });
 export const acceptNzParallelDifference = (id) => api.post(`${NZ}/parallel-differences/${id}/accept`, {});
 
+// ── Mexico — Recibo de nómina v2.0 (docs/mexico/MEXICO_RECIBO_REPORT.md) ──
+// The masked recibo view (the same data the PDF draws), the DUPLICADO PDF and
+// the pay-history extract. All tenant-scoped on the server.
+export const getMxRecibo = (payslipId) => api.get(`/api/payroll/mexico/payslips/${payslipId}/recibo`);
+export const getMxPayHistory = (employeeId, start, end) =>
+  api.get(`/api/payroll/mexico/employees/${employeeId}/pay-history`, { params: { start, end } });
+
+const mxPdf = async (path, filename) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new Error("Failed to download the document");
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+};
 // Belgium (ZP-BE-ENG-001 Block A4) — routes in backend/app/modules/payroll/be_org_router.py,
 // mounted under /api/payroll/belgium. Every route acts on the caller's own
 // organisation and answers 404 while Belgium is dormant (BE_TENANT_ONBOARDING_ENABLED
@@ -3361,6 +3381,11 @@ export const downloadPayslipTemplateSamplePdf = async (payload) => {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 100);
 };
+export const downloadMxReciboDuplicate = (payslipId) =>
+  mxPdf(`/api/payroll/mexico/payslips/${payslipId}/recibo/duplicate`, `recibo-${payslipId}-duplicado.pdf`);
+export const downloadMxPayHistory = (employeeId, start, end) =>
+  mxPdf(`/api/payroll/mexico/employees/${employeeId}/pay-history?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&format=pdf`,
+    `historial-${employeeId}.pdf`);
 // PDF design-match import: analyse (nothing stored), then create a draft from the confirmed analysis.
 export const analyzePayslipPdf = (formData) => api.post(`${PST}/import-pdf/analyze`, formData);
 export const createPayslipTemplateFromPdf = (payload) => api.post(`${PST}/import-pdf/create`, payload);

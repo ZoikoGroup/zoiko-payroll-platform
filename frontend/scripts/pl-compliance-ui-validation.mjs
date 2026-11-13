@@ -144,7 +144,13 @@ const orgRouter = readFileSync(resolve(BACKEND, "pl_org_router.py"), "utf-8");
 const orgRoutes = new Set([...orgRouter.matchAll(/@router\.(get|post|put|patch|delete)\(\s*"([^"]+)"/g)]
   .map(([, method, path]) => `${method.toUpperCase()} /api/payroll/poland${path.replace(/\{[^}]+\}/g, "{}")}`));
 const payrollService = read("service/payrollService.js");
-const plBlock = payrollService.slice(payrollService.indexOf('const PL = "/api/payroll/poland";'));
+// The Poland section runs from its `const PL` to the next top-level declaration
+// that is not Poland's own (PL / plList / plOne) — e.g. the payslip-template
+// block (`const PST`) that follows it. Slicing to end-of-file counted those
+// non-Poland calls as Poland routes.
+const plStart = payrollService.indexOf('const PL = "/api/payroll/poland";');
+const plAfter = payrollService.slice(plStart + 1).search(/\nconst (?!pl|PL\b)\w+ = /);
+const plBlock = payrollService.slice(plStart, plAfter === -1 ? undefined : plStart + 1 + plAfter);
 const plCalls = [...plBlock.matchAll(/api\.(get|post|put|delete)\(`([^`]+)`/g)]
   .map(([, method, path]) => `${method.toUpperCase()} ${path.replace("${PL}", "/api/payroll/poland").split("?")[0]
     .replace(/\$\{[^}]+\}/g, "{}")}`);

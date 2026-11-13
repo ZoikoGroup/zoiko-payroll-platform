@@ -113,9 +113,15 @@ _version = plan_catalog.create_plan_version(
     db=_db,
     plan_id=_plan.id,
     feature_set={"features": ["payroll_runs"]},
-    scale_limits={"max_entities": 5},
+    scale_limits={"max_entities": 5, "max_billable_worker_months": 1000},
     actor_user_id=_super.id,
 )
+# max_billable_worker_months: creating an employee is checked against it
+# (payroll/router.py, require_scope_limit(MAX_BWM)). Without the flag the
+# employee-creation tests passed only while BILLING_ENFORCEMENT_MODE was "warn";
+# another module sets "enforce" at import, so the full suite saw 403 "Your plan
+# does not include 'max_billable_worker_months'".
+plan_catalog.add_entitlement_flag(_db, _version.id, "max_billable_worker_months", 1000, actor_user_id=_super.id)
 plan_catalog.approve_plan_version(_db, _version.id, actor_user_id=_super.id)
 plan_catalog.publish_plan_version(_db, _version.id, published_by_user_id=_super.id)
 _db.refresh(_version)
@@ -325,6 +331,26 @@ _paid_sub = BillingSubscription(
     stripe_subscription_id="sub_FAKE_PAID",
 )
 _db.add(_paid_sub)
+_db.flush()
+
+# Success-page confirmation (POST /billing/checkout/confirm): two
+# subscription-less orgs — one that paid, one whose admin must not be able to
+# claim the first org's session.
+_confirm_org = Organization(
+    organization_name="Confirm Corp", organization_code="CONFCHK", workspace_type="EVALUATION",
+    country="DE", is_active=True, billing_classification="COMMERCIAL_ACTIVE", charge_enabled=True,
+)
+_deferred_org = Organization(
+    organization_name="Deferred Corp", organization_code="DEFRCHK", workspace_type="EVALUATION",
+    country="DE", is_active=True, billing_classification="COMMERCIAL_ACTIVE", charge_enabled=True,
+)
+_db.add_all([_confirm_org, _deferred_org])
+_db.flush()
+for _org, _email in ((_confirm_org, "confirm-admin@example.com"), (_deferred_org, "deferred-admin@example.com")):
+    _db.add(User(
+        email=_email, hashed_password=hash_password("strong-password"), role=UserRole.ORG_ADMIN,
+        first_name="Confirm", last_name="Admin", organization_id=_org.id, is_active=True,
+    ))
 _db.flush()
 
 _db.commit()
@@ -817,3 +843,225 @@ def test_webhook_for_another_environments_checkout_is_acknowledged_not_500(clien
     assert r.status_code == 200, r.text
     _db.expire_all()
     assert _db.query(BillingSubscription).count() == count_before
+
+
+# ── POST /billing/checkout/confirm (success-page reconciliation) ──────────
+# The customer paid, Stripe redirected to the success page, and the webhook
+# never reached this environment: the page must still activate the plan.
+
+def _stripe_session(org_id, *, subscription="sub_CONFIRM_001", status="complete",
+                    payment_status="paid", commencement=None):
+    metadata = {"organization_id": str(org_id), "plan_version_id": str(_version.id)}
+    if commencement is not None:
+        metadata["service_commencement_at"] = commencement.isoformat()
+    return stripe.StripeObject.construct_from({
+        "id": "cs_test_CONFIRM", "mode": "subscription", "status": status,
+        "payment_status": payment_status, "subscription": subscription, "metadata": metadata,
+    }, "sk_test_FAKE")
+
+
+def _confirm(client, email, session, token=None):
+    with patch.object(stripe.checkout.Session, "retrieve", return_value=session):
+        return client.post("/api/billing/checkout/confirm", json={"session_id": "cs_test_CONFIRM"},
+                           headers=_auth(token or _login(client, email)))
+
+
+def test_checkout_success_url_carries_the_session_id_template(client):
+    token = _login(client, "prod-admin@example.com")
+    client.post("/api/billing/checkout", json={"plan_code": "PROFESSIONAL"}, headers=_auth(token))
+    success_url = stripe.checkout.Session.create.call_args.kwargs["success_url"]
+    assert success_url == "http://localhost:3000/billing/checkout/success?session_id={CHECKOUT_SESSION_ID}"
+
+
+def test_confirm_refuses_another_organizations_session(client):
+    r = _confirm(client, "deferred-admin@example.com", _stripe_session(_confirm_org.id))
+    assert r.status_code == 403, r.text
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _deferred_org.id).first() is None
+
+
+def test_confirm_refuses_an_unpaid_session(client):
+    r = _confirm(client, "confirm-admin@example.com",
+                 _stripe_session(_confirm_org.id, status="open", payment_status="unpaid"))
+    assert r.status_code == 400, r.text
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _confirm_org.id).first() is None
+
+
+def test_confirm_activates_a_paid_checkout_without_the_webhook(client):
+    r = _confirm(client, "confirm-admin@example.com", _stripe_session(_confirm_org.id))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "ACTIVE" and body["workspace_type"] == "PRODUCTION"
+    assert body["plan_code"] == "PROFESSIONAL" and body["deferred"] is False
+
+    _db.expire_all()
+    sub = _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _confirm_org.id).one()
+    assert sub.status == SubscriptionStatus.ACTIVE.value
+    assert sub.stripe_subscription_id == "sub_CONFIRM_001"
+
+    # The platform now reports the subscription — the reported bug.
+    my = client.get("/api/billing/my-subscription", headers=_auth(_login(client, "confirm-admin@example.com")))
+    assert my.status_code == 200, my.text
+    assert my.json()["subscription"]["status"] == "ACTIVE"
+
+
+def test_confirm_then_late_webhook_is_idempotent(client):
+    again = _confirm(client, "confirm-admin@example.com", _stripe_session(_confirm_org.id))
+    assert again.status_code == 200 and again.json()["status"] == "ACTIVE"
+
+    r = _post_webhook(client, "checkout.session.completed", {
+        "metadata": {"organization_id": str(_confirm_org.id), "plan_version_id": str(_version.id)},
+        "subscription": "sub_CONFIRM_001",
+    }, event_id="evt_confirm_late_webhook")
+    assert r.status_code == 200, r.text
+
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _confirm_org.id).count() == 1
+    audit = _db.query(BillingCommercialAuditEvent).filter(
+        BillingCommercialAuditEvent.stripe_event_id == "evt_confirm_late_webhook").one()
+    assert audit.payload["already_applied"] is True
+
+
+def test_confirm_deferred_checkout_is_trialing_and_never_undoes_a_later_payment(client):
+    later = datetime.utcnow() + timedelta(days=30)
+    session = _stripe_session(_deferred_org.id, subscription="sub_DEFERRED_001",
+                              payment_status="no_payment_required", commencement=later)
+    r = _confirm(client, "deferred-admin@example.com", session)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "TRIALING" and r.json()["deferred"] is True
+    assert r.json()["workspace_type"] == "EVALUATION"
+
+    # The real charge lands (invoice.paid) — the sub becomes ACTIVE ...
+    r = _post_webhook(client, "invoice.paid", {"subscription": "sub_DEFERRED_001", "id": "in_DEFERRED_PAID",
+                                               "amount_paid": 4900}, event_id="evt_deferred_paid")
+    assert r.status_code == 200, r.text
+    # ... and a reload of the success page must not push it back to TRIALING.
+    r = _confirm(client, "deferred-admin@example.com", session)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "ACTIVE"
+    _db.expire_all()
+    sub = _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _deferred_org.id).one()
+    assert sub.status == SubscriptionStatus.ACTIVE.value
+
+
+# ── The whole platform reflects the payment: add employees afterwards ──────
+# The reported bug: payment succeeded, but the employee page kept answering
+# "Your organization doesn't have a plan yet" (payroll_router's own
+# require_active_subscription gate) because activation depended on the
+# webhook. Confirming the success page must clear that gate for both an
+# immediate charge and a deferred (TRIALING) commencement.
+
+def _seed_org_with_admin(org_code, email, *, workspace_type="PRODUCTION"):
+    db = SessionLocal()
+    try:
+        org = Organization(
+            organization_name=f"{org_code.title()} Corp",
+            organization_code=org_code,
+            workspace_type=workspace_type,
+            country="DE",
+            is_active=True,
+            billing_classification="COMMERCIAL_ACTIVE",
+            charge_enabled=True,
+        )
+        db.add(org)
+        db.flush()
+        user = User(
+            email=email,
+            hashed_password=hash_password("strong-password"),
+            role=UserRole.ORG_ADMIN,
+            first_name="Employee",
+            last_name="Admin",
+            organization_id=org.id,
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(org)
+        return org.id
+    finally:
+        db.close()
+
+
+def _token_for(email):
+    """Mint an MFA-complete token directly — this module already signs in nine
+    users and the login endpoint is rate-limited to 10/minute."""
+    from app.modules.auth import service as auth_service
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        assert user is not None
+        return auth_service.issue_access_token(user, mfa_at=int(time.time()))
+    finally:
+        db.close()
+
+
+def _de_employee_payload(steuer_id, employee_code="EMP001"):
+    """Minimal valid German employee (DE validation requires Steuer-ID,
+    Steuerklasse, Krankenkasse and IBAN)."""
+    return {
+        "employee_code": employee_code,
+        "name": "Post Payment Employee",
+        "email": "post-payment.employee@example.com",
+        "designation": "Engineer",
+        "employmentType": "Full-time",
+        "dateOfJoining": "2026-01-15",
+        "ctc": 60000,
+        "complianceFields": {
+            "steuer_id": steuer_id,
+            "steuerklasse": "I",
+            "krankenkasse": "TK",
+            # SYNTHETIC: check digits 00 never pass mod-97, so this is not a real
+            # account (privacy gate, ZP-PRIV D09); DE validation checks the shape only.
+            "iban": "DE00370400440532013000",
+        },
+    }
+
+
+def test_confirm_immediate_checkout_unlocks_employee_creation(client):
+    org_id = _seed_org_with_admin("EMPAYCHK", "emp-after-pay@example.com")
+    token = _token_for("emp-after-pay@example.com")
+
+    # Before confirmation this PRODUCTION org has no subscription at all —
+    # payroll_router's require_active_subscription gate is exactly what the
+    # user saw as "can't add employees".
+    blocked = client.get("/api/payroll/employees", headers=_auth(token))
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["trace"]["reason"] == "no_subscription"
+
+    r = _confirm(client, "emp-after-pay@example.com",
+                 _stripe_session(org_id, subscription="sub_EMPLOYEE_PAID"), token=token)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "ACTIVE" and r.json()["workspace_type"] == "PRODUCTION"
+
+    listed = client.get("/api/payroll/employees", headers=_auth(token))
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == []
+
+    created = client.post("/api/payroll/employees", json=_de_employee_payload("12345678901"),
+                          headers=_auth(token))
+    assert created.status_code == 200, created.text
+    assert created.json()["name"] == "Post Payment Employee"
+
+
+def test_confirm_deferred_checkout_unlocks_employee_creation(client):
+    org_id = _seed_org_with_admin("EMPDEFCHK", "emp-after-deferred@example.com", workspace_type="EVALUATION")
+    token = _token_for("emp-after-deferred@example.com")
+
+    later = datetime.utcnow() + timedelta(days=30)
+    r = _confirm(client, "emp-after-deferred@example.com",
+                 _stripe_session(org_id, subscription="sub_EMPLOYEE_DEFERRED",
+                                 payment_status="no_payment_required", commencement=later),
+                 token=token)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "TRIALING" and r.json()["deferred"] is True
+
+    # TRIALING is within its active window (not GRACE_READONLY/CLOSED) and
+    # the EVALUATION workspace passes require_active_subscription — the
+    # customer gets full payroll access while nothing is charged yet.
+    listed = client.get("/api/payroll/employees", headers=_auth(token))
+    assert listed.status_code == 200, listed.text
+    created = client.post("/api/payroll/employees", json=_de_employee_payload("12345678902"),
+                          headers=_auth(token))
+    assert created.status_code == 200, created.text

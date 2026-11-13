@@ -60,6 +60,10 @@ class RegisterRequest(BaseModel):
     # auth_provider="google" (no usable password).
     google_id: Optional[str] = None
     auth_provider: Optional[str] = Field(default="email", description="'email' or 'google'")
+    # The single-use token the Google callback issued (/register?pending=).
+    # Required for auth_provider="google": the Google id and email are taken
+    # from it server-side — a client-supplied google_id is never trusted.
+    google_pending_token: Optional[str] = Field(default=None, max_length=128)
     # Jurisdiction-aware tax/registration identifiers collected on the Register
     # Page once a country is selected — keyed by the field keys in
     # app/core/jurisdiction.py (gstin/pan/cin, ein/state_tax_id, crn/vat_number,

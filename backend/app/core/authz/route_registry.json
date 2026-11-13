@@ -1768,6 +1768,22 @@
    "overridden": true
   },
   {
+   "method": "POST",
+   "path": "/api/billing/checkout/confirm",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "confirm",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": "reviewed: activates the org's own subscription from a paid Stripe session; country counts only, no worker row returned",
+   "scan_worker_tables": [],
+   "overridden": true
+  },
+  {
    "method": "GET",
    "path": "/api/billing/dunning-status",
    "data_class": "self",
@@ -7621,6 +7637,8 @@
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
     "payroll_ni_relief_facts",
     "payroll_pr_withholding_certificates",
     "payroll_salary_tds_claims",
@@ -11848,6 +11866,25 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/access-log",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "access-log",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/mexico/cfdi/documents/{document_id}/cancel",
    "data_class": "worker",
@@ -11884,6 +11921,72 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/delivery",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "delivery",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/envelope",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "envelope",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_annual_isr_adjustments",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
+    "payroll_mx_run_corrections",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/publish",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "publish",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/payroll/mexico/cfdi/documents/{document_id}/receipt",
    "data_class": "worker",
@@ -11897,7 +12000,8 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_mx_cfdi_documents"
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events"
    ],
    "overridden": false
   },
@@ -11916,6 +12020,25 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_mx_cfdi_documents"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/cfdi/documents/{document_id}/xml",
+   "data_class": "worker",
+   "action": "export",
+   "resource": "xml",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events"
    ],
    "overridden": false
   },
@@ -12135,6 +12258,30 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/employees/{employee_id}/pay-history",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "pay-history",
+   "principals": [
+    "employee",
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -12877,6 +13024,74 @@
   },
   {
    "method": "GET",
+   "path": "/api/payroll/mexico/payslips/{payslip_id}/lifecycle",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "lifecycle",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/payslips/{payslip_id}/recibo",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "recibo",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/mexico/payslips/{payslip_id}/recibo/duplicate",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "duplicate",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/payroll/mexico/pilot-status",
    "data_class": "tenant_config",
    "action": "read",
@@ -13476,6 +13691,7 @@
     "payroll_mx_imss_branch_lines",
     "payroll_mx_imss_movements",
     "payroll_mx_isn_liabilities",
+    "payroll_mx_payment_items",
     "payroll_mx_ptu_allocations",
     "payroll_mx_run_corrections",
     "payroll_mx_sbc_history",
@@ -14645,6 +14861,8 @@
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
     "payroll_ni_relief_facts",
     "payroll_nz_corrections",
     "payroll_pr_withholding_certificates",
@@ -16618,6 +16836,9 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
     "payroll_personal_data_access_events",
     "payslip_items"
    ],
@@ -18284,6 +18505,8 @@
     "payroll_ie_myfuturefund_statuses",
     "payroll_ie_rpn_snapshots",
     "payroll_leave_requests",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_payment_items",
     "payroll_ni_relief_facts",
     "payroll_pr_withholding_certificates",
     "payroll_salary_tds_claims",
@@ -18360,6 +18583,9 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_employees",
+    "payroll_mx_cfdi_documents",
+    "payroll_mx_document_access_events",
+    "payroll_mx_payment_items",
     "payroll_personal_data_access_events",
     "payslip_items"
    ],

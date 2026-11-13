@@ -9741,6 +9741,11 @@ class PayrollMxCfdiSchemaRelease(Base):
     xsd_checksum            = Column(String(64), nullable=True)
     catalog_release         = Column(String(40), nullable=True)
     pac_validation_version  = Column(String(40), nullable=True)
+    # CFDI lifecycle L5: the official validity window of this release's
+    # catalogs/schemas (set by a Super Admin from a saved source; NULL = not
+    # recorded). A pay date outside it refuses as MX_CFDI_CATALOG_STALE.
+    effective_from          = Column(Date, nullable=True)
+    effective_to            = Column(Date, nullable=True)
     source_document_id      = Column(Integer, ForeignKey("payroll_source_artifacts.id"), nullable=True)
     status                  = Column(String(12), nullable=False, default="Draft")
     approved_by_id          = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -10417,11 +10422,33 @@ class PayrollMxCfdiDocument(Base):
     created_by_id            = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at               = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at               = Column(DateTime(timezone=True), onupdate=func.now())
+    # CFDI lifecycle L1/L2 (docs/mexico/MEXICO_CFDI_LIFECYCLE_REPORT.md) — all
+    # nullable: rows from before the lifecycle work keep NULL (derived on read).
+    event_key                = Column(String(64), nullable=True)      # hash(tenant+issuer RFC+worker RFC+run+pay event+subtype+snapshot)
+    document_subtype         = Column(String(40), nullable=True)      # ORDINARY / EXTRAORDINARY / REPLACEMENT:<id>
+    employer_profile_id      = Column(Integer, ForeignKey("payroll_mx_employer_profiles.id", ondelete="RESTRICT", name="fk_mx_cfdi_doc_employer_profile"), nullable=True)
+    state_code               = Column(String(10), nullable=True)
+    snapshot_hash            = Column(String(64), nullable=True)
+    ruleset_version          = Column(String(80), nullable=True)
+    issuing_cert_token       = Column(String(64), nullable=True)      # sha256 of the credential reference, never the reference
+    document_locale          = Column(String(10), nullable=True)
+    published_at             = Column(DateTime(timezone=True), nullable=True)   # employee view generated from the stamped XML
+    delivery_status          = Column(String(16), nullable=True)      # DELIVERED / DELIVERY_FAILED (latest outcome)
+    cancel_outcome           = Column(String(16), nullable=True)      # CANCEL_ACCEPTED / CANCEL_REJECTED (recorded response)
 
     __table_args__ = (
         sa.CheckConstraint(
             "status IN ('GENERATED', 'SIGNED', 'SUBMITTED', 'STAMPED', 'REJECTED', 'UNKNOWN', 'CANCEL_REQUESTED', "
             "'CANCELLED', 'REPLACED', 'VOIDED')", name="ck_mx_cfdi_doc_status"),
+        sa.CheckConstraint("delivery_status IS NULL OR delivery_status IN ('DELIVERED', 'DELIVERY_FAILED')",
+                           name="ck_mx_cfdi_doc_delivery"),
+        sa.CheckConstraint("cancel_outcome IS NULL OR cancel_outcome IN ('CANCEL_ACCEPTED', 'CANCEL_REJECTED')",
+                           name="ck_mx_cfdi_doc_cancel_outcome"),
+        Index("uq_mx_cfdi_doc_live_event", "event_key", unique=True,
+              postgresql_where=text("event_key IS NOT NULL AND status NOT IN ('CANCELLED', 'REPLACED', 'VOIDED', "
+                                    "'REJECTED')"),
+              sqlite_where=text("event_key IS NOT NULL AND status NOT IN ('CANCELLED', 'REPLACED', 'VOIDED', "
+                                "'REJECTED')")),
         UniqueConstraint("organization_id", "series", "folio", name="uq_mx_cfdi_doc_folio"),
         Index("uq_mx_cfdi_doc_live_per_item", "payslip_item_id", unique=True,
               postgresql_where=text("status NOT IN ('CANCELLED', 'REPLACED', 'VOIDED', 'REJECTED')"),
@@ -10429,6 +10456,40 @@ class PayrollMxCfdiDocument(Base):
         Index("uq_mx_cfdi_doc_uuid", "uuid", unique=True,
               postgresql_where=text("uuid IS NOT NULL"), sqlite_where=text("uuid IS NOT NULL")),
     )
+
+
+class PayrollMxDocumentAccessEvent(Base):
+    """MX24-PAY-009 / MX24-AUD-002 (CFDI lifecycle L3): one immutable row per
+    publish / delivery / view / download of a Mexican payroll document. Who
+    (actor id), when, which channel and artifact — never an identifier, never
+    the document's content. No update or delete path exists (ORM guard below;
+    PostgreSQL trigger in the migration)."""
+    __tablename__ = "payroll_mx_document_access_events"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    organization_id  = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    payslip_item_id  = Column(Integer, ForeignKey("payslip_items.id", ondelete="RESTRICT"), nullable=True, index=True)
+    document_id      = Column(Integer, ForeignKey("payroll_mx_cfdi_documents.id", ondelete="RESTRICT"), nullable=True, index=True)
+    employee_id      = Column(Integer, ForeignKey("payroll_employees.id", ondelete="RESTRICT"), nullable=True, index=True)
+    event_type       = Column(String(24), nullable=False)    # PUBLISHED / DELIVERED / DELIVERY_FAILED / VIEWED / DOWNLOADED
+    artifact         = Column(String(24), nullable=False)    # RECIBO_VIEW / RECIBO_PDF / DUPLICATE_PDF / STAMPED_XML / CFDI_RECEIPT / HISTORY / ENVELOPE
+    channel          = Column(String(16), nullable=False)    # API / UI / OPERATOR / EMAIL / PORTAL / PRINT
+    renderer_version = Column(String(40), nullable=True)
+    proof_reference  = Column(String(120), nullable=True)    # delivery proof given by the operator (no identifier)
+    actor_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    occurred_at      = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        sa.CheckConstraint("event_type IN ('PUBLISHED', 'DELIVERED', 'DELIVERY_FAILED', 'VIEWED', 'DOWNLOADED')",
+                           name="ck_mx_doc_access_event_type"),
+    )
+
+
+@_sa_event.listens_for(PayrollMxDocumentAccessEvent, "before_update")
+@_sa_event.listens_for(PayrollMxDocumentAccessEvent, "before_delete")
+def _mx_access_event_immutable(mapper, connection, target):
+    raise ValueError("payroll_mx_document_access_events is append-only")
+
 
 
 class PayrollMxCfdiOutboxItem(Base):

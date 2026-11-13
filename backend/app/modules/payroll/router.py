@@ -2142,6 +2142,10 @@ def download_run_payslips(
 
     retention_service.log_payslip_access(db, current_user.organization_id, current_user.id, [i.id for i in items],
                                   "DOWNLOAD_PAYSLIPS_ZIP", request=request, run_id=run_id)       # HK only
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    mexico_cfdi_lifecycle.log_payslip_downloads(db, current_user.organization_id, current_user.id,
+                                                [i.id for i in items])                         # MX only
 
     label = (run.period_label or f"run_{run_id}").replace(" ", "_")
     return StreamingResponse(
@@ -2205,6 +2209,10 @@ def download_payslip(
 
     retention_service.log_payslip_access(db, current_user.organization_id, current_user.id, [payslip_id],
                                   "DOWNLOAD_PAYSLIP", request=request)                            # HK only
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    mexico_cfdi_lifecycle.log_payslip_downloads(db, current_user.organization_id, current_user.id,
+                                                [payslip_id])                                   # MX only
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",

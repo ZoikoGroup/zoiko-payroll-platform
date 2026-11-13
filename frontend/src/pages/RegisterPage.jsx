@@ -363,34 +363,32 @@ export default function RegisterPage() {
   // Google Sign-Up: when the OAuth callback lands here with ?pending=<token>,
   // pre-fill name + email and skip the password field (Google is the IdP).
   const [searchParams] = useSearchParams();
-  const [isGoogleSignup, setIsGoogleSignup] = useState(false);
-  const [googlePendingToken, setGooglePendingToken] = useState("");
-  const [googleId, setGoogleId] = useState("");
+  const googlePendingToken = searchParams.get("pending") || "";
+  const isGoogleSignup = !!googlePendingToken;
 
   useEffect(() => {
+    if (!googlePendingToken) return undefined;
     let cancelled = false;
-    const pending = searchParams.get("pending");
-    const email = searchParams.get("email");
-    if (pending && !cancelled) {
-      setGooglePendingToken(pending);
-      setIsGoogleSignup(true);
-      if (email) setForm((f) => ({ ...f, adminEmail: email }));
-      fetch(`${API_BASE}/api/auth/google/pending/${pending}`, { credentials: "include" })
-        .then(async (res) => {
-          if (cancelled || !res.ok) return;
-          const p = await res.json();
-          setGoogleId(p.google_id || "");
-          setForm((f) => ({
-            ...f,
-            firstName: p.given_name || "",
-            lastName: p.family_name || "",
-            adminEmail: p.email || email || "",
-          }));
-        })
-        .catch(() => {}); // non-fatal: form still shows, user types manually
-    }
+    const email = searchParams.get("email") || "";
+    fetch(`${API_BASE}/api/auth/google/pending/${encodeURIComponent(googlePendingToken)}`, { credentials: "include" })
+      .then(async (res) => {
+        if (cancelled) return;
+        // Expired/used token: keep the email from the redirect; the server
+        // explains on submit that the Google sign-up must be restarted.
+        const p = res.ok ? await res.json() : {};
+        if (cancelled) return;
+        setForm((f) => ({
+          ...f,
+          firstName: p.given_name || f.firstName,
+          lastName: p.family_name || f.lastName,
+          adminEmail: p.email || email || f.adminEmail,
+        }));
+      })
+      .catch(() => {
+        if (!cancelled && email) setForm((f) => ({ ...f, adminEmail: email }));
+      });
     return () => { cancelled = true; };
-  }, [searchParams]);
+  }, [googlePendingToken, searchParams]);
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -488,16 +486,12 @@ export default function RegisterPage() {
         tax_identifiers: hasTaxIdentifiers ? form.taxIdentifiers : undefined,
         plan_code: selectedPlanCode,
       };
-      // Google Sign-Up: no password (Google is the IdP); link the Google
-      // identity instead. The pending token is consumed server-side once the
-      // account is created.
+      // Google Sign-Up: no password (Google is the IdP). The server takes the
+      // Google identity and verified email from the pending token — never
+      // from this request — and consumes the token once the account exists.
       if (isGoogleSignup) {
-        if (!googleId) {
-          setLocalError("Google profile couldn't be loaded. Please sign in with Google again.");
-          return;
-        }
         body.auth_provider = "google";
-        body.google_id = googleId;
+        body.google_pending_token = googlePendingToken;
       } else {
         body.password = form.password;
       }
@@ -732,7 +726,8 @@ export default function RegisterPage() {
               </Field>
               <Field id="adminEmail" label="Work email" required>
                 <IconInput icon={Mail} id="adminEmail" type="email" required autoComplete="email" value={form.adminEmail}
-                  onChange={(e) => update("adminEmail", e.target.value)} placeholder="e.g. lennox@company.com" />
+                  onChange={(e) => update("adminEmail", e.target.value)} placeholder="e.g. lennox@company.com"
+                  readOnly={isGoogleSignup} title={isGoogleSignup ? "Your Google account's email" : undefined} />
               </Field>
             </div>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">

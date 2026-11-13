@@ -19,6 +19,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "447f57564983"
@@ -249,7 +250,7 @@ def test_deploy_drift_filter_explains_every_za_object():
     google_tables = {"google_pending"}
     google_columns = {"auth_provider", "google_id", "avatar_url"}
     assert tables == (set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | set(P10_TABLES)
-                      | mexico_m20 | {"organization_jurisdictions"} | JP_TABLES | NZ_TABLES | google_tables)
+                      | mexico_m20 | {"organization_jurisdictions"} | JP_TABLES | NZ_TABLES | google_tables | MX_LIFECYCLE_TABLES)
     assert columns["users"] == google_columns
     for table, names in P9_COLUMNS.items():
         assert columns[table] == names, table

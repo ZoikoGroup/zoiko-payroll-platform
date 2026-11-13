@@ -137,15 +137,18 @@ def _parse_ts(value):
 # ── packs and rows ──────────────────────────────────────────────────────────
 
 def _upsert_pack(db, *, pack_id, state, parent, compliance_category, change_summary,
-                 source_document_id=None) -> JurisdictionPack:
+                 source_document_id=None, version="1.0", previous=None) -> JurisdictionPack:
     pack = (db.query(JurisdictionPack)
-            .filter(JurisdictionPack.pack_id == pack_id, JurisdictionPack.version == "1.0").first())
+            .filter(JurisdictionPack.pack_id == pack_id, JurisdictionPack.version == version).first())
     if pack is not None and pack.status != "Draft":
-        raise SystemExit(f"{pack_id} v1.0 is {pack.status!r}, not Draft — refusing to rewrite "
+        raise SystemExit(f"{pack_id} v{version} is {pack.status!r}, not Draft — refusing to rewrite "
                          "a pack that has entered review/approval. Create a new version from Super Admin instead.")
     if pack is None:
-        pack = JurisdictionPack(pack_id=pack_id, jurisdiction_country=CODE, version="1.0")
+        pack = JurisdictionPack(pack_id=pack_id, jurisdiction_country=CODE, version=version)
         db.add(pack)
+    if previous is not None:
+        # The version this one supersedes (same link as Super Admin "new version").
+        pack.previous_version_id = previous.id
     pack.jurisdiction_state = state
     pack.parent_pack_id = parent.id if parent is not None else None
     pack.pack_type = "tax"
@@ -232,13 +235,14 @@ def _cited_sources() -> set:
     return cited
 
 
-def _seed_national_pack(db, source_ids) -> JurisdictionPack:
+def _seed_national_pack(db, source_ids, *, version="1.0", previous=None, change_summary=None) -> JurisdictionPack:
     pack = _upsert_pack(
         db, pack_id=MAIN_PACK_ID, state=None, parent=None,
         compliance_category="ISR / subsidio al empleo / IMSS / CEAV / INFONAVIT / labour floors",
-        change_summary=f"v1.0 — {SPEC} federal core, transcribed only from docs/mexico/sources/ "
-                       "(SOURCES_MANIFEST.csv). Every row needs_g1 — Draft pending the gate G1 statutory review.",
-        source_document_id=source_ids.get("S2"),
+        change_summary=change_summary or (
+            f"v1.0 — {SPEC} federal core, transcribed only from docs/mexico/sources/ "
+            "(SOURCES_MANIFEST.csv). Every row needs_g1 — Draft pending the gate G1 statutory review."),
+        source_document_id=source_ids.get("S2"), version=version, previous=previous,
     )
     _rewrite_pack_rows(db, pack)
     scalars, isr, wages, ceav, week, vac = _national_rows(MAIN_FROM, MAIN_TO)
@@ -364,12 +368,12 @@ def seed_mexico(db, manifest: dict = None) -> dict:
     return {"national": national, "isn": isn, "availability": availability, "sources": source_ids}
 
 
-def _require_confirmed_target() -> None:
+def _require_confirmed_target(tag: str = "seed_mexico_canonical_packs") -> None:
     target = describe_target()
-    print(f"[seed_mexico_canonical_packs] TARGET DATABASE: {target or '<not configured>'}")
+    print(f"[{tag}] TARGET DATABASE: {target or '<not configured>'}")
     if (os.environ.get(_OVERRIDE_ENV) or "").strip() != _OVERRIDE_VALUE:
         print(
-            f"\n[seed_mexico_canonical_packs] REFUSING - Mexico has not passed gate G1; a stray run "
+            f"\n[{tag}] REFUSING - Mexico has not passed gate G1; a stray run "
             f"of this statutory WRITE script is worse than for other countries.\n"
             f"  Target: {target or '<not configured>'}\n\n"
             f"  Set {_OVERRIDE_ENV}={_OVERRIDE_VALUE} to proceed (this is stricter than assert_local_database - "
@@ -379,19 +383,19 @@ def _require_confirmed_target() -> None:
         raise SystemExit(2)
     if not is_local_database():
         print(
-            f"[seed_mexico_canonical_packs] WARNING: the target is NOT a local/isolated database "
+            f"[{tag}] WARNING: the target is NOT a local/isolated database "
             f"({target}). Confirm carefully below.", file=sys.stderr,
         )
     if not sys.stdin.isatty():
         print(
-            "[seed_mexico_canonical_packs] REFUSING - non-interactive run: there is no keyboard to confirm "
+            f"[{tag}] REFUSING - non-interactive run: there is no keyboard to confirm "
             "the printed target database. Re-run in an interactive terminal and type CONFIRM.",
             file=sys.stderr,
         )
         raise SystemExit(2)
-    print("[seed_mexico_canonical_packs] The target database is printed above. Type CONFIRM to proceed:")
+    print(f"[{tag}] The target database is printed above. Type CONFIRM to proceed:")
     if sys.stdin.readline().strip() != "CONFIRM":
-        print("[seed_mexico_canonical_packs] Not confirmed - aborting.", file=sys.stderr)
+        print(f"[{tag}] Not confirmed - aborting.", file=sys.stderr)
         raise SystemExit(2)
 
 

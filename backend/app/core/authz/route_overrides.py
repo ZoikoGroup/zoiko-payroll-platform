@@ -428,6 +428,10 @@ _set("GET", "/api/billing/my-subscription", data_class="self",
      note="reviewed: org subscription + country usage counts; no worker row returned")
 _set("POST", "/api/billing/checkout", data_class="tenant_config",
      note="reviewed: checkout with country-limit impact check (per-country counts only); no worker row returned")
+# Success-page reconciliation of a paid Checkout Session — same ledger
+# reconcile as the webhook (per-country counts only), org admin only.
+_set("POST", "/api/billing/checkout/confirm", data_class="tenant_config",
+     note="reviewed: activates the org's own subscription from a paid Stripe session; country counts only, no worker row returned")
 _set("GET", "/api/billing/plan-change-impact", data_class="tenant_config", principals={"org_admin", "payroll_admin"},
      note="reviewed: countries a plan change would keep/pause/restore (country codes only); no worker row returned")
 # Runs list adds per-country payslip totals (service.attach_run_country_totals).

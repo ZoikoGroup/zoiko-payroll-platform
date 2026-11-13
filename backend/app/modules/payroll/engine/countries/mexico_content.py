@@ -312,7 +312,8 @@ _S11 = "S11/S11_DIP_LSS_ref25_16dic20.pdf"
 _S18 = "S18/S18_DOF_Decreto_LFT_jornada_01052026.html"
 _S26 = "S26/S26_DIP_LFT.pdf"
 _S27 = "S27/S27_DIP_LIFNVT.pdf"
-_UMA25 = (date(2025, 2, 1), date(2026, 1, 31))   # S7: in force from 1 Feb 2025; S6: replaced from 1 Feb 2026
+_S30_GUIA = "S30/S30_SAT_Anexo20_Guia_llenado.pdf"
+_UMA25 =(date(2025, 2, 1), date(2026, 1, 31))   # S7: in force from 1 Feb 2025; S6: replaced from 1 Feb 2026
 _UMA26 = (date(2026, 2, 1), None)                # S6: in force from 1 Feb 2026
 MX_SCALAR_CONTENT: tuple = (
     # UMA (spec §2) — INEGI bulletins, Cuadro 1 "Valor de la UMA" (diario, mensual, anual)
@@ -403,6 +404,17 @@ MX_SCALAR_CONTENT: tuple = (
     ScalarRow("mx_sbc_min_rule", None, None, None, "RAISE_TO_ZONE_MIN_WAGE", None, None, _S10,
               "Art. 28: SBC 'como limite inferior el salario minimo general del area geografica respectiva' "
               "(a lower limit: an SBC below it is raised to the zone minimum wage, TL-SBC-1), PDF p. 11"),
+    # ── D-01 (owner decision 2026-11-11, option A) [PENDING G1] ── monetary rounding. The sources fix the
+    # quantum (MXN, 2 decimals) and the timing ("al final del cálculo"); they state no tie-break, so HALF_UP is
+    # the owner's choice (docs/mexico/D01_ROUNDING_DECISION_BRIEF.md). Seeded from MX-PAYROLL-2026 v1.1.
+    ScalarRow("mx_rounding_rule", None, None, None, "HALF_UP:0.01", None, None, _S30_GUIA,
+              "Guía de llenado CFDI 4.0, Q37/Q39 pp. 88, 90: 'redondear al final del cálculo y no antes'; "
+              "c_Moneda MXN 2 decimals (S30 catCFDI); tie-break HALF_UP = owner decision D-01"),
+    # ── D-03 (owner decision 2026-11-11, option GENERAL) [PENDING G1] [PENDING G2] ── the minimum wage that anchors
+    # CEAV band 1 ("1.0 SM"): the general-zone amount for every worker. Read for every SBC (ceav.band_for).
+    ScalarRow("mx_ceav_lowest_band_min_wage_ref", None, None, None, "GENERAL", None, None, _S11,
+              "Transitorio Segundo table, band 1 '1.0 SM' (PDF p. 7, image) read as the general-zone minimum wage "
+              "(S9) = owner decision D-03", pending_g2=True),
     ScalarRow("mx_risk_premium_min_pct", None, "0.5", None, None, None, None, _S10,
               "Art. 74 para 2: minimum premium 'cero punto cinco por ciento' of SBC, PDF p. 26"),
     ScalarRow("mx_risk_premium_max_pct", None, "15", None, None, None, None, _S10,

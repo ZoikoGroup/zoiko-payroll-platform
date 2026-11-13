@@ -54,8 +54,10 @@ def test_mx_tax_schema_is_registered_schema_only():
     for name in ("Mexico", "méxico", "Estados Unidos Mexicanos"):
         assert get_jurisdiction_code(name) == "MX"
     assert ALL_COUNTRY_NAME_TO_CODE["mexico"] == "MX"
-    # Phase 0 decision 1: no self-service registration until G1–G8.
-    assert "Mexico" not in REGISTRATION_COUNTRIES
+    # Owner decision 2026-11-11 (gate bypass, as for the other countries on 2026-10-29): Mexico is
+    # offered at registration; onboarding itself still needs the kill switch, an Active pack and the
+    # registry AVAILABLE (test_mexico_dormancy::test_signup_paths_refuse_mexico_while_dormant).
+    assert "Mexico" in REGISTRATION_COUNTRIES
 
 
 def test_mx_schema_patterns_are_format_only():
@@ -101,13 +103,13 @@ def test_content_skeleton_declares_no_statutory_values():
     assert [g for g, _ in c.GATES] == [f"G{i}" for i in range(1, 9)]
     # Phase 1 tooling names the parameter keys. Batches 1-2 and W1-1
     # (2026-10-26) filled the content below; the keys still missing wait for
-    # their source or decision (rounding: G1 owner; the INFONAVIT fixed-amount
-    # basis: its regulation is not saved; the CEAV lowest-band reference, G2).
-    # Every transcribed row is cited by file and awaits G1.
+    # their source or decision (the INFONAVIT fixed-amount basis: its regulation
+    # is not saved). The rounding rule (D-01) and the CEAV lowest-band reference
+    # (D-03) were transcribed 2026-11-11. Every transcribed row is cited by file and awaits G1.
     assert all(k.startswith("mx_") for k in c.MX_PARAMETER_KEYS)
     missing = {k for k, (_, _, scope) in c.MX_PARAMETER_KEYS.items() if scope == "national"} - {
         r.key for r in c.MX_SCALAR_CONTENT}
-    assert missing == {"mx_rounding_rule", "mx_infonavit_fixed_amount_basis", "mx_ceav_lowest_band_min_wage_ref",
+    assert missing == {"mx_infonavit_fixed_amount_basis",
                        "mx_hourly_rate_rule", "mx_infonavit_partial_period_rule"}       # W3-5: D-17; source missing
     assert [r.key for r in c.MX_ISN_CONTENT["CDMX"]] == ["mx_isn_rate_pct"]   # W1-2: S22 (VERIFIED)
     tables = (c.MX_SCALAR_CONTENT + c.MX_ISR_TARIFFS + c.MX_MIN_WAGES + c.MX_CEAV_SCHEDULE + c.MX_WORKWEEK

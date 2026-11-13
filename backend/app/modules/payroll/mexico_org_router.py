@@ -456,6 +456,12 @@ def mx_cfdi_document_receipt(document_id: int, current_user=Depends(get_current_
 
     pdf = mexico_cfdi_receipt.mx_cfdi_receipt_pdf(db, _org_id(current_user), document_id)
     mexico_cfdi_receipt.record_render(db, _org_id(current_user), document_id, _actor(current_user))   # X3
+    from app.modules.payroll import mexico_cfdi_lifecycle, mexico_cfdi_service
+
+    doc = mexico_cfdi_service._doc(db, _org_id(current_user), document_id)
+    mexico_cfdi_lifecycle.record_access(db, _org_id(current_user), "DOWNLOADED", "CFDI_RECEIPT", "API",
+                                        _actor(current_user), item_id=doc.payslip_item_id, document_id=doc.id,
+                                        employee_id=doc.employee_id)                                  # L3
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Cache-Control": "no-store", "Content-Disposition": f'inline; filename="cfdi-{document_id}.pdf"'})
 
@@ -1181,3 +1187,141 @@ def pilot_status(current_user=Depends(get_current_payroll_operator), db: Session
     from app.modules.payroll import mexico_pilot_service
 
     return mexico_pilot_service.pilot_status(db, _org_id(current_user))
+
+
+# ── Recibo de nómina v2.0 (docs/mexico/MEXICO_RECIBO_REPORT.md) ─────────────
+
+def _mx_payslip(db: Session, org_id: int, payslip_id: int):
+    """(item, run) of one of the caller's own Mexican payslips."""
+    from app.modules.payroll import service
+
+    _data, item, run = service.get_payslip_by_id(db, payslip_id, org_id)
+    if (item.country_code or "").upper() != "MX":
+        raise BadRequestException(f"payslip {payslip_id} is not a Mexican payslip")
+    return item, run
+
+
+@router.get("/payslips/{payslip_id}/recibo",
+            summary="The Mexican payslip view (masked) and its mobile summary — the same data the PDF draws")
+def mx_payslip_recibo(payslip_id: int, current_user=Depends(get_current_payroll_operator),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_payslip_service
+
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    item, run = _mx_payslip(db, _org_id(current_user), payslip_id)
+    view = mexico_payslip_service.recibo_view(db, item, run)
+    doc = mexico_payslip_service.latest_document(db, item.id)
+    mexico_cfdi_lifecycle.record_access(db, _org_id(current_user), "VIEWED", "RECIBO_VIEW", "UI", _actor(current_user),
+                                        item_id=item.id, document_id=doc.id if doc else None,
+                                        employee_id=item.employee_id)                                 # L3
+    return {"view": view, "summary": mexico_payslip_service.mobile_summary(view),
+            "lifecycle": mexico_cfdi_lifecycle.design_state(db, item, doc)}
+
+
+@router.get("/payslips/{payslip_id}/recibo/duplicate",
+            summary="MX24-PAY-010: the recibo re-rendered as a PDF marked DUPLICADO (never a new issuance)")
+def mx_payslip_recibo_duplicate(payslip_id: int, current_user=Depends(get_current_payroll_operator),
+                                db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from app.modules.payroll import service
+
+    from app.modules.payroll import mexico_cfdi_lifecycle, mexico_payslip_service
+
+    item, _run_ = _mx_payslip(db, _org_id(current_user), payslip_id)
+    pdf = service.generate_mx_payslip_duplicate_pdf_bytes(db, payslip_id, _org_id(current_user))
+    doc = mexico_payslip_service.latest_document(db, item.id)
+    mexico_cfdi_lifecycle.record_access(db, _org_id(current_user), "DOWNLOADED", "DUPLICATE_PDF", "API",
+                                        _actor(current_user), item_id=item.id, document_id=doc.id if doc else None,
+                                        employee_id=item.employee_id)                                 # L3
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Cache-Control": "no-store",
+                             "Content-Disposition": f'inline; filename="recibo-{payslip_id}-duplicado.pdf"'})
+
+
+@router.get("/employees/{employee_id}/pay-history",
+            summary="MX24-PAY-011: one employee's Mexican payslips in a pay-date range (JSON, or PDF with format=pdf)")
+def mx_employee_pay_history(employee_id: int, start: date = Query(...), end: date = Query(...),
+                            format: str = Query("json", pattern="^(json|pdf)$"),
+                            current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_payslip_pdf, mexico_payslip_service
+
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    history = mexico_payslip_service.pay_history(db, _org_id(current_user), employee_id, start, end)
+    mexico_cfdi_lifecycle.record_access(db, _org_id(current_user), "VIEWED" if format == "json" else "DOWNLOADED",
+                                        "HISTORY", "API", _actor(current_user), employee_id=employee_id)  # L3
+    if format == "json":
+        return history
+    from fastapi.responses import Response
+
+    history["issueDate"] = mexico_payslip_service.date_es(date.today())
+    return Response(content=mexico_payslip_pdf.render_history(history), media_type="application/pdf",
+                    headers={"Cache-Control": "no-store",
+                             "Content-Disposition": f'inline; filename="historial-{employee_id}.pdf"'})
+
+
+# ── CFDI lifecycle L2-L4 (docs/mexico/MEXICO_CFDI_LIFECYCLE_REPORT.md) ──────
+
+@router.get("/cfdi/documents/{document_id}/envelope",
+            summary="The document's common envelope (ids, hashes, versions, states) — no identifier in clear")
+def mx_cfdi_envelope(document_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    env = mexico_cfdi_lifecycle.envelope(db, _org_id(current_user), document_id)
+    mexico_cfdi_lifecycle.record_access(db, _org_id(current_user), "VIEWED", "ENVELOPE", "API", _actor(current_user),
+                                        document_id=document_id, employee_id=env["employee_id"])
+    return env
+
+
+@router.get("/cfdi/documents/{document_id}/xml",
+            summary="Download the stored STAMPED XML (the legal artifact) — org admins only, every access logged")
+def mx_cfdi_stamped_xml(document_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    data, filename = mexico_cfdi_lifecycle.stamped_xml_download(db, _org_id(current_user), document_id,
+                                                                _actor(current_user))
+    return Response(content=data, media_type="application/xml",
+                    headers={"Cache-Control": "no-store", "Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.post("/cfdi/documents/{document_id}/publish",
+             summary="PUBLISHED: generate the employee view FROM the stamped XML (after the conflict checks)")
+def mx_cfdi_publish(document_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    return mexico_cfdi_lifecycle.publish(db, _org_id(current_user), document_id, _actor(current_user))
+
+
+@router.post("/cfdi/documents/{document_id}/delivery",
+             summary="Record the delivery outcome (DELIVERED with its proof, or DELIVERY_FAILED)")
+def mx_cfdi_delivery(document_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                     db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    return mexico_cfdi_lifecycle.record_delivery(db, _org_id(current_user), document_id, str(body.get("outcome") or ""),
+                                                 str(body.get("channel") or ""), body.get("proofReference"),
+                                                 _actor(current_user))
+
+
+@router.get("/cfdi/documents/{document_id}/access-log",
+            summary="MX24-AUD-002: publish / delivery / view / download events of one document (no identifiers)")
+def mx_cfdi_access_log(document_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_lifecycle, mexico_cfdi_service
+
+    mexico_cfdi_service._doc(db, _org_id(current_user), document_id)
+    return mexico_cfdi_lifecycle.access_log(db, _org_id(current_user), document_id=document_id)
+
+
+@router.get("/payslips/{payslip_id}/lifecycle",
+            summary="The design-pack CFDI_DOCUMENT state of a payslip and its run's PAYROLL_RUN / funding states")
+def mx_payslip_lifecycle(payslip_id: int, current_user=Depends(get_current_payroll_operator),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    item, run = _mx_payslip(db, _org_id(current_user), payslip_id)
+    return {"document": mexico_cfdi_lifecycle.design_state(db, item), "run": mexico_cfdi_lifecycle.run_states(db, run),
+            "accessLog": mexico_cfdi_lifecycle.access_log(db, _org_id(current_user), item_id=item.id)}

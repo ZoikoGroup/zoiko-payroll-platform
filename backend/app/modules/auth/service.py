@@ -842,12 +842,16 @@ def _find_google_user(db: Session, profile: dict):
         return user
 
     if email:
-        user = db.query(User).filter(User.email == email).first()
+        # Case-insensitive: Google returns the address lower-cased, while an
+        # account may have been registered as "Name@Company.com".
+        user = db.query(User).filter(func.lower(User.email) == email.strip().lower()).first()
         if user is not None:
-            # Link the Google identity to this existing email account.
+            # Link the Google identity to this existing email account. A
+            # password account stays a password account (both sign-ins work).
             if not user.google_id:
                 user.google_id = google_id
-                user.auth_provider = "google"
+                if not user.hashed_password:
+                    user.auth_provider = "google"
             user.avatar_url = profile.get("picture")
             db.commit()
             db.refresh(user)
@@ -951,9 +955,14 @@ def google_sign_in(db: Session, code: str, request=None, mode: str = "login") ->
 
     Returns one of:
       {"action": "session", "session": {...}}   — account exists, logged in
+      {"action": "mfa", "mfa_token": str, "mfa_mode": "challenge"|"enroll"}
+                                                — account exists, second factor
+                                                  due (same policy as password)
       {"action": "pending", "token": str, ...}  — no account, needs signup
     """
+    from app.core.security import MFA_CHALLENGE_TOKEN_TYPE, MFA_ENROLL_TOKEN_TYPE, create_mfa_token
     from app.modules.auth import audit as auth_audit
+    from app.modules.auth import mfa
 
     tokens = _google_tokens(code)
     profile = _google_userinfo(tokens["access_token"])
@@ -969,6 +978,12 @@ def google_sign_in(db: Session, code: str, request=None, mode: str = "login") ->
         if temporary_access_ended(user):
             auth_audit.record(db, auth_audit.TEMPORARY_ACCESS_ENDED, user=user, request=request, reason="LOGIN")
             raise UnauthorizedException(TEMPORARY_ACCESS_ENDED_MESSAGE)
+        if user.organization_id:
+            org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+            if org is not None and not org.is_active:
+                auth_audit.record(db, auth_audit.LOGIN_FAILED, user=user, request=request,
+                                  reason="ORGANIZATION_SUSPENDED")
+                raise UnauthorizedException("Your organization has been suspended. Please contact support.")
 
         # Refresh Google-sourced names/avatar in case they changed.
         first_name, last_name = _profile_display(profile)
@@ -978,6 +993,17 @@ def google_sign_in(db: Session, code: str, request=None, mode: str = "login") ->
             user.last_name = last_name
         user.avatar_url = profile.get("picture")
         db.commit()
+
+        # ZP-PRIV B08: Google is the first factor only — the same second
+        # factor rule as password sign-in applies (login_user).
+        if mfa.enforcement_on() and mfa.is_enrolled(db, user):
+            auth_audit.record(db, auth_audit.MFA_CHALLENGE_ISSUED, user=user, request=request)
+            return {"action": "mfa", "mfa_mode": "challenge",
+                    "mfa_token": create_mfa_token(user.id, MFA_CHALLENGE_TOKEN_TYPE)}
+        if mfa.mfa_required_for(user):
+            auth_audit.record(db, auth_audit.MFA_CHALLENGE_ISSUED, user=user, request=request, reason="ENROLL")
+            return {"action": "mfa", "mfa_mode": "enroll",
+                    "mfa_token": create_mfa_token(user.id, MFA_ENROLL_TOKEN_TYPE)}
 
         auth_audit.record(db, auth_audit.LOGIN_SUCCESS, user=user, request=request, required=True)
         logger.info("User %s (%s) signed in via Google", user.email, user.role.value)
@@ -1161,11 +1187,32 @@ def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
 # ── Registration (public self-serve onboarding) ─────────────────────────────
 
 def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Optional[BackgroundTasks] = None) -> dict:
-    existing = db.query(User).filter(User.email == data.email).first()
+    existing = db.query(User).filter(func.lower(User.email) == str(data.email).strip().lower()).first()
     if existing:
         raise AlreadyExistsException("User", "email")
     if not data.terms_accepted:
         raise BadRequestException("You must accept the registration terms.")
+
+    # Google sign-up is accepted only with the pending token the Google
+    # callback issued: the Google id and verified email come from that row,
+    # never from the request body. Without this, anyone could create a
+    # "verified", passwordless account for any email address and attach
+    # their own Google identity to it.
+    is_google = (data.auth_provider or "email") == "google"
+    google_profile = None
+    if is_google:
+        google_profile = get_google_pending(db, data.google_pending_token or "")
+        if google_profile is None:
+            raise BadRequestException(
+                "Your Google sign-up has expired. Please choose \"Continue with Google\" again.")
+        if (google_profile.get("email") or "").strip().lower() != str(data.email).strip().lower():
+            raise BadRequestException(
+                "The admin email must be the Google account's email address ("
+                f"{google_profile.get('email')}).")
+        if db.query(User.id).filter(User.google_id == google_profile["google_id"]).first():
+            raise AlreadyExistsException("User", "Google account")
+    elif not data.password:
+        raise BadRequestException("A password is required.")
 
     # Reject registration outright for a jurisdiction with no valid Active
     # canonical compliance pack — never silently register the org and let
@@ -1223,7 +1270,6 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
     first_name = name_parts[0]
     last_name = name_parts[1] if len(name_parts) > 1 else "Admin"
 
-    is_google = (data.auth_provider or "email") == "google"
     admin = User(
         email=data.email,
         # Google-signed-up accounts have no usable password — Google is the IdP.
@@ -1236,8 +1282,8 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
         is_active=True,
         is_verified=True,
         auth_provider="google" if is_google else "email",
-        google_id=data.google_id if is_google else None,
-        avatar_url=None,
+        google_id=google_profile["google_id"] if is_google else None,
+        avatar_url=google_profile.get("picture") if is_google else None,
     )
     db.add(admin)
     db.commit()
@@ -1246,8 +1292,8 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
 
     # Consume the Google pending token now that the account exists, so the
     # one-time registration hold can't be reused.
-    if is_google and data.google_id:
-        consume_google_pending_by_google_id(db, data.google_id)
+    if is_google:
+        _consume_google_pending(db, data.google_pending_token)
 
     logger.info("New organization %s registered by %s (auth_provider=%s)",
                 org.organization_code, data.email, admin.auth_provider)

@@ -531,6 +531,29 @@ class BillingCheckoutResponse(BaseModel):
     message: Optional[str] = None
 
 
+class BillingCheckoutConfirmRequest(BaseModel):
+    """POST /billing/checkout/confirm — the Stripe Checkout Session id that
+    Stripe appends to the success_url as `session_id`."""
+    session_id: str = Field(..., min_length=1, max_length=255)
+
+
+class BillingCheckoutConfirmResponse(BaseModel):
+    """POST /billing/checkout/confirm — the subscription state after
+    reconciling the Checkout Session with Stripe.
+
+    `deferred` is True when the plan was bought with a future
+    service_commencement_at (the 30-day-trial signup): the subscription is
+    TRIALING and the org stays an EVALUATION workspace until the first real
+    charge, which is expected and still gives full payroll access.
+    """
+
+    status: str
+    workspace_type: str
+    plan_code: Optional[str] = None
+    deferred: bool = False
+    trial_ends_at: Optional[datetime] = None
+
+
 class BillingStartTrialResponse(BaseModel):
     """POST /billing/start-trial — response confirming the org's conversion
     to a 30-day Professional Evaluation, no Stripe/card involved."""

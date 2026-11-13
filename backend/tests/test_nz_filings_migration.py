@@ -16,6 +16,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "dd8a60634320"
@@ -150,7 +151,7 @@ def test_drift_filter_explains():
     finally:
         os.chdir(here)
     # P9 (a8cde2482ef0) and Poland P2 (1ee3bbde33bb) are pending on the same chain.
-    assert tables == set(NEW_TABLES) | {"payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
+    assert tables - MX_LIFECYCLE_TABLES == set(NEW_TABLES) | {"payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
                                         "payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
                                         "payroll_pl_employer_registrations", "payroll_pl_worker_profiles",
                                         "payroll_pl_declarations", "payroll_pl_ppk_participations",
@@ -168,6 +169,7 @@ def test_drift_filter_explains():
                                         "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
     pl_shared = {"payslip_items": {"pl_calculation_snapshot", "be_calculation_snapshot", "template_version_id"},  # + Belgium P2
                  "payroll_runs": {"pl_approval_fingerprint", "be_approval_fingerprint"}}
+    assert {t: columns.pop(t, None) for t in MX_LIFECYCLE_COLUMNS} == MX_LIFECYCLE_COLUMNS
     assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
     assert columns == {**{t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}}, **MX_M21}
 

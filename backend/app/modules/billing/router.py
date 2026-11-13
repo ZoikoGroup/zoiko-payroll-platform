@@ -45,6 +45,8 @@ from app.modules.billing.models import (
 )
 from app.modules.billing.schemas import (
     BillingCancelRequest,
+    BillingCheckoutConfirmRequest,
+    BillingCheckoutConfirmResponse,
     BillingCheckoutRequest,
     BillingCheckoutResponse,
     BillingStartTrialResponse,
@@ -347,6 +349,17 @@ def _require_checkout_config() -> None:
         )
 
 
+def _checkout_success_url() -> str:
+    """STRIPE_CHECKOUT_SUCCESS_URL with Stripe's {CHECKOUT_SESSION_ID}
+    template appended, so the success page can confirm the session itself
+    (POST /billing/checkout/confirm) instead of depending solely on the
+    webhook. Left alone when the configured URL already carries it."""
+    url = settings.STRIPE_CHECKOUT_SUCCESS_URL
+    if "{CHECKOUT_SESSION_ID}" in url:
+        return url
+    return f"{url}{'&' if '?' in url else '?'}session_id={{CHECKOUT_SESSION_ID}}"
+
+
 @router.post("/checkout", response_model=BillingCheckoutResponse)
 def create_checkout_session(
     body: BillingCheckoutRequest,
@@ -482,7 +495,7 @@ def create_checkout_session(
             "plan_version_id": str(version.id),
             "service_commencement_at": commencement.isoformat(),
         },
-        success_url=settings.STRIPE_CHECKOUT_SUCCESS_URL,
+        success_url=_checkout_success_url(),
         cancel_url=settings.STRIPE_CHECKOUT_CANCEL_URL,
         idempotency_key=idempotency_key,
         # Part 5 — jurisdiction-aware SaaS indirect tax (sales tax/VAT on
@@ -528,6 +541,84 @@ def create_checkout_session(
         raise BadRequestException(f"Stripe Checkout error: {str(e)}")
 
     return BillingCheckoutResponse(checkout_url=session.url)
+
+
+@router.post("/checkout/confirm", response_model=BillingCheckoutConfirmResponse)
+def confirm_checkout_session(
+    body: BillingCheckoutConfirmRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_org_admin),
+):
+    """Reconcile a just-paid Checkout Session from the success page.
+
+    Stripe's redirect and its checkout.session.completed webhook race, and
+    the webhook may never reach this environment at all (missing/incorrect
+    endpoint or signing secret, a shared Stripe account forwarding to another
+    environment). Before this endpoint, either case left the customer on
+    "Payment successful" while the platform said "No active subscription".
+
+    The session is read back from Stripe with the server's own secret key —
+    the browser's session_id is only a lookup handle, never trusted for
+    status — and must belong to the caller's organization, be complete and
+    paid (or need no payment, for a deferred-commencement checkout). Then the
+    same idempotent handler the webhook uses applies it.
+    """
+    from sqlalchemy.exc import IntegrityError
+    from app.modules.organizations.models import Organization
+
+    if not settings.STRIPE_SECRET_KEY:
+        raise BadRequestException("Checkout is not configured: missing STRIPE_SECRET_KEY.")
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    try:
+        session = stripe.checkout.Session.retrieve(body.session_id)
+    except stripe.error.InvalidRequestError:
+        raise NotFoundException("Checkout session", body.session_id)
+    except stripe.error.StripeError as e:
+        raise BadRequestException(f"Could not verify the checkout with Stripe: {str(e)}")
+
+    data = session.to_dict() if hasattr(session, "to_dict") else dict(session)
+    metadata = data.get("metadata") or {}
+    org_id_str = metadata.get("organization_id")
+    version_id_str = metadata.get("plan_version_id")
+
+    if not org_id_str or str(current_user.organization_id) != str(org_id_str):
+        raise ForbiddenException("This checkout belongs to a different organization.")
+    if data.get("mode") != "subscription" or not data.get("subscription"):
+        raise BadRequestException("This checkout did not create a subscription.")
+    if data.get("status") != "complete" or data.get("payment_status") not in ("paid", "no_payment_required"):
+        raise BadRequestException(
+            "Stripe has not completed this payment yet "
+            f"(status={data.get('status')}, payment_status={data.get('payment_status')}). "
+            "Your subscription activates as soon as Stripe confirms it."
+        )
+    if not version_id_str or not _webhook_target_exists(db, org_id_str, version_id_str):
+        raise NotFoundException("Plan version for checkout", version_id_str)
+
+    try:
+        sub = _apply_checkout_session_completed(
+            db, int(org_id_str), int(version_id_str), data, stripe_event_id=None, source="success_page",
+        )
+    except IntegrityError:
+        # The webhook created the row concurrently — its result stands.
+        db.rollback()
+        sub = entitlements.get_active_subscription(db, current_user.organization_id)
+        if sub is None:
+            raise
+
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    plan_code = None
+    version_row = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == sub.plan_version_id).first()
+    if version_row is not None:
+        plan_row = db.query(BillingPlan).filter(BillingPlan.id == version_row.plan_id).first()
+        plan_code = plan_row.code if plan_row else None
+    deferred = sub.status == SubscriptionStatus.TRIALING.value
+    return BillingCheckoutConfirmResponse(
+        status=sub.status,
+        workspace_type=(org.workspace_type if org else None) or "PRODUCTION",
+        plan_code=plan_code,
+        deferred=deferred,
+        trial_ends_at=(org.service_commencement_at if (org and deferred) else None),
+    )
 
 
 @router.post("/start-trial", response_model=BillingStartTrialResponse)
@@ -877,6 +968,171 @@ def _subscription_period(subscription_object: dict) -> tuple[Optional[datetime],
     )
 
 
+def _apply_checkout_session_completed(
+    db: Session,
+    org_id: int,
+    version_id: int,
+    data_object: dict,
+    stripe_event_id: Optional[str] = None,
+    source: str = "webhook",
+) -> BillingSubscription:
+    """Create/update the org's subscription from a completed Stripe Checkout
+    Session — the single implementation behind both the
+    checkout.session.completed webhook and POST /billing/checkout/confirm
+    (the success page's reconciliation, so a paid checkout never depends on
+    the webhook reaching this environment). Idempotent: re-applying the same
+    session is a no-op. Commits."""
+    commencement_str = (data_object.get("metadata") or {}).get("service_commencement_at")
+    stripe_sub_id = data_object.get("subscription")
+    if isinstance(stripe_sub_id, dict):
+        stripe_sub_id = stripe_sub_id.get("id")
+
+    stripe_sub =stripe.Subscription.retrieve(stripe_sub_id)
+    sub_item = stripe_sub["items"]["data"][0]
+    period_start_ts = _stripe_period_timestamp(
+        stripe_sub, sub_item, "current_period_start"
+    )
+    period_end_ts = _stripe_period_timestamp(
+        stripe_sub, sub_item, "current_period_end"
+    )
+    period_start = datetime.utcfromtimestamp(period_start_ts)
+    period_end = datetime.utcfromtimestamp(period_end_ts)
+
+    # A deferred service_commencement_at (PlanReviewPage's "delayed
+    # billing" checkout) means checkout completing here is NOT the
+    # same moment as actually being charged — Stripe won't bill
+    # until the commencement date. Until then this org must read as
+    # evaluation (workspace_type=EVALUATION, status=TRIALING), the
+    # same shape the real trial already uses — not "normal" — and
+    # only the invoice.paid handler below (the real charge
+    # succeeding) is allowed to flip it to PRODUCTION/ACTIVE. An
+    # immediate checkout (no deferral, e.g. Core's $0 signup) keeps
+    # the original behavior: normal access right away.
+    commencement_dt = None
+    if commencement_str:
+        try:
+            commencement_dt = datetime.fromisoformat(commencement_str)
+        except ValueError:
+            commencement_dt = None
+    is_deferred = commencement_dt is not None and commencement_dt > datetime.utcnow() + timedelta(minutes=5)
+    pending_status = SubscriptionStatus.TRIALING.value if is_deferred else SubscriptionStatus.ACTIVE.value
+
+    sub = (
+        db.query(BillingSubscription)
+        .filter(BillingSubscription.organization_id == org_id)
+        .first()
+    )
+    # Idempotency across the two callers (webhook + success-page confirm):
+    # once this Stripe subscription is linked to the org's row on this plan,
+    # applying the same checkout again must never rewrite it — in particular
+    # a deferred checkout's TRIALING must not overwrite the ACTIVE that a
+    # later invoice.paid already set.
+    if (
+        sub is not None
+        and stripe_sub_id
+        and sub.stripe_subscription_id == stripe_sub_id
+        and sub.plan_version_id == version_id
+        and sub.status in (SubscriptionStatus.ACTIVE.value, SubscriptionStatus.TRIALING.value)
+    ):
+        if stripe_event_id:
+            db.add(BillingCommercialAuditEvent(
+                organization_id=org_id,
+                event_type="SELF_SERVICE_CHECKOUT_COMPLETED",
+                payload={"stripe_subscription_id": stripe_sub_id, "plan_version_id": version_id,
+                         "already_applied": True, "source": source},
+                stripe_event_id=stripe_event_id,
+            ))
+            db.commit()
+        return sub
+
+    if not sub:
+        sub = BillingSubscription(
+            organization_id=org_id,
+            plan_version_id=version_id,
+            status=pending_status,
+            current_period_start=period_start,
+            current_period_end=period_end,
+            stripe_subscription_id=stripe_sub_id,
+        )
+        db.add(sub)
+    else:
+        # This is the ONLY place status is written outside of
+        # convert_trial_to_paid (which is the Super Admin path) and
+        # invoice.paid (the real-charge conversion, below).
+        sub.plan_version_id = version_id
+        sub.status = pending_status
+        sub.current_period_start = period_start
+        sub.current_period_end = period_end
+        sub.stripe_subscription_id = stripe_sub_id
+
+    # Materialize sub.id now — billing_subscription_items has no
+    # ORM relationship() for SQLAlchemy to auto-order inserts by
+    # dependency, so the item's subscription_id FK below would
+    # otherwise flush as NULL (NOT NULL violation).
+    db.flush()
+
+    # Step 7 — pin the sub's flat base price to the PUBLISHED price
+    # catalog (Enterprise Order Form orgs have no plan_version, so
+    # plan_code resolves to None and no item is written for them).
+    version_row = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == version_id).first()
+    plan_code = None
+    if version_row is not None:
+        plan_row = db.query(BillingPlan).filter(BillingPlan.id == version_row.plan_id).first()
+        if plan_row is not None:
+            plan_code = plan_row.code
+    if plan_code is not None:
+        _sync_subscription_price_item(db, sub, plan_code)
+
+    # Deferred commencement -> stay/become EVALUATION until
+    # invoice.paid confirms the real charge; immediate checkout ->
+    # PRODUCTION right away, same as before this change. period_end
+    # was already computed correctly above (via
+    # _stripe_period_timestamp, which uses getattr — a StripeObject
+    # raises AttributeError on .get(), it isn't a dict); no need to
+    # recompute it here.
+    from app.modules.organizations.models import Organization
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if org:
+        org.workspace_type = "EVALUATION" if is_deferred else "PRODUCTION"
+        org.billing_onboarding_status = "TRIALING" if is_deferred else "ACTIVE"
+        # service_commencement_at is set once only — a later
+        # renewal's checkout.session.completed (there isn't one
+        # today, but future replan/upgrade flows may reuse this
+        # handler) must never push a negotiated commencement date
+        # forward.
+        if org.service_commencement_at is None and commencement_str:
+            try:
+                org.service_commencement_at = datetime.fromisoformat(commencement_str)
+            except ValueError:
+                org.service_commencement_at = datetime.utcnow()
+
+        # Part 1 (§A1) — this webhook is the actual authority for a
+        # STANDALONE org becoming billable on the self-service path
+        # (create_checkout_session's own auto-promotion, above,
+        # already does this idempotently for the common case; this
+        # re-affirms it here too so it holds even if a subscription
+        # somehow reaches ACTIVE via a path that skipped that step).
+        if org.commercial_route != BillingAuthority.ENTERPRISE_ORDER_FORM.value:
+            org.billing_classification = "COMMERCIAL_ACTIVE"
+            org.charge_enabled = True
+            # §12 — resolve_commercial_route also stamps sub.billing_authority
+            # to match explicitly (previously it only ever got STANDALONE by
+            # column default, never an explicit assignment).
+            entitlements.resolve_commercial_route(db, org, org.commercial_route or BillingAuthority.STANDALONE.value)
+
+    db.add(BillingCommercialAuditEvent(
+        organization_id=org_id,
+        event_type="SELF_SERVICE_CHECKOUT_COMPLETED",
+        payload={"stripe_subscription_id": stripe_sub_id, "plan_version_id": version_id, "source": source},
+        stripe_event_id=stripe_event_id,
+    ))
+    # The plan may have changed max_jurisdictions — pause or restore
+    # entitled countries to match (never deletes anything).
+    jurisdiction_entitlement.safe_reconcile(db, org_id, reason="checkout_completed")
+    db.commit()
+    return sub
+
+
 # ── Stripe webhook handler ─────────────────────────────────────────────────
 
 @router.post("/webhooks/stripe", include_in_schema=False)
@@ -934,130 +1190,10 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 event_type, org_id_str, version_id_str, event_id,
             )
         elif org_id_str and version_id_str:
-            org_id = int(org_id_str)
-            version_id = int(version_id_str)
-            stripe_sub_id = data_object.get("subscription")
-
-            stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
-            sub_item = stripe_sub["items"]["data"][0]
-            period_start_ts = _stripe_period_timestamp(
-                stripe_sub, sub_item, "current_period_start"
+            _apply_checkout_session_completed(
+                db, int(org_id_str), int(version_id_str), data_object,
+                stripe_event_id=event_id, source="webhook",
             )
-            period_end_ts = _stripe_period_timestamp(
-                stripe_sub, sub_item, "current_period_end"
-            )
-            period_start = datetime.utcfromtimestamp(period_start_ts)
-            period_end = datetime.utcfromtimestamp(period_end_ts)
-
-            # A deferred service_commencement_at (PlanReviewPage's "delayed
-            # billing" checkout) means checkout completing here is NOT the
-            # same moment as actually being charged — Stripe won't bill
-            # until the commencement date. Until then this org must read as
-            # evaluation (workspace_type=EVALUATION, status=TRIALING), the
-            # same shape the real trial already uses — not "normal" — and
-            # only the invoice.paid handler below (the real charge
-            # succeeding) is allowed to flip it to PRODUCTION/ACTIVE. An
-            # immediate checkout (no deferral, e.g. Core's $0 signup) keeps
-            # the original behavior: normal access right away.
-            commencement_dt = None
-            if commencement_str:
-                try:
-                    commencement_dt = datetime.fromisoformat(commencement_str)
-                except ValueError:
-                    commencement_dt = None
-            is_deferred = commencement_dt is not None and commencement_dt > datetime.utcnow() + timedelta(minutes=5)
-            pending_status = SubscriptionStatus.TRIALING.value if is_deferred else SubscriptionStatus.ACTIVE.value
-
-            sub = (
-                db.query(BillingSubscription)
-                .filter(BillingSubscription.organization_id == org_id)
-                .first()
-            )
-            if not sub:
-                sub = BillingSubscription(
-                    organization_id=org_id,
-                    plan_version_id=version_id,
-                    status=pending_status,
-                    current_period_start=period_start,
-                    current_period_end=period_end,
-                    stripe_subscription_id=stripe_sub_id,
-                )
-                db.add(sub)
-            else:
-                # This is the ONLY place status is written outside of
-                # convert_trial_to_paid (which is the Super Admin path) and
-                # invoice.paid (the real-charge conversion, below).
-                sub.plan_version_id = version_id
-                sub.status = pending_status
-                sub.current_period_start = period_start
-                sub.current_period_end = period_end
-                sub.stripe_subscription_id = stripe_sub_id
-
-            # Materialize sub.id now — billing_subscription_items has no
-            # ORM relationship() for SQLAlchemy to auto-order inserts by
-            # dependency, so the item's subscription_id FK below would
-            # otherwise flush as NULL (NOT NULL violation).
-            db.flush()
-
-            # Step 7 — pin the sub's flat base price to the PUBLISHED price
-            # catalog (Enterprise Order Form orgs have no plan_version, so
-            # plan_code resolves to None and no item is written for them).
-            version_row = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == version_id).first()
-            plan_code = None
-            if version_row is not None:
-                plan_row = db.query(BillingPlan).filter(BillingPlan.id == version_row.plan_id).first()
-                if plan_row is not None:
-                    plan_code = plan_row.code
-            if plan_code is not None:
-                _sync_subscription_price_item(db, sub, plan_code)
-
-            # Deferred commencement -> stay/become EVALUATION until
-            # invoice.paid confirms the real charge; immediate checkout ->
-            # PRODUCTION right away, same as before this change. period_end
-            # was already computed correctly above (via
-            # _stripe_period_timestamp, which uses getattr — a StripeObject
-            # raises AttributeError on .get(), it isn't a dict); no need to
-            # recompute it here.
-            from app.modules.organizations.models import Organization
-            org = db.query(Organization).filter(Organization.id == org_id).first()
-            if org:
-                org.workspace_type = "EVALUATION" if is_deferred else "PRODUCTION"
-                org.billing_onboarding_status = "TRIALING" if is_deferred else "ACTIVE"
-                # service_commencement_at is set once only — a later
-                # renewal's checkout.session.completed (there isn't one
-                # today, but future replan/upgrade flows may reuse this
-                # handler) must never push a negotiated commencement date
-                # forward.
-                if org.service_commencement_at is None and commencement_str:
-                    try:
-                        org.service_commencement_at = datetime.fromisoformat(commencement_str)
-                    except ValueError:
-                        org.service_commencement_at = datetime.utcnow()
-
-                # Part 1 (§A1) — this webhook is the actual authority for a
-                # STANDALONE org becoming billable on the self-service path
-                # (create_checkout_session's own auto-promotion, above,
-                # already does this idempotently for the common case; this
-                # re-affirms it here too so it holds even if a subscription
-                # somehow reaches ACTIVE via a path that skipped that step).
-                if org.commercial_route != BillingAuthority.ENTERPRISE_ORDER_FORM.value:
-                    org.billing_classification = "COMMERCIAL_ACTIVE"
-                    org.charge_enabled = True
-                    # §12 — resolve_commercial_route also stamps sub.billing_authority
-                    # to match explicitly (previously it only ever got STANDALONE by
-                    # column default, never an explicit assignment).
-                    entitlements.resolve_commercial_route(db, org, org.commercial_route or BillingAuthority.STANDALONE.value)
-
-            db.add(BillingCommercialAuditEvent(
-                organization_id=org_id,
-                event_type="SELF_SERVICE_CHECKOUT_COMPLETED",
-                payload={"stripe_subscription_id": stripe_sub_id, "plan_version_id": version_id},
-                stripe_event_id=event_id,
-            ))
-            # The plan may have changed max_jurisdictions — pause or restore
-            # entitled countries to match (never deletes anything).
-            jurisdiction_entitlement.safe_reconcile(db, org_id, reason="checkout_completed")
-            db.commit()
 
     elif event_type == "customer.subscription.updated":
         stripe_sub_id = data_object.get("id")

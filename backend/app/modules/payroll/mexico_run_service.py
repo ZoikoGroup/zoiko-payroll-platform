@@ -1293,8 +1293,24 @@ def run_status(db: Session, run) -> dict:
                         "pilot": bool(stored.get("pilot")) or mexico_dormancy.is_pilot_organization(db, run.organization_id)},
             "cfdi": _cfdi_lane(db, run),
             "authorities": _authorities_lane(db, run),
-            "bank": {"status": "HELD", "detail": "bank settlement is built in Phase 10; every Mexican payment is held"},
+            # CFDI lifecycle L1: from the Phase 10a payment batches only — never from the stamp or the run status
+            "bank": _bank_lane(db, run),
+            "lifecycle": _lifecycle_lane(db, run),
             "ledgers": ledger_counts(db, run)}
+
+
+def _bank_lane(db: Session, run) -> dict:
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    f = mexico_cfdi_lifecycle.funding_state(db, run)
+    return {"status": {"NOT_FUNDED": "HELD", "FUNDED": "FUNDED", "PAID": "PAID"}[f["state"]], "detail": f["detail"]}
+
+
+def _lifecycle_lane(db: Session, run) -> dict:
+    """The design pack's PAYROLL_RUN state (and the funding state beside it) — a mapping, read-only."""
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
+    return mexico_cfdi_lifecycle.run_states(db, run)
 
 
 # ── 9. Approved hours (D1) and opening balances (D4) — four-eyes ─────────────
