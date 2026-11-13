@@ -34340,6 +34340,22 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     # template downloads (and is emailed) in that layout. No template, a
     # payslip a template can't represent, or any template failure -> None,
     # and the standard statutory PDF below is produced exactly as before.
+    # Belgium (ZP-BE-ENG-001 Block H1): a Belgian payslip is never rendered
+    # through a template or the generic layout — only the Belgian §11 PDF
+    # (masked NISS, DEMO watermark), or a clear refusal.
+    from app.modules.payroll import belgium_payslip_pdf as _be_payslip_pdf
+    _be_query = db.query(PayslipItem.country_code).filter(PayslipItem.id == payslip_id)
+    if organization_id:
+        _be_query = _be_query.filter(PayslipItem.organization_id == organization_id)
+    _be_row = _be_query.first()
+    if _be_row is not None and (_be_row[0] or "").strip().upper() == "BE":
+        data, item, run = get_payslip_by_id(db, payslip_id, organization_id)
+        company = db.query(CompanyComplianceDetails).filter(
+            CompanyComplianceDetails.organization_id == organization_id).first() if organization_id else None
+        return _be_payslip_pdf.be_payslip_pdf_bytes(
+            data, item, run, getattr(company, "name", None) or "Company Name", getattr(company, "address", None) or "",
+            item.organization_id, evaluation=_is_evaluation_workspace(db, organization_id))
+
     from app.modules.payroll import payslip_template_service as _payslip_templates
     templated = _payslip_templates.template_pdf_or_none(db, payslip_id, organization_id)
     if templated is not None:

@@ -291,9 +291,9 @@ def test_niss_is_vault_only_and_never_echoed(be_strategy, key):
     from app.core.exceptions import BadRequestException
 
     with pytest.raises(BadRequestException) as raised:
-        be_strategy.validate({key: "85073003328"})
+        be_strategy.validate({key: "85073003300"})
     text = str(getattr(raised.value, "detail", None) or raised.value)
-    assert "identifier vault" in text and "85073003328" not in text
+    assert "identifier vault" in text and "85073003300" not in text
 
 
 @pytest.mark.parametrize("iban", [BE_IBAN_BAD_CHECK, PL_IBAN])

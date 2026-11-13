@@ -626,3 +626,25 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   72 passed, 3 skipped. Main's payslip-template tests need its new packages (mammoth, pdfplumber, xhtml2pdf) locally.
 - docs/belgium/MERGE_PLAN.md (merge commit recommended over rebase; exact steps); PR_DESCRIPTION.md updated with
   Blocks E / F and the demo flags. Nothing merged, rebased, re-chained on the branch or pushed.
+
+## Block H1 — post-merge secret / PII scan and payslip render paths
+
+- H1a scan of every file added / changed in 1af3d44..a1e4914 (176 files; content at a1e4914): no private key,
+  cloud / payment / VCS token, JWT, password assignment, .env file or file > 5 MB. Two connection strings are the
+  disposable CI PostgreSQL service (`zp_privacy:zp_privacy@localhost`, test-only, pre-existing job pattern). One
+  mod-97-valid NISS shape: `85073003328` in tests/test_belgium_scaffold.py (refusal-test fixture, the published
+  Belgian documentation example 85.07.30-033.28, not a real person's record) — replaced by the checksum-invalid
+  `85073003300`. docs/belgium/authority/: placeholders only ([TO FILL]), no company data.
+- H1b render paths after PR #158 (payslip templates):
+  | Path | Before | Now |
+  |------|--------|-----|
+  | GET /payslips/{id}/download, run ZIP, payslip e-mail (generate_payslip_pdf_bytes) | template PDF or generic reportlab layout — no §11 content, no DEMO watermark | Belgian §11 PDF (belgium_payslip_pdf.py): snapshot only, masked NISS, DEMO watermark every page; no snapshot → 409 BE_PAYSLIP_NO_SNAPSHOT |
+  | GET /payslips/{id}/rendered (template HTML) | rendered a BE payslip through an assigned template | 409 TEMPLATE_NOT_REPRESENTABLE (UI falls back to the BE §11 view) |
+  | template xhtml2pdf PDF (render_payslip_pdf / template_pdf_or_none) | possible for BE | refused / None |
+  | template create / update / assign / import-from-PDF with country BE | allowed | 400 "do not apply to Belgium" |
+  | template preview / preview PDF (sample data) for BE | generic sample | 400 refused |
+  | freeze_run_templates at approval | pinned BE payslips to a template | BE skipped |
+  | GET /payslips/{id} (on-screen PayslipStub BE branch) | §11 from beCalculationSnapshot, masked, demo label | unchanged |
+  | mammoth / pdfplumber import (analyze-pdf) | builds a template from an upload; renders no payslip | BE scope refused at save |
+- Tests: tests/test_belgium_payslip_render_paths.py (5, incl. demo PDF: watermark on every page, no NISS shape).
+  Guard: belgium_payslip_pdf.py layout numbers registered. Registry: fresh == stored (0 changed).

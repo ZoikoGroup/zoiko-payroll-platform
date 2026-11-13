@@ -196,6 +196,11 @@ _STRUCTURAL_NUMBERS = {
         2025: "DEMO employees' illustrative hire year", 2026: "DEMO month year", 9: "DEMO month (September)",
         30: "DEMO month end day",
     },
+    "belgium_payslip_pdf.py": {
+        0: "table origin cell", 1: "last table cell (-1) / spacer width", 4: "section spacing (mm)",
+        9: "table font size (pt)", 0.5: "table grid line width (pt)", 45: "label column width (mm)",
+        120: "value column width (mm)", 125: "line label column width (mm)", 40: "amount column width (mm)",
+    },
     "be_content_workbook.py": {0: "first sheet / zero", 1: "first column / header row", 2: "first data row",
                                4: "YYYY width", 10: "YYYY-MM-DD width / refusals listed", 100: "period label width",
                                50: "source form-number width", 200: "source agency width", 300: "source title width"},
@@ -208,6 +213,7 @@ _STRUCTURAL_NUMBERS = {
 }
 # Strings that look numeric but are not statutory values.
 _STRUCTURAL_STRINGS = {
+    ("belgium_payslip_pdf.py", "0.00"): "a zero amount line is not printed (payslip layout, not a value)",
     ("engine/jurisdictions/belgium/pack.py", "0.01"): "EUR cent unit (the signed rounding rule picks it)",
     ("engine/countries/belgium_content.py", "^[A-Z0-9]{1,10}$"):
         "ONSS code shape (1-10 letters / digits) for code lists and EC / WC dimensions",
