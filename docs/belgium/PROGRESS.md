@@ -280,3 +280,47 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
   test_south_africa_migrations: pending-table sets gain the five Block C tables.
 - Registry diff: no existing route changed (no routes in C0).
 - Open: PostgreSQL RLS run of the new policies (CI merge gate).
+
+## Block C1 — filings and obligations (1403aa5)
+
+- belgium_filing.py: Dimona IN / UPDATE / OUT / CANCEL from the ACTIVE employment lines and their contract dates
+  (BE-033): IN once per line; a changed period after transmission is an UPDATE linked to the IN by corrects_id
+  (never a silent overwrite); OUT when the line has an end date (linked inFilingId); CANCEL is a CANCELLATION.
+  DmfA per legal employer + quarter from the committed ledger + employment lines (BE-034): employee / employer
+  contributions per line, masked identifiers, codes PENDING_CONTENT (G-33); a CORRECTION ledger entry counts in
+  the quarter of its source period, so a correction of an accepted quarter re-declares that quarter as a linked
+  CORRECTION filing. FinProf object from the tax ledger (frequency from the registration, G-30). Belcotax fiche
+  per employee for a closed income year with an employee copy (rendition), CORRECTION and CANCELLATION (BE-014).
+- Schema by submission date from signed content (G-31): VALIDATED only with signed version + archived XSD +
+  mapping + XSD pass; otherwise DRAFT with the reason in validation_note. Approval / submission re-check the
+  schema of their own date (30 Sep / 1 Oct boundary sends the filing back to DRAFT). Four-eyes approval (shared
+  require_four_eyes + DB CHECK). Transmission adapter refuses (G3 not certified, D9); submission (reference,
+  mandate, actor, time) and response (receipt / error codes, immutable) recorded by hand, idempotent per
+  reference. Payload hash, rendition, response, timestamps, actor, mandate stored (BE-037); idempotency keys
+  hash internal ids + payload hash (no personal data).
+- Obligations: ONSS_QUARTER (balance after recorded advances), ONSS_ADVANCE per month from the ONSS notice
+  (BE-018), WITHHOLDING, HOLIDAY_FUND; acceptance_status separate from status (BE-036: accepted-but-unpaid stays
+  open); payments idempotent per bank reference; OVERPAID and CHANGED_AFTER_PAYMENT variances; reconcile and
+  resolve are four-eyes; an ACCEPTED filing becomes SETTLED only when its obligations are paid. Due dates only from
+  an Active, sourced calendar row (BE-035, G-32). Exception queue: rejected filing, late Dimona, not validated,
+  overdue / unsourced obligation, open variance, payment failure.
+- Run preflight: the Block B Dimona placeholder is replaced by a BLOCK when the line has no ACCEPTED Dimona IN
+  (BE_DIMONA_IN_MISSING / _NOT_ACCEPTED / _CANCELLED). Correction snapshots now carry employerTotalDelta.
+- Content: new kind "schema-version" (SLAB_KINDS; Super Admin slab form gains effectiveTo) and group "filing"
+  with four keys (rule types BE_FILING_<FORM>_SCHEMA).
+- 21 routes under /api/payroll/belgium (filings, dimona/events, dmfa/quarters/{q}/build,
+  withholding-obligations/{p}/build, belcotax/{y}/build, validate / approve / transmit / submission / response /
+  cancel, obligations, onss-advances, payments, reconcile, variances, filing-calendar, filing-exceptions).
+  Registry diff: no existing route changed; 21 new BE routes (worker class, tenant scope; writes org admin, reads
+  payroll operator); registry + inventory CSV regenerated (additive only).
+- Frontend: Compliances/BEFilingSettlementPanel.jsx (exception queue, calendar, builders, filing centre,
+  obligations / variances) in the Belgium Compliance Centre; payrollService BE filing functions; lint clean on new
+  files; be-console validation 19 checks pass.
+- Tests: test_belgium_filing.py (new, 25: on-time / late / rejected Dimona, linked update, OUT, cancel, state
+  machine, four-eyes (service + DB), D9 refusal, idempotency + no PII, 30 Sep / 1 Oct boundary, the four
+  DRAFT reasons, archive check, DmfA content, 2026/Q3 calendar row, overdue, accepted-but-unpaid, advances,
+  variances, correction after an accepted quarter, FinProf, Belcotax). test_belgium_run_lifecycle: fixture adds
+  contract start + accepted Dimona IN; new BE-033 block test (11). Belgium files: 495 passed, 1 skipped.
+  tests/privacy: 294 passed, 13 skipped, 3 failed (the pre-existing health-route registry failures).
+  Env: PAYROLL_DATABASE_URL=sqlite:///<scratchpad>/testdb_<ts>/zp_test.db, ZP_TEST_POSTGRES_URL unset.
+- Open: G-30..G-33; real XSDs, mappings and codes (G-08); calendar rows; G3 channel.
