@@ -1006,7 +1006,9 @@ def _de_employee_payload(steuer_id, employee_code="EMP001"):
             "steuer_id": steuer_id,
             "steuerklasse": "I",
             "krankenkasse": "TK",
-            "iban": "DE89370400440532013000",
+            # SYNTHETIC: check digits 00 never pass mod-97, so this is not a real
+            # account (privacy gate, ZP-PRIV D09); DE validation checks the shape only.
+            "iban": "DE00370400440532013000",
         },
     }
 
