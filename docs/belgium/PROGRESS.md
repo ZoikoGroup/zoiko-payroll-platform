@@ -613,3 +613,16 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   the patterns table, the conflicts, examples status; counts unchanged (HIGH 9 / MEDIUM 36 / LOW 187 / NOT FOUND 72).
 - Tests: +1 workbook test (sheet names <= 31, patterns cover the 180 cells exactly once); workbook + demo: 18 passed.
   Frontend: lint clean, be-console validation 19 checks.
+
+## Block F5 — merge readiness (STOP for decision)
+
+- `git fetch origin` (read-only): origin/main `6081174` is 6 commits past the base 1af3d44 (payslip templates PR
+  #158 etc.); nikhil is 42 commits ahead. Main adds migration f3a9c1d7e2b4 (child of efc56f3235e2) — a plain merge
+  would give two heads → re-chain 1d76678ef1a1 onto f3a9c1d7e2b4 inside the merge commit.
+- `git merge-tree` simulation: 13 conflicting files (models.py, PayslipStub.jsx, 11 migration pin tests), all
+  additive "both sides" conflicts.
+- Trial in a scratch copy of the merge tree (branch untouched): resolutions for models.py / test_alembic_metadata +
+  the re-chain + manifest SHA → single head 8a1f5ef9fa5d; Belgian migration tests + alembic metadata / manifest:
+  72 passed, 3 skipped. Main's payslip-template tests need its new packages (mammoth, pdfplumber, xhtml2pdf) locally.
+- docs/belgium/MERGE_PLAN.md (merge commit recommended over rebase; exact steps); PR_DESCRIPTION.md updated with
+  Blocks E / F and the demo flags. Nothing merged, rebased, re-chained on the branch or pushed.

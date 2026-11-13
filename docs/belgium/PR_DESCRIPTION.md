@@ -15,6 +15,23 @@ is Draft with every row `[PENDING G1]`; no statutory value is in code; the engin
 until content is signed; the registry row stays PLANNED while any gate is red. Merging this changes nothing
 for any existing customer.
 
+## Blocks E and F (after the engineering blocks)
+
+- **E — AI-drafted content, unsigned:** `docs/belgium/content/BE_2026_AI_DRAFT.xlsx` proposes every content row with
+  source, retrieval date and confidence (HIGH 9 / MEDIUM 36 / LOW 187 / NOT FOUND 72); importable as UNSIGNED rows
+  through the D3 workbook (never signs). Reviewer guide, specialist pack, authority request drafts.
+- **E4 — DEMO pack (non-production only):** `BE-DEMO-2026` "DEMO — NOT FOR PAYROLL". New settings, both off by
+  default and to stay unset in production: `BE_DEMO_PACKS_ENABLED` (demo packs exist / are used only when true AND
+  the environment is not production) and `BE_DEMO_ORG_IDS` (the only organisations that may use it). Demo payslips /
+  filings are watermarked, never paid, never transmitted; `scripts/seed_belgium_demo.py` (local / staging) needs two
+  existing users and creates no account.
+- **F1 — F-G12-1 fixed:** a Belgian content row is never edited and signed in one action and never signed by a user
+  who edited it in the current pack version.
+- **F2-F4:** official source download list + inbox register (`scripts/be_source_inbox.py`), earning-class patterns,
+  review order.
+- **F5:** merge plan against main (`docs/belgium/MERGE_PLAN.md`): main added `f3a9c1d7e2b4` (payslip templates);
+  the merge re-chains `1d76678ef1a1` onto it.
+
 ## Architecture
 
 - `belgium_service.py`: the 13 jurisdiction hooks, statutory records (versioned, four-eyes), resolver,
@@ -32,11 +49,11 @@ for any existing customer.
   payment panels, Super Admin Belgium console (rows, slabs, joint committees, signing status with workbook and
   bulk sign, overview with gates and golden certification).
 
-## Migrations (in order; single head 8a1f5ef9fa5d)
+## Migrations (in order; single head 8a1f5ef9fa5d — also after merging main, see MERGE_PLAN.md)
 
 | Revision | Name | Down revision | Content |
 |----------|------|---------------|---------|
-| 1d76678ef1a1 | be_foundation | efc56f3235e2 | 9 Belgian tables (vault, access events, registrations, units, profiles, schedules, classifications, declarations, ledger) + 2 nullable shared columns (payslip_items.be_calculation_snapshot, payroll_runs.be_approval_fingerprint); RLS |
+| 1d76678ef1a1 | be_foundation | efc56f3235e2 (→ **f3a9c1d7e2b4** after the merge re-chain) | 9 Belgian tables (vault, access events, registrations, units, profiles, schedules, classifications, declarations, ledger) + 2 nullable shared columns (payslip_items.be_calculation_snapshot, payroll_runs.be_approval_fingerprint); RLS |
 | 2943a0490b5b | be_absence_holiday_payment | 1d76678ef1a1 | 5 tables (absence episodes, holiday certificates, payment batches / items, component mappings) + decision columns on 3 Belgian tables; RLS |
 | 8a1f5ef9fa5d | be_filing_parallel | 2943a0490b5b | 5 tables (filings, obligations, reconciliation variances, parallel imports / differences); RLS |
 
