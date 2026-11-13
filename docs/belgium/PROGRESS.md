@@ -648,3 +648,28 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   | mammoth / pdfplumber import (analyze-pdf) | builds a template from an upload; renders no payslip | BE scope refused at save |
 - Tests: tests/test_belgium_payslip_render_paths.py (5, incl. demo PDF: watermark on every page, no NISS shape).
   Guard: belgium_payslip_pdf.py layout numbers registered. Registry: fresh == stored (0 changed).
+
+## Block H2a-c — deploy rehearsal, production-like startup, seed entry points
+
+- H2a `backend/scripts/be_deploy_rehearsal.py` (throwaway SQLite only): production-like state at f3a9c1d7e2b4
+  (create_all minus the 19 payroll_be_* tables and the 2 shared columns, stamped) → read-only drift check: 21 BE
+  drift lines, all explained by scripts.drift_pending_filter f3a9c1d7e2b4 (unexplained: none) → `alembic upgrade
+  head` → 8a1f5ef9fa5d, 19 tables + 2 columns, drift check exit 0 → second upgrade head: no-op, drift 0 → the
+  orphan-path stamp walk finds 8a1f5ef9fa5d after / f3a9c1d7e2b4 before the upgrade (never stamps over pending
+  migrations) → downgrade 2943a0490b5b (14 tables) → 1d76678ef1a1 (9) → f3a9c1d7e2b4 (0 tables, 0 columns) on
+  empty tables → drift again explained → re-upgrade clean. RLS is PostgreSQL-only (CI privacy-isolation job).
+- H2b `tests/test_belgium_production_startup.py`: fresh interpreter, real app WITH lifespan, ENVIRONMENT=production,
+  every BE_* unset, throwaway SQLite → starts; every /api/payroll/belgium route (method × path) answers 404 to a
+  Belgian org's own admin; Super Admin console packs / decisions / joint-committees / readiness answer 200 (empty);
+  0 BE packs, 0 payroll_be_* rows, no BE registry row after startup.
+- H2c seed entry points (none automatic):
+  | Entry point | Writes | Trigger |
+  |-------------|--------|---------|
+  | app startup `initialize_database` → `_seed_reference_content` | Assist KB / capabilities only | every start (not Belgian) |
+  | `scripts/deploy_migrate.sh` / backend-deploy.yml | migrations + read-only drift checks; no seed | deploy |
+  | BE migrations 1d76678ef1a1 / 2943a0490b5b / 8a1f5ef9fa5d | schema + RLS only (one DELETE in a downgrade of the ledger accumulator list) | deploy |
+  | `scripts/seed_belgium_registry.py` | PLANNED registry row (create-only) | manual; `_local_db_guard` |
+  | `scripts/seed_belgium_canonical_packs.py` | Draft BE-PAYROLL-2026 `[PENDING G1]` + PLANNED row | manual; `_local_db_guard` |
+  | `POST /api/super-admin/compliance/belgium/seed-draft` | same Draft pack + PLANNED row (only while no BE pack; reason; audited) | Super Admin click |
+  | `scripts/seed_belgium_demo.py` | BE-DEMO-2026 + demo org / month | manual; refused unless BE_DEMO_PACKS_ENABLED and not production; `_local_db_guard`; needs 2 existing users |
+  | `belgium_service.seed_be_individual_account_template` | Draft individual-account report template | no caller in app (tests only) |
