@@ -574,3 +574,14 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
 - Tests: test_belgium_signing_four_eyes.py (new, 8); super-admin and slab-row tests moved to edit-then-sign by a
   second user. Belgium files: 539 passed, 3 skipped (PostgreSQL round trips). PL / NZ console tests pass. Registry
   diff: no route changed. BELGIUM_SECURITY_REVIEW.md and the gaps register record F-G12-1 as FIXED.
+
+## Block F2 — source acquisition list
+
+- docs/belgium/sources/DOWNLOAD_LIST.md: 34 documents in 7 groups (A Annex III withholding incl. the 24 Jul 2026 and
+  27 Sep 2026 / 1 Nov 2026 versions and the quarterly-declaration threshold; B ONSS 2026/3 instructions, quarterly
+  rate files by EC x WC, BSSC scale, work bonus, structural / target-group reductions, company car; C manual-worker
+  holiday contributions for the current holiday year and holiday-pay rules; D guaranteed-salary day bands,
+  maternity / birth leave; E RMMMG dated amounts, index-centime law, working time, public holidays + substitution;
+  F Dimona / DmfA 2026/2-2026/3 / FinProf / Belcotax 281.10 schemas, codes, deadline table; G legal sources for
+  G-13 / G-16 / G-21), each with publisher, version, URL found or official site + section, and workbook rows filled.
+- docs/belgium/sources/inbox/README.md: "save downloaded files here unchanged; do not rename" (+ optional meta file).
