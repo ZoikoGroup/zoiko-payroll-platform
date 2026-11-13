@@ -673,3 +673,8 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   | `POST /api/super-admin/compliance/belgium/seed-draft` | same Draft pack + PLANNED row (only while no BE pack; reason; audited) | Super Admin click |
   | `scripts/seed_belgium_demo.py` | BE-DEMO-2026 + demo org / month | manual; refused unless BE_DEMO_PACKS_ENABLED and not production; `_local_db_guard`; needs 2 existing users |
   | `belgium_service.seed_be_individual_account_template` | Draft individual-account report template | no caller in app (tests only) |
+- H2d docs/belgium/DEPLOY_NOTES.md: pre-merge checklist, what the deploy changes, read-only verification SQL,
+  rollback, first manual steps. Rollback ORDER deviates from the brief on purpose: schema downgrade (empty tables
+  verified) BEFORE the code revert. After a code revert the three revision files are gone (alembic cannot
+  downgrade), and check_schema_drift refuses the next deploy on the two shared columns the reverted models do not
+  declare. The "already reverted" recovery path is documented.
