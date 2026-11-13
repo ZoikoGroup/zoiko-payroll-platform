@@ -677,6 +677,7 @@ def be_resolve_variance(variance_id: int, body: Dict[str, Any] = Body(...), curr
 @router.get("/filing-calendar", summary="The Belgian authority calendar (content; only Active + sourced rows count)")
 def be_filing_calendar(year: Optional[int] = None, current_user=Depends(get_current_payroll_operator),
                        db: Session = Depends(get_db)):
+    _org_id(current_user)                     # D2: like every route, only for a caller with an organisation
     return _bf().calendar_view(db, year)
 
 

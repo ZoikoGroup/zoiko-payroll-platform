@@ -251,8 +251,8 @@ _COUNTRY_CALC = {
     # Poland (ZP-PL-ENG-001): fail-closed orchestrator over
     # engine/jurisdictions/poland/* (Phase 3); never the generic calculator.
     "PL": _calc_poland,
-    # Belgium (ZP-BE-ENG-001): fail-closed by design until Phase 5 — always
-    # raises BE_ENGINE_NOT_BUILT; never the generic calculator.
+    # Belgium (ZP-BE-ENG-001): fail-closed orchestrator over
+    # engine/jurisdictions/belgium/* (Blocks A-B); never the generic calculator.
     "BE": _calc_belgium,
 }
 

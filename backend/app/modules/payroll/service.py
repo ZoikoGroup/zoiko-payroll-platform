@@ -8180,8 +8180,8 @@ def _refuse_nz_generic_statutory_edit(pack) -> None:
             "Poland statutory rows are edited and signed in Compliance → Poland (a source document and a change "
             "reason are required; signing needs a second Super Admin)."
         )
-    # Belgium (ZP-BE-ENG-001 Phase 1): never through the generic editor, which
-    # carries no source; the governed Belgium console arrives in Phase 3.
+    # Belgium (ZP-BE-ENG-001): never through the generic editor, which carries
+    # no source; rows are edited and signed in the governed Belgium console.
     if pack is not None and pack.jurisdiction_country == "BE":
         raise BadRequestException(
             "Belgium statutory rows are edited and signed only in Compliance → Belgium (a source document and a "

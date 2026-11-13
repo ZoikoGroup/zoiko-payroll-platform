@@ -433,3 +433,17 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   workflows running the three Belgium migration test files on its PostgreSQL. Not runnable locally (no
   disposable PostgreSQL here): these run in CI only.
 - Registry diff: no route changed.
+
+## Block D2 — hardening review
+
+- docs/belgium/BELGIUM_SECURITY_REVIEW.md: findings F1-F5 with fixes; identifier exposure review; the 98-route
+  table generated from the registry and the live app; every shared-file hunk listed (all additive and
+  BE-guarded; none flagged); numeric guard / no eval-exec / formula grammar; fail-closed audit of the 11 places
+  a Belgian result can be produced.
+- Fixes: F1 filing-calendar route pins the caller's organisation (be_org_router); F3 stale comments in the BE
+  lines of engine/standard.py and service.py (comment only). F2 was fixed in D1; F4 / F5 in C2.
+- Tests: tests/test_belgium_security_review.py (new, 5): a synthetic month with a NISS and an employer ONSS
+  number scanned across snapshots, serialized payslip, filings, obligations, parallel rows, audit, access
+  events, logs, the payroll-register CSV and error messages; route test (dormancy dependency, own org,
+  org-admin writes, no org id input). Content + formula + security: 82 passed.
+- Registry diff: no route changed.
