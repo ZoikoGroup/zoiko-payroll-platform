@@ -1656,7 +1656,10 @@ def post_be_accumulators(db: Session, run, actor_id=None) -> int:
     posted = {(r[0], r[1], r[2]) for r in db.query(Entry.payslip_item_id, Entry.accumulator, Entry.entry_kind)
               .filter(Entry.payslip_item_id.in_(ids)).all()} if ids else set()
     employee_ids = sorted({i.employee_id for i in items})
-    employees = {e.id: e for e in db.query(PayrollEmployee).filter(PayrollEmployee.id.in_(employee_ids)).all()}         if employee_ids else {}
+    from app.core.authz.scopes import organization_scoped
+
+    employees = {e.id: e for e in organization_scoped(db, PayrollEmployee, run.organization_id)
+                 .filter(PayrollEmployee.id.in_(employee_ids)).all()} if employee_ids else {}
     for item in items:
         snapshot = item.be_calculation_snapshot or {}
         deltas = snapshot.get("accumulatorDeltas") or {}
