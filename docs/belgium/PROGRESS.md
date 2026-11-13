@@ -324,3 +324,52 @@ Merge / push is gated on the PostgreSQL RLS test passing in CI.
   tests/privacy: 294 passed, 13 skipped, 3 failed (the pre-existing health-route registry failures).
   Env: PAYROLL_DATABASE_URL=sqlite:///<scratchpad>/testdb_<ts>/zp_test.db, ZP_TEST_POSTGRES_URL unset.
 - Open: G-30..G-33; real XSDs, mappings and codes (G-08); calendar rows; G3 channel.
+
+## Block C2 — parallel run, golden, readiness, release (77de922)
+
+- belgium_parallel.py: an independent payroll's CSV for a committed run (Approved / Authorized / Paid / Closed),
+  matched per employee code and concept (gross, withholding, employee ONSS, social work bonus, net, employer
+  contributions) against the frozen payslips; tolerance per concept only from signed content
+  be_parallel_tolerance_<concept> (new group "parallel", six amount keys, seeded pending; unsigned = exact);
+  explain then accept by another person; cycle accepted by someone other than the importer; files with an
+  identifier header or a NISS / BIS (11 digits), enterprise-number (10 digits) or Belgian IBAN shaped cell are
+  refused before anything is written. G4 = every launch employer (BE_CANARY_ORG_IDS) with accepted cycles in 2+
+  distinct months.
+- belgium_golden.py: authority examples (BE_AUTHORITY_EXAMPLE rows) now carry a replayable case
+  "inputs => expected" (formula_expression; add_authority_example validates it); replayed exactly through the
+  engine with the pack's own rows; recorded as the shared TestCertificationRun of BE (PASS / FAIL /
+  NO_REAL_CASES). be_pack_activation_refusal now also requires the live replay to pass and the latest BE
+  certification run to be PASS (wired through the BE hook; shared service.py untouched).
+- belgium_readiness.py: G1-G7 from real evidence (see the runbook table); be_unmet_requirements returns the
+  red gates + open launch-blocking decisions, so PLANNED -> AVAILABLE stays refused; the statutory summary
+  (be_statutory_summary) reports MET / NOT MET per gate, gate details, status CERTIFIED / NOT_CERTIFIED.
+- Registry diff (standing rule): the first regeneration showed 13 EXISTING routes changed (NZ / PL / MX
+  parallel routes and MX readiness gained BE worker tables) — callgraph simple-name collisions with the new
+  generic function names and with statutory_summary. Fixed by be_-unique names (all C2 functions;
+  statutory_summary hook now maps to be_statutory_summary). Final diff: no existing route changed; 10 new
+  routes (7 org parallel routes, worker / tenant_config; 3 Super Admin: golden-check, golden-certification
+  platform; readiness = aggregate via a reviewed route_overrides entry — it returns counts and organisation ids
+  only). Raw PayrollEmployee query avoided (organization_scoped).
+- Frontend: BEParallelCyclesSection in the Belgium Compliance Centre; Overview shows real gate states, the failing
+  checks and a golden-certification card (register an example with its case, replay, record the run).
+- Docs: BELGIUM_ACTIVATION_RUNBOOK.md (canary, opening registration manually, rollback, §15 incident
+  categories); BELGIUM_COVERAGE_MATRIX.md (BE-001..BE-040: 17 IMPLEMENTED, 19 BLOCKED-BY-CONTENT, 4
+  BLOCKED-BY-EXTERNAL; G1-G7 evidence still needed).
+- Tests: test_belgium_parallel_golden_readiness.py (new, 14); content / scaffold / slab-rows / super-admin tests
+  updated for the new gates (fully signed content is now refused by the golden gate; status NOT_CERTIFIED).
+  Belgium files + tests/privacy: 803 passed, 14 skipped, 3 failed (pre-existing health-route registry).
+
+## End of Block C
+
+- Backend full suite: PARTIAL, by the user's 2026-11-13 rule (full suite only at the end of the whole phase;
+  more Belgium phases follow). Chunks 0 and 2-8 of 12 ran on 77de922 (PAYROLL_DATABASE_URL = fresh scratchpad
+  SQLite per chunk, ZP_TEST_POSTGRES_URL unset, Python 3.11): 6,419 passed, 11 failed, 80 skipped, 2 xfailed.
+  The 11 failures are the known pre-existing ones (5 test_engine_jurisdiction_db_integration ordering,
+  5 Germany full-business ordering, 1 HK configuration CSV); none is a Belgium test. Chunk 1 (twice ended with
+  no summary; the run was stopped while investigating it) and chunks 9-11 are NOT run: they run with the
+  end-of-phase full suite.
+- Per sub-step: all Belgium files 509 passed, 1 skipped; tests/privacy 3 failed (pre-existing health-route
+  registry, from the uncommitted main.py).
+- Frontend: build passed; lint clean on the Block C files; npm test all 9 scripts pass (be-console 19 checks).
+- Merge gates before any push: CI PostgreSQL run (RLS of the five Block C tables, the filing / obligation CHECKs),
+  Python 3.12, frontend build; the full chunked suite with reconciliation at the end of the phase.
