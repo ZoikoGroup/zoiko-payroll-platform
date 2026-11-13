@@ -32653,6 +32653,30 @@ def _reverse_run_ytd_postings(db: Session, run: PayrollRun) -> None:
             _ytd_reverse_legacy(db, item)
 
 
+def _clear_pending_sg_liabilities(db: Session, payslip_item_ids: list, what: str) -> None:
+    """Australia Payday Super: every real AU payslip owns a
+    SuperGuaranteeLiability row whose payslip_item_id FK has no ON DELETE
+    rule, so deleting the payslip without clearing it first is refused by
+    Postgres (surfaced to users as an HTTP 500). A PENDING row is only the
+    recorded liability of a not-yet-final payslip and goes with it. Any
+    row past PENDING (SUBMITTED/RECEIVED/FAILED/EXCEPTION) is a recorded
+    statutory fact — refuse (409) instead of silently erasing it."""
+    if not payslip_item_ids:
+        return
+    rows = (db.query(SuperGuaranteeLiability)
+            .filter(SuperGuaranteeLiability.payslip_item_id.in_(payslip_item_ids))
+            .all())
+    progressed = [r for r in rows if (r.status or "PENDING").upper() != "PENDING"]
+    if progressed:
+        db.rollback()
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            f"Cannot delete this {what}: {len(progressed)} Super Guarantee liability record(s) "
+            f"have already been {progressed[0].status.lower()} and must be kept for audit."))
+    for row in rows:
+        db.delete(row)
+    db.flush()
+
+
 def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     run = get_payroll_run_by_id(db, run_id, organization_id)
     if getattr(run, "mx_approval_fingerprint", None):
@@ -32670,6 +32694,11 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
             "This is a Hong Kong correction run — reject the correction instead (its record is kept for audit)."))
     _deleted_run_period = run.period_label
     _deleted_run_code = run.run_code
+    _clear_pending_sg_liabilities(
+        db,
+        [pid for (pid,) in db.query(PayslipItem.id).filter(PayslipItem.payroll_run_id == run.id).all()],
+        "payroll run",
+    )
     # Year-to-date accumulators (every YTD jurisdiction): reverse what every
     # payslip in this run posted before the run itself is deleted — never
     # leave a stale total or a dangling last_updated_payslip_id pointing at a
@@ -32680,13 +32709,19 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     except YtdPostingConflict as exc:
         db.rollback()
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Cannot delete this payroll run: {exc}")
-    # Clean up dependent reports or unlinked foreign references before deleting run
+    # Clean up dependent reports before deleting the run. A report that a
+    # filing record (e.g. an STP/RTI submission) still references cannot be
+    # removed — previously this failure was swallowed and resurfaced as an
+    # HTTP 500 at commit; report it as a clear 409 instead.
     try:
         db.query(GeneratedReport).filter(GeneratedReport.payroll_run_id == run.id).delete(synchronize_session=False)
-    except Exception:
-        pass
-    db.delete(run)
-    db.commit()
+        db.delete(run)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            "Cannot delete this payroll run: one of its generated reports is referenced by a "
+            "filing or submission record."))
     _notify_payroll_run_deleted(db, _deleted_run_period or "", _deleted_run_code or "", organization_id, run_id=run_id)
 
 
@@ -32751,6 +32786,7 @@ def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
     except YtdPostingConflict as exc:
         db.rollback()
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Cannot delete this payslip: {exc}")
+    _clear_pending_sg_liabilities(db, [item.id], "payslip")
     db.delete(item)
     db.commit()
     _notify_payslip_deleted(db, item, run, organization_id)

@@ -122,10 +122,13 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
     setError("");
     try {
       const res = await sendUpdateForm(savedForm.id, targetIds);
-      setSendResults(res.results || []);
+      const results = res.results || [];
+      setSendResults(results);
       setStep("done");
-      const sentCount = (res.results || []).filter((r) => r.status === "sent").length;
-      addToast?.(`Sent to ${sentCount} of ${targetIds.length} employee(s).`, sentCount > 0 ? "success" : "error");
+      const sentCount = results.filter((r) => r.status === "sent").length;
+      // Success only when every recipient's email actually went out.
+      const tone = sentCount === targetIds.length ? "success" : sentCount > 0 ? "warning" : "error";
+      addToast?.(`Emailed ${sentCount} of ${targetIds.length} employee(s).`, tone);
       onSent?.();
     } catch (err) {
       setError(err.message || "Could not send the form.");
@@ -313,15 +316,29 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
       {step === "done" && (
         <>
           <div className="rounded-[12px] bg-primary/10 px-4 py-3 text-[13px] text-primary border border-primary/20">
-            {sendResults.filter((r) => r.status === "sent").length} of {sendResults.length} sent successfully.
+            {sendResults.filter((r) => r.status === "sent").length} of {sendResults.length} emailed successfully.
+            {sendResults.filter((r) => r.status === "sent" && r.note).map((r, i) => (
+              <p key={i} className="mt-1 text-[12px] text-foreground-muted">{r.note}</p>
+            ))}
           </div>
+          {sendResults.some((r) => r.status === "not_delivered") && (
+            <div className="rounded-[12px] bg-warning/10 px-4 py-3 text-[13px] text-warning border border-warning/20">
+              <p className="font-semibold mb-1">Not emailed:</p>
+              <ul className="space-y-0.5">
+                {sendResults.filter((r) => r.status === "not_delivered").map((r, i) => {
+                  const emp = employees.find((e) => e.id === r.employeeId);
+                  return <li key={i}>{emp?.name || `#${r.employeeId}`}{r.email ? ` (${r.email})` : ""} — {r.reason}</li>;
+                })}
+              </ul>
+            </div>
+          )}
           {sendResults.some((r) => r.status === "failed") && (
             <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">
               <p className="font-semibold mb-1">Could not send to:</p>
               <ul className="space-y-0.5">
                 {sendResults.filter((r) => r.status === "failed").map((r, i) => {
                   const emp = employees.find((e) => e.id === r.employeeId);
-                  return <li key={i}>{emp?.name || `#${r.employeeId}`} — {r.reason}</li>;
+                  return <li key={i}>{emp?.name || `#${r.employeeId}`}{r.email ? ` (${r.email})` : ""} — {r.reason}</li>;
                 })}
               </ul>
             </div>

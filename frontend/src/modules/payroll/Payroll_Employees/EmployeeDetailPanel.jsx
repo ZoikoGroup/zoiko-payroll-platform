@@ -180,7 +180,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex-1 overflow-y-auto px-6 pt-5 pb-24">
           {mode === "edit" ? (
             <EmployeeForm
               employee={employee}

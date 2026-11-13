@@ -64,8 +64,9 @@ export default function UsersPage() {
         setTotal(data.total);
       })
       .catch((err) => {
-        // 401/403 means the session is invalid — clear it and send to login.
-        if (err.status === 401 || err.status === 403) {
+        // 401 means the session is invalid — clear it and send to login.
+        // A 403 is a missing permission, not a dead session.
+        if (err.status === 401) {
           clearSession();
           navigate("/login", { replace: true });
           return;
@@ -93,7 +94,7 @@ export default function UsersPage() {
       addToast?.(`User ${u.email} ${u.is_active ? "deactivated" : "activated"}.`);
       load();
     } catch (err) {
-      if (err.status === 401 || err.status === 403) {
+      if (err.status === 401) {
         clearSession();
         navigate("/login", { replace: true });
         return;
@@ -111,7 +112,7 @@ export default function UsersPage() {
       addToast?.(`Password reset link sent to ${u.email}.`);
       load();
     } catch (err) {
-      if (err.status === 401 || err.status === 403) {
+      if (err.status === 401) {
         clearSession();
         navigate("/login", { replace: true });
         return;

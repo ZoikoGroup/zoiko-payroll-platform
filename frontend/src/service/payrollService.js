@@ -1461,11 +1461,11 @@ export const rejectFormSubmission = async (id, notes) => {
 
 // Public, unauthenticated — reached via the emailed link, no token attached.
 export const getPublicForm = async (token) => {
-  return await api.get(`/api/public/employee-forms/${token}`, { auth: false });
+  return await api.get(`/api/payroll/public/employee-forms/${token}`, { auth: false });
 };
 
 export const submitPublicForm = async (token, values) => {
-  return await api.post(`/api/public/employee-forms/${token}/submit`, { values }, { auth: false });
+  return await api.post(`/api/payroll/public/employee-forms/${token}/submit`, { values }, { auth: false });
 };
 
 // ── Report Generation (template-driven) ──────────────────────────────

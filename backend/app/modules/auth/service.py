@@ -672,6 +672,16 @@ def _access_lifetime(user) -> timedelta:
     return lifetime
 
 
+def refresh_idle_timeout_seconds(user) -> Optional[int]:
+    """How long a privileged session may go without a refresh before
+    refresh_user_token demands a fresh sign-in (PRIVILEGED_REFRESH_IDLE_MINUTES).
+    Sent with every session so the client can warn the user before the
+    deadline instead of silently signing them out. None = no idle limit."""
+    if not is_privileged(user):
+        return None
+    return int(settings.PRIVILEGED_REFRESH_IDLE_MINUTES) * 60
+
+
 def _claims(user, mfa_at: Optional[int]) -> dict:
     claims = {
         "sub": user.email,
@@ -711,6 +721,7 @@ def issue_session(db: Session, user, request=None, *, mfa_at: Optional[int] = No
         "refresh_token": refresh_token,
         "token_type": "bearer",
         "user": user,
+        "refresh_idle_timeout_seconds": refresh_idle_timeout_seconds(user),
     }
 
 
@@ -1104,6 +1115,7 @@ def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
                     "refresh_token": refresh_token,
                     "token_type": "bearer",
                     "user": user,
+                    "refresh_idle_timeout_seconds": refresh_idle_timeout_seconds(user),
                 }
 
         _revoke_family(db, record.family_id, "REUSE_DETECTED")
@@ -1633,7 +1645,7 @@ def invite_user(db: Session, actor, data) -> User:
     if actor.organization_id is None:
         raise ForbiddenException("Super Admin must create users via the super-admin API.")
 
-    existing = db.query(User).filter(User.email == data.email).first()
+    existing = db.query(User).filter(func.lower(User.email) == data.email.lower()).first()
     if existing:
         raise AlreadyExistsException("User", "email")
 
@@ -1649,20 +1661,28 @@ def invite_user(db: Session, actor, data) -> User:
         is_verified=False,
     )
     db.add(user)
-    db.flush()
+    # Commit the account before the invite email work. The invite path
+    # (token supersede/insert + audit-row claim, which commits or rolls back
+    # on its own) used to share this transaction: a DB error there left the
+    # transaction aborted, or its rollback discarded the just-flushed user,
+    # and the final commit/refresh raised — an HTTP 500 on "Invite Payroll
+    # Admin". The account is now durable first; an invite failure only
+    # rolls back the invite's own work and the user can be re-invited.
+    db.commit()
+    user_id = user.id
 
     if data.send_invite:
         try:
             _dispatch_invite_email(db, user, actor)
+            db.commit()
         except Exception as exc:  # noqa: BLE001
+            db.rollback()
             logger.warning(
                 "Invite email failed for user %s (%s): %s — account created but invite email not sent",
-                user.email, user.id, exc,
+                data.email, user_id, exc,
             )
 
-    db.commit()
-    db.refresh(user)
-    return user
+    return db.query(User).filter(User.id == user_id).one()
 
 
 def resend_user_invite(db: Session, actor, user: User) -> None:
@@ -1905,6 +1925,7 @@ def get_my_trial_status(db: Session, organization_id: int):
     trial_status = None
     trial_started_at = None
     trial_expires_at = None
+    has_payment_method = False
 
     org = db.query(Organization).filter(Organization.id == organization_id).first()
     workspace_type = org.workspace_type if org is not None else "PRODUCTION"
@@ -1918,6 +1939,7 @@ def get_my_trial_status(db: Session, organization_id: int):
             trial_status = resolve_trial_stage(subscription)
             trial_started_at = subscription.current_period_start
             trial_expires_at = subscription.current_period_end
+            has_payment_method = bool(subscription.stripe_subscription_id)
 
     from app.modules.auth.schemas import TrialStatusResponse
 
@@ -1926,4 +1948,5 @@ def get_my_trial_status(db: Session, organization_id: int):
         trial_status=trial_status,
         trial_started_at=trial_started_at,
         trial_expires_at=trial_expires_at,
+        has_payment_method=has_payment_method,
     )

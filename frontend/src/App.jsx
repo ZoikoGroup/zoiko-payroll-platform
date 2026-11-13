@@ -12,6 +12,7 @@ import TrialSignupPage from "./pages/TrialSignupPage";
 import RegistrationSuccessPage from "./pages/RegistrationSuccessPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import PublicFormPage from "./pages/PublicFormPage";
 import DashboardPage from "./pages/DashboardPage";
 import UsersPage from "./pages/UsersPage";
 import OrganizationsPage from "./pages/OrganizationsPage";
@@ -125,6 +126,8 @@ export default function App() {
       <Route path="/register/success" element={<RegistrationSuccessPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      {/* Public, no-login: the link employees get from "Send Template". */}
+      <Route path="/forms/fill/:token" element={<PublicFormPage />} />
 <Route element={<ProtectedRoute />}>
           {/* Billing — plan selection & Stripe Checkout landing pages */}
         <Route path="/register/plan-review" element={<PlanReviewPage />} />

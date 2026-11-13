@@ -32,7 +32,7 @@ const ALLOWED_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN, ROLES.SUPER
 
 function Card({ title, value, sub, accent }) {
   return (
-    <div className="rounded-[16px] border border-border bg-white p-4">
+    <div className="rounded-[16px] border border-border bg-surface p-4">
       <p className="text-[11px] font-semibold text-foreground-muted">{title}</p>
       <p className={`mt-1 text-[22px] font-extrabold ${accent || "text-foreground"}`}>{value}</p>
       {sub ? <p className="mt-1 text-[10px] text-foreground-disabled">{sub}</p> : null}
@@ -79,7 +79,7 @@ const CONTENT_TYPES = ["HOW_TO", "FAQ", "POLICY", "GUIDE", "REFERENCE"];
 const AUTHORITIES = ["TIER_1_STATUTE", "TIER_2_APPROVED_PRIMARY", "TIER_3_APPROVED_SECONDARY", "TIER_4_TENANT"];
 
 const inputCls =
-  "w-full rounded-[10px] border border-border bg-white px-2.5 py-2 text-[12px] text-foreground outline-none focus:border-primary";
+  "w-full rounded-[10px] border border-border bg-surface px-2.5 py-2 text-[12px] text-foreground outline-none focus:border-primary";
 
 function KbItemRow({ item, onEdit, onPublish, savingId }) {
   const [editing, setEditing] = useState(false);
@@ -239,14 +239,14 @@ function KnowledgePanel({ allowed }) {
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="rounded-[16px] border border-border bg-white">
+      <div className="rounded-[16px] border border-border bg-surface">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-light px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-[11px] font-bold text-foreground-muted">State</label>
             <select
               value={state}
               onChange={(e) => setState(e.target.value)}
-              className="rounded-[10px] border border-border bg-white px-2.5 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
+              className="rounded-[10px] border border-border bg-surface px-2.5 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
             >
               {KB_STATES.map((s) => (
                 <option key={s} value={s}>
@@ -267,7 +267,7 @@ function KnowledgePanel({ allowed }) {
           <button
             type="button"
             onClick={() => setShowCreate((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-white px-3 py-1.5 text-[11px] font-bold text-primary hover:border-primary"
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[11px] font-bold text-primary hover:border-primary"
           >
             <Plus size={12} /> New knowledge item
           </button>
@@ -349,7 +349,7 @@ function KnowledgePanel({ allowed }) {
         ) : items.length === 0 ? (
           <p className="p-8 text-center text-[12px] text-foreground-muted">No knowledge items match.</p>
         ) : (
-          <div className="max-h-[560px] overflow-y-auto">
+          <div className="max-h-[70vh] overflow-y-auto">
             {items.map((it) => (
               <KbItemRow key={it.id} item={it} onEdit={handleEdit} onPublish={handlePublish} savingId={savingId} />
             ))}
@@ -358,7 +358,7 @@ function KnowledgePanel({ allowed }) {
       </div>
 
       {/* Sources */}
-      <div className="rounded-[16px] border border-border bg-white">
+      <div className="rounded-[16px] border border-border bg-surface">
         <p className="border-b border-border-light px-4 py-3 text-[12px] font-bold text-foreground">
           Knowledge sources ({sources.length})
         </p>
@@ -449,7 +449,7 @@ export default function AssistAdminPage() {
 
   if (!allowed) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-8">
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-8">
         <div className="max-w-md rounded-[20px] border border-error/30 bg-error-light px-8 py-10 text-center">
           <ShieldCheck className="mx-auto h-10 w-10 text-error" />
           <h1 className="mt-4 text-[18px] font-bold text-foreground">Restricted area</h1>
@@ -474,7 +474,7 @@ export default function AssistAdminPage() {
           type="button"
           onClick={loadAll}
           disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-[12px] border border-border bg-white px-3 py-2 text-[12px] font-bold text-foreground-muted transition hover:border-primary hover:text-primary disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-[12px] border border-border bg-surface px-3 py-2 text-[12px] font-bold text-foreground-muted transition hover:border-primary hover:text-primary disabled:opacity-60"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
           Refresh
@@ -499,7 +499,7 @@ export default function AssistAdminPage() {
           type="button"
           disabled={runningRetention}
           onClick={runRetention}
-          className="inline-flex items-center gap-1.5 rounded-[10px] border border-warning bg-warning-light px-3 py-1.5 text-[11px] font-bold text-warning transition hover:bg-warning-light disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-[10px] border border-warning bg-warning-light px-3 py-1.5 text-[11px] font-bold text-warning transition hover:bg-warning/20 disabled:opacity-60"
         >
           {runningRetention ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
           Run retention cleanup
@@ -510,7 +510,7 @@ export default function AssistAdminPage() {
       {summary?.retention_class_counts ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {Object.entries(summary.retention_class_counts).map(([cls, count]) => (
-            <span key={cls} className="rounded-full bg-background px-2.5 py-1 text-[10px] font-semibold text-foreground-muted">
+            <span key={cls} className="rounded-full bg-surface-muted px-2.5 py-1 text-[10px] font-semibold text-foreground-muted">
               {cls.replaceAll("_", " ")} · {count}
             </span>
           ))}
@@ -530,8 +530,8 @@ export default function AssistAdminPage() {
               key={tb.id}
               type="button"
               onClick={() => setTab(tb.id)}
-              className={`flex items-center gap-1.5 rounded-t-[10px] px-4 py-2.5 text-[12px] font-bold transition ${
-                tab === tb.id ? "border-b-2 border-primary text-primary" : "text-foreground-muted hover:text-foreground-muted"
+              className={`flex items-center gap-1.5 rounded-t-[10px] -mb-px border-b-2 px-4 py-2.5 text-[12px] font-bold transition ${
+                tab === tb.id ? "border-primary text-primary" : "border-transparent text-foreground-muted hover:text-foreground"
               }`}
             >
               <Icon size={13} /> {tb.label}
@@ -542,13 +542,13 @@ export default function AssistAdminPage() {
 
       {/* Audit events */}
       {tab === "audit" ? (
-        <div className="mt-4 rounded-[16px] border border-border bg-white">
+        <div className="mt-4 rounded-[16px] border border-border bg-surface">
           <div className="flex flex-wrap items-center gap-2 border-b border-border-light px-4 py-3">
             <label className="text-[11px] font-bold text-foreground-muted">Event type</label>
             <select
               value={eventType}
               onChange={(e) => setEventType(e.target.value)}
-              className="rounded-[10px] border border-border bg-white px-2.5 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
+              className="rounded-[10px] border border-border bg-surface px-2.5 py-1.5 text-[12px] text-foreground outline-none focus:border-primary"
             >
               <option value="">All</option>
               {eventTypes.map((et) => (
@@ -574,9 +574,9 @@ export default function AssistAdminPage() {
           ) : events.length === 0 ? (
             <p className="p-8 text-center text-[12px] text-foreground-muted">No audit events match.</p>
           ) : (
-            <div className="max-h-[560px] overflow-auto">
-              <table className="w-full text-left">
-                <thead className="sticky top-0 bg-white">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left">
+                <thead className="sticky top-0 z-10 bg-surface">
                   <tr className="border-b border-border-light text-[10px] uppercase tracking-wide text-foreground-muted">
                     <th className="px-4 py-2.5 font-bold">Event</th>
                     <th className="px-3 py-2.5 font-bold">Session</th>
@@ -609,7 +609,7 @@ export default function AssistAdminPage() {
 
       {/* Sessions */}
       {tab === "sessions" ? (
-        <div className="mt-4 rounded-[16px] border border-border bg-white">
+        <div className="mt-4 rounded-[16px] border border-border bg-surface">
           {sessions === null ? (
             <div className="flex items-center justify-center p-10">
               <Loader2 size={18} className="animate-spin text-primary" />
@@ -617,9 +617,9 @@ export default function AssistAdminPage() {
           ) : sessions.length === 0 ? (
             <p className="p-8 text-center text-[12px] text-foreground-muted">No sessions found.</p>
           ) : (
-            <div className="max-h-[560px] overflow-auto">
-              <table className="w-full text-left">
-                <thead className="sticky top-0 bg-white">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left">
+                <thead className="sticky top-0 z-10 bg-surface">
                   <tr className="border-b border-border-light text-[10px] uppercase tracking-wide text-foreground-muted">
                     <th className="px-4 py-2.5 font-bold">Session</th>
                     <th className="px-3 py-2.5 font-bold">State</th>
