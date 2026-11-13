@@ -10,6 +10,7 @@ throwaway SQLite file, ENVIRONMENT=production and every BE_* setting unset:
 """
 import json
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -86,8 +87,16 @@ def test_app_starts_with_no_belgian_settings_and_belgium_is_dormant(tmp_path):
         "ASSIST_SWEEP_ENABLED": "false", "TRIAL_SWEEP_ENABLED": "false",
         "SMTP_HOST": "", "SMTP_FROM_EMAIL": "", "ASSIST_SUPPORT_EMAIL": "",
         "ASSIST_MODEL_PROVIDER": "", "ASSIST_MODEL_BASE_URL": "", "ASSIST_MODEL_API_KEY": "",
+        # Production refuses the placeholder secret (app/config.py): a fresh throwaway key, as a real
+        # deployment provides its own. Nothing else of a developer's backend/.env is read (cwd below).
+        "PAYROLL_SECRET_KEY": secrets.token_hex(32),
+        "PYTHONPATH": str(BACKEND),
     })
-    done = subprocess.run([sys.executable, "-c", CHILD], cwd=BACKEND, env=env, capture_output=True, text=True,
+    # Run from an empty directory so the settings never read a local backend/.env (CI has none): the
+    # child sees exactly this environment, on a developer machine and in CI alike.
+    workdir = tmp_path / "cwd"
+    workdir.mkdir()
+    done = subprocess.run([sys.executable, "-c", CHILD], cwd=workdir, env=env, capture_output=True, text=True,
                           timeout=600)
     line = next((ln for ln in done.stdout.splitlines() if ln.startswith("STARTUP-RESULT ")), None)
     assert done.returncode == 0 and line, (done.stdout[-3000:], done.stderr[-5000:])
