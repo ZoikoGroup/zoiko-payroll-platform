@@ -191,3 +191,50 @@ def test_the_importer_cannot_bulk_sign_but_another_super_admin_can(db, seeded):
                                                         TaxConfigurationAudit.entity_id == rate.id,
                                                         TaxConfigurationAudit.actor_id == SIGNER).all())
         assert len(signs) == 1 and signs[0].new_value["signed"] is True                 # one audit row per row
+
+
+# ── Block E: source references, draft sources, the committed AI draft ──────
+def test_a_source_reference_works_like_an_id_and_draft_sources_are_created_unverified(db, seeded):
+    from app.modules.payroll.models import SourceArtifact
+    from tests.test_belgium_super_admin import _rate
+
+    c = _c()
+    book = _export(db, seeded)
+    ds = book.create_sheet("Draft sources")
+    ds.append(["reference", "agency", "title", "url"])
+    ds.append(["ZP-BE-TEST D01", "TEST ONLY", "TEST ONLY source", "https://example.invalid/source"])
+    scalar = book["Scalar keys"]
+    row, header = _find(scalar, "key", "be_rounding_onss")
+    _set(scalar, row, header, textValue="CENT_HALF_UP", sourceDocumentId="ZP-BE-TEST D01")
+    out = _import(db, seeded, book, dry_run=False)
+    db.commit()
+    assert out["written"] and out["errors"] == 0
+    source = db.query(SourceArtifact).filter_by(form_number="ZP-BE-TEST D01").one()
+    assert "[UNVERIFIED" in source.title and source.checksum_sha256 is None                 # can never sign
+    rate = _rate(db, seeded, "be_rounding_onss")
+    assert rate.source_document_id == source.id and c.PENDING_MARK in rate.label
+    again = _import(db, seeded, book)                                                    # reference exists now
+    assert again["errors"] == 0 and db.query(SourceArtifact).filter_by(form_number="ZP-BE-TEST D01").count() == 1
+
+
+def test_the_committed_ai_draft_imports_without_error_and_signs_nothing(db, seeded):
+    from pathlib import Path
+
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    c = _c()
+    path = Path(__file__).resolve().parents[2] / "docs" / "belgium" / "content" / "BE_2026_AI_DRAFT.xlsx"
+    data = path.read_bytes()
+    dry = _wb().be_content_workbook_import(db, seeded.id, data, IMPORTER, reason="TEST ONLY", dry_run=True)
+    assert dry["errors"] == 0 and dry["changes"] > 200
+    done = _wb().be_content_workbook_import(db, seeded.id, data, IMPORTER, reason="TEST ONLY", dry_run=False)
+    db.commit()
+    assert done["written"]
+    rates = db.query(ContributionRate).filter_by(jurisdiction_pack_id=seeded.id).all()
+    slabs = db.query(TaxSlab).filter_by(jurisdiction_pack_id=seeded.id).all()
+    assert all(c.PENDING_MARK in r.label for r in rates)                                   # nothing signed
+    assert all(c.PENDING_MARK in s.rate_label for s in slabs)
+    assert seeded.status == "Draft"
+    by_key = {r.component_key: r for r in rates}
+    assert by_key["be_supported_pay_frequencies"].text_value == "MONTHLY"                    # G-11
+    assert str(by_key["be_onss_employee_rate"].employee_rate_pct).rstrip("0").rstrip(".") == "13.07"

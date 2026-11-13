@@ -503,3 +503,16 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   Partena as secondary (conflicts noted). Web searches on 2026-11-13; no value invented: Annex III, reductions,
   rounding, BSSC, day bands, schema versions other than DmfA, tolerances and most calendar rows are NOT FOUND.
 - The generator stayed in the scratchpad (no statutory value in repository code); the workbook is the artifact.
+
+## Block E2 — import as unsigned drafts
+
+- be_content_workbook import gains two portability features (Belgium-only): sourceDocumentId may be a source
+  REFERENCE (SourceArtifact.form_number, e.g. ZP-BE-AI-DRAFT D02) as well as an id; an optional "Draft sources"
+  sheet creates missing references as UNVERIFIED, unarchived sources (they can never be used to sign).
+- Import run on a fresh local SQLite copy of the Draft BE-PAYROLL-2026 (seeded by the canonical seed script; no
+  shared or production database touched): dry run 261 changes, 0 errors (nothing to fix); real import written,
+  261 changes, 0 rows signed, pack still Draft, 35 scalar rows with a value, 194 slab rows. The import in a real
+  environment is done by a Super Admin in the console (the importer becomes the editor for four-eyes); no account
+  was created.
+- Tests: test_belgium_content_workbook.py +2 (source reference and draft sources; the committed AI draft imports
+  with 0 errors and signs nothing). Workbook + content: 32 passed. Registry diff: no route changed.

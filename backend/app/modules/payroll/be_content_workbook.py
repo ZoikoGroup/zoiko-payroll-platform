@@ -62,11 +62,14 @@ CALENDAR_COLS = ("id", "reportType", "reportingYear", "periodKey", "periodLabel"
                  "status", "sourceDocumentId")
 DECISION_COLS = ("key", "label", "blocksLaunch", "evidenceTag", "state")
 SOURCE_COLS = ("code", "agency", "title", "url", "sourceDocumentId", "archived", "reviewed")
+SHEET_DRAFT_SOURCES = "Draft sources"               # optional: references a drafted workbook relies on
+DRAFT_SOURCE_COLS = ("reference", "agency", "title", "url")
 
 INSTRUCTIONS = (
     "Belgium content workbook (ZP-BE-ENG-001). Content only — no personal data.",
     "Edit only the value columns; never rowId / key / kind columns. Leave a cell unchanged to keep the value.",
-    "Every changed row needs sourceDocumentId: an existing source document (Super Admin > Belgium > Sources).",
+    "Every changed row needs sourceDocumentId: an existing source document id, or its reference (form number, "
+    "e.g. ZP-BE-ENG-001 S3) so the workbook works in every environment.",
     "Importing never signs: every changed row becomes PENDING again; a second Super Admin who did not import or "
     "edit it signs it (bulk sign) with a reviewed, archived source.",
     "Text-choice keys: use one of the listed vocabulary values, or NOT_SUPPORTED. Band / formula / table / "
@@ -324,6 +327,21 @@ def _src(row: dict) -> Optional[str]:
     return _norm(row.get("sourceDocumentId"))
 
 
+def _source_id(db: Session, raw: Optional[str]) -> Optional[int]:
+    """A source document by id, or by its reference (SourceArtifact.form_number,
+    e.g. "ZP-BE-ENG-001 S3"), so a workbook is portable between environments."""
+    from app.modules.payroll.models import SourceArtifact
+
+    if raw is None:
+        return None
+    if raw.isdigit():
+        return int(raw) if db.get(SourceArtifact, int(raw)) is not None else None
+    row = (db.query(SourceArtifact).filter(SourceArtifact.form_number == raw,
+                                           SourceArtifact.superseded_by_id.is_(None))
+           .order_by(SourceArtifact.id.desc()).first())
+    return row.id if row is not None else None
+
+
 def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor_id, *, reason=None,
                                dry_run: bool = True) -> dict:
     from app.modules.payroll.models import ContributionRate, SourceArtifact, StatutoryFilingCalendar, TaxSlab
@@ -338,16 +356,35 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
         raise BadRequestException("A reason is required for a workbook import.")
     sheets = _read(data)
     report = _Report()
+    # Draft sources first (optional sheet): every listed reference that does not
+    # exist yet becomes an UNVERIFIED, unarchived SourceArtifact (it can never be
+    # used to sign); existing references are left untouched.
+    header, rows = sheets.get(SHEET_DRAFT_SOURCES, ([], []))
+    for n, row in rows:
+        ref_ = _norm(row.get("reference"))
+        if ref_ is None:
+            continue
+        title = _norm(row.get("title"))
+        if not title or ref_.isdigit():
+            report.add(SHEET_DRAFT_SOURCES, n, "title" if not title else "reference", header, "ERROR",
+                       "a draft source needs a non-numeric reference and a title")
+            continue
+        if _source_id(db, ref_) is None:
+            db.add(SourceArtifact(agency=(_norm(row.get("agency")) or "unknown")[:200],
+                                  title=f"{title} [UNVERIFIED: not archived]"[:300], form_number=ref_[:50],
+                                  source_url=(_norm(row.get("url")) or None), created_by_id=actor_id))
+            db.flush()
+            report.add(SHEET_DRAFT_SOURCES, n, "reference", header, "OK", f"new unverified source {ref_}")
     rates = {r.id: r for r in _pack_rows(db, pack)[0]}
     slabs = {s.id: s for s in _pack_rows(db, pack)[1]}
 
     def ref(sheet, n, header, row, key):
-        source = _src(row)
-        if source is None or not source.isdigit() or db.get(SourceArtifact, int(source)) is None:
+        source = _source_id(db, _src(row))
+        if source is None:
             report.add(sheet, n, "sourceDocumentId", header, "ERROR",
-                       "a changed row needs an existing source document id", key)
+                       "a changed row needs an existing source document (id or reference)", key)
             return None
-        return int(source)
+        return source
 
     def row_id(sheet, n, header, row, pool, key):
         raw = _norm(row.get("rowId"))
@@ -527,9 +564,9 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
                 dates[column] = date.fromisoformat(raw[:10])
             except ValueError:
                 problems.append((column, "must be a date YYYY-MM-DD"))
-        source = _src(row)
-        if source is None or not source.isdigit() or db.get(SourceArtifact, int(source)) is None:
-            problems.append(("sourceDocumentId", "a calendar row needs an existing source document id"))
+        source = _source_id(db, _src(row))
+        if source is None:
+            problems.append(("sourceDocumentId", "a calendar row needs an existing source document (id or reference)"))
         if problems:
             for column, why in problems:
                 report.add(SHEET_CALENDAR, n, column, header, "ERROR", f"{column} {why}")
@@ -537,7 +574,7 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
         db.add(StatutoryFilingCalendar(jurisdiction_country=BE, report_type=report_type, reporting_year=year,
                                        period_key=period, period_label=(_norm(row.get("periodLabel")) or period)[:100],
                                        due_date=dates["dueDate"], payment_due_date=dates.get("paymentDueDate"),
-                                       status="Draft", source_document_id=int(source), created_by_id=actor_id,
+                                       status="Draft", source_document_id=source, created_by_id=actor_id,
                                        updated_by_id=actor_id))
         db.flush()
         report.add(SHEET_CALENDAR, n, "dueDate", header, "OK", f"new Draft {report_type} {period} row")
