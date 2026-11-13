@@ -16,6 +16,7 @@ import pytest
 from fastapi import HTTPException
 
 from tests._be_engine_helpers import PAY, build_pack
+from tests._be_filing_helpers import accept_dimona_in, install_filing_content
 
 EMPLOYER_IBAN = "BE68539007547034"          # privacy-scan: allow (published example IBAN, valid check digits, TEST ONLY)
 EMPLOYEE_IBAN = "BE71096123456769"          # privacy-scan: allow (published example IBAN, valid check digits, TEST ONLY)
@@ -43,6 +44,7 @@ def world(db, monkeypatch):
     db.commit()
     w = SimpleNamespace(db=db, org=t.org.id, a=t.users[0].id, b=t.users[1].id, c=t.users[2].id, employee=employee)
     _patch(monkeypatch)
+    install_filing_content(monkeypatch)            # Block C: synthetic schema content for the Dimona IN (BE-033)
     _setup_employer(w)
     _setup_employee(w, employee, "EMPLOYEE")
     return w
@@ -105,7 +107,9 @@ def _setup_employee(w, employee, category):
               {"effective_from": "2026-01-01", "regime": "EFFECTIVE", "weekly_hours": "38"}, w.a, "hire")
     _two_step(w, be.record_be_employment_classification, be.approve_be_employment_classification, w.db, w.org,
               employee.id, {"effective_from": "2026-01-01", "employment_line": "MAIN", "joint_committee": "200",
-                            "function_class": "B", "seniority_months": 0, "contract_type": "INDEFINITE"}, w.a, "hire")
+                            "function_class": "B", "seniority_months": 0, "contract_type": "INDEFINITE",
+                            "contract_start_date": "2025-01-01"}, w.a, "hire")
+    accept_dimona_in(w.db, w.org, employee.id, w.a, w.b)          # Block C: BE-033 needs an accepted Dimona IN
 
 
 def _run(w, created_by=None):
@@ -163,7 +167,7 @@ def test_approval_needs_a_clear_preflight_and_acknowledged_exceptions(world):
     view = be.be_run_preflight_view(w.db, w.org, run.id)
     assert {p["code"] for p in view["blocking"]} == {"BE_BSSC_PENDING", "BE_SECTOR_AGREEMENT_MISSING:MAIN"}
     assert not view["approvable"]
-    assert {p["code"] for p in view["pending"]} == {"BE_DIMONA_IN_PENDING"}  # placeholder, never blocks
+    assert view["pending"] == []                                          # Block C replaced the Dimona placeholder
     _advance(w, run, w.a)
     with pytest.raises(HTTPException, match="BE_BSSC_PENDING"):
         _advance(w, run, w.b)
@@ -388,3 +392,24 @@ def test_the_individual_account_template_is_seeded_inactive(db):
     assert (row.document_scope, row.status, row.jurisdiction_country) == ("EMPLOYEE", "Draft", "BE")
     assert be.seed_be_individual_account_template(db, "2026").id == row.id
     assert jh.call("BE", "template_activation_refusal", db, row, 1)
+
+
+def test_no_approval_without_an_accepted_dimona_in(world):
+    """Block C (BE-033): an employee whose employment line has no ACCEPTED
+    Dimona IN blocks the run; the check names the line."""
+    from app.modules.payroll import belgium_filing as bf
+    from app.modules.payroll import belgium_service as be
+    from app.modules.payroll.models import PayrollBeFiling
+
+    w = world
+    accepted = w.db.query(PayrollBeFiling).filter_by(organization_id=w.org, form_code="DIMONA").one()
+    accepted.status = "TRANSMITTED"          # as if the authority had not answered yet (TEST ONLY state change)
+    accepted.receipt_ref = None
+    w.db.commit()
+    run = _run(w)
+    codes = {p["code"] for p in be.be_run_preflight(w.db, run) if p["severity"] == "BLOCK"}
+    assert "BE_DIMONA_IN_NOT_ACCEPTED" in codes
+    assert bf.dimona_status(w.db, w.org, w.employee.id, "MAIN", PAY)["code"] == "BE_DIMONA_IN_NOT_ACCEPTED"
+    w.db.delete(accepted)
+    w.db.commit()
+    assert bf.dimona_status(w.db, w.org, w.employee.id, "MAIN", PAY)["code"] == "BE_DIMONA_IN_MISSING"

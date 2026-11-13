@@ -505,3 +505,181 @@ def be_acknowledge_exception(run_id: int, body: Dict[str, Any] = Body(...), curr
     out = be.acknowledge_be_run_exception(db, _org_id(current_user), run_id, body, _actor(current_user))
     db.commit()
     return out
+
+
+# ── Block C1: filings, obligations, calendar, exception queue (spec §10 / §13) ──
+# Every builder is idempotent (the same payload returns the same row); every
+# filing write is scoped to the caller's organisation in belgium_filing.
+def _bf():
+    from app.modules.payroll import belgium_filing
+
+    return belgium_filing
+
+
+@router.get("/filings", summary="Belgian filings (Dimona, DmfA, FinProf, Belcotax)")
+def be_list_filings(period: Optional[str] = None, form: Optional[str] = None, status: Optional[str] = None,
+                    current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _bf().list_be_filings(db, _org_id(current_user), period, form, status)
+
+
+@router.get("/filings/{filing_id}", summary="One Belgian filing with its payload, rendition and response")
+def be_get_filing(filing_id: int, current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _bf().get_be_filing(db, _org_id(current_user), filing_id)
+
+
+@router.get("/filings/{filing_id}/employee-copy", summary="The employee copy of a Belcotax fiche")
+def be_filing_employee_copy(filing_id: int, current_user=Depends(get_current_payroll_operator),
+                            db: Session = Depends(get_db)):
+    return _bf().employee_copy(db, _org_id(current_user), filing_id)
+
+
+def _filings_out(rows):
+    return [_bf().filing_view(r) for r in rows]
+
+
+@router.post("/dimona/events", summary="Create / update / cancel the Dimona events of an employee (BE-033)")
+def be_dimona_events(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                     db: Session = Depends(get_db)):
+    rows = _bf().build_be_dimona_events(db, _org_id(current_user), body.get("employeeId"), _actor(current_user),
+                                        event=body.get("event"), reason=body.get("reason"),
+                                        line=body.get("employmentLine"))
+    db.commit()
+    return _filings_out(rows)
+
+
+@router.post("/dmfa/quarters/{quarter}/build", summary="Build the DmfA of one legal employer + quarter (BE-034)")
+def be_build_dmfa(quarter: str, body: Optional[Dict[str, Any]] = Body(None),
+                  current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    bf = _bf()
+    filing, obligations = bf.build_be_dmfa(db, _org_id(current_user), quarter, (body or {}).get("legalEntityId"),
+                                           _actor(current_user))
+    db.commit()
+    return {"filing": bf.filing_view(filing), "obligations": [bf.obligation_view(o) for o in obligations]}
+
+
+@router.post("/withholding-obligations/{period}/build",
+             summary="Build the professional-withholding filing object of a period")
+def be_build_withholding(period: str, body: Optional[Dict[str, Any]] = Body(None),
+                         current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    bf = _bf()
+    filing, obligations = bf.build_be_withholding(db, _org_id(current_user), period,
+                                                  (body or {}).get("legalEntityId"), _actor(current_user))
+    db.commit()
+    return {"filing": bf.filing_view(filing), "obligations": [bf.obligation_view(o) for o in obligations]}
+
+
+@router.post("/belcotax/{income_year}/build", summary="Build the Belcotax fiches of a closed income year (BE-014)")
+def be_build_belcotax(income_year: int, body: Optional[Dict[str, Any]] = Body(None),
+                      current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    rows = _bf().build_be_belcotax(db, _org_id(current_user), income_year, (body or {}).get("legalEntityId"),
+                                   _actor(current_user))
+    db.commit()
+    return _filings_out(rows)
+
+
+@router.post("/filings/{filing_id}/validate", summary="Validate a filing against the schema of its submission date")
+def be_validate_filing(filing_id: int, body: Optional[Dict[str, Any]] = Body(None),
+                       current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    bf = _bf()
+    row = bf.validate_be_filing(db, _org_id(current_user), filing_id, _actor(current_user),
+                                (body or {}).get("submissionDate"))
+    db.commit()
+    return bf.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/approve", summary="Approve a validated filing (four-eyes)")
+def be_approve_filing(filing_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    bf = _bf()
+    row = bf.approve_be_filing(db, _org_id(current_user), filing_id, _actor(current_user))
+    db.commit()
+    return bf.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/transmit", summary="Transmit to the authority (refused until gate G3, D9)")
+def be_transmit_filing(filing_id: int, current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    return _bf().transmit_be_filing(db, _org_id(current_user), filing_id, _actor(current_user))
+
+
+@router.post("/filings/{filing_id}/submission", summary="Record a submission made through the authority channel")
+def be_filing_submission(filing_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                         db: Session = Depends(get_db)):
+    bf = _bf()
+    row = bf.record_be_filing_submission(db, _org_id(current_user), filing_id, body, _actor(current_user))
+    db.commit()
+    return bf.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/response", summary="Record the acceptance or rejection by the authority")
+def be_filing_response(filing_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                       db: Session = Depends(get_db)):
+    bf = _bf()
+    row = bf.record_be_filing_response(db, _org_id(current_user), filing_id, body, _actor(current_user))
+    db.commit()
+    return bf.filing_view(row)
+
+
+@router.post("/filings/{filing_id}/cancel", summary="Cancel a transmitted Belcotax fiche (reason; linked CANCELLATION)")
+def be_cancel_filing(filing_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                     db: Session = Depends(get_db)):
+    bf = _bf()
+    row = bf.cancel_be_belcotax(db, _org_id(current_user), filing_id, body.get("reason"), _actor(current_user))
+    db.commit()
+    return bf.filing_view(row)
+
+
+@router.get("/obligations", summary="Belgian payment obligations (acceptance and settlement apart)")
+def be_list_obligations(open_only: bool = False, current_user=Depends(get_current_payroll_operator),
+                        db: Session = Depends(get_db)):
+    return _bf().list_be_obligations(db, _org_id(current_user), open_only)
+
+
+@router.post("/obligations/onss-advances", summary="Record an ONSS advance from the ONSS notice (BE-018)")
+def be_onss_advance(body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                    db: Session = Depends(get_db)):
+    bf = _bf()
+    row = bf.record_be_onss_advance(db, _org_id(current_user), body, _actor(current_user))
+    db.commit()
+    return bf.obligation_view(row)
+
+
+@router.post("/obligations/{obligation_id}/payments", summary="Record a payment against an obligation")
+def be_obligation_payment(obligation_id: int, body: Dict[str, Any] = Body(...),
+                          current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    bf = _bf()
+    row = bf.record_be_obligation_payment(db, _org_id(current_user), obligation_id, body, _actor(current_user))
+    db.commit()
+    return bf.obligation_view(row)
+
+
+@router.post("/obligations/{obligation_id}/reconcile", summary="Reconcile a paid obligation (four-eyes)")
+def be_reconcile_obligation(obligation_id: int, current_user=Depends(get_current_org_admin),
+                            db: Session = Depends(get_db)):
+    bf = _bf()
+    row = bf.reconcile_be_obligation(db, _org_id(current_user), obligation_id, _actor(current_user))
+    db.commit()
+    return bf.obligation_view(row)
+
+
+@router.get("/variances", summary="Belgian reconciliation variances")
+def be_list_variances(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _bf().list_be_variances(db, _org_id(current_user))
+
+
+@router.post("/variances/{variance_id}/resolve", summary="Resolve a variance (four-eyes; resolution required)")
+def be_resolve_variance(variance_id: int, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                        db: Session = Depends(get_db)):
+    bf = _bf()
+    row = bf.resolve_be_variance(db, _org_id(current_user), variance_id, body.get("resolution"), _actor(current_user))
+    db.commit()
+    return bf.variance_view(row)
+
+
+@router.get("/filing-calendar", summary="The Belgian authority calendar (content; only Active + sourced rows count)")
+def be_filing_calendar(year: Optional[int] = None, current_user=Depends(get_current_payroll_operator),
+                       db: Session = Depends(get_db)):
+    return _bf().calendar_view(db, year)
+
+
+@router.get("/filing-exceptions", summary="The Belgian filing / payment exception queue")
+def be_filing_exceptions(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    return _bf().exception_queue(db, _org_id(current_user))

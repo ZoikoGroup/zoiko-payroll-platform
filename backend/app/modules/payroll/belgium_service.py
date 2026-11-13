@@ -1606,8 +1606,9 @@ def _input_creators(db: Session, organization_id: int, employee_ids: list, on: d
 
 
 def be_run_preflight(db: Session, run) -> list:
-    """[{code, employeeId, severity, message}] — BLOCK items refuse approval;
-    PENDING items are placeholders for Block C (Dimona IN) and do not block."""
+    """[{code, employeeId, severity, message}] — BLOCK items refuse approval.
+    Block C: every employee's employment line needs an ACCEPTED Dimona IN
+    (BE-033); a correction payslip re-declares through DmfA, not Dimona."""
     problems = []
     items = _be_run_items(db, run)
     pay_date = getattr(run, "pay_date", None)
@@ -1636,8 +1637,14 @@ def be_run_preflight(db: Session, run) -> list:
             problems.append({"code": exception["code"], "employeeId": item.employee_id,
                              "severity": "ACKNOWLEDGED" if done else "BLOCK", "exception": True,
                              "message": exception.get("detail") or exception["code"]})
-        problems.append({"code": "BE_DIMONA_IN_PENDING", "employeeId": item.employee_id, "severity": PREFLIGHT_PENDING,
-                         "message": "The Dimona IN declaration is checked once Block C (Dimona) exists."})
+        if not snapshot.get("correctionOf"):
+            from app.modules.payroll import belgium_filing
+
+            dimona = belgium_filing.dimona_status(db, run.organization_id, item.employee_id,
+                                                  snapshot.get("employmentLine"), pay_date)
+            if not dimona["ok"]:
+                problems.append({"code": dimona["code"], "employeeId": item.employee_id, "severity": "BLOCK",
+                                 "message": dimona["message"]})
     return problems
 
 
@@ -1792,6 +1799,10 @@ def create_be_correction(db: Session, organization_id: int, payslip_item_id: int
         (dec_(s.get("netDelta")) for s in prior), Decimal("0"))
     tds_delta = dec_(corrected["be_withholding"]) - dec_(before.get("be_withholding")) - sum(
         (dec_(s.get("withholdingDelta")) for s in prior), Decimal("0"))
+    # Block C (DmfA): the employer-contribution delta, so the quarter declaration
+    # carries the correction on the employer side too.
+    employer_delta = dec_(corrected["be_employer_total"]) - dec_(before.get("be_employer_total")) - sum(
+        (dec_(s.get("employerTotalDelta")) for s in prior), Decimal("0"))
     on = _as_date(payload.get("payDate") or date.today().isoformat(), "payDate")
     run = PayrollRun(organization_id=organization_id, created_by=actor_id, calculation_mode="standard",
                      period_label=f"BE Correction {on.isoformat()}", period_start=source_run.period_start,
@@ -1801,7 +1812,8 @@ def create_be_correction(db: Session, organization_id: int, payslip_item_id: int
     db.flush()
     snapshot = {"paymentKind": "CORRECTION", "correctionOf": original.id, "reason": reason, "evidenceRef": evidence,
                 "inputDelta": _json_safe(delta_inputs), "grossDelta": str(gross_delta), "netDelta": str(net_delta),
-                "withholdingDelta": str(tds_delta), "be_net": str(net_delta),
+                "withholdingDelta": str(tds_delta), "employerTotalDelta": str(employer_delta),
+                "be_net": str(net_delta),
                 "employmentLine": before.get("employmentLine"), "accumulatorDeltas": accumulator_delta,
                 "exceptions": [e for e in corrected.get("exceptions") or [] if e.get("code") != "BE_BSSC_PENDING"],
                 "corrected": {k: corrected[k] for k in ("be_net", "be_withholding", "be_employee_total", "hashes")},

@@ -155,8 +155,11 @@ AUTHORITY_EXAMPLE_RULE = "BE_AUTHORITY_EXAMPLE"
 # key -> (group, kind, spec reference, short label)
 KIND_RATE, KIND_AMOUNT, KIND_TEXT, KIND_BAND, KIND_FORMULA, KIND_DATE, KIND_TABLE = (
     "rate", "amount", "text-choice", "band", "formula", "date", "table")
-KINDS = (KIND_RATE, KIND_AMOUNT, KIND_TEXT, KIND_BAND, KIND_FORMULA, KIND_DATE, KIND_TABLE)
-SLAB_KINDS = (KIND_BAND, KIND_FORMULA, KIND_TABLE)
+# Block C: an authority schema version (the row's name) in force for a window
+# of SUBMISSION dates (BE-034); one signed slab row per version.
+KIND_VERSION = "schema-version"
+KINDS = (KIND_RATE, KIND_AMOUNT, KIND_TEXT, KIND_BAND, KIND_FORMULA, KIND_DATE, KIND_TABLE, KIND_VERSION)
+SLAB_KINDS = (KIND_BAND, KIND_FORMULA, KIND_TABLE, KIND_VERSION)
 # Every onss_employer rate / band key is REFERENCE ONLY. The full statement is
 # returned as `referenceNote` by every API view of those rows; the label (100
 # characters, shared with the spec-proposed text) carries the short marker.
@@ -259,19 +262,31 @@ KEYS = {
     "be_bik_valuation_rules": ("earning_class", KIND_FORMULA, "BE-008, G-15", "Benefit-in-kind valuation"),
     "be_meal_voucher_treatment": ("earning_class", KIND_TEXT, "BE-008, G-15", "Meal voucher treatment"),
     "be_ecocheque_treatment": ("earning_class", KIND_TEXT, "BE-008, G-15", "Ecocheque treatment"),
+    # filing (§10, Block C): authority schema registry, chosen by submission date
+    "be_filing_dimona_schema_versions": ("filing", KIND_VERSION, "§10, BE-033, G-08", "Dimona schema versions"),
+    "be_filing_dmfa_schema_versions": ("filing", KIND_VERSION, "§10, BE-034, G-08", "DmfA schema versions"),
+    "be_filing_finprof_schema_versions": ("filing", KIND_VERSION, "§10, G-08", "FinProf schema versions"),
+    "be_filing_belcotax_schema_versions": ("filing", KIND_VERSION, "§10, BE-014, G-08",
+                                           "Belcotax fiche schema versions"),
 }
 GROUPS = ("policy", "withholding", "onss_employee", "onss_employer", "reductions", "holiday", "wages",
-          "working_time", "absence", "holidays", "earning_class")
+          "working_time", "absence", "holidays", "earning_class", "filing")
 CATEGORY_LABELS = {
     "policy": "Scope, Policy & Rounding", "withholding": "Professional Withholding (Annex III)",
     "onss_employee": "ONSS/RSZ Employee", "onss_employer": "ONSS/RSZ Employer (reference; by employer/worker code)",
     "reductions": "Reductions", "holiday": "Annual Holiday Pay", "wages": "Wages, RMMMG & Indexation",
     "working_time": "Working Time & Overtime", "absence": "Absence & Guaranteed Salary",
     "holidays": "Public Holidays", "earning_class": "Earning Classification",
+    "filing": "Authority Filing Schemas",
 }
 
 # TaxSlab rule type carrying each band / formula / table key's content.
 _RULE_TYPE_OVERRIDES = {"be_abs_maternity_multiple_weeks": "BE_ABS_MATERNITY_MULTIPLE",
+                        # Block C: <= 30 characters (TaxSlab.rule_type)
+                        "be_filing_dimona_schema_versions": "BE_FILING_DIMONA_SCHEMA",
+                        "be_filing_dmfa_schema_versions": "BE_FILING_DMFA_SCHEMA",
+                        "be_filing_finprof_schema_versions": "BE_FILING_FINPROF_SCHEMA",
+                        "be_filing_belcotax_schema_versions": "BE_FILING_BELCOTAX_SCHEMA",
                         "be_public_holidays": PUBLIC_HOLIDAY_RULE}
 RULE_TYPES = {key: _RULE_TYPE_OVERRIDES.get(key, key.upper())
               for key, (_g, kind, _r, _l) in KEYS.items() if kind in SLAB_KINDS}
@@ -326,6 +341,7 @@ SPEC_PROPOSED = {
     "be_abs_birth_leave_window_months": "4 months",
     "be_abs_birth_leave_employer_days": "3 days",
     "be_public_holidays": "ten statutory holidays; dates none in spec (G-09)",
+    "be_filing_dmfa_schema_versions": "2026/2 to 30 Sep, 2026/3 from 1 Oct",
 }
 
 # ── Owner decisions (shown OPEN until reviewed evidence BE-DECISION-<key>) ──
@@ -400,7 +416,8 @@ DIMENSION_LISTS = {"EC": "be_onss_supported_employer_categories", "WC": "be_onss
 _BAND = ("minAmount",)
 _FORMULA = ("formulaText", "name")
 SLAB_SPECS = {key: {"kind": kind,
-                    "fields": {KIND_BAND: _BAND, KIND_FORMULA: _FORMULA, KIND_TABLE: ("date", "name")}[kind],
+                    "fields": {KIND_BAND: _BAND, KIND_FORMULA: _FORMULA, KIND_TABLE: ("date", "name"),
+                               KIND_VERSION: ("name", "effectiveFrom")}[kind],
                     "dimensions": ()}
               for key, (_g, kind, _r, _l) in KEYS.items() if kind in SLAB_KINDS}
 for _key in ("be_onss_employer_base_rate", "be_onss_fund_contributions"):

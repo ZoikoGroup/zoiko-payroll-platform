@@ -135,7 +135,9 @@ const ORG_FILES = ["modules/payroll/Compliances/BEComplianceCentreTab.jsx",
   "modules/payroll/Payroll_Employees/BEIdentifierField.jsx", "modules/payroll/Payroll_Employees/beOrgPayloads.js",
   // Block B3: run preflight, payslip breakdown, payment
   "modules/payroll/PayRollRuns/BERunPreflightPanel.jsx", "modules/payroll/PayRollRuns/BEPayslipBreakdown.jsx",
-  "modules/payroll/PayRollRuns/BEPaymentPanel.jsx", "modules/payroll/PayRollRuns/bePayslipLines.js"];
+  "modules/payroll/PayRollRuns/BEPaymentPanel.jsx", "modules/payroll/PayRollRuns/bePayslipLines.js",
+  // Block C1: filing centre, calendar, exception queue
+  "modules/payroll/Compliances/BEFilingSettlementPanel.jsx"];
 
 check("A4: the Compliance Centre tab and the employee button are wired for BE", () => {
   const page = read("modules/payroll/Compliances/CompliancePage.jsx");

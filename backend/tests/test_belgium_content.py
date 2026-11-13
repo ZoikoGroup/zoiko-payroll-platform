@@ -173,6 +173,14 @@ _STRUCTURAL_NUMBERS = {
         7: "days per week (calendar)", 12: "months per year (calendar)",
     },
     "engine/jurisdictions/belgium/holiday.py": {0: "default year index", 1: "service year = the year before the taking year (BE-024)"},
+    "belgium_filing.py": {
+        0: "list index / zero", 1: "first month / day; version start; index", 2: "months to a quarter end",
+        3: "months per quarter", 4: "YYYY width (string slice)", 5: "YYYY-MM / YYYYQn slice offset",
+        7: "YYYY-MM length", 12: "December (calendar year end) / months per year", 20: "XSD error lines shown",
+        31: "31 December (calendar year end, not a deadline)", 40: "error code width",
+        64: "sha256 hex width (key column)", 100: "reference column width (String(100))",
+        200: "XSD error message width", 300: "note / message column width (String(300))",
+    },
     "belgium_payment_service.py": {0: "list index / zero amount", 1: "batch sequence (+1)",
                                    100: "idempotency key / column width 100", 200: "return reason column width"},
     "be_identifiers.py": {
@@ -194,6 +202,8 @@ _STRUCTURAL_STRINGS = {
     ("engine/countries/belgium.py", "BE-ENGINE-A3-2026.11"): "engine build identifier (not a value)",
     ("belgium_service.py", "[a-z0-9_-]{1,50}"): "policy allowance key slug shape (column width 50)",
     ("belgium_service.py", "0.01"): "ledger amount column scale Numeric(14, 2) (storage precision, not rounding)",
+    ("belgium_filing.py", "0.01"): "filing amount scale Numeric(14, 2) (storage precision, not rounding)",
+    ("belgium_filing.py", "281.10"): "the Belcotax fiche NAME (form identifier, not a statutory value)",
     ("be_identifiers.py", r"^\d{5,16}$"): "ONSS employer number shape (5-16 digits; format only, G-16)",
     ("belgium_service.py", "^[A-Z0-9]{1,10}$"): "ONSS category / sub-committee code shape (1-10 letters / digits)",
     ("belgium_service.py", r"\d{9,12}"): "KBO/BCE enterprise number shape (format only, G-16)",

@@ -3211,6 +3211,34 @@ export const downloadBePaymentFile = async (batchId) => {
 };
 export const resolveBeClassification = async (employeeId, payDate, extra = {}) =>
   beOne(await api.post(`${BE}/classification/resolve`, { employeeId, payDate, ...extra }));
+// Block C1 — filings (Dimona, DmfA, FinProf, Belcotax), obligations, calendar,
+// exception queue. Builders are idempotent server-side; transmission is refused
+// until gate G3 (D9): submissions and responses are recorded by hand.
+export const listBeFilings = async (params = {}) => beList(await api.get(`${BE}/filings`, { params }));
+export const getBeFiling = async (id) => beOne(await api.get(`${BE}/filings/${id}`));
+export const getBeEmployeeCopy = async (id) => beOne(await api.get(`${BE}/filings/${id}/employee-copy`));
+export const buildBeDimonaEvents = (employeeId, body = {}) => api.post(`${BE}/dimona/events`, { employeeId, ...body });
+export const buildBeDmfa = (quarter, legalEntityId = null) =>
+  api.post(`${BE}/dmfa/quarters/${encodeURIComponent(quarter)}/build`, { legalEntityId });
+export const buildBeWithholding = (period, legalEntityId = null) =>
+  api.post(`${BE}/withholding-obligations/${encodeURIComponent(period)}/build`, { legalEntityId });
+export const buildBeBelcotax = (incomeYear, legalEntityId = null) =>
+  api.post(`${BE}/belcotax/${incomeYear}/build`, { legalEntityId });
+export const validateBeFiling = (id, submissionDate) => api.post(`${BE}/filings/${id}/validate`, { submissionDate });
+export const approveBeFiling = (id) => api.post(`${BE}/filings/${id}/approve`, {});
+export const transmitBeFiling = (id) => api.post(`${BE}/filings/${id}/transmit`, {});
+export const recordBeFilingSubmission = (id, body) => api.post(`${BE}/filings/${id}/submission`, body);
+export const recordBeFilingResponse = (id, body) => api.post(`${BE}/filings/${id}/response`, body);
+export const cancelBeFiling = (id, reason) => api.post(`${BE}/filings/${id}/cancel`, { reason });
+export const listBeObligations = async (openOnly = false) =>
+  beList(await api.get(`${BE}/obligations`, { params: { open_only: openOnly } }));
+export const recordBeOnssAdvance = (body) => api.post(`${BE}/obligations/onss-advances`, body);
+export const recordBeObligationPayment = (id, body) => api.post(`${BE}/obligations/${id}/payments`, body);
+export const reconcileBeObligation = (id) => api.post(`${BE}/obligations/${id}/reconcile`, {});
+export const listBeVariances = async () => beList(await api.get(`${BE}/variances`));
+export const resolveBeVariance = (id, resolution) => api.post(`${BE}/variances/${id}/resolve`, { resolution });
+export const listBeFilingCalendar = async (year) => beList(await api.get(`${BE}/filing-calendar`, { params: { year } }));
+export const listBeFilingExceptions = async () => beList(await api.get(`${BE}/filing-exceptions`));
 
 // Poland (ZP-PL-ENG-001) — routes in backend/app/modules/payroll/pl_org_router.py,
 // mounted under /api/payroll/poland. Every route acts on the caller's own

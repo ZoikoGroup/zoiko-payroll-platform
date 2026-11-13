@@ -16,7 +16,7 @@ import { cleanLabel, isDraftPack, isEditablePack, slabRowsFor } from "./beShared
 // dimension names come from config.slabSpecs[key]; the backend validates again.
 
 const OPTIONAL = { band: ["maxAmount", "ratePct", "flatAmount", "effectiveFrom", "effectiveTo"],
-  formula: ["effectiveFrom", "effectiveTo"], table: [] };
+  formula: ["effectiveFrom", "effectiveTo"], table: [], "schema-version": ["effectiveTo"] };
 const FIELD_LABELS = { minAmount: "From", maxAmount: "To (empty = open)", ratePct: "Rate %", flatAmount: "Amount",
   formulaText: "Formula (stored as text; never executed)", name: "Name", date: "Date",
   effectiveFrom: "Row effective from", effectiveTo: "Row effective to" };

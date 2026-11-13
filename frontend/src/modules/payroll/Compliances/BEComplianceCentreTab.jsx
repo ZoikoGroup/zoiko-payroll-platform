@@ -10,6 +10,7 @@ import JPRecordSection, { btn, isDraft, statusCol } from "../../../components/ju
 import { REASON_FIELD, errorText, period } from "../../../components/jurisdiction/new_zealand/nzOrgOptions";
 import { BEResolverResult, BelgiumEmployeeRecords } from "../Payroll_Employees/BelgiumStatutoryProfilePanel";
 import { registrationPayload } from "../Payroll_Employees/beOrgPayloads";
+import BEFilingSettlementPanel from "./BEFilingSettlementPanel";
 
 // Belgium Compliance Centre (ZP-BE-ENG-001 §2 / §15; Block A4). Employer
 // registration per legal employer (enterprise number, ONSS employer category,
@@ -340,6 +341,7 @@ export default function BEComplianceCentreTab() {
       <JointCommitteeCoverage />
       <ResolverBlockers employees={employees} />
       <EmployeeRecords employees={employees} />
+      <BEFilingSettlementPanel employees={employees} />
     </div>
   );
 }

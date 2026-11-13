@@ -3159,6 +3159,26 @@
   },
   {
    "method": "POST",
+   "path": "/api/payroll/belgium/belcotax/{income_year}/build",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "build",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_identifier_vault",
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
    "path": "/api/payroll/belgium/classification/resolve",
    "data_class": "worker",
    "action": "create",
@@ -3282,6 +3302,49 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_be_declarations"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/dimona/events",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "events",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_employment_classifications",
+    "payroll_be_identifier_vault",
+    "payroll_be_worker_profiles",
+    "payroll_employees"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/dmfa/quarters/{quarter}/build",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "build",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_employment_classifications",
+    "payroll_be_identifier_vault",
+    "payroll_employees",
+    "payslip_items"
    ],
    "overridden": false
   },
@@ -3733,6 +3796,187 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/belgium/filing-calendar",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "filing-calendar",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/filing-exceptions",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "filing-exceptions",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/filings",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "filings",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/filings/{filing_id}",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "filings",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/filings/{filing_id}/approve",
+   "data_class": "tenant_config",
+   "action": "approve",
+   "resource": "approve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/filings/{filing_id}/cancel",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "cancel",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/filings/{filing_id}/employee-copy",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "employee-copy",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/filings/{filing_id}/response",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "response",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/filings/{filing_id}/submission",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "submission",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/filings/{filing_id}/transmit",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "transmit",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/filings/{filing_id}/validate",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "validate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/belgium/holiday-certificates/{row_id}/approve",
    "data_class": "worker",
@@ -3835,6 +4079,71 @@
    "principals": [
     "org_admin",
     "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/obligations",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "obligations",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/obligations/onss-advances",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "onss-advances",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/obligations/{obligation_id}/payments",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "payments",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/obligations/{obligation_id}/reconcile",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "reconcile",
+   "principals": [
+    "org_admin"
    ],
    "scope_level": "tenant",
    "field_classes": [],
@@ -4138,6 +4447,58 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/variances",
+   "data_class": "tenant_config",
+   "action": "read",
+   "resource": "variances",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/variances/{variance_id}/resolve",
+   "data_class": "tenant_config",
+   "action": "create",
+   "resource": "resolve",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/withholding-obligations/{period}/build",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "build",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_identifier_vault"
+   ],
    "overridden": false
   },
   {

@@ -181,7 +181,7 @@ SLAB_FIELDS = {"minAmount": "min_amount", "maxAmount": "max_amount", "ratePct": 
                "effectiveTo": "effective_to"}
 _KIND_SLOTS = {"rate": {"employee_rate_pct", "employer_rate_pct"}, "amount": {"flat_amount"},
                "text-choice": {"text_value"}, "date": {"text_value"}, "band": {"text_value"},
-               "formula": {"text_value"}, "table": {"text_value"}}
+               "formula": {"text_value"}, "table": {"text_value"}, "schema-version": {"text_value"}}
 
 
 def _parse(column: str, value, name: str):
