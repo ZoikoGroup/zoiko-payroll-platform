@@ -1028,6 +1028,41 @@ class PayrollContext:
     pl_organization_id: int = None
     pl_legal_entity_id: int = None
     pl_employee_id: int = None
+    # ── Belgium (ZP-BE-ENG-001 Block A3) ──────────────────────────────────
+    # Everything countries/belgium.py reads, resolved by belgium_service
+    # .calc_inputs as of the pay date. Missing facts BLOCK; nothing is
+    # defaulted. Plain dicts only — never a vault id's value or a credential.
+    be_pay_date: date = None                  # preferred over pay_date
+    be_registration: dict = None              # employer registration in force
+    be_profile: dict = None                   # worker statutory profile in force
+    be_classifications: list = None           # employment classifications (all versions; resolver picks)
+    be_schedules: list = None                 # work schedules (all versions)
+    be_units: dict = None                     # {id: establishment unit} linked by the classifications
+    be_agreements: dict = None                # {id: Joint Committee agreement} linked by the classifications
+    be_declarations: list = None              # declarations (only APPROVED in force count)
+    be_components: dict = None                # {"SALARY": ..., "BONUS": ...}; must add up to gross (BE-008)
+    be_source_periods: dict = None            # {component: {"start", "end"}} (BE-009)
+    be_pay_frequency: str = None
+    be_component_mappings: dict = None        # G-28: {"SOURCE:key": BE component} of ACTIVE mappings
+    be_allowance_items: list = None           # G-28: [{key, amount}] named policy allowances of this payslip
+    be_date_of_birth: date = None             # B1: the minimum-age condition of the interprofessional minimum
+    be_working_time: dict = None              # B1: {"days": [{date, hours}], "substituteDays": [...], "restTakenHours"}
+    be_hours_paid: Decimal = None             # B1: hours paid (hourly sector minimum)
+    be_hourly_rate: Decimal = None            # B1: hourly rate (overtime premium check)
+    be_indexation: dict = None                # B1: {"increase", "increasePct"} when an indexation applies
+    be_absence_episodes: list = None          # B2: ACTIVE episodes (dates, kind, category at start; no diagnosis)
+    be_holiday: dict = None                   # B2: service-year facts {serviceYear, monthsWorked, advanceOutstanding, ...}
+    be_holiday_certificates: list = None      # B2: approved holiday certificates (IN / OUT)
+    be_profile_history: list = None           # B2: every worker-profile version (category transitions)
+    be_daily_rate: Decimal = None             # B2: daily rate for employer absence pay checks
+    be_identifier_masked: str = None          # B3: masked NISS / BIS for the payslip (no digit, BE-040)
+    be_pension_premium: Decimal = None        # employer occupational-pension premium (special contribution base)
+    be_exceptional_reference: Decimal = None  # annual reference remuneration for exceptional withholding
+    be_ytd: dict = None                       # {accumulator: sum before this pay date}
+    be_pack_version: str = None               # pack id / version recorded in the trace (BE-010)
+    be_organization_id: int = None
+    be_legal_entity_id: int = None
+    be_employee_id: int = None
     # Phase 4 — bonus path (S1/S8) and lifecycle events (spec §11).
     jp_payment_kind: str = None                # "SALARY" (default) | "BONUS" (bonus-only payment)
     jp_prior_month_pay_after_si: Decimal = None  # selects the NTA bonus-rate band
@@ -1798,6 +1833,9 @@ class PayrollResult:
     # exceptions, trace and hashes). None for every other country. No PESEL,
     # NIP or bank data is ever placed here.
     pl_result: dict = None
+    # Belgium (ZP-BE-ENG-001): the whole BE dict once the engine exists
+    # (Phase 5). None for every other country. No NISS/INSZ is ever placed here.
+    be_result: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
     # The whole dict countries/brazil.py returns under 'br_result' key (spec,

@@ -6,6 +6,7 @@ import { formatCurrency } from "../../../utils/currency";
 import { getPayrollLabels, getIdentityField, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
 import { bankPaymentModeLabel, bankBtfLabel, combineRoutingValue } from "../Payroll_Employees/bankFieldsFor";
 import { nlEmployeeLines, nlEmployerLines } from "../PayRollRuns/nlPayslipLines";
+import { beEmployeeLines, beEmployerLines, beObligationLines } from "../PayRollRuns/bePayslipLines";
 import { getPayslipById, getPayslipRenderedHtml } from "../../../service/payrollService";
 
 const printStyles = `
@@ -147,6 +148,10 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   // Netherlands: employee-side lines straight from the frozen snapshot; the
   // employer's premiums are shown in their own section below (NL-048).
   const nlSnapshot = (payslip.country || payslip.countryCode) === "NL" ? payslip.nlCalculationSnapshot : null;
+  // Belgium (ZP-BE-ENG-001 spec §11): every line from the frozen snapshot —
+  // employee lines here, the employer composition and obligations in their own
+  // section below; the national number only masked; nothing computed.
+  const beSnapshot = (payslip.country || payslip.countryCode) === "BE" ? payslip.beCalculationSnapshot : null;
   const nlEmployerRows = nlSnapshot ? nlEmployerLines(nlSnapshot).map(([label, amount]) => ({ label, amount })) : [];
   // Mexico (ZP-MX-ENG-001): every line from the frozen engine result; the SBC
   // (IMSS contribution base) is shown apart from pay (MX-037); employer cost
@@ -163,7 +168,7 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
     { label: `State payroll tax (ISN ${mxResult.isn?.state || ""})`, amount: mxResult.isn?.amount },
   ].filter((r) => Number(r.amount) > 0) : [];
 
-  const deductionRows = mxResult ? mxEmployeeRows : chSnapshot ? CH_EMPLOYEE_LINES
+  const deductionRows = beSnapshot ? beEmployeeLines(beSnapshot) : mxResult ? mxEmployeeRows : chSnapshot ? CH_EMPLOYEE_LINES
     .map(([key, label]) => ({ label, amount: chTotals[key] || 0 }))
     .filter((r) => Number(r.amount) > 0) : nlSnapshot ? nlEmployeeLines(nlSnapshot)
     .map(([label, amount]) => ({ label, amount })) : [
@@ -506,6 +511,27 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
                   <dt className="text-foreground">Total employer cost</dt>
                   <dd className="text-foreground">{fmt(nlSnapshot.totals?.employerCost)}</dd>
                 </div>
+              </dl>
+            </div>
+            )}
+
+            {!isBlocked && beSnapshot && !beSnapshot.correctionOf && (
+            <div className="mb-5 rounded-[8px] border border-border p-4" data-testid="be-payslip-section">
+              {beSnapshot.demo && <p className="mb-2 rounded-md border-2 border-error bg-error/10 px-2 py-1 text-center text-[13px] font-bold uppercase tracking-wider text-error" data-testid="be-demo-watermark">DEMO — NOT FOR PAYROLL</p>}
+              <p className="mb-2 text-[12px] font-bold uppercase tracking-wider text-foreground-muted">
+                Belgium — employer contributions and obligations (not deducted from your pay)
+              </p>
+              <p className="mb-2 text-[12px] text-foreground-muted" data-testid="be-payslip-identity">
+                National number {beSnapshot.identifierMasked || "not on file"} · Joint Committee{" "}
+                {beSnapshot.sector?.jointCommittee || "—"} · function {beSnapshot.sector?.functionClass || "—"} ·
+                document {beSnapshot.documentVersion || "—"}
+              </p>
+              <dl className="space-y-1 text-[13px]">
+                {[...beEmployerLines(beSnapshot), ...beObligationLines(beSnapshot)].map((r) => (
+                  <div key={r.key} className="flex justify-between gap-3">
+                    <dt className="text-foreground-muted">{r.label}</dt><dd className="text-foreground">{fmt(r.amount)}</dd>
+                  </div>
+                ))}
               </dl>
             </div>
             )}
