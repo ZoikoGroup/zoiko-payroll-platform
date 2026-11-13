@@ -1,6 +1,6 @@
 # Belgium coverage matrix (ZP-BE-ENG-001 BE-001 .. BE-040, gates G1–G7)
 
-Status at the end of Block C (2026-11-13, branch nikhil, local commits only).
+Status at the end of Block D (2026-11-13, branch nikhil, local commits only). Every cited test file exists and passed in the Block D4 run (see PROGRESS.md).
 
 - **IMPLEMENTED**: the behaviour is built and proven by tests; it needs no further statutory input.
 - **BLOCKED-BY-CONTENT**: the mechanism is built and tested with SYNTHETIC content; it produces a
@@ -50,9 +50,9 @@ Test files are under `backend/tests/`.
 | BE-035 | Authority calendar separate from formulas | BLOCKED-BY-CONTENT (calendar rows G-32) | test_belgium_filing.py |
 | BE-036 | Acceptance separate from settlement | IMPLEMENTED | test_belgium_filing.py, test_belgium_block_c_migration.py |
 | BE-037 | Payload hash, rendition, response, actor / mandate | IMPLEMENTED | test_belgium_filing.py |
-| BE-038 | Legal-employer / line scope in storage and filings | IMPLEMENTED | test_belgium_setup.py, test_belgium_filing.py |
-| BE-039 | Content decisions with source, interval, approval | IMPLEMENTED | test_belgium_super_admin.py, test_belgium_slab_rows.py |
-| BE-040 | PII out of logs, metrics, idempotency keys | IMPLEMENTED | test_belgium_identifiers.py, test_belgium_filing.py, test_belgium_parallel_golden_readiness.py |
+| BE-038 | Legal-employer / line scope in storage and filings | IMPLEMENTED | test_belgium_setup.py, test_belgium_filing.py, test_belgium_security_review.py |
+| BE-039 | Content decisions with source, interval, approval | IMPLEMENTED | test_belgium_super_admin.py, test_belgium_slab_rows.py, test_belgium_content_workbook.py |
+| BE-040 | PII out of logs, metrics, idempotency keys | IMPLEMENTED | test_belgium_identifiers.py, test_belgium_filing.py, test_belgium_parallel_golden_readiness.py, test_belgium_security_review.py |
 
 Totals: IMPLEMENTED 17, BLOCKED-BY-CONTENT 19, BLOCKED-BY-EXTERNAL 4.
 

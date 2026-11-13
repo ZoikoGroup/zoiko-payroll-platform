@@ -470,3 +470,17 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   unsigned rows + Draft calendar rows with the importer as editor, non-Draft pack refused, the importer cannot
   bulk-sign while another Super Admin can (one audit row per row). Content + workbook + super admin + slab rows:
   passing. Frontend: lint clean, be-console validation 19 checks.
+
+## Block D4 — handover and merge package
+
+- New docs: BELGIUM_SPECIALIST_PACK.md (generated from the catalogue: all 83 keys by group with kind, spec
+  reference, what is needed, spec-proposed label, workbook sheet and gate; other content; open owner decisions
+  G-01, G-02, G-06/17, G-11, G-12, G-13, G-16, G-21, G-26, G-30), BELGIUM_AUTHORITY_ONBOARDING.md (schemas +
+  mappings, codes, channel / credentials, mandates, calendar rows, end-to-end evidence; owner and gate each),
+  PR_DESCRIPTION.md (architecture, migrations in order, shared hunks, re-pin commits, test evidence, merge gates,
+  rollback). BELGIUM_SECURITY_REVIEW.md came with D2.
+- BELGIUM_COVERAGE_MATRIX.md: D2 / D3 tests added where they prove BE-038 / BE-039 / BE-040; all 19 cited test
+  files exist; every Belgium test file run: 20 files, 521 passed, 3 skipped (PostgreSQL round trips, CI only).
+- Final checks: single Alembic head 8a1f5ef9fa5d (1d76678ef1a1 <- efc56f3235e2, 2943a0490b5b <- 1d76678ef1a1,
+  8a1f5ef9fa5d <- 2943a0490b5b); manifest / drift / metadata tests 13 passed; npm test all 9 scripts pass; lint
+  clean on every Belgian frontend file; frontend build passed (16 s). No push.
