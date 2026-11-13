@@ -586,6 +586,31 @@ def test_ledger_and_access_events_have_no_updated_at():
 PG_URL = os.environ.get("ZP_TEST_POSTGRES_URL")
 
 
+PG_DROP_BATCH = 25     # tables per teardown transaction (lock-table budget, see pg_reset_public_schema)
+
+
+def pg_reset_public_schema(engine):
+    """Empty the DISPOSABLE database's public schema without exhausting the lock table.
+
+    One `DROP SCHEMA public CASCADE` over the full model schema (left behind by the privacy suite that runs
+    first in the same CI job: ~370 tables with indexes, sequences, types, RLS policies, triggers, grants) takes
+    an AccessExclusive lock on every object in ONE transaction and fails with "out of shared memory / increase
+    max_locks_per_transaction" (CI privacy-isolation, after the merge with main grew the schema). Dropping the
+    tables in small batches, one transaction each, keeps every transaction far below the default lock budget
+    (max_locks_per_transaction 64 x max_connections); the final schema drop then only sees the few objects
+    left (functions, types)."""
+    with engine.connect() as conn:
+        tables = [r[0] for r in conn.execute(sa.text(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"))]
+    for start in range(0, len(tables), PG_DROP_BATCH):
+        batch = ", ".join(f'"public"."{t}"' for t in tables[start:start + PG_DROP_BATCH])
+        with engine.begin() as conn:
+            conn.execute(sa.text(f"DROP TABLE IF EXISTS {batch} CASCADE"))
+    with engine.begin() as conn:
+        conn.execute(sa.text("DROP SCHEMA public CASCADE"))
+        conn.execute(sa.text("CREATE SCHEMA public"))
+
+
 def pg_round_trip(revision, new_tables, tenant, worker, columns=None):
     """Schema from the models + d7f9b1c3e5a6's RLS, then `revision`'s
     downgrade -> upgrade -> upgrade (replay) -> downgrade -> upgrade on a real,
@@ -599,9 +624,7 @@ def pg_round_trip(revision, new_tables, tenant, worker, columns=None):
     metadata = _metadata()
     engine = sa.create_engine(PG_URL, connect_args={"sslmode": "disable"} if "sslmode" not in PG_URL else {})
     try:
-        with engine.begin() as conn:
-            conn.execute(sa.text("DROP SCHEMA public CASCADE"))
-            conn.execute(sa.text("CREATE SCHEMA public"))
+        pg_reset_public_schema(engine)
         metadata.create_all(engine)
         with engine.begin() as conn:
             _load("d7f9b1c3e5a6").apply_rls(conn)
