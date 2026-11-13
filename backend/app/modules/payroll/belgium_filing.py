@@ -336,12 +336,30 @@ def _refresh(db: Session, row, payload, run_ids, due, actor_id):
     return row
 
 
+_LOOKUP = object()
+
+
+def _latest_by_subject(db: Session, organization_id, legal_entity_id, form_code, key, kind="ORIGINAL") -> dict:
+    """{subject: latest row} for one employer + form + period in ONE read (I2: per-subject lookups scanned every
+    fiche of the period - the index has no subject - so a Belcotax year of N fiches was O(N^2))."""
+    F = _model()
+    query = db.query(F).filter(F.organization_id == organization_id, F.form_code == form_code,
+                               F.period_key == key, F.kind == kind)
+    query = query.filter(F.legal_entity_id.is_(None) if legal_entity_id is None else F.legal_entity_id == legal_entity_id)
+    out = {}
+    for row in query.order_by(F.version.desc(), F.id.desc()).all():
+        out.setdefault(row.subject_key, row)
+    return out
+
+
 def upsert_filing(db: Session, organization_id: int, legal_entity_id, form_code: str, key: str, payload: dict,
-                  run_ids, due, actor_id, subject: Optional[str] = None):
+                  run_ids, due, actor_id, subject: Optional[str] = None, latest=_LOOKUP):
     """Store `payload` for (employer, form, period, subject) under the
-    versioning rules; the same payload again returns the existing row."""
+    versioning rules; the same payload again returns the existing row.
+    `latest` may be passed when the caller already read it (_latest_by_subject)."""
     digest = canonical_hash(payload)
-    latest = _latest(db, organization_id, legal_entity_id, form_code, key, subject)
+    if latest is _LOOKUP:
+        latest = _latest(db, organization_id, legal_entity_id, form_code, key, subject)
     if latest is None:
         return _new_row(db, organization_id, legal_entity_id, form_code, key, subject, "ORIGINAL", 1, payload,
                         run_ids, due, actor_id)
@@ -734,6 +752,7 @@ def build_be_belcotax(db: Session, organization_id: int, income_year: int, legal
     _employer_contributions(db, {e.payslip_item_id for e in entries if e.payslip_item_id}, demo_items)
     demo_items = set(demo_items)
     due, _why = due_on(db, "BELCOTAX", str(year))
+    existing = _latest_by_subject(db, organization_id, legal_entity_id, "BELCOTAX", str(year))     # one read (I2)
     out = []
     for employee_id in sorted(per):
         sums = per[employee_id]
@@ -750,7 +769,8 @@ def build_be_belcotax(db: Session, organization_id: int, income_year: int, legal
                    "coding": "PENDING_CONTENT"}
         payload = _be_mark_demo(payload, any(x.payslip_item_id in demo_items for x in mine[employee_id]))
         out.append(upsert_filing(db, organization_id, legal_entity_id, "BELCOTAX", str(year), payload,
-                                 _run_ids(mine[employee_id]), due, actor_id, subject=f"E{employee_id}"))
+                                 _run_ids(mine[employee_id]), due, actor_id, subject=f"E{employee_id}",
+                                 latest=existing.get(f"E{employee_id}")))
     return out
 
 

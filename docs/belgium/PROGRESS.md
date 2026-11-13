@@ -765,3 +765,20 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   CLI exercised on a throwaway SQLite at the head: dry run 8 PASS; no --confirm refused (exit 2); confirm DONE x3
   + 8 PASS; second run "nothing to do".
 - DEPLOY_NOTES §5 step 1 is now this command (console "Create the Draft pack" kept as the alternative).
+
+## Block I2 (measurement, guard, report)
+
+- Harness tests/perf/be_scale_harness.py (synthetic DEMO org, throwaway SQLite; wall time, statements, statements
+  per item, statement kinds, tracemalloc peak with --memory, process peak via psutil). Before = export of edfec72.
+- Before: acknowledging exceptions O(N^2) — 457 → 907 statements per item (50 → 100 employees), 104 s → 553 s; a
+  500-employee before-run was stopped after 16 min. After: every step flat in statements per item 50 → 2,000.
+- Extra fix found at 2,000: Belcotax fiche lookup scanned the year's fiches per employee (index has no subject) →
+  `_latest_by_subject` one read + `upsert_filing(latest=…)`: 17.05 s / 5.0 → 13.19 s / 4.0.
+- Main capacity finding (not fixed, owner decision): ~240 KB snapshot per payslip (frozen pack copy + used rows
+  stored twice) → approval peak 1.1 GB at 500 (tracemalloc), process peak 4.3 GB at 2,000. Recommendation:
+  content-addressed pack reference + used rows once (audit-format change); meanwhile size workers ~2.2 MB/employee.
+  Also recommended: bulk acknowledge (per-click acknowledgement is O(N) through the JSON list).
+- tests/perf/test_belgium_scale.py (slow; skipped unless ZP_BE_SCALE=1; tests/perf/conftest.py): statement ceilings,
+  no growth small → large, per-employee time ceilings. Ran once: 1 passed (76 s). Default run: skipped.
+- docs/belgium/PERFORMANCE.md: method, before / after table, memory, fixes, remaining super-linear causes,
+  PostgreSQL / RLS items for CI / staging. Registry unchanged (fresh == stored).
