@@ -779,6 +779,11 @@ def delete_organization(
         "payroll_attendance_records",
         "payroll_runs",
         "payroll_employees",
+        # Payslip templates (f3a9c1d7e2b4): after payslip_items (which point at
+        # a template version) and before users (created/published/assigned by).
+        "payroll_payslip_template_assignments",
+        "payroll_payslip_template_versions",
+        "payroll_payslip_templates",
     ]
     _org_via_parent = [
         ("payroll_inbound_attachments", "message_id", "payroll_inbound_messages"),

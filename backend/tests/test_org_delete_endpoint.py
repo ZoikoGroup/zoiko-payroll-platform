@@ -160,3 +160,26 @@ def test_org_hard_delete_is_refused_when_audit_purge_is_disabled(monkeypatch):
     assert r.status_code == 409 and "AUDIT_PURGE_ON_ORG_HARD_DELETE" in r.text, r.text
     assert _audit_rows(uid) == 1
     assert db.execute(text("SELECT COUNT(*) FROM organizations WHERE id = :o"), {"o": oid}).scalar() == 1
+
+
+def test_org_delete_removes_payslip_templates():
+    """Payslip templates (f3a9c1d7e2b4): templates, versions and assignments
+    go with the org, after the payslips that point at a version."""
+    r = client.post("/api/organizations/", json={"organization_name": "Template Org", "country": "IN"})
+    assert r.status_code == 200, r.text
+    oid = r.json()["id"]
+    db.execute(text("INSERT INTO payroll_payslip_templates (organization_id, code, name, is_archived) "
+                    "VALUES (:o, 'T1', 'T', 0)"), {"o": oid})
+    tid = db.execute(text("SELECT id FROM payroll_payslip_templates WHERE organization_id = :o"), {"o": oid}).scalar()
+    db.execute(text("INSERT INTO payroll_payslip_template_versions (organization_id, template_id, version_number, "
+                    "status, html_content) VALUES (:o, :t, 1, 'Active', '<p></p>')"), {"o": oid, "t": tid})
+    vid = db.execute(text("SELECT id FROM payroll_payslip_template_versions WHERE template_id = :t"), {"t": tid}).scalar()
+    db.execute(text("INSERT INTO payroll_payslip_template_assignments (organization_id, jurisdiction_country, "
+                    "template_id, version_id) VALUES (:o, 'ALL', :t, :v)"), {"o": oid, "t": tid, "v": vid})
+    db.commit()
+
+    r = client.delete(f"/api/organizations/{oid}")
+    assert r.status_code == 200, r.text
+    for t in ["payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"]:
+        n = db.execute(text(f'SELECT COUNT(*) FROM "{t}" WHERE organization_id = :o'), {"o": oid}).scalar()
+        assert n == 0, f"{t} still has {n} rows"

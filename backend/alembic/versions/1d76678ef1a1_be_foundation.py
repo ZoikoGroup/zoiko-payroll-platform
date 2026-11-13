@@ -1,7 +1,8 @@
 """be_foundation: Belgium employer/worker statutory tables, identifier vault, schedules, classifications, ledger
 
 Revision ID: 1d76678ef1a1
-Revises: efc56f3235e2
+Revises: f3a9c1d7e2b4 (re-chained from efc56f3235e2 when origin/main, which added
+f3a9c1d7e2b4 payslip templates, was merged into nikhil; never applied anywhere before)
 Create Date: 2026-11-11
 
 ZP-BE-ENG-001 Phase 2 (database). Additive only: nine new payroll_be_* tables
@@ -75,7 +76,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "1d76678ef1a1"
-down_revision: Union[str, Sequence[str], None] = "efc56f3235e2"
+down_revision: Union[str, Sequence[str], None] = "f3a9c1d7e2b4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

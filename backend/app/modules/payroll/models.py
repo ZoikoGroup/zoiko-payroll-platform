@@ -2045,6 +2045,14 @@ class PayslipItem(Base):
     # withholding / holiday / sector bases, BE-007) + trace, replayed exactly as
     # computed; NULL for non-BE payslips (1d76678ef1a1). Never a NISS.
     be_calculation_snapshot = Column(JSON, nullable=True)
+    # Payslip templates (f3a9c1d7e2b4): the organisation's published template
+    # version this payslip is shown with, frozen when its run is approved so a
+    # later template change never alters an issued payslip. NULL = the
+    # standard statutory payslip.
+    template_version_id = Column(
+        Integer, ForeignKey("payroll_payslip_template_versions.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     # Saudi Arabia: employer Occupational Hazards (2% of contributory wages,
     # capped at 45,000 SAR/month, floor 400 SAR) — informational, not deducted
     # from employee. Zero for non-SA payslips.
@@ -3313,6 +3321,90 @@ class TaxConfigurationAudit(Base):
     __table_args__ = (
         Index("ix_tax_audit_entity", "entity_type", "entity_id"),
         Index("ix_tax_audit_pack", "jurisdiction_pack_id"),
+    )
+
+
+# ── Payslip Templates (organisation-owned presentation layouts) ─────────
+# Every row is owned by one organisation. The built-in starter layouts live in
+# code (payslip_template_service.STARTERS) and are copied into the org when it
+# picks one, so no row is shared between tenants and no tenant can change
+# another's template. A template only changes how a payslip LOOKS: amounts
+# come from the payslip itself, the same line items the PDF prints.
+class PayslipTemplate(Base):
+    __tablename__ = "payroll_payslip_templates"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    code                 = Column(String(60), nullable=False)
+    name                 = Column(String(200), nullable=False)
+    description          = Column(Text, nullable=True)
+    # Country the layout was written for; NULL = any country.
+    jurisdiction_country = Column(String(10), nullable=True)
+    # The built-in starter this template was copied from, if any.
+    source_starter       = Column(String(60), nullable=True)
+    is_archived          = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    created_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at           = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+    versions = relationship(
+        "PayslipTemplateVersion", back_populates="template", cascade="all, delete-orphan",
+        order_by="PayslipTemplateVersion.id",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "code", name="uq_payslip_template_org_code"),
+    )
+
+
+class PayslipTemplateVersion(Base):
+    """One revision of a template. A Draft is edited in place; publishing makes
+    it Active (the previous Active becomes Archived). Active and Archived
+    versions are never edited — a payslip may point at them."""
+    __tablename__ = "payroll_payslip_template_versions"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    organization_id    = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    template_id        = Column(Integer, ForeignKey("payroll_payslip_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_number     = Column(Integer, nullable=False)
+    status             = Column(String(10), nullable=False, default="Draft", server_default="Draft")
+    html_content       = Column(Text, nullable=False)
+    css_content        = Column(Text, nullable=True)
+    configuration_json = Column(JSON, nullable=True)
+    change_summary     = Column(String(300), nullable=True)
+    created_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    published_by_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    published_at       = Column(DateTime(timezone=True), nullable=True)
+    created_at         = Column(DateTime(timezone=True), server_default=func.now())
+
+    template = relationship("PayslipTemplate", back_populates="versions")
+
+    __table_args__ = (
+        UniqueConstraint("template_id", "version_number", name="uq_payslip_template_version"),
+        Index("ix_payslip_template_version_status", "template_id", "status"),
+        sa.CheckConstraint("status IN ('Draft', 'Active', 'Archived')", name="ck_payslip_template_version_status"),
+    )
+
+
+class PayslipTemplateAssignment(Base):
+    """Which published template version an organisation's payslips use — for
+    one country, or for every country (jurisdiction_country = 'ALL'). No
+    assignment = the standard statutory payslip."""
+    __tablename__ = "payroll_payslip_template_assignments"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    organization_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    jurisdiction_country = Column(String(10), nullable=False, default="ALL", server_default="ALL")
+    template_id          = Column(Integer, ForeignKey("payroll_payslip_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_id           = Column(Integer, ForeignKey("payroll_payslip_template_versions.id", ondelete="CASCADE"), nullable=False)
+    assigned_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    assigned_at          = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    template = relationship("PayslipTemplate")
+    version  = relationship("PayslipTemplateVersion")
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "jurisdiction_country", name="uq_payslip_template_assignment"),
     )
 
 

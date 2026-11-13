@@ -304,9 +304,10 @@ def test_alembic_heads_is_single_head():
     # e7ec6c1933b4 (Poland P9 pl_parallel_cycles) is its single child.
     # efc56f3235e2 (Mexico mx_decision_inputs_m21, sweep S1): seven nullable columns the
     # decision options read (terminations, labour policies, statutory profiles); written on
-    # 3880223bfaa0, re-parented (never applied) onto e7ec6c1933b4 - single head.
-    # 1d76678ef1a1 (Belgium P2 be_foundation) is the single child of efc56f3235e2;
-    # 8a1f5ef9fa5d (Belgium Block C be_filing_parallel) is the single child of 2943a0490b5b.
+    # 3880223bfaa0, re-parented (never applied) onto e7ec6c1933b4.
+    # f3a9c1d7e2b4 (2026-11-11, payslip templates) is the single child of efc56f3235e2; Belgium
+    # 1d76678ef1a1 (be_foundation) was re-chained onto f3a9c1d7e2b4 when origin/main was merged into
+    # nikhil, and 8a1f5ef9fa5d (Belgium Block C be_filing_parallel, child of 2943a0490b5b) is the single head.
     assert heads == ["8a1f5ef9fa5d"]
 
 
@@ -372,7 +373,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 262   # + 8a1f5ef9fa5d (Belgium Block C be_filing_parallel, child of 2943a0490b5b) + 2943a0490b5b (Belgium Block B be_absence_holiday_payment, child of 1d76678ef1a1) + 1d76678ef1a1 (Belgium P2 be_foundation, child of efc56f3235e2) + efc56f3235e2 (Mexico mx_decision_inputs_m21, child of e7ec6c1933b4) + e7ec6c1933b4 (Poland P9 pl_parallel_cycles, child of e75b9219e1f8)
+    assert len(revs) == 263   # + f3a9c1d7e2b4 (payslip templates, child of efc56f3235e2) + 8a1f5ef9fa5d (Belgium Block C be_filing_parallel, child of 2943a0490b5b) + 2943a0490b5b (Belgium Block B be_absence_holiday_payment, child of 1d76678ef1a1) + 1d76678ef1a1 (Belgium P2 be_foundation, re-chained onto f3a9c1d7e2b4) + efc56f3235e2 (Mexico mx_decision_inputs_m21, child of e7ec6c1933b4) + e7ec6c1933b4 (Poland P9 pl_parallel_cycles, child of e75b9219e1f8)
 
 
 def test_germany_head_chain_wiring_is_intact():

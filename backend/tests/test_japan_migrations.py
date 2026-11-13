@@ -193,7 +193,7 @@ def test_deploy_drift_filter_explains_every_jp_object():
     assert set(NEW_TABLES) <= tables
     assert columns["payslip_items"] == {"jp_calculation_snapshot", "nz_calculation_snapshot",
                                         "nz_correction_of_id", "pl_calculation_snapshot",
-                                        "be_calculation_snapshot"}   # + NZ P2 / P6, PL P2, BE P2
+                                        "be_calculation_snapshot", "template_version_id"}   # + NZ P2 / P6, PL P2, BE P2
     # Later Japan revisions on the same chain: P5's run payment kind must also
     # be visible to the drift filter (literal table name, 9c1d7e4a2b6f).
     # New Zealand P2 (0e697c2388bf) is pending on the same chain.

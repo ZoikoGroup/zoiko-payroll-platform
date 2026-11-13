@@ -1,11 +1,9 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Check, Plus, List, FileText, Play, AlertTriangle, ArrowLeft } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Check, Plus, List, FileText, Play, AlertTriangle } from "lucide-react";
 import { useToast } from "../ToastContext";
 import RunsTable from "./RunsTable";
 import RunDetailPage from "./RunDetailPage";
-import RunDetailPanel, { StatusBadge } from "./RunDetailPanel";
-import RunStatusTimeline from "./RunStatusTimeline";
-import RunCurrencyAmount from "../../../components/payroll/RunCurrencyAmount";
+import RunDetailPanel from "./RunDetailPanel";
 import {
   fetchRuns,
   createRun,
@@ -25,52 +23,6 @@ const WIZARD_STEPS = [
   { id: 3, label: "Approve", icon: Check },
   { id: 4, label: "Process", icon: Play },
 ];
-
-const WORKFLOW_STEP_BY_STATUS = {
-  Draft: 1,
-  Review: 2,
-  Approved: 3,
-  Authorized: 3,
-  Paid: 4,
-  Closed: 4,
-};
-
-function WorkflowSteps({ steps, activeStep = 0 }) {
-  return (
-    <div className="space-y-1">
-      {steps.map((step, i) => {
-        const completed = activeStep > step.id;
-        const active = activeStep === step.id;
-        const StepIcon = step.icon;
-        return (
-          <div key={step.id} className="flex items-start gap-2.5">
-            <div className="flex flex-col items-center">
-              <div
-                className={`flex h-9 w-9 items-center justify-center rounded-full border-2 text-xs font-bold transition-all ${
-                  completed
-                    ? "border-primary bg-primary text-white"
-                    : active
-                    ? "border-primary bg-primary/10 text-primary ring-4 ring-primary/20"
-                    : "border-border bg-surface text-foreground-muted"
-                }`}
-              >
-                {completed ? <Check size={14} /> : <StepIcon size={14} />}
-              </div>
-              {i < steps.length - 1 && (
-                <div className={`w-px h-5 my-0.5 ${completed || active ? "bg-primary" : "bg-border"}`} />
-              )}
-            </div>
-            <div className="pt-1.5">
-              <p className={`text-xs font-semibold ${completed || active ? "text-foreground" : "text-foreground-muted"}`}>
-                {step.label}
-              </p>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 function createCurrencyFormatter(currencyInfo) {
   if (!currencyInfo) {
@@ -106,10 +58,6 @@ export default function PayrollRunsPage() {
   const [previewData, setPreviewData] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [selectedRun, setSelectedRun] = useState(null);
-  const [selectedRunDetail, setSelectedRunDetail] = useState(null);
-  const initialLoadRef = useRef(true);
-  const selectedRunIdRef = useRef(null);
-  const selectedRunStatusRef = useRef(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   // Attendance gate (see AttendanceReadinessPanel / backend
   // check_attendance_readiness): checked when the Calculate step opens and
@@ -143,20 +91,6 @@ export default function PayrollRunsPage() {
   const loadRuns = useCallback(async () => {
     const data = await fetchRuns();
     setRuns(data);
-    const nextRun = data.find((r) => r.id === selectedRunIdRef.current) || data[0] || null;
-    if (
-      (nextRun?.id ?? null) !== selectedRunIdRef.current ||
-      (nextRun?.status ?? null) !== selectedRunStatusRef.current
-    ) {
-      setSelectedRunDetail(null);
-    }
-    selectedRunIdRef.current = nextRun?.id ?? null;
-    selectedRunStatusRef.current = nextRun?.status ?? null;
-    setSelectedRun(nextRun);
-    if (initialLoadRef.current) {
-      initialLoadRef.current = false;
-      if (nextRun) setView((current) => (current === "wizard" ? current : "workspace"));
-    }
   }, []);
 
   useEffect(() => {
@@ -167,28 +101,6 @@ export default function PayrollRunsPage() {
     window.addEventListener("focus", loadRuns);
     return () => window.removeEventListener("focus", loadRuns);
   }, [loadRuns]);
-
-  // Auto-select latest run if still on list view and runs exist
-  if (view === "list" && runs.length > 0) {
-    setSelectedRun(runs[0]);
-    setView("workspace");
-  }
-
-  const selectRun = useCallback((run) => {
-    selectedRunIdRef.current = run?.id ?? null;
-    selectedRunStatusRef.current = run?.status ?? null;
-    setSelectedRunDetail(null);
-    setSelectedRun(run);
-    setView("workspace");
-  }, []);
-
-  const showRunsList = useCallback(() => {
-    setView("list");
-  }, []);
-
-  const handleDetailLoaded = useCallback((payload) => {
-    if (payload?.runId === selectedRun?.id) setSelectedRunDetail(payload);
-  }, [selectedRun?.id]);
 
   const stats = useMemo(() => {
     const total = runs.length;
@@ -342,23 +254,8 @@ export default function PayrollRunsPage() {
   };
 
   const prevStep = () => {
-    if (wizardStep > 1) {
-      setWizardStep((s) => s - 1);
-    } else {
-      handleBackToRuns();
-    }
+    if (wizardStep > 1) setWizardStep((s) => s - 1);
   };
-
-  const handleBackToRuns = useCallback(() => {
-    setView("list");
-    setWizardStep(0);
-    setEmployees([]);
-    setSelectedEmployees([]);
-    setCreatedRunId(null);
-    setPreviewData(null);
-    resetReadiness();
-    loadRuns();
-  }, [resetReadiness, loadRuns]);
 
   const recalculate = async () => {
     loadReadiness(selectedEmployees);
@@ -392,60 +289,45 @@ export default function PayrollRunsPage() {
   };
 
   const isWizard = view === "wizard";
-  const isWorkspaceView = view === "workspace";
-  const selectedDetail = selectedRunDetail?.detail || null;
-  const workflowStep = WORKFLOW_STEP_BY_STATUS[(selectedDetail || selectedRun)?.status] || 0;
-  const summaryRun = selectedDetail || selectedRun;
-  const summaryEmployees = summaryRun?.employees ?? selectedRunDetail?.items?.length ?? 0;
 
   return (
     <div className="flex h-full min-h-screen bg-background font-sans">
-      <aside className="w-[260px] xl:w-[300px] flex-shrink-0 flex flex-col overflow-y-auto border-r border-border bg-surface p-4">
-{isWizard ? (
-          <>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-4">
-              Run Progress
-            </p>
-            <div className="flex-1">
-              <WorkflowSteps steps={WIZARD_STEPS} activeStep={wizardStep} />
-            </div>
-          </>
-        ) : isWorkspaceView && selectedRun ? (
-          <>
-            <div className="mb-4">
-              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-2">
-                Selected Payroll Run
-              </p>
-              <select
-                value={selectedRun.id}
-                aria-label="Select payroll run"
-                onChange={(e) => {
-                  const next = runs.find((r) => String(r.id) === e.target.value);
-                  if (next) selectRun(next);
-                }}
-                className="w-full rounded-[10x] border border-border bg-surface px-2.5 py-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                {runs.map((r) => (
-                  <option key={r.id} value={r.id}>{r.period} A� {r.status}</option>
-                ))}
-              </select>
-              <div className="mt-2 flex items-center gap-2">
-                <p className="min-w-0 truncate text-sm font-bold text-foreground">{selectedRun.period}</p>
-                <StatusBadge status={selectedDetail?.status || selectedRun.status} />
+      <aside className="w-[200px] flex-shrink-0 flex flex-col border-r border-border bg-surface p-5">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-5">
+          Run Progress
+        </p>
+        <div className="flex-1 space-y-1">
+          {WIZARD_STEPS.map((step, i) => {
+            const completed = isWizard && wizardStep > step.id;
+            const active = isWizard && wizardStep === step.id;
+            const StepIcon = step.icon;
+            return (
+              <div key={step.id} className="flex items-start gap-2.5">
+                <div className="flex flex-col items-center">
+                    <div
+                    className={`flex h-9 w-9 items-center justify-center rounded-full border-2 text-xs font-bold transition-all ${
+                      completed
+                        ? "border-primary bg-primary text-white"
+                        : active
+                        ? "border-primary bg-primary/10 text-primary ring-4 ring-primary/20"
+                        : "border-border bg-surface text-foreground-muted"
+                    }`}
+                  >
+                    {completed ? <Check size={14} /> : <StepIcon size={14} />}
+                  </div>
+                  {i < WIZARD_STEPS.length - 1 && (
+                    <div className={`w-px h-5 my-0.5 ${completed || active ? "bg-primary" : "bg-border"}`} />
+                  )}
+                </div>
+                <div className="pt-1.5">
+                  <p className={`text-xs font-semibold ${completed || active ? "text-foreground" : "text-foreground-muted"}`}>
+                    {step.label}
+                  </p>
+                </div>
               </div>
-            </div>
-
-            <RunStatusTimeline run={selectedDetail || selectedRun} vertical />
-          </>
-        ) : (
-          <>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-2">
-              Payroll Runs
-            </p>
-            <p className="text-xs text-foreground-muted">Select a run to view its details.</p>
-            <div className="flex-1" />
-          </>
-        )}
+            );
+          })}
+        </div>
         {jurisdictionCountry && (
           <div className="mt-4 rounded-[12px] bg-surface-muted border border-border p-3">
             <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1">
@@ -476,54 +358,25 @@ export default function PayrollRunsPage() {
 
       <div className="flex-1 flex flex-col overflow-auto">
         <header className="flex items-center justify-between px-8 py-5 border-b border-border bg-surface">
-          <div className="flex items-center gap-3">
-            {isWizard && (
-              <button
-                type="button"
-                onClick={handleBackToRuns}
-                aria-label="Back to Runs"
-                title="Back to Runs"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-muted px-2.5 py-1.5 text-xs font-semibold text-foreground-muted hover:bg-surface hover:text-foreground transition-all duration-150 shrink-0"
-              >
-                <ArrowLeft size={14} />
-                <span>Back to Runs</span>
-              </button>
-            )}
-            <div>
-              <h1 className="text-[28px] font-extrabold tracking-tight text-foreground">Payroll Runs</h1>
-              <p className="text-[13px] text-foreground-muted mt-0.5">
-                {isWizard
-                  ? `Processing payroll for ${runCountriesLabel}`
-                  : isWorkspaceView
-                  ? "Selected run details and employee payroll"
-                  : "View and manage existing payroll runs"}
-              </p>
-            </div>
+          <div>
+            <h1 className="text-[28px] font-extrabold tracking-tight text-foreground">Payroll Runs</h1>
+            <p className="text-[13px] text-foreground-muted mt-0.5">
+              {isWizard ? `Processing payroll for ${runCountriesLabel}` : "View and manage existing payroll runs"}
+            </p>
           </div>
           <div className="flex items-center gap-4">
             {!isWizard ? (
-              <>
-                {isWorkspaceView && (
-                  <button
-                    onClick={showRunsList}
-                    className="flex items-center gap-2 border border-border bg-surface-muted rounded-[12px] px-4 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary"
-                  >
-                    <List size={15} />
-                    All Runs
-                  </button>
-                )}
-                <button
-                  onClick={startWizard}
-                  disabled={loadingEmployees}
-                  className="flex items-center gap-2 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Plus size={15} />
-                  {loadingEmployees ? "Loading…" : "Create New Run"}
-                </button>
-              </>
+              <button
+                onClick={startWizard}
+                disabled={loadingEmployees}
+                className="flex items-center gap-2 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] hover:shadow-[0_4px_14px_rgba(25,197,138,0.4)] hover:-translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Plus size={15} />
+                {loadingEmployees ? "Loading…" : "Create New Run"}
+              </button>
             ) : (
               <button
-                onClick={handleBackToRuns}
+                onClick={() => { setView("list"); setWizardStep(0); setEmployees([]); setSelectedEmployees([]); setPreviewData(null); resetReadiness(); }}
                 className="flex items-center gap-2 border border-border bg-surface-muted rounded-[12px] px-4 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-error hover:text-error"
               >
                 Cancel
@@ -533,57 +386,7 @@ export default function PayrollRunsPage() {
         </header>
 
         <div className="flex-1 p-5">
-          {isWizard ? (
-            <RunDetailPage
-              step={wizardStep}
-              config={wizardConfig}
-              setConfig={setWizardConfig}
-              employees={employees}
-              selectedEmployees={selectedEmployees}
-              toggleEmployee={toggleEmployee}
-              toggleAllEmployees={toggleAllEmployees}
-              setSelectedEmployees={setSelectedEmployees}
-              previewData={previewData}
-              totals={totals}
-              jurisdictionCountry={jurisdictionCountry}
-              calculationMode={calculationMode}
-              runId={createdRunId}
-              loading={loadingEmployees || loadingPreview}
-              onNext={nextStep}
-              onBack={prevStep}
-              onBackToRuns={handleBackToRuns}
-              onRecalculate={recalculate}
-              onLoadPreview={loadPreview}
-              fmtCurrency={fmtCurrency}
-              attendance={{
-                readiness: attendanceReadiness,
-                loading: readinessLoading,
-                error: readinessError,
-                onLoad: loadReadiness,
-                onRefresh: () => loadReadiness(selectedEmployees),
-                overrideEnabled,
-                setOverrideEnabled,
-                overrideReason,
-                setOverrideReason,
-                canProceed: canProceedPastAttendance,
-              }}
-            />
-          ) : isWorkspaceView ? (
-            selectedRun ? (
-              <RunDetailPanel
-                key={`${selectedRun.id}-${selectedRun.status}`}
-                run={selectedRun}
-                onClose={showRunsList}
-                fmtCurrency={fmtCurrency}
-                onDetailLoaded={handleDetailLoaded}
-              />
-            ) : (
-              <div className="flex min-h-[320px] flex-col items-center justify-center rounded-[18px] border border-border bg-surface text-center">
-                <p className="text-[15px] font-bold text-foreground">No payroll runs yet</p>
-                <p className="mt-1 text-[13px] text-foreground-muted">Create your first run to get started.</p>
-              </div>
-            )
-          ) : (
+          {!isWizard ? (
             <div className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
@@ -602,13 +405,51 @@ export default function PayrollRunsPage() {
                   <h3 className="text-[15px] font-bold text-foreground">Payroll Runs</h3>
                 </div>
                 <div className="px-5 pb-5">
-                  <RunsTable runs={runs} onSelect={selectRun} onDelete={handleRunChanged} isWizardMode={false} fmtCurrency={fmtCurrency} />
+                  <RunsTable runs={runs} onSelect={setSelectedRun} onDelete={handleRunChanged} isWizardMode={false} fmtCurrency={fmtCurrency} />
                 </div>
               </div>
             </div>
+          ) : (
+            <RunDetailPage
+              step={wizardStep}
+              config={wizardConfig}
+              setConfig={setWizardConfig}
+              employees={employees}
+              selectedEmployees={selectedEmployees}
+              toggleEmployee={toggleEmployee}
+              toggleAllEmployees={toggleAllEmployees}
+              setSelectedEmployees={setSelectedEmployees}
+              previewData={previewData}
+              totals={totals}
+              jurisdictionCountry={jurisdictionCountry}
+              calculationMode={calculationMode}
+              runId={createdRunId}
+              loading={loadingEmployees || loadingPreview}
+              onNext={nextStep}
+              onBack={prevStep}
+              onRecalculate={recalculate}
+              onLoadPreview={loadPreview}
+              fmtCurrency={fmtCurrency}
+              attendance={{
+                readiness: attendanceReadiness,
+                loading: readinessLoading,
+                error: readinessError,
+                onLoad: loadReadiness,
+                onRefresh: () => loadReadiness(selectedEmployees),
+                overrideEnabled,
+                setOverrideEnabled,
+                overrideReason,
+                setOverrideReason,
+                canProceed: canProceedPastAttendance,
+              }}
+            />
           )}
         </div>
       </div>
+
+      {selectedRun && (
+        <RunDetailPanel run={selectedRun} onClose={() => setSelectedRun(null)} fmtCurrency={fmtCurrency} />
+      )}
 
       {showConfirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">

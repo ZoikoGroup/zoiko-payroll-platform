@@ -36,7 +36,7 @@ from sqlalchemy.pool import StaticPool
 BACKEND = Path(__file__).resolve().parents[1]
 VERSIONS = BACKEND / "alembic" / "versions"
 REVISION = "1d76678ef1a1"
-PARENT = "efc56f3235e2"
+PARENT = "f3a9c1d7e2b4"         # re-chained (merge of origin/main)
 FILENAME = f"{REVISION}_be_foundation.py"
 
 TENANT = ("payroll_be_employer_registrations", "payroll_be_establishment_units")
