@@ -1,0 +1,556 @@
+{
+ "_note": "DEMO PLACEHOLDERS - clearly fake values, NOT Belgian statutory content, NEVER for payroll. Used only by belgium_demo.be_seed_demo_pack for the rows the AI draft could not source (NOT FOUND). Generated from the synthetic TEST ONLY engine pack (tests/_be_engine_helpers.py).",
+ "label": "DEMO PLACEHOLDER (not a real value)",
+ "rates": {
+  "be_abs_birth_leave_days": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": "20",
+   "text_value": null
+  },
+  "be_abs_birth_leave_employer_days": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": "3",
+   "text_value": null
+  },
+  "be_abs_manual_day_bands": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_abs_relapse_window_weeks": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": "3",
+   "text_value": null
+  },
+  "be_abs_wc_guaranteed_days": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": "10",
+   "text_value": null
+  },
+  "be_abs_wc_guaranteed_pct": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": "10.00",
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_abs_wc_min_contract_months": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": "5",
+   "text_value": null
+  },
+  "be_hol_additional_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_hol_departure_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_hol_manual_annual_debit": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": "10.00",
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_hol_manual_quarterly_contribution": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": "10.00",
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_hol_wc_double_contribution_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "TEST_ONLY"
+  },
+  "be_hol_wc_double_pct": {
+   "employee_rate_pct": "10.00",
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_hol_wc_simple_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "TEST_ONLY"
+  },
+  "be_onss_employee_rate": {
+   "employee_rate_pct": "10.00",
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_onss_employer_base_rate": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_onss_fund_contributions": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_onss_manual_base_categories": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "MANUAL"
+  },
+  "be_onss_manual_base_uplift": {
+   "employee_rate_pct": "10.00",
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_onss_pension_special": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": "10.00",
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_onss_special_160": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": "10.00",
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_onss_supported_employer_categories": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "000"
+  },
+  "be_onss_supported_worker_codes": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "015,495"
+  },
+  "be_onss_wage_moderation": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": "10.00",
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_ot_compensatory_rest_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_ot_premium_sunday_holiday": {
+   "employee_rate_pct": "20.00",
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_ot_premium_weekday": {
+   "employee_rate_pct": "10.00",
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_ot_threshold_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "TEST_ONLY"
+  },
+  "be_public_holidays": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_red_social_work_bonus": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_red_structural": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "NOT_SUPPORTED"
+  },
+  "be_red_target_group": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "NOT_SUPPORTED"
+  },
+  "be_rounding_holiday": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "CENT_HALF_UP"
+  },
+  "be_rounding_onss": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "CENT_HALF_UP"
+  },
+  "be_rounding_withholding": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "CENT_HALF_UP"
+  },
+  "be_supported_contract_types": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "INDEFINITE,FIXED_TERM"
+  },
+  "be_supported_pay_bases": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SALARIED"
+  },
+  "be_supported_pay_frequencies": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "MONTHLY"
+  },
+  "be_supported_worker_categories": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "MANUAL,EMPLOYEE"
+  },
+  "be_wage_index_centime_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_wage_index_centime_threshold": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": "1000",
+   "text_value": null
+  },
+  "be_wage_norm_margin": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": "10.00",
+   "flat_amount": null,
+   "text_value": null
+  },
+  "be_wage_rmmmg": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": "1000",
+   "text_value": null
+  },
+  "be_wage_rmmmg_min_age": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": "10",
+   "text_value": null
+  },
+  "be_wht_annex3_amendment_2026": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_wht_annex3_regular_scale": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_wht_applicability_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "TEST_ONLY"
+  },
+  "be_wht_arrears_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_wht_exceptional_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_wht_family_reductions": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_wht_fiscal_work_bonus": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_wht_holiday_pay_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_wht_nonresident_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "TEST_ONLY"
+  },
+  "be_wht_overtime_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "SLAB_ROWS"
+  },
+  "be_wht_period_strategy": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "TEST_ONLY"
+  },
+  "be_wht_taxable_basis_rule": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": null,
+   "text_value": "TEST_ONLY"
+  },
+  "be_wt_daily_limit_hours": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": "12",
+   "text_value": null
+  },
+  "be_wt_weekly_limit_hours": {
+   "employee_rate_pct": null,
+   "employer_rate_pct": null,
+   "flat_amount": "50",
+   "text_value": null
+  }
+ },
+ "slabs": [
+  {
+   "filing_status": null,
+   "flat_amount": "30",
+   "formula_expression": null,
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_RED_SOCIAL_WORK_BONUS",
+   "tax_formula": "be_red_social_work_bonus"
+  },
+  {
+   "filing_status": "EC=000;WC=015",
+   "flat_amount": null,
+   "formula_expression": null,
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "10.00",
+   "rule_type": "BE_ONSS_EMPLOYER_BASE_RATE",
+   "tax_formula": "be_onss_employer_base_rate"
+  },
+  {
+   "filing_status": "EC=000;WC=495",
+   "flat_amount": null,
+   "formula_expression": null,
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "10.00",
+   "rule_type": "BE_ONSS_EMPLOYER_BASE_RATE",
+   "tax_formula": "be_onss_employer_base_rate"
+  },
+  {
+   "filing_status": "EC=000;WC=015",
+   "flat_amount": null,
+   "formula_expression": null,
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "1.00",
+   "rule_type": "BE_ONSS_FUND_CONTRIBUTIONS",
+   "tax_formula": "FUND_A"
+  },
+  {
+   "filing_status": "EC=000;WC=495",
+   "flat_amount": null,
+   "formula_expression": null,
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "1.00",
+   "rule_type": "BE_ONSS_FUND_CONTRIBUTIONS",
+   "tax_formula": "FUND_A"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": null,
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "10.00",
+   "rule_type": "BE_WHT_ANNEX3_REGULAR_SCALE",
+   "tax_formula": "be_wht_annex3_regular_scale"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": "0",
+   "formula_expression": null,
+   "max_amount": "1",
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_WHT_FAMILY_REDUCTIONS",
+   "tax_formula": "be_wht_family_reductions"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": "50",
+   "formula_expression": null,
+   "max_amount": null,
+   "min_amount": "1",
+   "rate_pct": "0",
+   "rule_type": "BE_WHT_FAMILY_REDUCTIONS",
+   "tax_formula": "be_wht_family_reductions"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": null,
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "10.00",
+   "rule_type": "BE_WHT_EXCEPTIONAL_RULE",
+   "tax_formula": "be_wht_exceptional_rule"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": "tax",
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_WHT_ANNEX3_AMENDMENT_2026",
+   "tax_formula": "be_wht_annex3_amendment_2026"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": "social_bonus * 0.5",
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_WHT_FISCAL_WORK_BONUS",
+   "tax_formula": "be_wht_fiscal_work_bonus"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": "amount * 0.1",
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_WHT_HOLIDAY_PAY_RULE",
+   "tax_formula": "be_wht_holiday_pay_rule"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": "amount * 0.1",
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_WHT_ARREARS_RULE",
+   "tax_formula": "be_wht_arrears_rule"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": "tax",
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_WHT_OVERTIME_RULE",
+   "tax_formula": "be_wht_overtime_rule"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": "overtime * 1",
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_OT_COMPENSATORY_REST_RULE",
+   "tax_formula": "be_ot_compensatory_rest_rule"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": "min(increase, 10)",
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_WAGE_INDEX_CENTIME_RULE",
+   "tax_formula": "be_wage_index_centime_rule"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": "days * 10",
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_HOL_ADDITIONAL_RULE",
+   "tax_formula": "be_hol_additional_rule"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": "reference * months / 100",
+   "max_amount": null,
+   "min_amount": "0",
+   "rate_pct": "0",
+   "rule_type": "BE_HOL_DEPARTURE_RULE",
+   "tax_formula": "be_hol_departure_rule"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": null,
+   "max_amount": "8",
+   "min_amount": "1",
+   "rate_pct": "10.00",
+   "rule_type": "BE_ABS_MANUAL_DAY_BANDS",
+   "tax_formula": "be_abs_manual_day_bands"
+  },
+  {
+   "filing_status": null,
+   "flat_amount": null,
+   "formula_expression": null,
+   "max_amount": "31",
+   "min_amount": "8",
+   "rate_pct": "5.00",
+   "rule_type": "BE_ABS_MANUAL_DAY_BANDS",
+   "tax_formula": "be_abs_manual_day_bands"
+  }
+ ]
+}

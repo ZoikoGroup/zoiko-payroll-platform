@@ -714,6 +714,23 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^\d{10}$", "example": "0000123456", "primary": False},
         ],
     },
+    # Belgium (ZP-BE-ENG-001 Phase 1, BE-001) — schema only. BE stays out of
+    # REGISTRATION_COUNTRIES and is registry-gated (tax_resolver.
+    # _REGISTRY_ROW_REQUIRED_COUNTRIES) and dormant (belgium_dormancy).
+    # Patterns are deliberately permissive: format and check digits pending
+    # verification, gap G-16. The examples only illustrate the input shape
+    # (validate_tax_identifiers quotes them in its format message); they are
+    # not real numbers and are not checked against any check-digit rule.
+    "BE": {
+        "label": "Enterprise number / ONSS number",
+        "currency": "EUR",
+        "fields": [
+            {"key": "enterprise_number", "label": "Enterprise number (KBO/BCE)",
+             "pattern": r"^[0-9][0-9. ]{8,13}$", "example": "0123.456.789", "primary": True},
+            {"key": "onss_employer_number", "label": "ONSS/RSZ employer number",
+             "pattern": r"^[0-9][0-9 /-]{4,15}$", "example": "1234567-89", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -786,6 +803,19 @@ COUNTRY_NAME_TO_CODE = {
     "rzeczpospolita polska": "PL",
     "republic of poland": "PL",
     "pol": "PL",
+    # Belgium (ZP-BE-ENG-001 Phase 1). Without these, "Belgium" reaches "BE"
+    # only through the blind [:2] truncation in payroll.service.
+    # _normalize_country. The bare "be" is deliberately NOT an alias ("BE"
+    # resolves through JURISDICTION_TAX_SCHEMAS; "BE" is also a Swiss canton).
+    "belgium": "BE",
+    "belgique": "BE",
+    "belgië": "BE",
+    "belgie": "BE",
+    "belgien": "BE",
+    "kingdom of belgium": "BE",
+    "royaume de belgique": "BE",
+    "koninkrijk belgië": "BE",
+    "bel": "BE",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -817,6 +847,7 @@ CODE_TO_COUNTRY_NAME = {
     "JP": "Japan",
     "NZ": "New Zealand",
     "PL": "Poland",
+    "BE": "Belgium",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

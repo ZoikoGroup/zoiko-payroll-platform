@@ -84,6 +84,12 @@ jobs:
       - name: Privacy defect checks
         run: python -m scripts.check_privacy_defects
         working-directory: backend
+      # Belgium (ZP-BE-ENG-001 Block D1): each Belgian migration's upgrade / downgrade
+      # round trip with row-level security on this PostgreSQL. Last step: the round
+      # trip drops and recreates the disposable schema.
+      - name: Belgium migrations on PostgreSQL (RLS round trip)
+        run: python -m pytest -q -p no:cacheprovider tests/test_belgium_migrations.py tests/test_belgium_block_b_migration.py tests/test_belgium_block_c_migration.py
+        working-directory: backend
 
   deploy:
     needs: [test, privacy-isolation]

@@ -1545,7 +1545,7 @@ def check_jurisdiction_readiness(
 # Mexico (ZP-MX-ENG-001): MX-003 — only the signed, effective-dated canonical
 # pack; an org-synced copy would drop the row-level dates that separate the
 # January and February UMA rows (MX-004).
-_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL")
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "BE")
 # Countries whose payroll refuses an AMBIGUOUS resolution: more than one Active
 # canonical tax pack covering the payroll date (activation already forbids the
 # overlap; this keeps a corrupted / manually edited database from silently
@@ -8180,6 +8180,13 @@ def _refuse_nz_generic_statutory_edit(pack) -> None:
             "Poland statutory rows are edited and signed in Compliance → Poland (a source document and a change "
             "reason are required; signing needs a second Super Admin)."
         )
+    # Belgium (ZP-BE-ENG-001): never through the generic editor, which carries
+    # no source; rows are edited and signed in the governed Belgium console.
+    if pack is not None and pack.jurisdiction_country == "BE":
+        raise BadRequestException(
+            "Belgium statutory rows are edited and signed only in Compliance → Belgium (a source document and a "
+            "change reason are required; signing needs a second Super Admin)."
+        )
 
 
 def _existing_row_pack(db: Session, model, row_id):
@@ -8617,23 +8624,24 @@ def se_activation_blockers(db: Session, pack) -> list:
 # Display names for the per-country opt-in activation gates below.
 _GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong",
                              "CH": "Switzerland", "SA": "Saudi Arabia", "NL": "Netherlands", "MX": "Mexico", "BR": "Brazil",
-                             "ZA": "South Africa", "PL": "Poland"}
+                             "ZA": "South Africa", "PL": "Poland",
+                             "BE": "Belgium"}
 # Phase 6.0 F2: countries whose pack approver may never be its activator.
-_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL")  # MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "BE")  # MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose pack approver may never be the Super Admin who
 # last edited / submitted the pack (refused at the Approve step itself).
-_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose REFUSED pack / report-template governance
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
-_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 # Singapore completion programme (2026-09-29): countries whose TAX packs follow
 # an explicit transition graph. Before this, only the Active-downgrade guard
 # applied, so a Superseded / Retired Singapore pack could be moved back to
 # Draft, edited through upsert and re-activated, and any string was accepted
 # as a status. Same per-country opt-in pattern as the constants above; other
 # countries keep their existing free lifecycle (DE keeps its downgrade guard).
-_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 TAX_PACK_TRANSITIONS = {
     "Draft": ("In Review", "QA", "Approved", "Active"),
     "In Review": ("Draft", "QA", "Approved", "Active"),
@@ -20104,6 +20112,14 @@ def assign_pack_to_organizations(db: Session, pack_row_id: int, organization_ids
     pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_row_id).first()
     if not pack:
         raise NotFoundException("JurisdictionPack", pack_row_id)
+    if (pack.jurisdiction_country or "").upper() == "BE":
+        # Belgium (ZP-BE-ENG-001 Phase 3A): only an Active Belgian pack may be
+        # assigned. Every other country's assignment behaviour is unchanged.
+        from app.modules.payroll.belgium_service import be_pack_assignment_refusal
+
+        be_refusal = be_pack_assignment_refusal(pack, organization_ids)
+        if be_refusal:
+            raise BadRequestException(be_refusal)
     is_tax = pack.pack_type == "tax"
 
     updated = 0
@@ -20468,6 +20484,15 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             jurisdiction_hooks.call("PL", "calc_inputs", db, None, emp, None, as_of=pay_date)
             if emp_country == "PL" else None
         )
+        # Belgium (ZP-BE-ENG-001 Block A3): inputs in force on the run's pay
+        # date; without a pay date the preview refuses.
+        be_inputs = (
+            jurisdiction_hooks.call("BE", "calc_inputs", db, None, emp, None, as_of=pay_date)
+            if emp_country == "BE" else None
+        )
+        if be_inputs is not None:      # G-28: named allowances map to Belgian components
+            be_inputs = {**be_inputs, "be_allowance_items": [
+                {"key": i["key"], "amount": i["amount"]} for i in (allowance_items or [])]}
         # Mexico (ZP-MX-ENG-001 Phase 6): guarded + read-only (MX-039). The pay
         # date is the run's own pay date, passed explicitly — never the period
         # end or today's date (MX-004); without it the preview refuses. A
@@ -20657,6 +20682,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             japan_inputs=japan_inputs,
             nz_inputs=nz_inputs,
             poland_inputs=pl_inputs,
+            belgium_inputs=be_inputs,
             mexico_inputs=mexico_inputs,
             brazil_inputs=brazil_inputs,
             pay_date=period_end or date.today(),
@@ -25714,6 +25740,14 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("PL", "calc_inputs", db, run, employee, resolved_pack)
         if country == "PL" else None
     )
+    # Belgium (ZP-BE-ENG-001 Block A3): inputs in force on the run's pay date.
+    be_inputs = (
+        jurisdiction_hooks.call("BE", "calc_inputs", db, run, employee, resolved_pack)
+        if country == "BE" else None
+    )
+    if be_inputs is not None:          # G-28: named allowances map to Belgian components
+        be_inputs = {**be_inputs, "be_allowance_items": [
+            {"key": i["key"], "amount": i["amount"]} for i in (allowance_items or [])]}
     # Mexico (ZP-MX-ENG-001 Phase 6): guarded, read-only inputs as of the run's
     # pay date; the payslip's money columns come from the Mexican earning lines
     # (D2) — the engine refuses any other gross (MX_GROSS_MISMATCH).
@@ -25841,6 +25875,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         netherlands_inputs=netherlands_inputs,
         japan_inputs=japan_inputs,
         poland_inputs=pl_inputs,
+        belgium_inputs=be_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
         pay_date=run.pay_date,
@@ -25884,6 +25919,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     if pl_inputs is not None:
         from app.modules.payroll import poland_service as _pl_service
         pl_frozen = _pl_service.pl_freeze_context(ctx, calculation_mode)
+    be_frozen = None
+    if be_inputs is not None:
+        from app.modules.payroll import belgium_service as _be_service
+        be_frozen = _be_service.be_freeze_context(ctx, calculation_mode)
     try:
         result = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -26066,6 +26105,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # replay or correction uses. None for every non-PL payslip.
         "pl_calculation_snapshot": (_pl_service.pl_payslip_snapshot(result, frozen=pl_frozen)
                                     if pl_frozen is not None else None),
+        # Belgium (ZP-BE-ENG-001 Block A3): be_result plus the frozen context a
+        # replay or correction uses. None for every non-BE payslip.
+        "be_calculation_snapshot": (_be_service.be_payslip_snapshot(result, frozen=be_frozen)
+                                    if be_frozen is not None else None),
         # Netherlands (ZP-NL-ENG-001): the frozen NL context + nl_result dict
         # (wage_tax, employee_insurance, whk, zvw, wkr, car_addition, labor_pay,
         # net_pay, employer_cost, pack, minimum_wage_hourly, period_maximum,
@@ -32831,6 +32874,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         jurisdiction_hooks.call("PL", "calc_inputs", db, run, employee, None)
         if country == "PL" else None
     )
+    # Belgium (ZP-BE-ENG-001 Block A3): the same pay-date inputs as a generated run.
+    be_inputs = (
+        jurisdiction_hooks.call("BE", "calc_inputs", db, run, employee, None)
+        if country == "BE" else None
+    )
     # Mexico (Phase 6): the payslip is computed from the profile, labour policy
     # and approved hours; manual amounts that disagree are refused, never
     # silently replaced.
@@ -32977,6 +33025,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         netherlands_inputs=netherlands_inputs,
         japan_inputs=japan_inputs,
         poland_inputs=pl_inputs,
+        belgium_inputs=be_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
         **ytd_inputs,
@@ -33009,6 +33058,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if pl_inputs is not None:
         from app.modules.payroll import poland_service as _pl_service
         pl_frozen = _pl_service.pl_freeze_context(ctx, calculation_mode)
+    be_frozen = None
+    if be_inputs is not None:
+        from app.modules.payroll import belgium_service as _be_service
+        be_frozen = _be_service.be_freeze_context(ctx, calculation_mode)
     try:
         calc = calculate_payroll(ctx, calculation_mode)
     except FranceCalculationBlockedError as exc:
@@ -33059,6 +33112,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
                                  if nz_frozen is not None else None),
         pl_calculation_snapshot=(_pl_service.pl_payslip_snapshot(calc, frozen=pl_frozen)
                                  if pl_frozen is not None else None),
+        be_calculation_snapshot=(_be_service.be_payslip_snapshot(calc, frozen=be_frozen)
+                                 if be_frozen is not None else None),
         mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
                                  if mexico_inputs is not None else None),
         **tax_snapshot,
@@ -33771,6 +33826,11 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "plCalculationSnapshot": (
             {k: v for k, v in (item.pl_calculation_snapshot or {}).items() if k != "frozenContext"}
             if (item.country_code or country) == "PL" and item.pl_calculation_snapshot else None),
+        # Belgium (ZP-BE-ENG-001 Block A3): the frozen be_result; the frozen
+        # inputs (frozenContext) stay server-side.
+        "beCalculationSnapshot": (
+            {k: v for k, v in (item.be_calculation_snapshot or {}).items() if k != "frozenContext"}
+            if (item.country_code or country) == "BE" and item.be_calculation_snapshot else None),
     }
 
 
@@ -34280,6 +34340,22 @@ def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: in
     # template downloads (and is emailed) in that layout. No template, a
     # payslip a template can't represent, or any template failure -> None,
     # and the standard statutory PDF below is produced exactly as before.
+    # Belgium (ZP-BE-ENG-001 Block H1): a Belgian payslip is never rendered
+    # through a template or the generic layout — only the Belgian §11 PDF
+    # (masked NISS, DEMO watermark), or a clear refusal.
+    from app.modules.payroll import belgium_payslip_pdf as _be_payslip_pdf
+    _be_query = db.query(PayslipItem.country_code).filter(PayslipItem.id == payslip_id)
+    if organization_id:
+        _be_query = _be_query.filter(PayslipItem.organization_id == organization_id)
+    _be_row = _be_query.first()
+    if _be_row is not None and (_be_row[0] or "").strip().upper() == "BE":
+        data, item, run = get_payslip_by_id(db, payslip_id, organization_id)
+        company = db.query(CompanyComplianceDetails).filter(
+            CompanyComplianceDetails.organization_id == organization_id).first() if organization_id else None
+        return _be_payslip_pdf.be_payslip_pdf_bytes(
+            data, item, run, getattr(company, "name", None) or "Company Name", getattr(company, "address", None) or "",
+            item.organization_id, evaluation=_is_evaluation_workspace(db, organization_id))
+
     from app.modules.payroll import payslip_template_service as _payslip_templates
     templated = _payslip_templates.template_pdf_or_none(db, payslip_id, organization_id)
     if templated is not None:
@@ -37442,6 +37518,10 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             from app.modules.payroll.poland_dormancy import entering_poland_refusal
             if code and entering_poland_refusal(row.jurisdiction_country, code, row.organization_id):
                 code = None
+            # Belgium (ZP-BE-ENG-001 Phase 1 dormancy): never back-fill INTO Belgium.
+            from app.modules.payroll.belgium_dormancy import entering_belgium_refusal
+            if code and entering_belgium_refusal(row.jurisdiction_country, code, row.organization_id):
+                code = None
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -37556,6 +37636,12 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     pl_refusal = entering_poland_refusal(row.jurisdiction_country, incoming_country, row.organization_id)
     if pl_refusal:
         raise BadRequestException(pl_refusal)
+    # Belgium (ZP-BE-ENG-001 Phase 1): choosing Belgium is refused the same way
+    # while Belgium onboarding is disabled.
+    from app.modules.payroll.belgium_dormancy import entering_belgium_refusal
+    be_refusal = entering_belgium_refusal(row.jurisdiction_country, incoming_country, row.organization_id)
+    if be_refusal:
+        raise BadRequestException(be_refusal)
 
     field_map = {
         "name": "name", "type": "type", "taxNo": "tax_no", "employerId": "employer_id",
@@ -42354,6 +42440,16 @@ def upsert_collective_agreement(db: Session, data, actor_id: Optional[int] = Non
     that has left Draft — a change to released content is a NEW version."""
     if _normalize_country(data.jurisdictionCountry) == "CH":
         raise BadRequestException("Swiss wage floors are governed — use /compliance/switzerland/wage-floors.")
+    if _normalize_country(data.jurisdictionCountry) == "BE":
+        # Belgium (ZP-BE-ENG-001 Phase 3A, D3): Joint Committee packs reuse this
+        # registry; agreement_code (BE-PC-<committee>[-<sub>]-<version>) is the
+        # single source of truth for the committee. employee_group keeps its
+        # existing meaning. Approval four-eyes is enforced below unchanged.
+        from app.modules.payroll.belgium_service import be_agreement_refusal
+
+        be_refusal = be_agreement_refusal(data.agreementCode)
+        if be_refusal:
+            raise BadRequestException(be_refusal)
     if data.agreementType not in _CBA_TYPES:
         raise BadRequestException(f"agreementType must be one of {list(_CBA_TYPES)} — there is no national "
                                   "default collective agreement (ZP-SE-ENG-001 §9).")

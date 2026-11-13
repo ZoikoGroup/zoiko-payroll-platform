@@ -62,6 +62,10 @@ class _CaptureBind:
         self.sql.append(" ".join(str(clause).split()))
 
 
+
+# Belgium Block B (2943a0490b5b) adds these columns to Belgium tables (standing re-pin rule).
+BE_BLOCK_B_COLUMNS = {"payroll_be_worker_profiles": {"pay_basis"}, "payroll_be_employment_classifications": {"contract_type", "contract_start_date", "contract_end_date"}, "payroll_be_employer_registrations": {"onss_special_160_status", "special_160_evidence_ref"}}
+
 def test_rls_policies_derived():
     metadata = _metadata()
     rls = _load("d7f9b1c3e5a6")
@@ -147,7 +151,7 @@ def test_drift_filter_explains():
     finally:
         os.chdir(here)
     # P9 (a8cde2482ef0) and Poland P2 (1ee3bbde33bb) are pending on the same chain.
-    assert tables == set(NEW_TABLES) | {"payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
+    assert tables - MX_LIFECYCLE_TABLES == set(NEW_TABLES) | {"payroll_nz_parallel_imports", "payroll_nz_parallel_differences",
                                         "payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
                                         "payroll_pl_employer_registrations", "payroll_pl_worker_profiles",
                                         "payroll_pl_declarations", "payroll_pl_ppk_participations",
@@ -157,10 +161,17 @@ def test_drift_filter_explains():
                                         "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
                                         "payroll_pl_parallel_imports",
                                         "payroll_pl_parallel_differences",  # + Poland P9 (e7ec6c1933b4)
-                                        "payroll_payslip_templates", "payroll_payslip_template_versions",
-                                        "payroll_payslip_template_assignments"} | MX_LIFECYCLE_TABLES  # + payslip templates (f3a9c1d7e2b4)
-    pl_shared = {"payslip_items": {"pl_calculation_snapshot", "template_version_id"}, "payroll_runs": {"pl_approval_fingerprint"}}
-    assert columns == {**{t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}}, **MX_M21, **MX_LIFECYCLE_COLUMNS}
+                                        "payroll_be_identifier_vault", "payroll_be_identifier_access_events",
+                                        "payroll_be_employer_registrations", "payroll_be_establishment_units",
+                                        "payroll_be_worker_profiles", "payroll_be_work_schedules",
+                                        "payroll_be_employment_classifications", "payroll_be_declarations",
+                                        "payroll_be_accumulator_entries",  # + Belgium P2 (1d76678ef1a1)
+                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
+    pl_shared = {"payslip_items": {"pl_calculation_snapshot", "be_calculation_snapshot", "template_version_id"},  # + Belgium P2
+                 "payroll_runs": {"pl_approval_fingerprint", "be_approval_fingerprint"}}
+    assert {t: columns.pop(t, None) for t in MX_LIFECYCLE_COLUMNS} == MX_LIFECYCLE_COLUMNS
+    assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
+    assert columns == {**{t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}}, **MX_M21}
 
 
 def test_single_child_literal_and_manifest():

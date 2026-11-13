@@ -963,9 +963,19 @@ def org_countries(db: Session, organization_id: int) -> List[dict]:
             for code in codes]
 
 
+def _be_refuse_template_scope(scope: str) -> str:
+    """Belgium (ZP-BE-ENG-001 Block H1): templates never apply to Belgian
+    payslips — they only render through the Belgian §11 layout."""
+    if scope == "BE":
+        from app.modules.payroll.belgium_payslip_pdf import BE_TEMPLATE_REFUSAL
+        raise _bad_request(BE_TEMPLATE_REFUSAL)
+    return scope
+
+
 def _org_scope(db: Session, organization_id: int, country: Optional[str]) -> str:
     """ALL, or one of the organisation's own countries — never any other."""
     scope = _normalize_scope(country)
+    _be_refuse_template_scope(scope)
     if scope == ALL_COUNTRIES:
         return scope
     if scope not in {c["code"] for c in org_countries(db, organization_id)}:
@@ -981,8 +991,8 @@ def _sample_country(db: Optional[Session], organization_id: Optional[int], count
     codes = [c["code"] for c in org_countries(db, organization_id)] if db is not None and organization_id else []
     wanted = _normalize_scope(country) if country else None
     if wanted and wanted != ALL_COUNTRIES and (not codes or wanted in codes):
-        return wanted
-    return codes[0] if codes else "IN"
+        return _be_refuse_template_scope(wanted)
+    return _be_refuse_template_scope(codes[0]) if codes else "IN"
 
 
 def get_template_detail(db: Session, organization_id: int, template_id: int) -> dict:
@@ -1244,6 +1254,10 @@ def _payslip_template(db: Session, organization_id: int, payslip_id: int):
         PayslipItem.id == payslip_id, PayslipItem.organization_id == organization_id).first()
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Payslip {payslip_id} not found.")
+    if (item.country_code or "").strip().upper() == "BE":      # Belgium (Block H1): §11 layout only
+        from app.modules.payroll.belgium_payslip_pdf import BE_TEMPLATE_REFUSAL
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            detail={"code": "TEMPLATE_NOT_REPRESENTABLE", "message": BE_TEMPLATE_REFUSAL})
     version = None
     frozen = False
     if item.template_version_id:
@@ -1329,6 +1343,8 @@ def freeze_run_templates(db: Session, run: PayrollRun) -> None:
                 PayslipItem.payroll_run_id == run.id, PayslipItem.template_version_id.is_(None)).all()
             for it in items:
                 key = (it.country_code or "").upper()
+                if key == "BE":     # Belgium (Block H1): never pinned to a template
+                    continue
                 if key not in cache:
                     cache[key] = _resolve_version(db, run.organization_id, it.country_code)
                 if cache[key] is not None:

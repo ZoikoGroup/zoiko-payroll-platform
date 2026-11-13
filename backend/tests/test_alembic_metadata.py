@@ -305,11 +305,9 @@ def test_alembic_heads_is_single_head():
     # efc56f3235e2 (Mexico mx_decision_inputs_m21, sweep S1): seven nullable columns the
     # decision options read (terminations, labour policies, statutory profiles); written on
     # 3880223bfaa0, re-parented (never applied) onto e7ec6c1933b4.
-    # f3a9c1d7e2b4 (2026-11-11, payslip templates) is the single child of efc56f3235e2
-    # (re-parented, never applied, when origin/main was merged into venu) - single head.
-    # b5e1c7d9a3f2 (Mexico CFDI lifecycle, rugvedh) is the other child of a8cde2482ef0;
-    # 2defe5c4edd6 merges it with f3a9c1d7e2b4 (origin/main merged into rugvedh) - single head.
-    assert heads == ["2defe5c4edd6"]
+    # rugvedh's Mexico CFDI lifecycle chain and main's Belgium filing chain
+    # are joined by the final no-op merge migration.
+    assert heads == ["4de7c091ab32"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -321,7 +319,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["2defe5c4edd6"]
+    assert list(script.get_heads()) == ["4de7c091ab32"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -370,7 +368,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         "f0b1c2d3e4f5", "f1b78410d568",
         # f5c1a8d3e9b2: main's Mexico M8 (a6d2f9c4b8e1) and the ZP-PRIV chain
         # (a7c3e91f2b60) both grow from it; rejoined by merge c3e5a7b9d1f4.
-        "f5c1a8d3e9b2",
+        "f3a9c1d7e2b4", "f5c1a8d3e9b2",
         "fbfe6d7eeb2e",
     ]
 
@@ -378,7 +376,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 262   # + 2defe5c4edd6 (merge) + b5e1c7d9a3f2 (Mexico CFDI lifecycle) + + f3a9c1d7e2b4 (payslip templates, child of efc56f3235e2) + efc56f3235e2 (Mexico mx_decision_inputs_m21, child of e7ec6c1933b4) + e7ec6c1933b4 (Poland P9 pl_parallel_cycles, child of e75b9219e1f8)
+    assert len(revs) == 266   # union of rugvedh's Mexico lifecycle and main's Belgium chains plus their merge revision
 
 
 def test_germany_head_chain_wiring_is_intact():

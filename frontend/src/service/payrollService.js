@@ -3140,6 +3140,135 @@ const mxPdf = async (path, filename) => {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 100);
 };
+// Belgium (ZP-BE-ENG-001 Block A4) — routes in backend/app/modules/payroll/be_org_router.py,
+// mounted under /api/payroll/belgium. Every route acts on the caller's own
+// organisation and answers 404 while Belgium is dormant (BE_TENANT_ONBOARDING_ENABLED
+// off and the org not on the canary list). Versioned writes carry a `reason`;
+// four-eyes approvals and the single-use identifier reveal are enforced
+// server-side. NISS / BIS / the ONSS number are only ever sent on create;
+// responses are masked except the reveal. Payload keys are the backend's
+// snake_case field names. Nothing here calculates payroll.
+const BE = "/api/payroll/belgium";
+const beList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const beOne = (res) => res?.data ?? res;
+export const getBeOptions = async () => beOne(await api.get(`${BE}/options`));
+export const listBeJointCommitteesForOrg = async () => beList(await api.get(`${BE}/joint-committees`));
+export const listBeRegistrations = async () => beList(await api.get(`${BE}/employer-registrations`));
+export const createBeRegistration = (body) => api.post(`${BE}/employer-registrations`, body);
+export const approveBeRegistration = (id) => api.post(`${BE}/employer-registrations/${id}/approve`, {});
+export const verifyBeRegistration = (id, outcome, reason) =>
+  api.post(`${BE}/employer-registrations/${id}/verify`, { outcome, reason });
+export const setBeEmployerOnss = (id, onssNumber) =>
+  api.post(`${BE}/employer-registrations/${id}/onss-number`, { onssNumber });
+export const listBeUnits = async () => beList(await api.get(`${BE}/establishment-units`));
+export const createBeUnit = (body) => api.post(`${BE}/establishment-units`, body);
+export const approveBeUnit = (id) => api.post(`${BE}/establishment-units/${id}/approve`, {});
+export const listBeWorkerProfiles = async (employeeId) =>
+  beList(await api.get(`${BE}/employees/${employeeId}/worker-profiles`));
+export const createBeWorkerProfile = (employeeId, body) => api.post(`${BE}/employees/${employeeId}/worker-profiles`, body);
+export const approveBeWorkerProfile = (id) => api.post(`${BE}/worker-profiles/${id}/approve`, {});
+export const listBeSchedules = async (employeeId) => beList(await api.get(`${BE}/employees/${employeeId}/work-schedules`));
+export const createBeSchedule = (employeeId, body) => api.post(`${BE}/employees/${employeeId}/work-schedules`, body);
+export const approveBeSchedule = (id) => api.post(`${BE}/work-schedules/${id}/approve`, {});
+export const listBeClassifications = async (employeeId) =>
+  beList(await api.get(`${BE}/employees/${employeeId}/classifications`));
+export const createBeClassification = (employeeId, body) =>
+  api.post(`${BE}/employees/${employeeId}/classifications`, body);
+export const approveBeClassification = (id) => api.post(`${BE}/classifications/${id}/approve`, {});
+export const listBeDeclarations = async (employeeId) => beList(await api.get(`${BE}/employees/${employeeId}/declarations`));
+export const createBeDeclaration = (employeeId, body) => api.post(`${BE}/employees/${employeeId}/declarations`, body);
+export const approveBeDeclaration = (id) => api.post(`${BE}/declarations/${id}/approve`, {});
+export const withdrawBeDeclaration = (id, reason, effectiveTo) =>
+  api.post(`${BE}/declarations/${id}/withdraw`, { reason, effectiveTo });
+export const listBeIdentifiers = async (employeeId) => beList(await api.get(`${BE}/employees/${employeeId}/identifiers`));
+export const createBeIdentifier = (employeeId, identifierType, value) =>
+  api.post(`${BE}/employees/${employeeId}/identifiers`, { identifierType, value });
+export const requestBeIdentifierReveal = (vaultId, reason) =>
+  api.post(`${BE}/identifiers/${vaultId}/reveal-request`, { reason });
+export const approveBeIdentifierReveal = (vaultId) => api.post(`${BE}/identifiers/${vaultId}/reveal-approve`, {});
+export const revealBeIdentifier = async (vaultId) => beOne(await api.post(`${BE}/identifiers/${vaultId}/reveal`, {}));
+export const deleteBeIdentifier = (vaultId, reason) => api.post(`${BE}/identifiers/${vaultId}/delete`, { reason });
+export const getBeEmployeeSummary = async (employeeId) => beOne(await api.get(`${BE}/employees/${employeeId}/summary`));
+export const listBeAbsenceEpisodes = async (employeeId) =>
+  beList(await api.get(`${BE}/employees/${employeeId}/absence-episodes`));
+export const createBeAbsenceEpisode = (employeeId, body) => api.post(`${BE}/employees/${employeeId}/absence-episodes`, body);
+export const approveBeAbsenceEpisode = (id) => api.post(`${BE}/absence-episodes/${id}/approve`, {});
+export const cancelBeAbsenceEpisode = (id, reason) => api.post(`${BE}/absence-episodes/${id}/cancel`, { reason });
+export const listBeHolidayCertificates = async (employeeId) =>
+  beList(await api.get(`${BE}/employees/${employeeId}/holiday-certificates`));
+export const createBeHolidayCertificate = (employeeId, body) =>
+  api.post(`${BE}/employees/${employeeId}/holiday-certificates`, body);
+export const approveBeHolidayCertificate = (id) => api.post(`${BE}/holiday-certificates/${id}/approve`, {});
+export const listBeComponentMappings = async () => beList(await api.get(`${BE}/component-mappings`));
+export const createBeComponentMapping = (body) => api.post(`${BE}/component-mappings`, body);
+export const approveBeComponentMapping = (id) => api.post(`${BE}/component-mappings/${id}/approve`, {});
+export const listBeSubstituteDays = async (year) => beList(await api.get(`${BE}/substitute-days`, { params: { year } }));
+export const createBeSubstituteDay = (body) => api.post(`${BE}/substitute-days`, body);
+export const getBeRunPreflight = async (runId) => beOne(await api.get(`${BE}/runs/${runId}/preflight`));
+export const acknowledgeBeRunException = (runId, body) => api.post(`${BE}/runs/${runId}/exceptions/acknowledge`, body);
+export const createBeCorrection = (payslipItemId, body) => api.post(`${BE}/payslips/${payslipItemId}/corrections`, body);
+export const getBePaymentPreview = async (runId) => beOne(await api.get(`${BE}/runs/${runId}/payment-preview`));
+export const listBePaymentBatches = async (runId) => beList(await api.get(`${BE}/payment-batches`, { params: { runId } }));
+export const createBePaymentBatch = (runId, body) => api.post(`${BE}/runs/${runId}/payment-batches`, body);
+export const approveBePaymentBatch = (batchId) => api.post(`${BE}/payment-batches/${batchId}/approve`, {});
+export const submitBePaymentBatch = (batchId) => api.post(`${BE}/payment-batches/${batchId}/submit`, {});
+export const recordBePaymentBankResult = (batchId, outcome) =>
+  api.post(`${BE}/payment-batches/${batchId}/bank-result`, { outcome });
+export const reconcileBePaymentBatch = (batchId) => api.post(`${BE}/payment-batches/${batchId}/reconcile`, {});
+export const downloadBePaymentFile = async (batchId) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}${BE}/payment-batches/${batchId}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error("The payment file is released only after a second person approves the batch.");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `be-payment-${batchId}.xml`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+export const resolveBeClassification = async (employeeId, payDate, extra = {}) =>
+  beOne(await api.post(`${BE}/classification/resolve`, { employeeId, payDate, ...extra }));
+// Block C1 — filings (Dimona, DmfA, FinProf, Belcotax), obligations, calendar,
+// exception queue. Builders are idempotent server-side; transmission is refused
+// until gate G3 (D9): submissions and responses are recorded by hand.
+export const listBeFilings = async (params = {}) => beList(await api.get(`${BE}/filings`, { params }));
+export const getBeFiling = async (id) => beOne(await api.get(`${BE}/filings/${id}`));
+export const getBeEmployeeCopy = async (id) => beOne(await api.get(`${BE}/filings/${id}/employee-copy`));
+export const buildBeDimonaEvents = (employeeId, body = {}) => api.post(`${BE}/dimona/events`, { employeeId, ...body });
+export const buildBeDmfa = (quarter, legalEntityId = null) =>
+  api.post(`${BE}/dmfa/quarters/${encodeURIComponent(quarter)}/build`, { legalEntityId });
+export const buildBeWithholding = (period, legalEntityId = null) =>
+  api.post(`${BE}/withholding-obligations/${encodeURIComponent(period)}/build`, { legalEntityId });
+export const buildBeBelcotax = (incomeYear, legalEntityId = null) =>
+  api.post(`${BE}/belcotax/${incomeYear}/build`, { legalEntityId });
+export const validateBeFiling = (id, submissionDate) => api.post(`${BE}/filings/${id}/validate`, { submissionDate });
+export const approveBeFiling = (id) => api.post(`${BE}/filings/${id}/approve`, {});
+export const transmitBeFiling = (id) => api.post(`${BE}/filings/${id}/transmit`, {});
+export const recordBeFilingSubmission = (id, body) => api.post(`${BE}/filings/${id}/submission`, body);
+export const recordBeFilingResponse = (id, body) => api.post(`${BE}/filings/${id}/response`, body);
+export const cancelBeFiling = (id, reason) => api.post(`${BE}/filings/${id}/cancel`, { reason });
+export const listBeObligations = async (openOnly = false) =>
+  beList(await api.get(`${BE}/obligations`, { params: { open_only: openOnly } }));
+export const recordBeOnssAdvance = (body) => api.post(`${BE}/obligations/onss-advances`, body);
+export const recordBeObligationPayment = (id, body) => api.post(`${BE}/obligations/${id}/payments`, body);
+export const reconcileBeObligation = (id) => api.post(`${BE}/obligations/${id}/reconcile`, {});
+export const listBeVariances = async () => beList(await api.get(`${BE}/variances`));
+export const resolveBeVariance = (id, resolution) => api.post(`${BE}/variances/${id}/resolve`, { resolution });
+export const listBeFilingCalendar = async (year) => beList(await api.get(`${BE}/filing-calendar`, { params: { year } }));
+export const listBeFilingExceptions = async () => beList(await api.get(`${BE}/filing-exceptions`));
+// Block C2 — parallel cycles (gate G4); no identifier may appear in the file.
+export const listBeParallelImports = async () => beList(await api.get(`${BE}/parallel-imports`));
+export const createBeParallelImport = (body) => api.post(`${BE}/parallel-imports`, body);
+export const getBeParallelImport = async (id) => beOne(await api.get(`${BE}/parallel-imports/${id}`));
+export const acceptBeParallelImport = (id) => api.post(`${BE}/parallel-imports/${id}/accept`, {});
+export const withdrawBeParallelImport = (id, reason) => api.post(`${BE}/parallel-imports/${id}/withdraw`, { reason });
+export const explainBeParallelDifference = (id, reason) =>
+  api.post(`${BE}/parallel-differences/${id}/explain`, { reason });
+export const acceptBeParallelDifference = (id) => api.post(`${BE}/parallel-differences/${id}/accept`, {});
+
 // Poland (ZP-PL-ENG-001) — routes in backend/app/modules/payroll/pl_org_router.py,
 // mounted under /api/payroll/poland. Every route acts on the caller's own
 // organisation and answers 404 while PL_TENANT_ONBOARDING_ENABLED is off.
