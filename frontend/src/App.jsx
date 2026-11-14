@@ -12,6 +12,7 @@ import TrialSignupPage from "./pages/TrialSignupPage";
 import RegistrationSuccessPage from "./pages/RegistrationSuccessPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import PublicFormPage from "./pages/PublicFormPage";
 import DashboardPage from "./pages/DashboardPage";
 import UsersPage from "./pages/UsersPage";
 import OrganizationsPage from "./pages/OrganizationsPage";
@@ -33,6 +34,7 @@ import {
   JPCompliancePage,
   NZCompliancePage,
   PLCompliancePage,
+  MYCompliancePage,
   BECompliancePage,
 } from "./pages/JurisdictionCompliance";
 import CaribbeanCompliancePage from "./pages/CaribbeanCompliancePage";
@@ -125,6 +127,8 @@ export default function App() {
       <Route path="/register/success" element={<RegistrationSuccessPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      {/* Public, no-login: the link employees get from "Send Template". */}
+      <Route path="/forms/fill/:token" element={<PublicFormPage />} />
 <Route element={<ProtectedRoute />}>
           {/* Billing — plan selection & Stripe Checkout landing pages */}
         <Route path="/register/plan-review" element={<PlanReviewPage />} />
@@ -246,6 +250,8 @@ export default function App() {
       <Route path="/super-admin/compliance/new-zealand/:state" element={<SuperAdminShell><NZCompliancePage /></SuperAdminShell>} />
       <Route path="/super-admin/compliance/poland" element={<SuperAdminShell><PLCompliancePage /></SuperAdminShell>} />
       <Route path="/super-admin/compliance/poland/:state" element={<SuperAdminShell><PLCompliancePage /></SuperAdminShell>} />
+      <Route path="/super-admin/compliance/malaysia" element={<SuperAdminShell><MYCompliancePage /></SuperAdminShell>} />
+      <Route path="/super-admin/compliance/malaysia/:state" element={<SuperAdminShell><MYCompliancePage /></SuperAdminShell>} />
       <Route path="/super-admin/compliance/belgium" element={<SuperAdminShell><BECompliancePage /></SuperAdminShell>} />
       <Route path="/super-admin/compliance/belgium/:state" element={<SuperAdminShell><BECompliancePage /></SuperAdminShell>} />
         {/* Caribbean production jurisdictions (2026-09-21) — each is

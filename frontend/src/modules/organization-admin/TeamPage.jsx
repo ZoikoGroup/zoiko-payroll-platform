@@ -207,6 +207,7 @@ function InviteModal({ onClose, onInvited, onError, existingEmails }) {
             <label className="block text-xs font-medium text-foreground-secondary mb-1">Phone (optional)</label>
             <input
               value={form.phone}
+              maxLength={40}
               onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
               className="w-full rounded-lg border border-border bg-background py-2 px-3 text-sm text-foreground"
             />

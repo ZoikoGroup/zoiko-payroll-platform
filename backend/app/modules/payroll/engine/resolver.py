@@ -175,6 +175,17 @@ def calculate_payroll(
             "Poland payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "MY" and key == "simple":
+        # Malaysia (ZP-MY-ENG-001): simple mode would silently skip PCB, EPF,
+        # PERKESO, EIS and HRD — each a separate obligation with its own base
+        # and schedule (spec §5-§8). Fail-closed: countries/malaysia.py.
+        from app.modules.payroll.engine.countries.malaysia import MYCalculationBlockedError
+
+        raise MYCalculationBlockedError(
+            "MY_SIMPLE_MODE_UNSUPPORTED",
+            "Malaysia payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     if (ctx.country or "").upper() == "BE" and key == "simple":
         # Belgium (ZP-BE-ENG-001 BE-004/BE-007): simple mode would silently skip
         # professional withholding and ONSS/RSZ, each a separate obligation with
@@ -313,6 +324,7 @@ def build_context_from_employee(
     japan_inputs: dict | None = None,
     nz_inputs: dict | None = None,
     poland_inputs: dict | None = None,
+    malaysia_inputs: dict | None = None,
     belgium_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
@@ -525,6 +537,9 @@ def build_context_from_employee(
         # Poland (ZP-PL-ENG-001): pl_* context fields resolved by
         # poland_service.calc_inputs as of the run's pay date (Phase 4).
         **(poland_inputs or {}),
+        # Malaysia (ZP-MY-ENG-001): my_* context fields resolved by
+        # malaysia_service.calc_inputs as of the run's pay date (Phase 5).
+        **(malaysia_inputs or {}),
         # Belgium (ZP-BE-ENG-001 Block A3): be_* context fields resolved by
         # belgium_service.calc_inputs as of the run's pay date.
         **(belgium_inputs or {}),

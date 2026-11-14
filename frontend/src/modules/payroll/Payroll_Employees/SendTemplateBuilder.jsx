@@ -1,14 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { CheckSquare, Square, Plus, Send, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, Plus, Send, TriangleAlert } from "lucide-react";
 import {
   getCustomFields, createCustomField, createUpdateForm, sendUpdateForm,
 } from "../../../service/payrollService";
 import { STANDARD_EMPLOYEE_FIELDS } from "./EmployeeBulkEditPanel";
-import EmployeeTable from "./EmployeeTable";
+import {
+  EmployeePicker, FieldChecklist, WizardError, WizardFooter, WizardSteps, sectionLabelClass, wizardInputClass,
+} from "./EmployeeWizardParts";
 import { useToast } from "../ToastContext";
-
-const inputClass =
-  "w-full rounded-[10px] border border-border bg-background px-3 py-2 text-[13px] text-foreground placeholder:text-foreground-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200";
 
 const CUSTOM_FIELD_TYPES = [
   { value: "text", label: "Text" },
@@ -16,6 +15,14 @@ const CUSTOM_FIELD_TYPES = [
   { value: "date", label: "Date" },
   { value: "select", label: "Dropdown" },
 ];
+
+const STEPS = [
+  { id: "employees", label: "Select employees" },
+  { id: "form", label: "Form details" },
+  { id: "review", label: "Review & send" },
+];
+
+const REVIEW_NAME_LIMIT = 10;
 
 function toFieldConfig(field, source) {
   return {
@@ -28,9 +35,15 @@ function toFieldConfig(field, source) {
   };
 }
 
-export default function SendTemplateBuilder({ employees, selectedIds, onClose, onSent, currencyInfo }) {
+// Step-by-step Send Template: pick employees -> name the form and choose the
+// fields they should fill in -> review -> send. The form is created only at
+// Send (it used to be saved as soon as the fields were chosen, leaving unused
+// forms behind when an admin backed out); a retry after a failed send reuses
+// it as long as the name and fields are unchanged.
+export default function SendTemplateBuilder({ employees, selectedIds, onClose, onSent, currencyInfo, orgCountryCode }) {
   const { addToast } = useToast();
-  const [step, setStep] = useState("build"); // build | send | done
+  const [step, setStep] = useState(0); // 0..2, then "done"
+  const [pickedIds, setPickedIds] = useState(() => new Set(selectedIds || []));
   const [formName, setFormName] = useState("");
   const [checkedStandard, setCheckedStandard] = useState({});
   const [customFields, setCustomFields] = useState([]);
@@ -40,19 +53,39 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
   const [newFieldType, setNewFieldType] = useState("text");
   const [newFieldOptions, setNewFieldOptions] = useState("");
   const [addingField, setAddingField] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [savedForm, setSavedForm] = useState(null);
-
-  const [pickedIds, setPickedIds] = useState(() => new Set(selectedIds || []));
+  // { form, signature } of the form created by the last send attempt.
+  const [created, setCreated] = useState(null);
   const [sending, setSending] = useState(false);
   const [sendResults, setSendResults] = useState(null);
+  const [showAllNames, setShowAllNames] = useState(false);
+  const headingRef = useRef(null);
 
   useEffect(() => {
     getCustomFields().then(setCustomFields).catch(() => {});
   }, []);
 
-  const targetIds = useMemo(() => [...pickedIds], [pickedIds]);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [step]);
+
+  const selectedEmployees = useMemo(
+    () => (employees || []).filter((e) => pickedIds.has(e.id)),
+    [employees, pickedIds],
+  );
+  const recipients = selectedEmployees.filter((e) => e.email);
+  const skipped = selectedEmployees.filter((e) => !e.email);
+
+  const fields = useMemo(() => [
+    ...STANDARD_EMPLOYEE_FIELDS.filter((f) => checkedStandard[f.key]).map((f) => toFieldConfig(f, "standard")),
+    ...customFields.filter((f) => checkedCustom[f.fieldKey]).map((f) => toFieldConfig(f, "custom")),
+  ], [checkedStandard, checkedCustom, customFields]);
+  const signature = JSON.stringify({ name: formName.trim(), fields });
+
+  function goTo(next) {
+    setError("");
+    setStep(next);
+  }
 
   function toggleStandard(key) {
     setCheckedStandard((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -66,20 +99,24 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
       setError("Enter a label for the new field.");
       return;
     }
+    const options = newFieldType === "select"
+      ? newFieldOptions.split(",").map((o) => o.trim()).filter(Boolean)
+      : null;
+    if (newFieldType === "select" && options.length === 0) {
+      setError("Enter at least one option for a dropdown field.");
+      return;
+    }
     setAddingField(true);
     setError("");
     try {
-      const options = newFieldType === "select"
-        ? newFieldOptions.split(",").map((o) => o.trim()).filter(Boolean)
-        : null;
-      const created = await createCustomField({ label: newFieldLabel.trim(), fieldType: newFieldType, selectOptions: options });
-      setCustomFields((prev) => [...prev, created]);
-      setCheckedCustom((prev) => ({ ...prev, [created.fieldKey]: true }));
+      const field = await createCustomField({ label: newFieldLabel.trim(), fieldType: newFieldType, selectOptions: options });
+      setCustomFields((prev) => [...prev, field]);
+      setCheckedCustom((prev) => ({ ...prev, [field.fieldKey]: true }));
       setNewFieldLabel("");
       setNewFieldType("text");
       setNewFieldOptions("");
       setShowAddField(false);
-      addToast?.(`Custom field "${created.label}" added — it now applies to every employee.`, "success");
+      addToast?.(`Custom field "${field.label}" added — it now applies to every employee.`, "success");
     } catch (err) {
       setError(err.message || "Could not add custom field.");
     } finally {
@@ -87,68 +124,122 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
     }
   }
 
-  async function handleSaveForm() {
-    setError("");
+  function handleContinueFromForm() {
     if (!formName.trim()) {
       setError("Give this form a name.");
       return;
     }
-    const fields = [
-      ...STANDARD_EMPLOYEE_FIELDS.filter((f) => checkedStandard[f.key]).map((f) => toFieldConfig(f, "standard")),
-      ...customFields.filter((f) => checkedCustom[f.fieldKey]).map((f) => toFieldConfig(f, "custom")),
-    ];
     if (fields.length === 0) {
-      setError("Select at least one field for the form to ask for.");
+      setError("Choose at least one field for employees to fill in.");
       return;
     }
-    setSaving(true);
-    try {
-      const form = await createUpdateForm({ name: formName.trim(), fields });
-      setSavedForm(form);
-      setStep("send");
-    } catch (err) {
-      setError(err.message || "Could not save the form.");
-    } finally {
-      setSaving(false);
-    }
+    goTo(2);
   }
 
   async function handleSend() {
-    if (targetIds.length === 0) {
-      setError("Select at least one employee to send this form to.");
+    setError("");
+    if (recipients.length === 0) {
+      setError("None of the selected employees has an email address on file. Go back to step 1 and choose others.");
       return;
     }
     setSending(true);
-    setError("");
     try {
-      const res = await sendUpdateForm(savedForm.id, targetIds);
-      setSendResults(res.results || []);
-      setStep("done");
-      const sentCount = (res.results || []).filter((r) => r.status === "sent").length;
-      addToast?.(`Sent to ${sentCount} of ${targetIds.length} employee(s).`, sentCount > 0 ? "success" : "error");
+      let form = created && created.signature === signature ? created.form : null;
+      if (!form) {
+        form = await createUpdateForm({ name: formName.trim(), fields });
+        setCreated({ form, signature });
+      }
+      const res = await sendUpdateForm(form.id, recipients.map((e) => e.id));
+      const results = res.results || [];
+      setSendResults(results);
+      const sentCount = results.filter((r) => r.status === "sent").length;
+      // Success only when every recipient's email actually went out.
+      const tone = sentCount === recipients.length ? "success" : sentCount > 0 ? "warning" : "error";
+      addToast?.(`Emailed ${sentCount} of ${recipients.length} employee(s).`, tone);
       onSent?.();
+      setStep("done");
     } catch (err) {
-      setError(err.message || "Could not send the form.");
+      setError(err.message || "Could not send the form. Please try again.");
     } finally {
       setSending(false);
     }
   }
 
+  function startOver() {
+    setPickedIds(new Set());
+    setFormName("");
+    setCheckedStandard({});
+    setCheckedCustom({});
+    setCreated(null);
+    setSendResults(null);
+    setShowAllNames(false);
+    goTo(0);
+  }
+
+  const nameOf = (id) => (employees || []).find((e) => e.id === id)?.name || `#${id}`;
+  const visibleRecipients = showAllNames ? recipients : recipients.slice(0, REVIEW_NAME_LIMIT);
+  const resultList = (status) => (sendResults || []).filter((r) => r.status === status);
+
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-[15px] font-bold text-foreground">Send Template</h3>
-        <p className="text-[13px] text-foreground-muted mt-1">
-          Build a form, email it to employees with a no-login link, and review what they submit before it changes anything.
-        </p>
+      <div className="space-y-4">
+        <div>
+          <h3 ref={headingRef} tabIndex={-1} className="text-[15px] font-bold text-foreground outline-none">
+            Send Template
+          </h3>
+          <p className="mt-1 text-[13px] text-foreground-muted">
+            Email selected employees a no-login form to update their details. You review every response before it changes
+            anything.
+          </p>
+        </div>
+        <WizardSteps steps={STEPS} current={step === "done" ? STEPS.length : step} />
       </div>
 
-      {step === "build" && (
+      {step === 0 && (
         <>
           <div>
-            <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Form name</span>
+            <span className={sectionLabelClass}>Who should receive the form?</span>
+            <EmployeePicker
+              employees={employees}
+              selectedIds={pickedIds}
+              onSelectionChange={setPickedIds}
+              currencyInfo={currencyInfo}
+              orgCountryCode={orgCountryCode}
+              showEmail
+            />
+            {skipped.length > 0 && (
+              <p className="mt-2 flex items-center gap-1.5 text-[12px] text-warning">
+                <TriangleAlert size={14} aria-hidden="true" />
+                {skipped.length} selected employee{skipped.length === 1 ? " has" : "s have"} no email and will be skipped.
+              </p>
+            )}
+          </div>
+          <WizardError>{error}</WizardError>
+          <WizardFooter
+            onCancel={onClose}
+            onNext={() => goTo(1)}
+            nextDisabled={recipients.length === 0}
+            nextLabel={
+              selectedEmployees.length === 0 ? "Select employees to continue"
+                : recipients.length === 0 ? "No selected employee has an email"
+                : `Continue with ${recipients.length} employee${recipients.length === 1 ? "" : "s"}`
+            }
+          />
+        </>
+      )}
+
+      {step === 1 && (
+        <>
+          <div className="rounded-[12px] border border-border bg-surface-muted px-4 py-2.5 text-[13px] text-foreground" aria-live="polite">
+            Sending to <strong>{recipients.length}</strong> employee{recipients.length === 1 ? "" : "s"} ·{" "}
+            <strong>{fields.length}</strong> field{fields.length === 1 ? "" : "s"} chosen
+          </div>
+
+          <div>
+            <label htmlFor="send-template-form-name" className={sectionLabelClass}>Form name</label>
             <input
-              className={inputClass}
+              id="send-template-form-name"
+              className={wizardInputClass}
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
               placeholder="e.g. Bank Details Update"
@@ -156,181 +247,215 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
           </div>
 
           <div>
-            <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Standard fields</span>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {STANDARD_EMPLOYEE_FIELDS.map((field) => {
-                const isChecked = Boolean(checkedStandard[field.key]);
-                return (
-                  <button
-                    type="button"
-                    key={field.key}
-                    onClick={() => toggleStandard(field.key)}
-                    className={`flex items-center gap-2.5 rounded-[12px] border px-3.5 py-3 text-left text-[13px] font-semibold transition-all duration-200 ${
-                      isChecked ? "border-primary bg-primary/5 text-primary" : "border-border text-foreground"
-                    }`}
-                  >
-                    {isChecked ? <CheckSquare size={16} className="flex-shrink-0" /> : <Square size={16} className="text-foreground-muted flex-shrink-0" />}
-                    {field.label}
-                  </button>
-                );
-              })}
-            </div>
+            <span className={sectionLabelClass}>Standard fields</span>
+            <FieldChecklist
+              fields={STANDARD_EMPLOYEE_FIELDS.map((f) => ({ key: f.key, label: f.label }))}
+              checked={checkedStandard}
+              onToggle={toggleStandard}
+            />
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Custom fields (permanent, org-wide)</span>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                Custom fields (organization-wide)
+              </span>
               <button
                 type="button"
                 onClick={() => setShowAddField((v) => !v)}
-                className="flex items-center gap-1 text-[12px] font-semibold text-primary hover:text-primary-hover transition-colors duration-200"
+                aria-expanded={showAddField}
+                className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[12px] font-semibold text-primary transition-colors duration-200 hover:text-primary-hover"
               >
-                <Plus size={13} /> Add field
+                <Plus size={13} aria-hidden="true" /> Add field
               </button>
             </div>
 
-            {customFields.length > 0 && (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 mb-3">
-                {customFields.map((field) => {
-                  const isChecked = Boolean(checkedCustom[field.fieldKey]);
-                  return (
-                    <button
-                      type="button"
-                      key={field.fieldKey}
-                      onClick={() => toggleCustom(field.fieldKey)}
-                      className={`flex items-center gap-2.5 rounded-[12px] border px-3.5 py-3 text-left text-[13px] font-semibold transition-all duration-200 ${
-                        isChecked ? "border-category-teal bg-category-teal/5 text-category-teal" : "border-border text-foreground"
-                      }`}
-                    >
-                      {isChecked ? <CheckSquare size={16} className="flex-shrink-0" /> : <Square size={16} className="text-foreground-muted flex-shrink-0" />}
-                      {field.label}
-                      <span className="ml-auto text-[10.5px] font-bold uppercase text-foreground-muted">{field.fieldType}</span>
-                    </button>
-                  );
-                })}
+            {customFields.length > 0 ? (
+              <div className="mb-3">
+                <FieldChecklist
+                  tone="teal"
+                  fields={customFields.map((f) => ({ key: f.fieldKey, label: f.label, hint: f.fieldType }))}
+                  checked={checkedCustom}
+                  onToggle={toggleCustom}
+                />
               </div>
+            ) : (
+              !showAddField && (
+                <p className="mb-3 text-[12.5px] text-foreground-muted">No custom fields yet. Use “Add field” to create one.</p>
+              )
             )}
 
             {showAddField && (
-              <div className="rounded-[12px] border border-border p-4 space-y-3">
+              <div className="space-y-3 rounded-[12px] border border-border p-4">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <input
-                    className={inputClass}
+                    aria-label="New field label"
+                    className={wizardInputClass}
                     placeholder="Field label, e.g. Emergency Contact"
                     value={newFieldLabel}
                     onChange={(e) => setNewFieldLabel(e.target.value)}
                   />
-                  <select className={inputClass} value={newFieldType} onChange={(e) => setNewFieldType(e.target.value)}>
-                    {CUSTOM_FIELD_TYPES.map((t) => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
-                    ))}
+                  <select aria-label="New field type" className={wizardInputClass} value={newFieldType} onChange={(e) => setNewFieldType(e.target.value)}>
+                    {CUSTOM_FIELD_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
                 </div>
                 {newFieldType === "select" && (
                   <input
-                    className={inputClass}
+                    aria-label="Dropdown options"
+                    className={wizardInputClass}
                     placeholder="Comma-separated options, e.g. Yes, No, Not sure"
                     value={newFieldOptions}
                     onChange={(e) => setNewFieldOptions(e.target.value)}
                   />
                 )}
+                <p className="text-[11px] text-foreground-muted">
+                  This field will show up for every employee in this organization going forward, not just on this form.
+                </p>
                 <div className="flex justify-end gap-2">
-                  <button type="button" onClick={() => setShowAddField(false)} className="text-[12.5px] font-semibold text-foreground-muted hover:text-foreground-muted px-3 py-1.5">
+                  <button type="button" onClick={() => setShowAddField(false)} className="px-3 py-1.5 text-[12.5px] font-semibold text-foreground-muted hover:text-foreground">
                     Cancel
                   </button>
                   <button
                     type="button"
                     onClick={handleAddCustomField}
                     disabled={addingField}
-                    className="rounded-[10px] bg-category-teal text-white px-4 py-1.5 text-[12.5px] font-bold hover:bg-category-teal transition-all duration-200 disabled:opacity-60"
+                    className="rounded-[10px] bg-category-teal px-4 py-1.5 text-[12.5px] font-bold text-white transition-all duration-200 hover:opacity-90 disabled:opacity-60"
                   >
                     {addingField ? "Adding…" : "Add field"}
                   </button>
                 </div>
-                <p className="text-[11px] text-foreground-muted">This field will show up for every employee in this organization going forward, not just on this form.</p>
               </div>
             )}
           </div>
 
-          {error && (
-            <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">{error}</div>
-          )}
-
-          <div className="flex justify-end gap-3 border-t border-border pt-6">
-            <button type="button" onClick={onClose} className="border border-border bg-surface-muted rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary">
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveForm}
-              disabled={saving}
-              className="bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-60"
-            >
-              {saving ? "Saving…" : "Continue to send"}
-            </button>
-          </div>
+          <WizardError>{error}</WizardError>
+          <WizardFooter
+            onCancel={onClose}
+            onPrevious={() => goTo(0)}
+            onNext={handleContinueFromForm}
+            nextDisabled={fields.length === 0 || !formName.trim()}
+            nextLabel="Review"
+          />
         </>
       )}
 
-      {step === "send" && (
+      {step === 2 && (
         <>
-          <div>
-            <span className="mb-2 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
-              Send &quot;{savedForm?.name}&quot; to — {pickedIds.size} selected
-            </span>
-            <EmployeeTable
-              employees={employees}
-              selectedIds={pickedIds}
-              onSelectionChange={setPickedIds}
-              currencyInfo={currencyInfo}
-            />
-            <p className="mt-2 text-[11.5px] text-foreground-muted">
-              Check the header box to select every employee. Employees without an email on file will be skipped. Each link expires in 7 days and can only be used once.
-            </p>
+          <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+            <div className="rounded-[14px] border border-border">
+              <div className="border-b border-border px-4 py-3">
+                <p className="text-[13px] font-bold text-foreground">“{formName.trim()}”</p>
+                <p className="text-[12px] text-foreground-muted">
+                  Asks for {fields.length} field{fields.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 px-4 py-3">
+                {fields.map((f) => (
+                  <span
+                    key={`${f.source}-${f.key}`}
+                    className={`rounded-full px-3 py-1 text-[12px] font-semibold ${
+                      f.source === "custom" ? "bg-category-teal/10 text-category-teal" : "bg-primary/10 text-primary"
+                    }`}
+                  >
+                    {f.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-[14px] border border-border">
+              <div className="border-b border-border px-4 py-3">
+                <p className="text-[13px] font-bold text-foreground">
+                  To {recipients.length} employee{recipients.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <ul className="max-h-72 divide-y divide-border overflow-y-auto">
+                {visibleRecipients.map((e) => (
+                  <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-[13px]">
+                    <span className="font-semibold text-foreground">{e.name}</span>
+                    <span className="text-foreground-muted">{e.email}</span>
+                  </li>
+                ))}
+              </ul>
+              {recipients.length > REVIEW_NAME_LIMIT && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllNames((v) => !v)}
+                  className="w-full border-t border-border px-4 py-2 text-left text-[12.5px] font-semibold text-primary hover:text-primary-hover"
+                >
+                  {showAllNames ? "Show fewer" : `Show all ${recipients.length}`}
+                </button>
+              )}
+            </div>
           </div>
-
-          {error && (
-            <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">{error}</div>
+          {skipped.length > 0 && (
+            <div className="rounded-[12px] border border-warning/30 bg-warning/10 px-4 py-3 text-[13px] text-warning">
+              <p className="font-semibold">Skipped — no email on file ({skipped.length}):</p>
+              <p className="mt-0.5">{skipped.map((e) => e.name).join(", ")}</p>
+            </div>
           )}
-
-          <div className="flex justify-end gap-3 border-t border-border pt-6">
-            <button type="button" onClick={() => setStep("build")} className="border border-border bg-surface-muted rounded-[12px] px-5 py-2.5 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:border-primary hover:text-primary">
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={sending}
-              className="flex items-center gap-1.5 bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)] disabled:opacity-60"
-            >
-              {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-              {sending ? "Sending…" : `Send to ${targetIds.length} employee${targetIds.length === 1 ? "" : "s"}`}
-            </button>
-          </div>
+          <p className="text-[12px] text-foreground-muted">
+            Each employee gets a personal link that works without signing in. It expires in 7 days and can be used once.
+            Responses wait in Review Submissions until you approve them.
+          </p>
+          <WizardError>{error}</WizardError>
+          <WizardFooter
+            onCancel={onClose}
+            onPrevious={() => goTo(1)}
+            onNext={handleSend}
+            busy={sending}
+            nextIcon={<Send size={14} aria-hidden="true" />}
+            nextLabel={sending ? "Sending…" : `Send to ${recipients.length} employee${recipients.length === 1 ? "" : "s"}`}
+          />
         </>
       )}
 
-      {step === "done" && (
+      {step === "done" && sendResults && (
         <>
-          <div className="rounded-[12px] bg-primary/10 px-4 py-3 text-[13px] text-primary border border-primary/20">
-            {sendResults.filter((r) => r.status === "sent").length} of {sendResults.length} sent successfully.
+          <div
+            className={`flex items-start gap-3 rounded-[12px] border px-4 py-3 text-[13px] ${
+              resultList("sent").length > 0 ? "border-primary/20 bg-primary/10 text-primary" : "border-warning/30 bg-warning/10 text-warning"
+            }`}
+          >
+            {resultList("sent").length > 0
+              ? <CheckCircle2 size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+              : <TriangleAlert size={18} className="mt-0.5 shrink-0" aria-hidden="true" />}
+            <div>
+              <p>
+                {resultList("sent").length > 0
+                  ? `${resultList("sent").length} of ${sendResults.length} emailed successfully.`
+                  : `No emails were sent (0 of ${sendResults.length}). See the reasons below.`}
+              </p>
+              {resultList("sent").filter((r) => r.note).map((r, i) => (
+                <p key={i} className="mt-1 text-[12px] text-foreground-muted">{r.note}</p>
+              ))}
+            </div>
           </div>
-          {sendResults.some((r) => r.status === "failed") && (
-            <div className="rounded-[12px] bg-error/10 px-4 py-3 text-[13px] text-error border border-error/20">
-              <p className="font-semibold mb-1">Could not send to:</p>
+          {resultList("not_delivered").length > 0 && (
+            <div className="rounded-[12px] border border-warning/20 bg-warning/10 px-4 py-3 text-[13px] text-warning">
+              <p className="mb-1 font-semibold">Not emailed:</p>
               <ul className="space-y-0.5">
-                {sendResults.filter((r) => r.status === "failed").map((r, i) => {
-                  const emp = employees.find((e) => e.id === r.employeeId);
-                  return <li key={i}>{emp?.name || `#${r.employeeId}`} — {r.reason}</li>;
-                })}
+                {resultList("not_delivered").map((r, i) => (
+                  <li key={i}>{nameOf(r.employeeId)}{r.email ? ` (${r.email})` : ""} — {r.reason}</li>
+                ))}
               </ul>
             </div>
           )}
-          <div className="flex justify-end border-t border-border pt-6">
-            <button type="button" onClick={onClose} className="bg-primary rounded-[12px] px-5 py-2.5 text-[13px] font-bold text-white transition-all duration-200 hover:bg-primary-hover shadow-[0_2px_8px_rgba(25,197,138,0.3)]">
-              Done
-            </button>
-          </div>
+          {resultList("failed").length > 0 && (
+            <div className="rounded-[12px] border border-error/20 bg-error/10 px-4 py-3 text-[13px] text-error">
+              <p className="mb-1 font-semibold">Could not send to:</p>
+              <ul className="space-y-0.5">
+                {resultList("failed").map((r, i) => (
+                  <li key={i}>{nameOf(r.employeeId)}{r.email ? ` (${r.email})` : ""} — {r.reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {skipped.length > 0 && (
+            <p className="text-[12.5px] text-foreground-muted">
+              Skipped (no email on file): {skipped.map((e) => e.name).join(", ")}.
+            </p>
+          )}
+          <WizardFooter onCancel={startOver} cancelLabel="Send another form" onNext={onClose} nextLabel="Done" />
         </>
       )}
     </div>

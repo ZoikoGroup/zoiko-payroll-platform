@@ -229,6 +229,33 @@ def _html_to_text(html: str) -> str:
 _BASE_WRAPPER_NAME = "_base_wrapper.html"
 
 
+# What send_approval_email actually did with the most recent message on this
+# thread/context. It returns True for "nothing to report" cases too (no SMTP
+# host configured -> mock log; local/test mode -> outbound blocked), which is
+# right for most callers but let a caller that reports delivery to a user
+# (Send Template) claim "sent" when no email left the server.
+DISPOSITION_SMTP = "smtp"
+DISPOSITION_MOCKED = "mocked_no_smtp_host"
+DISPOSITION_BLOCKED = "blocked_outbound"
+DISPOSITION_LOCAL_SANDBOX = "local_sandbox"
+_last_send_disposition: ContextVar[Optional[dict]] = ContextVar("email_last_send_disposition", default=None)
+
+
+def reset_last_send_disposition() -> None:
+    _last_send_disposition.set(None)
+
+
+def last_send_disposition() -> Optional[dict]:
+    """{"disposition": DISPOSITION_*, "redirected_to": sandbox address or None}
+    for the most recent send_approval_email call, or None if none ran."""
+    return _last_send_disposition.get()
+
+
+def frontend_base_url() -> str:
+    """Public base URL of the SPA, for links placed in emails."""
+    return _frontend_base()
+
+
 def _frontend_base() -> str:
     from app.config import settings as _cfg
 
@@ -536,9 +563,11 @@ def send_approval_email(
     if reply_to:
         msg["Reply-To"] = reply_to
 
+    redirected_to = email if email != original_recipient else None
     if not smtp["host"]:
         logger.info(f"[email] SMTP_HOST not configured. Mock sending email to {email} | subject='{subject}' | template={template_name}")
         logger.debug(f"[email] Body content:\n{_html_to_text(body)}")
+        _last_send_disposition.set({"disposition": DISPOSITION_MOCKED, "redirected_to": redirected_to})
         return True
 
     # F-10: test and local modes never reach the configured server (whatever
@@ -546,8 +575,13 @@ def send_approval_email(
     target = outbound.smtp_target(smtp)
     if target is None:
         outbound.log_blocked("email", email, f"subject='{subject}' | template={template_name}")
+        _last_send_disposition.set({"disposition": DISPOSITION_BLOCKED, "redirected_to": redirected_to})
         return True
     smtp = target
+    _last_send_disposition.set({
+        "disposition": DISPOSITION_LOCAL_SANDBOX if smtp.get("sandbox") else DISPOSITION_SMTP,
+        "redirected_to": redirected_to,
+    })
 
     try:
         port = int(smtp["port"])
@@ -655,7 +689,7 @@ def send_update_form_invite_email(
     from_email, from_display_name = _resolve_payroll_send_identity(organization_id, db=db)
     return send_approval_email(email, "update_form_invite.html", {
         "subject": f"{form_name} — Action Requested | Zoiko Payroll",
-        "preheader": f"Seniority review form {form_name} needs your input.",
+        "preheader": f"{form_name} needs your input.",
         "heading": "Action requested on your payroll details",
         "employee_name": employee_name,
         "form_name": form_name,

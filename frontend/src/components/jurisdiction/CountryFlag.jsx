@@ -319,6 +319,22 @@ function Japan() {
   );
 }
 
+function Malaysia() {
+  // Simplified: red / white stripes with the blue canton and a yellow crescent and star.
+  const stripes = Array.from({ length: 14 }, (_, i) => (
+    <rect key={i} y={(16 / 14) * i} width="24" height={16 / 14} fill={i % 2 === 0 ? "#CC0001" : "#fff"} />
+  ));
+  return (
+    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
+      {stripes}
+      <rect width="12" height={(16 / 14) * 8} fill="#010066" />
+      <circle cx="4.6" cy="4.6" r="3" fill="#FC0" />
+      <circle cx="5.5" cy="4.6" r="2.5" fill="#010066" />
+      <circle cx="8.6" cy="4.6" r="1.3" fill="#FC0" />
+    </svg>
+  );
+}
+
 function Poland() {
   return (
     <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
@@ -375,7 +391,7 @@ const FLAGS = {
   IN: India, US: UnitedStates, UK: UnitedKingdom, GB: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
   BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
 PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
-  NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica, JP: Japan, NZ: NewZealand, PL: Poland, SA: SaudiArabia,
+  NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica, JP: Japan, NZ: NewZealand, PL: Poland, MY: Malaysia, SA: SaudiArabia,
   BE: Belgium,
 };
 

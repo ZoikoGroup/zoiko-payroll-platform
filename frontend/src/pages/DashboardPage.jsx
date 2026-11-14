@@ -141,8 +141,10 @@ export default function DashboardPage() {
         setCharts(chartsRes);
       })
       .catch((err) => {
-        // 401/403 means the session is invalid — clear it and go to login.
-        if (err.status === 401 || err.status === 403) {
+        // 401 means the session is invalid — clear it and go to login. A 403
+        // is a missing permission (or a cancelled step-up), not a dead
+        // session, so it is shown as an error instead of signing the user out.
+        if (err.status === 401) {
           clearSession();
           navigate("/login", { replace: true });
           return;

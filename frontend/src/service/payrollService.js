@@ -1461,11 +1461,11 @@ export const rejectFormSubmission = async (id, notes) => {
 
 // Public, unauthenticated — reached via the emailed link, no token attached.
 export const getPublicForm = async (token) => {
-  return await api.get(`/api/public/employee-forms/${token}`, { auth: false });
+  return await api.get(`/api/payroll/public/employee-forms/${token}`, { auth: false });
 };
 
 export const submitPublicForm = async (token, values) => {
-  return await api.post(`/api/public/employee-forms/${token}/submit`, { values }, { auth: false });
+  return await api.post(`/api/payroll/public/employee-forms/${token}/submit`, { values }, { auth: false });
 };
 
 // ── Report Generation (template-driven) ──────────────────────────────
@@ -3364,3 +3364,83 @@ export const downloadPayslipTemplateSamplePdf = async (payload) => {
 // PDF design-match import: analyse (nothing stored), then create a draft from the confirmed analysis.
 export const analyzePayslipPdf = (formData) => api.post(`${PST}/import-pdf/analyze`, formData);
 export const createPayslipTemplateFromPdf = (payload) => api.post(`${PST}/import-pdf/create`, payload);
+
+// ── Malaysia (ZP-MY-ENG-001 Phase 8b) — organisation statutory setup ──────
+// Every route lives in my_org_router (/api/payroll/malaysia), dormant (404)
+// until Malaysia onboarding is enabled. Versioned records are captured as
+// DRAFT and count only after a second user approves them; identifiers go to
+// the encrypted vault and come back masked.
+const MYP = "/api/payroll/malaysia";
+const myList = (res) => (Array.isArray(res) ? res : res?.data || []);
+const myOne = (res) => res?.data ?? res;
+export const getMySummary = async () => myOne(await api.get(`${MYP}/summary`));
+export const listMyRegistrations = async () => myList(await api.get(`${MYP}/employer-registrations`));
+export const createMyRegistration = (body) => api.post(`${MYP}/employer-registrations`, body);
+export const approveMyRegistration = (id) => api.post(`${MYP}/employer-registrations/${id}/approve`, {});
+export const verifyMyRegistration = (id, outcome, reason) =>
+  api.post(`${MYP}/employer-registrations/${id}/verify`, { outcome, reason });
+export const listMyWorkerProfiles = async (employeeId) =>
+  myList(await api.get(`${MYP}/employees/${employeeId}/worker-profiles`));
+export const createMyWorkerProfile = (employeeId, body) => api.post(`${MYP}/employees/${employeeId}/worker-profiles`, body);
+export const approveMyWorkerProfile = (id) => api.post(`${MYP}/worker-profiles/${id}/approve`, {});
+export const listMyAssignments = async (employeeId) =>
+  myList(await api.get(`${MYP}/employees/${employeeId}/work-assignments`));
+export const createMyAssignment = (employeeId, body) => api.post(`${MYP}/employees/${employeeId}/work-assignments`, body);
+export const approveMyAssignment = (id) => api.post(`${MYP}/work-assignments/${id}/approve`, {});
+export const listMyDeclarations = async (employeeId) =>
+  myList(await api.get(`${MYP}/employees/${employeeId}/declarations`));
+export const createMyDeclaration = (employeeId, body) => api.post(`${MYP}/employees/${employeeId}/declarations`, body);
+export const approveMyDeclaration = (id) => api.post(`${MYP}/declarations/${id}/approve`, {});
+export const withdrawMyDeclaration = (id, reason, effectiveTo) =>
+  api.post(`${MYP}/declarations/${id}/withdraw`, { reason, effectiveTo });
+export const listMyIdentifiers = async (employeeId) => myList(await api.get(`${MYP}/employees/${employeeId}/identifiers`));
+export const createMyIdentifier = (employeeId, identifierType, value) =>
+  api.post(`${MYP}/employees/${employeeId}/identifiers`, { identifierType, value });
+export const requestMyIdentifierReveal = (vaultId, reason) =>
+  api.post(`${MYP}/identifiers/${vaultId}/reveal-request`, { reason });
+export const approveMyIdentifierReveal = (vaultId) => api.post(`${MYP}/identifiers/${vaultId}/reveal-approve`, {});
+export const revealMyIdentifier = async (vaultId) => myOne(await api.post(`${MYP}/identifiers/${vaultId}/reveal`, {}));
+export const deleteMyIdentifier = (vaultId, reason) => api.post(`${MYP}/identifiers/${vaultId}/delete`, { reason });
+export const getMyLeaveEntitlement = async (employeeId, asOf) =>
+  myOne(await api.get(`${MYP}/employees/${employeeId}/leave-entitlement`, { params: { asOf } }));
+export const getMyHolidays = async (employeeId, year) =>
+  myOne(await api.get(`${MYP}/employees/${employeeId}/holidays`, { params: { year } }));
+export const listMyEmployerEvents = async (employeeId) =>
+  myList(await api.get(`${MYP}/employees/${employeeId}/employer-events`));
+export const createMyEmployerEvent = (employeeId, body) => api.post(`${MYP}/employees/${employeeId}/employer-events`, body);
+export const submitMyEmployerEvent = (id, submittedOn, receiptRef, evidenceRef) =>
+  api.post(`${MYP}/employer-events/${id}/submitted`, { submittedOn, receiptRef, evidenceRef });
+export const cancelMyEmployerEvent = (id, reason) => api.post(`${MYP}/employer-events/${id}/cancel`, { reason });
+export const openMyClearanceHold = (eventId, openedOn, reason) =>
+  api.post(`${MYP}/employer-events/${eventId}/clearance-hold`, { openedOn, reason });
+export const requestMyHoldRelease = (holdId, releaseReference, evidenceRef) =>
+  api.post(`${MYP}/clearance-holds/${holdId}/release-request`, { releaseReference, evidenceRef });
+export const approveMyHoldRelease = (holdId) => api.post(`${MYP}/clearance-holds/${holdId}/release-approve`, {});
+export const getMyEmployeeSummary = async (employeeId) => myOne(await api.get(`${MYP}/employees/${employeeId}/summary`));
+export const getMyRunPreflight = async (runId) => myList(await api.get(`${MYP}/runs/${runId}/preflight`));
+// Phase 9 — filings, settlements, reconciliation, journal (no live transport, D-5).
+export const listMyFilings = async (params = {}) => myList(await api.get(`${MYP}/filings`, { params }));
+export const getMyFiling = async (id) => myOne(await api.get(`${MYP}/filings/${id}`));
+export const rebuildMyRunFilings = async (runId) => myList(await api.post(`${MYP}/filings/rebuild/${runId}`, {}));
+export const buildMyAnnualFilings = async (year, legalEntityId) =>
+  myList(await api.post(`${MYP}/filings/annual`, { year, legalEntityId }));
+export const buildMyEventFiling = (eventId) => api.post(`${MYP}/employer-events/${eventId}/filing`, {});
+export const approveMyFiling = (id) => api.post(`${MYP}/filings/${id}/approve`, {});
+export const recordMyFilingSubmission = (id, submissionRef) =>
+  api.post(`${MYP}/filings/${id}/submission`, { submissionRef });
+export const recordMyFilingResponse = (id, body) => api.post(`${MYP}/filings/${id}/response`, body);
+export const listMySettlements = async (params = {}) => myList(await api.get(`${MYP}/settlements`, { params }));
+export const recordMySettlementPayment = (id, body) => api.post(`${MYP}/settlements/${id}/payments`, body);
+export const reconcileMySettlement = async (id) => myOne(await api.post(`${MYP}/settlements/${id}/reconcile`, {}));
+export const listMyVariances = async (params = {}) => myList(await api.get(`${MYP}/variances`, { params }));
+export const resolveMyVariance = (id, reason) => api.post(`${MYP}/variances/${id}/resolve`, { reason });
+export const getMyRunJournal = async (runId) => myOne(await api.get(`${MYP}/runs/${runId}/journal`));
+// Phase 10 — parallel payroll cycles (gate G5).
+export const listMyParallelImports = async () => myList(await api.get(`${MYP}/parallel-imports`));
+export const createMyParallelImport = (body) => api.post(`${MYP}/parallel-imports`, body);
+export const getMyParallelImport = async (id) => myOne(await api.get(`${MYP}/parallel-imports/${id}`));
+export const acceptMyParallelImport = (id) => api.post(`${MYP}/parallel-imports/${id}/accept`, {});
+export const withdrawMyParallelImport = (id, reason) => api.post(`${MYP}/parallel-imports/${id}/withdraw`, { reason });
+export const explainMyParallelDifference = (id, reason) =>
+  api.post(`${MYP}/parallel-differences/${id}/explain`, { reason });
+export const acceptMyParallelDifference = (id) => api.post(`${MYP}/parallel-differences/${id}/accept`, {});

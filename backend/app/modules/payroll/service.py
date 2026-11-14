@@ -1545,7 +1545,7 @@ def check_jurisdiction_readiness(
 # Mexico (ZP-MX-ENG-001): MX-003 — only the signed, effective-dated canonical
 # pack; an org-synced copy would drop the row-level dates that separate the
 # January and February UMA rows (MX-004).
-_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "BE")
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")
 # Countries whose payroll refuses an AMBIGUOUS resolution: more than one Active
 # canonical tax pack covering the payroll date (activation already forbids the
 # overlap; this keeps a corrupted / manually edited database from silently
@@ -8180,6 +8180,13 @@ def _refuse_nz_generic_statutory_edit(pack) -> None:
             "Poland statutory rows are edited and signed in Compliance → Poland (a source document and a change "
             "reason are required; signing needs a second Super Admin)."
         )
+    # Malaysia (ZP-MY-ENG-001 Phase 8a): the same governance through my_super_admin
+    # (row by row, or the statutory workbook).
+    if pack is not None and pack.jurisdiction_country == "MY":
+        raise BadRequestException(
+            "Malaysia statutory rows are edited and signed in Compliance → Malaysia or loaded with the statutory "
+            "workbook (a source document and a change reason are required; signing needs a second Super Admin)."
+        )
     # Belgium (ZP-BE-ENG-001): never through the generic editor, which carries
     # no source; rows are edited and signed in the governed Belgium console.
     if pack is not None and pack.jurisdiction_country == "BE":
@@ -8624,24 +8631,24 @@ def se_activation_blockers(db: Session, pack) -> list:
 # Display names for the per-country opt-in activation gates below.
 _GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong",
                              "CH": "Switzerland", "SA": "Saudi Arabia", "NL": "Netherlands", "MX": "Mexico", "BR": "Brazil",
-                             "ZA": "South Africa", "PL": "Poland",
+                             "ZA": "South Africa", "PL": "Poland", "MY": "Malaysia",
                              "BE": "Belgium"}
 # Phase 6.0 F2: countries whose pack approver may never be its activator.
-_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "BE")  # MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")  # MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose pack approver may never be the Super Admin who
 # last edited / submitted the pack (refused at the Approve step itself).
-_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose REFUSED pack / report-template governance
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
-_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 # Singapore completion programme (2026-09-29): countries whose TAX packs follow
 # an explicit transition graph. Before this, only the Active-downgrade guard
 # applied, so a Superseded / Retired Singapore pack could be moved back to
 # Draft, edited through upsert and re-activated, and any string was accepted
 # as a status. Same per-country opt-in pattern as the constants above; other
 # countries keep their existing free lifecycle (DE keeps its downgrade guard).
-_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 TAX_PACK_TRANSITIONS = {
     "Draft": ("In Review", "QA", "Approved", "Active"),
     "In Review": ("Draft", "QA", "Approved", "Active"),
@@ -9823,6 +9830,29 @@ _MX_CONCEPT_KINDS = (
     ("PTU", "PTU"), ("SEPARATION_SENIORITY_PREMIUM", "Seniority Premium"),
     ("SEPARATION_PAYMENT", "Separation Payment"), ("SEPARATION_INDEMNITY", "Indemnity"),
 )
+# Malaysia (ZP-MY-ENG-001 Phase 11): paths into the frozen my_calculation_snapshot
+# (engine/countries/malaysia.py my_result; amounts are decimal strings). The
+# national obligations are reported separately — never one "statutory" figure.
+_MY_SNAP = "my_calculation_snapshot."
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["MY"] = {
+    _MY_SNAP + "my_pcb": ("PCB / MTD", "currency", True),
+    _MY_SNAP + "my_epf.employee": ("EPF (Employee)", "currency", True),
+    _MY_SNAP + "my_epf.employer": ("EPF (Employer)", "currency", True),
+    _MY_SNAP + "my_socso.employee": ("SOCSO (Employee)", "currency", True),
+    _MY_SNAP + "my_socso.employer": ("SOCSO (Employer)", "currency", True),
+    _MY_SNAP + "my_eis.employee": ("EIS (Employee)", "currency", True),
+    _MY_SNAP + "my_eis.employer": ("EIS (Employer)", "currency", True),
+    _MY_SNAP + "my_hrd": ("HRD Levy (Employer)", "currency", True),
+    _MY_SNAP + "my_employee_total": ("Total Employee Contributions", "currency", True),
+    _MY_SNAP + "my_employer_total": ("Total Employer Cost", "currency", True),
+    _MY_SNAP + "my_net": ("Net Pay (statutory)", "currency", True),
+    _MY_SNAP + "trace.bases.EPF.base": ("EPF Wage", "currency", True),
+    _MY_SNAP + "trace.bases.SOCSO.base": ("SOCSO Wage", "currency", True),
+    _MY_SNAP + "trace.bases.EIS.base": ("EIS Wage", "currency", True),
+    _MY_SNAP + "trace.bases.HRD.base": ("HRD Levy Base", "currency", True),
+    _MY_SNAP + "trace.labour.territory.territory": ("Labour Territory", "text", False),
+    _MY_SNAP + "trace.labour.territory.holidayState": ("Holiday State", "text", False),
+}
 _PAYSLIP_ITEM_JSON_FIELD_CATALOG["MX"] = {
     _MX_SNAP + "gross": ("Gross Pay", "currency", True),
     _MX_SNAP + "days_paid": ("Days Paid", "text", False),
@@ -10102,6 +10132,12 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     "SA": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "gross_pay", "employee_pension", "social_security", "total_deductions",
            "employer_pension", "employer_social_security", "employer_occupational_hazard", "net_pay"],
+    # Malaysia (ZP-MY-ENG-001 Phase 11): PCB -> tds; EPF employer ->
+    # employer_pension; SOCSO + EIS employer -> employer_esi; HRD levy ->
+    # employer_payroll_tax. Employee EPF / SOCSO / EIS are in catalog "MY".
+    "MY": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "basic_salary", "gross_pay", "tds", "total_deductions",
+           "employer_pension", "employer_esi", "employer_payroll_tax", "net_pay"],
 }
 _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 
@@ -10112,6 +10148,12 @@ _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 # changes which PayslipItem column is read, only the label shown in the
 # Report Template field picker.
 _PAYSLIP_FIELD_LABEL_OVERRIDES = {
+    "MY": {
+        "tds": "PCB / MTD",
+        "employer_pension": "EPF (Employer)",
+        "employer_esi": "SOCSO + EIS (Employer)",
+        "employer_payroll_tax": "HRD Levy (Employer)",
+    },
     "CA": {
         "esi": "Employment Insurance (Employee)",
         "employer_esi": "Employment Insurance (Employer)",
@@ -20484,6 +20526,13 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             jurisdiction_hooks.call("PL", "calc_inputs", db, None, emp, None, as_of=pay_date)
             if emp_country == "PL" else None
         )
+        # Malaysia (ZP-MY-ENG-001 Phase 5): inputs in force on the run's pay date,
+        # and the pay period (MY-006) the preview context does not otherwise carry.
+        my_inputs = (
+            jurisdiction_hooks.call("MY", "calc_inputs", db, None, emp, None, as_of=pay_date,
+                                    period=(period_start, period_end) if period_start and period_end else None)
+            if emp_country == "MY" else None
+        )
         # Belgium (ZP-BE-ENG-001 Block A3): inputs in force on the run's pay
         # date; without a pay date the preview refuses.
         be_inputs = (
@@ -20682,6 +20731,7 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
             japan_inputs=japan_inputs,
             nz_inputs=nz_inputs,
             poland_inputs=pl_inputs,
+            malaysia_inputs=my_inputs,
             belgium_inputs=be_inputs,
             mexico_inputs=mexico_inputs,
             brazil_inputs=brazil_inputs,
@@ -25740,6 +25790,12 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         jurisdiction_hooks.call("PL", "calc_inputs", db, run, employee, resolved_pack)
         if country == "PL" else None
     )
+    # Malaysia (ZP-MY-ENG-001 Phase 5): inputs in force on the run's pay date and
+    # the run's pay period (MY-006).
+    my_inputs = (
+        jurisdiction_hooks.call("MY", "calc_inputs", db, run, employee, resolved_pack)
+        if country == "MY" else None
+    )
     # Belgium (ZP-BE-ENG-001 Block A3): inputs in force on the run's pay date.
     be_inputs = (
         jurisdiction_hooks.call("BE", "calc_inputs", db, run, employee, resolved_pack)
@@ -25875,6 +25931,7 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         netherlands_inputs=netherlands_inputs,
         japan_inputs=japan_inputs,
         poland_inputs=pl_inputs,
+        malaysia_inputs=my_inputs,
         belgium_inputs=be_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
@@ -25919,6 +25976,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     if pl_inputs is not None:
         from app.modules.payroll import poland_service as _pl_service
         pl_frozen = _pl_service.pl_freeze_context(ctx, calculation_mode)
+    my_frozen = None
+    if my_inputs is not None:
+        from app.modules.payroll import malaysia_service as _my_service
+        my_frozen = _my_service.my_freeze_context(ctx, calculation_mode)
     be_frozen = None
     if be_inputs is not None:
         from app.modules.payroll import belgium_service as _be_service
@@ -26105,6 +26166,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # replay or correction uses. None for every non-PL payslip.
         "pl_calculation_snapshot": (_pl_service.pl_payslip_snapshot(result, frozen=pl_frozen)
                                     if pl_frozen is not None else None),
+        # Malaysia (ZP-MY-ENG-001 Phase 5): my_result plus the frozen context a
+        # replay or correction uses. None for every non-MY payslip.
+        "my_calculation_snapshot": (_my_service.my_payslip_snapshot(result, frozen=my_frozen)
+                                    if my_frozen is not None else None),
         # Belgium (ZP-BE-ENG-001 Block A3): be_result plus the frozen context a
         # replay or correction uses. None for every non-BE payslip.
         "be_calculation_snapshot": (_be_service.be_payslip_snapshot(result, frozen=be_frozen)
@@ -32631,6 +32696,30 @@ def _reverse_run_ytd_postings(db: Session, run: PayrollRun) -> None:
             _ytd_reverse_legacy(db, item)
 
 
+def _clear_pending_sg_liabilities(db: Session, payslip_item_ids: list, what: str) -> None:
+    """Australia Payday Super: every real AU payslip owns a
+    SuperGuaranteeLiability row whose payslip_item_id FK has no ON DELETE
+    rule, so deleting the payslip without clearing it first is refused by
+    Postgres (surfaced to users as an HTTP 500). A PENDING row is only the
+    recorded liability of a not-yet-final payslip and goes with it. Any
+    row past PENDING (SUBMITTED/RECEIVED/FAILED/EXCEPTION) is a recorded
+    statutory fact — refuse (409) instead of silently erasing it."""
+    if not payslip_item_ids:
+        return
+    rows = (db.query(SuperGuaranteeLiability)
+            .filter(SuperGuaranteeLiability.payslip_item_id.in_(payslip_item_ids))
+            .all())
+    progressed = [r for r in rows if (r.status or "PENDING").upper() != "PENDING"]
+    if progressed:
+        db.rollback()
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            f"Cannot delete this {what}: {len(progressed)} Super Guarantee liability record(s) "
+            f"have already been {progressed[0].status.lower()} and must be kept for audit."))
+    for row in rows:
+        db.delete(row)
+    db.flush()
+
+
 def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     run = get_payroll_run_by_id(db, run_id, organization_id)
     if getattr(run, "mx_approval_fingerprint", None):
@@ -32648,6 +32737,11 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
             "This is a Hong Kong correction run — reject the correction instead (its record is kept for audit)."))
     _deleted_run_period = run.period_label
     _deleted_run_code = run.run_code
+    _clear_pending_sg_liabilities(
+        db,
+        [pid for (pid,) in db.query(PayslipItem.id).filter(PayslipItem.payroll_run_id == run.id).all()],
+        "payroll run",
+    )
     # Year-to-date accumulators (every YTD jurisdiction): reverse what every
     # payslip in this run posted before the run itself is deleted — never
     # leave a stale total or a dangling last_updated_payslip_id pointing at a
@@ -32658,13 +32752,19 @@ def delete_payroll_run(db: Session, run_id: int, organization_id: int = None):
     except YtdPostingConflict as exc:
         db.rollback()
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Cannot delete this payroll run: {exc}")
-    # Clean up dependent reports or unlinked foreign references before deleting run
+    # Clean up dependent reports before deleting the run. A report that a
+    # filing record (e.g. an STP/RTI submission) still references cannot be
+    # removed — previously this failure was swallowed and resurfaced as an
+    # HTTP 500 at commit; report it as a clear 409 instead.
     try:
         db.query(GeneratedReport).filter(GeneratedReport.payroll_run_id == run.id).delete(synchronize_session=False)
-    except Exception:
-        pass
-    db.delete(run)
-    db.commit()
+        db.delete(run)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
+            "Cannot delete this payroll run: one of its generated reports is referenced by a "
+            "filing or submission record."))
     _notify_payroll_run_deleted(db, _deleted_run_period or "", _deleted_run_code or "", organization_id, run_id=run_id)
 
 
@@ -32729,6 +32829,7 @@ def delete_payslip(db: Session, payslip_id: int, organization_id: int = None):
     except YtdPostingConflict as exc:
         db.rollback()
         raise HTTPException(http_status.HTTP_409_CONFLICT, detail=f"Cannot delete this payslip: {exc}")
+    _clear_pending_sg_liabilities(db, [item.id], "payslip")
     db.delete(item)
     db.commit()
     _notify_payslip_deleted(db, item, run, organization_id)
@@ -32873,6 +32974,11 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     pl_inputs = (
         jurisdiction_hooks.call("PL", "calc_inputs", db, run, employee, None)
         if country == "PL" else None
+    )
+    # Malaysia (ZP-MY-ENG-001 Phase 5): the same pay-date inputs as a generated run.
+    my_inputs = (
+        jurisdiction_hooks.call("MY", "calc_inputs", db, run, employee, None)
+        if country == "MY" else None
     )
     # Belgium (ZP-BE-ENG-001 Block A3): the same pay-date inputs as a generated run.
     be_inputs = (
@@ -33025,6 +33131,7 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
         netherlands_inputs=netherlands_inputs,
         japan_inputs=japan_inputs,
         poland_inputs=pl_inputs,
+        malaysia_inputs=my_inputs,
         belgium_inputs=be_inputs,
         mexico_inputs=mexico_inputs,
         brazil_inputs=brazil_inputs,
@@ -33058,6 +33165,10 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
     if pl_inputs is not None:
         from app.modules.payroll import poland_service as _pl_service
         pl_frozen = _pl_service.pl_freeze_context(ctx, calculation_mode)
+    my_frozen = None
+    if my_inputs is not None:
+        from app.modules.payroll import malaysia_service as _my_service
+        my_frozen = _my_service.my_freeze_context(ctx, calculation_mode)
     be_frozen = None
     if be_inputs is not None:
         from app.modules.payroll import belgium_service as _be_service
@@ -33112,6 +33223,8 @@ def add_payslip_item(db: Session, run_id: int, data: PayslipItemCreate, organiza
                                  if nz_frozen is not None else None),
         pl_calculation_snapshot=(_pl_service.pl_payslip_snapshot(calc, frozen=pl_frozen)
                                  if pl_frozen is not None else None),
+        my_calculation_snapshot=(_my_service.my_payslip_snapshot(calc, frozen=my_frozen)
+                                 if my_frozen is not None else None),
         be_calculation_snapshot=(_be_service.be_payslip_snapshot(calc, frozen=be_frozen)
                                  if be_frozen is not None else None),
         mx_calculation_snapshot=(_mx_run.payslip_snapshot(calc.mx_result, mexico_inputs)
@@ -33826,6 +33939,11 @@ def _serialize_payslip(item: PayslipItem, run: PayrollRun, country: str = None) 
         "plCalculationSnapshot": (
             {k: v for k, v in (item.pl_calculation_snapshot or {}).items() if k != "frozenContext"}
             if (item.country_code or country) == "PL" and item.pl_calculation_snapshot else None),
+        # Malaysia (ZP-MY-ENG-001): the frozen my_result; the frozen inputs
+        # (frozenContext) stay server-side.
+        "myCalculationSnapshot": (
+            {k: v for k, v in (item.my_calculation_snapshot or {}).items() if k != "frozenContext"}
+            if (item.country_code or country) == "MY" and item.my_calculation_snapshot else None),
         # Belgium (ZP-BE-ENG-001 Block A3): the frozen be_result; the frozen
         # inputs (frozenContext) stay server-side.
         "beCalculationSnapshot": (
@@ -34206,6 +34324,9 @@ def payslip_line_items(data: dict, country: str):
         # being read as "this country's income tax happened to be zero".
         "BB": "PAYE", "DO": "ISR", "GY": "PAYE", "JM": "PAYE", "TT": "PAYE",
         "PR": "Hacienda Withholding",
+        # Poland / Malaysia route the monthly income-tax advance through `tds`
+        # (engine/countries/poland.py, malaysia.py): PIT advance / PCB (MTD).
+        "PL": "PIT Advance (zaliczka)", "MY": "PCB / MTD",
     }
     # US: federal/state/local are stored (and shown here) as three separate
     # lines instead of one combined "Federal Withholding" figure — `tds`
@@ -34315,6 +34436,11 @@ def payslip_line_items(data: dict, country: str):
             v = float(data.get(key, 0) or 0)
             if v > 0:
                 deduction_items.append((lbl, v))
+    # Poland / Malaysia: the employee social contributions travel in the
+    # frozen calculation snapshot (pl_employee_total / my_employee_total), not
+    # in the generic pf / esi / pension fields — itemise them from it, so the
+    # lines add up to the stored total deductions (PCB / PIT is the tds line).
+    deduction_items.extend(_snapshot_deduction_lines(data, country))
     # Employer-side contributions (Employer PF/ESI/Social Security/Medicare/
     # Pension/NI) are deliberately NOT shown here — this is the employee's
     # own payslip, and none of these are amounts deducted from the
@@ -34324,6 +34450,35 @@ def payslip_line_items(data: dict, country: str):
     # visible to admins on the Payroll Register / Run Detail views, which
     # are internal cost-review screens, not the payslip document itself.
     return earnings_items, deduction_items
+
+
+_PL_ZUS_EMPLOYEE_LABELS = {"EMERYTALNE": "ZUS Pension (emerytalne)", "RENTOWE": "ZUS Disability (rentowe)",
+                           "CHOROBOWE": "ZUS Sickness (chorobowe)"}
+
+
+def _snapshot_deduction_lines(data: dict, country: str) -> list:
+    """[(label, amount)] of the employee contributions a Poland / Malaysia
+    payslip keeps in its frozen snapshot (zero lines omitted). Read as stored —
+    never recomputed. Empty for every other country or without a snapshot."""
+    def amount(value) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    lines = []
+    if country == "MY":
+        snap = data.get("myCalculationSnapshot") or {}
+        for label, key in (("EPF (Employee)", "my_epf"), ("SOCSO (Employee)", "my_socso"),
+                           ("EIS (Employee)", "my_eis")):
+            lines.append((label, amount((snap.get(key) or {}).get("employee"))))
+    elif country == "PL":
+        snap = data.get("plCalculationSnapshot") or {}
+        for key, value in sorted((snap.get("pl_zus_employee") or {}).items()):
+            lines.append((_PL_ZUS_EMPLOYEE_LABELS.get(str(key).upper(), f"ZUS ({key})"), amount(value)))
+        lines.append(("Health contribution (zdrowotna)", amount(snap.get("pl_health"))))
+        lines.append(("PPK (Employee)", sum(amount(v) for v in (snap.get("pl_ppk_employee") or {}).values())))
+    return [(label, value) for label, value in lines if value > 0]
 
 
 def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: int = None) -> bytes:
@@ -37476,6 +37631,10 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             from app.modules.payroll.poland_dormancy import entering_poland_refusal
             if code and entering_poland_refusal(row.jurisdiction_country, code, row.organization_id):
                 code = None
+            # Malaysia (ZP-MY-ENG-001 Phase 0 dormancy): never back-fill INTO Malaysia.
+            from app.modules.payroll.malaysia_dormancy import entering_malaysia_refusal
+            if code and entering_malaysia_refusal(row.jurisdiction_country, code, row.organization_id):
+                code = None
             # Belgium (ZP-BE-ENG-001 Phase 1 dormancy): never back-fill INTO Belgium.
             from app.modules.payroll.belgium_dormancy import entering_belgium_refusal
             if code and entering_belgium_refusal(row.jurisdiction_country, code, row.organization_id):
@@ -37594,6 +37753,12 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     pl_refusal = entering_poland_refusal(row.jurisdiction_country, incoming_country, row.organization_id)
     if pl_refusal:
         raise BadRequestException(pl_refusal)
+    # Malaysia (ZP-MY-ENG-001 Phase 0): choosing Malaysia is refused the same
+    # way while Malaysia onboarding is disabled.
+    from app.modules.payroll.malaysia_dormancy import entering_malaysia_refusal
+    my_refusal = entering_malaysia_refusal(row.jurisdiction_country, incoming_country, row.organization_id)
+    if my_refusal:
+        raise BadRequestException(my_refusal)
     # Belgium (ZP-BE-ENG-001 Phase 1): choosing Belgium is refused the same way
     # while Belgium onboarding is disabled.
     from app.modules.payroll.belgium_dormancy import entering_belgium_refusal

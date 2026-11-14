@@ -127,6 +127,13 @@ def test_deploy_drift_filter_explains_every_object():
     os.chdir(BACKEND)
     try:
         tables, columns = pending_objects(PARENT)
+        # Malaysia's chain (13574b996ccf ... f793f6074257) joins Belgium's at merge
+        # cf348b09db2b, so its objects are pending from here too. They are explained by
+        # the Malaysia migration tests; from Belgium's head only Malaysia is pending.
+        my_tables, my_columns = pending_objects("8a1f5ef9fa5d")
+        tables = tables - my_tables
+        columns = {t: c - my_columns.get(t, set()) for t, c in columns.items()}
+        columns = {t: c for t, c in columns.items() if c}
     finally:
         os.chdir(here)
     assert tables == set(NEW_TABLES) | set(LATER_TABLES)

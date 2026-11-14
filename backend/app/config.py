@@ -124,6 +124,20 @@ class Settings(BaseSettings):
     # Poland duplicate-detection key (32 bytes, Secret Manager). Never rotated:
     # fingerprints must stay comparable across keyring rotations.
     PL_IDENTIFIER_FINGERPRINT_KEY: str = ""
+    # Malaysia dormancy switch (ZP-MY-ENG-001 Phase 0, malaysia_dormancy). False =
+    # no organisation can become Malaysian and the Malaysia APIs refuse. Leave
+    # UNSET in production until the MY release gates G1-G7 are signed.
+    MY_TENANT_ONBOARDING_ENABLED: bool = False
+    # Canary: comma-separated organisation ids that may use Malaysia while the
+    # flag above is off (only once Malaysia is AVAILABLE). Empty by default.
+    MY_CANARY_ORG_IDS: str = ""
+    # Malaysia identifier vault (ZP-MY-ENG-001 §15, my_identifiers - Phase 2):
+    # NRIC / passport / TIN / EPF / SOCSO / work-pass numbers are encrypted at
+    # rest. JSON object mapping key version -> 32-byte key from Secret Manager.
+    # Empty = the vault refuses. No fallback to PAYROLL_SECRET_KEY.
+    MY_IDENTIFIER_KEYRING: str = ""
+    # Malaysia duplicate-detection key (32 bytes, Secret Manager). Never rotated.
+    MY_IDENTIFIER_FINGERPRINT_KEY: str = ""
     # HMAC key for Mexican identity tokens (RFC / CURP / NSS) on the statutory
     # profile (Phase 4b, Q7). Required outside development/test once Mexico is
     # enabled — there is NO derived fallback in production. Secret Manager.

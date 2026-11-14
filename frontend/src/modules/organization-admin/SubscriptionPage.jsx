@@ -358,17 +358,27 @@ function daysUntil(iso) {
   return Math.ceil(diff / 86400000);
 }
 
+// The API serialises prices as decimal strings ("50.00"), so compare numbers.
+function formatPrice(amount) {
+  if (amount === null || amount === undefined || amount === "") return null;
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return null;
+  if (n === 0) return "Free";
+  return `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
+}
+
 function getPriceLabel(plan) {
-  if (plan.monthly_price_usd === 0) return "Free";
-  if (plan.monthly_price_usd > 0) return `$${plan.monthly_price_usd}`;
-  return "Contact";
+  return formatPrice(plan.monthly_price_usd) || "Contact";
 }
 
 // Plans in ascending order — anything after the current one is an upgrade.
 const PLAN_ORDER = ["CORE", "PROFESSIONAL", "BUSINESS", "ENTERPRISE"];
 
 // How the subscription is paid for (billing_authority is a route, not an interval).
+// A TRIALING subscription with a card on file is a paid plan whose first
+// charge is deferred — not a free trial.
 function billingLabel(subscription) {
+  if (subscription.status === "TRIALING" && subscription.stripe_subscription_id) return "Card on file";
   if (subscription.status === "TRIALING") return "Free trial";
   if (subscription.billing_authority === "ENTERPRISE_ORDER_FORM") return "Per contract";
   if (subscription.billing_authority === "ZOIKO_ONE_BUNDLE") return "Zoiko One";
@@ -569,6 +579,9 @@ export default function SubscriptionPage() {
   const [subscription, setSubscription] = useState(null);
   const [entitlements, setEntitlements] = useState({});
   const [countryUsage, setCountryUsage] = useState(null);
+  // Plan facts resolved by the server (plan_code, plan_name, monthly_price_usd,
+  // is_trial, has_payment_method, intended_plan_code).
+  const [planInfo, setPlanInfo] = useState({});
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -599,6 +612,12 @@ export default function SubscriptionPage() {
         if (subData?.subscription) {
           setSubscription(subData.subscription);
           setEntitlements(subData.entitlement_flags || {});
+          setPlanInfo({
+            planCode: subData.plan_code || null,
+            planName: subData.plan_name || null,
+            monthlyPrice: subData.monthly_price_usd ?? null,
+            intendedPlanCode: subData.intended_plan_code || null,
+          });
         }
         setCountryUsage(subData?.country_usage || null);
         setPlans(plansData || []);
@@ -725,12 +744,18 @@ export default function SubscriptionPage() {
   const hasSubscription = !!subscription;
   const isCancelled = subscription?.status === "CANCELLED";
 
+  // The server resolves the plan (by code, not by joining on plan_version_id,
+  // which stopped matching after the plan-version migration).
   const currentPlan = hasSubscription
-    ? plans.find((p) => p.plan_version_id === subscription.plan_version_id) || null
+    ? plans.find((p) => p.code === planInfo.planCode)
+      || plans.find((p) => p.plan_version_id === subscription.plan_version_id)
+      || null
     : null;
   // Enterprise has no published plan version — its signed contract is the plan.
   const isEnterprise = subscription?.billing_authority === "ENTERPRISE_ORDER_FORM";
-  const currentPlanCode = currentPlan?.code || (isEnterprise ? "ENTERPRISE" : null);
+  const currentPlanCode = planInfo.planCode || currentPlan?.code || (isEnterprise ? "ENTERPRISE" : null);
+  const currentPlanName = planInfo.planName || currentPlan?.name || (isEnterprise ? "Enterprise" : currentPlanCode);
+  const currentPrice = formatPrice(planInfo.monthlyPrice ?? currentPlan?.monthly_price_usd);
   const daysLeft = daysUntil(subscription?.current_period_end);
   const isTrial = subscription?.status === "TRIALING";
   const cancelScheduled = !!subscription?.cancel_requested_at;
@@ -738,9 +763,15 @@ export default function SubscriptionPage() {
   // Only a Stripe-billed subscription has a card to manage or a Stripe
   // subscription to cancel (the cancel endpoint 404s without one).
   const hasStripe = !!subscription?.stripe_subscription_id;
+  // No-card evaluation vs. a chosen paid plan whose first charge is deferred.
+  const isEvaluation = isTrial && !hasStripe;
+  const isDeferredStart = isTrial && hasStripe;
+  const intendedPlan = planInfo.intendedPlanCode && planInfo.intendedPlanCode !== currentPlanCode
+    ? plans.find((p) => p.code === planInfo.intendedPlanCode) || { code: planInfo.intendedPlanCode, name: planInfo.intendedPlanCode }
+    : null;
   const currentRank = PLAN_ORDER.indexOf(currentPlanCode);
   const hasHigherPlan = plans.some((p) => PLAN_ORDER.indexOf(p.code) > currentRank);
-  const showPlanActions = isTrial || hasHigherPlan || hasStripe;
+  const showPlanActions = isEvaluation || hasHigherPlan || hasStripe;
   // A null country limit means unlimited, so it stays in the list.
   // null is "on" for a feature and "unlimited" for a limit, so it is listed.
   const entitlementList = Object.entries(entitlements).filter(
@@ -793,11 +824,12 @@ export default function SubscriptionPage() {
               />
               <StatTile
                 glowColor="var(--success)"
-                label={isTrial ? "Trial Days Left" : "Days Remaining"}
+                label={isEvaluation ? "Trial Days Left" : isDeferredStart ? "Days Until First Charge" : "Days Remaining"}
                 value={daysLeft !== null ? Math.max(0, daysLeft) : "—"}
                 sub={
                   !subscription.current_period_end ? "No end date"
-                    : isTrial ? `Trial ends ${periodEnd}`
+                    : isEvaluation ? `Trial ends ${periodEnd}`
+                    : isDeferredStart ? `First charge on ${periodEnd}`
                     : cancelScheduled ? `Plan ends ${periodEnd}`
                     : hasStripe ? `Renews ${periodEnd}`
                     : `Until ${periodEnd}`
@@ -807,7 +839,9 @@ export default function SubscriptionPage() {
                 glowColor="var(--amber)"
                 label="Billing"
                 value={billingLabel(subscription)}
-                sub={isTrial ? "No card needed during the evaluation" : hasStripe ? "Charged to your card" : "How this plan is billed"}
+                sub={isEvaluation ? "No card needed during the evaluation"
+                  : isDeferredStart ? `Nothing is charged until ${periodEnd}`
+                  : hasStripe ? "Charged to your card" : "How this plan is billed"}
               />
             </div>
 
@@ -818,35 +852,54 @@ export default function SubscriptionPage() {
                   <CreditCard size={16} />
                 </div>
                 <div>
-                  <p className="panel-title">Current Plan</p>
-                  <p className="panel-sub">Your active subscription details</p>
+                  <p className="panel-title">{isEvaluation ? "Your Evaluation" : "Current Plan"}</p>
+                  <p className="panel-sub">
+                    {isEvaluation ? "Full access during your free evaluation" : "Your active subscription details"}
+                  </p>
                 </div>
               </div>
 
               <div style={{ padding: "0 24px 24px" }}>
                 <div className="plan-badge">
                   <Zap size={12} />
-                  {currentPlanCode || "UNKNOWN"} Plan
+                  {isEvaluation ? "Free Evaluation" : `${currentPlanCode || "Unknown"} Plan`}
                 </div>
                 <h2 className="plan-name">
-                  {currentPlan?.name || (isEnterprise ? "Enterprise" : currentPlanCode || "No Plan")}
+                  {isEvaluation
+                    ? `${currentPlanName || "Professional"} features`
+                    : currentPlanName || "No Plan"}
                 </h2>
                 <p className="plan-price">
-                  {isEnterprise ? "Per contract" : (
+                  {isEnterprise ? "Per contract" : isEvaluation ? (
                     <>
-                      {currentPlan ? getPriceLabel(currentPlan) : "—"}
-                      <span>/month</span>
+                      $0<span> during your evaluation</span>
+                    </>
+                  ) : (
+                    <>
+                      {currentPrice || "—"}
+                      {currentPrice && currentPrice !== "Free" ? <span>/month</span> : null}
                     </>
                   )}
                 </p>
                 <p className="plan-period">
                   {subscription.current_period_start && subscription.current_period_end
-                    ? `${formatDate(subscription.current_period_start)} — ${formatDate(subscription.current_period_end)}`
+                    ? `${isEvaluation ? "Evaluation period" : isDeferredStart ? "Starts" : "Billing period"}: ${
+                      isDeferredStart
+                        ? formatDate(subscription.current_period_end)
+                        : `${formatDate(subscription.current_period_start)} — ${formatDate(subscription.current_period_end)}`
+                    }`
                     : "Billing period details unavailable"}
                 </p>
-                {isTrial && (
+                {isEvaluation && (
                   <p className="plan-period">
-                    Free during your evaluation. Choose a plan before {periodEnd} to keep running payroll.
+                    {intendedPlan
+                      ? `You selected the ${intendedPlan.name || intendedPlan.code} plan. Your evaluation includes all ${currentPlanName || "Professional"} features; choose a plan before ${periodEnd} to keep running payroll.`
+                      : `No card needed. Choose a plan before ${periodEnd} to keep running payroll.`}
+                  </p>
+                )}
+                {isDeferredStart && (
+                  <p className="plan-period">
+                    Your card is on file. The first charge of {currentPrice || "your plan price"} is on {periodEnd}.
                   </p>
                 )}
                 {cancelScheduled && (
@@ -933,9 +986,9 @@ export default function SubscriptionPage() {
                     <ArrowRight size={16} />
                   </div>
                   <div>
-                    <p className="panel-title">{isTrial ? "Keep payroll running" : hasHigherPlan ? "Need more power?" : "Manage your plan"}</p>
+                    <p className="panel-title">{isEvaluation ? "Keep payroll running" : hasHigherPlan ? "Need more power?" : "Manage your plan"}</p>
                     <p className="panel-sub">
-                      {isTrial
+                      {isEvaluation
                         ? "Choose a plan before your evaluation ends"
                         : hasHigherPlan
                           ? "Upgrade your plan for more countries, entities and features"
@@ -945,9 +998,9 @@ export default function SubscriptionPage() {
                 </div>
                 <div style={{ padding: "16px 24px 20px" }}>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    {(isTrial || hasHigherPlan) && (
+                    {(isEvaluation || hasHigherPlan) && (
                       <button className="btn btn-primary" onClick={() => navigate("/billing/plans")}>
-                        <Zap className="w-3.5 h-3.5" /> {isTrial ? "Choose a Plan" : "Upgrade Plan"}
+                        <Zap className="w-3.5 h-3.5" /> {isEvaluation ? "Choose a Plan" : "Upgrade Plan"}
                       </button>
                     )}
                     {hasStripe && (
@@ -1015,7 +1068,12 @@ export default function SubscriptionPage() {
             </div>
             <div className="plans-grid">
               {plans.map((plan) => {
-                const isCurrent = plan.code === currentPlanCode;
+                // During a no-card evaluation nothing is "current" yet: the
+                // evaluated plan stays choosable (it used to be marked
+                // "Current Plan" with no button, so it couldn't be bought).
+                const isCurrent = !isEvaluation && plan.code === currentPlanCode;
+                const isEvaluated = isEvaluation && plan.code === currentPlanCode;
+                const isSelected = isEvaluation && plan.code === planInfo.intendedPlanCode;
                 const Icon = PLAN_ICONS[plan.code] || Package;
                 const isLoading = checkoutLoading === plan.code;
 
@@ -1041,15 +1099,16 @@ export default function SubscriptionPage() {
                       </div>
                       <div>
                         <div className="plan-opt-name">{plan.name || plan.code}</div>
-                        {isCurrent && (
+                        {(isCurrent || isEvaluated || isSelected) && (
                           <span style={{ fontSize: 10, fontWeight: 700, color: "var(--success)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                            Current Plan
+                            {isCurrent ? "Current Plan" : isSelected ? "You selected" : "Evaluating"}
                           </span>
                         )}
                       </div>
                     </div>
                     <div className="plan-opt-price">
-                      {getPriceLabel(plan)}<span>/mo</span>
+                      {getPriceLabel(plan)}
+                      {getPriceLabel(plan).startsWith("$") ? <span>/mo{isEvaluation ? " after trial" : ""}</span> : null}
                     </div>
                     <div className="plan-opt-features">
                       {(() => {

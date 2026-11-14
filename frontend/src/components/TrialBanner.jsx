@@ -7,17 +7,20 @@ const DAY_MS = 86400000;
 const WARN_BELOW_DAYS = 7;
 const STATUS_REFRESH_MS = 60000;
 
-function daysRemaining(iso, now = Date.now()) {
-  if (!iso) return null;
-  const end = new Date(iso).getTime();
-  if (Number.isNaN(end)) return null;
-  return Math.ceil((end - now) / DAY_MS);
-}
-
+// The API sends naive UTC timestamps (no "Z"); JS would read those as local
+// time and shift the trial end by the viewer's UTC offset (5.5h in IST).
 function dateMs(iso) {
   if (!iso) return null;
-  const value = new Date(iso).getTime();
+  const text = String(iso);
+  const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(text);
+  const value = new Date(hasZone || !text.includes("T") ? text : `${text}Z`).getTime();
   return Number.isNaN(value) ? null : value;
+}
+
+function daysRemaining(iso, now = Date.now()) {
+  const end = dateMs(iso);
+  if (end === null) return null;
+  return Math.ceil((end - now) / DAY_MS);
 }
 
 export default function TrialBanner() {
@@ -66,17 +69,25 @@ export default function TrialBanner() {
   const isClosed = statusStr === "CLOSED";
   const isWarning = displayDays !== null && displayDays <= WARN_BELOW_DAYS && !isGrace && !isClosed;
 
-  // Calculate progress percentage
+  // Progress percentage from the same rounded day counts the banner shows,
+  // so "7 Days Left" reads 23% of 30 - not 22% from exact milliseconds.
   let percentRemaining = 100;
   if (expiresIso) {
-    const totalMs = startMs !== null && endMs !== null ? Math.max(1, endMs - startMs) : 1;
-    const remainingMs = endMs !== null ? Math.max(0, endMs - now) : 0;
-    percentRemaining = isGrace || isClosed ? 0 : Math.min(100, Math.max(0, (remainingMs / totalMs) * 100));
+    if (isGrace || isClosed) percentRemaining = 0;
+    else if (displayDays !== null && trialLengthDays) {
+      percentRemaining = Math.min(100, Math.max(0, (displayDays / trialLengthDays) * 100));
+    } else {
+      const totalMs = startMs !== null && endMs !== null ? Math.max(1, endMs - startMs) : 1;
+      const remainingMs = endMs !== null ? Math.max(0, endMs - now) : 0;
+      percentRemaining = Math.min(100, Math.max(0, (remainingMs / totalMs) * 100));
+    }
   }
+  // A paid plan is already chosen, only its first charge is deferred.
+  const planChosen = !!trial.has_payment_method && !isGrace && !isClosed;
 
   // Format expiry date string
-  const expiryFormatted = expiresIso
-    ? new Date(expiresIso).toLocaleDateString(undefined, {
+  const expiryFormatted = endMs !== null
+    ? new Date(endMs).toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
         year: "numeric",
@@ -148,7 +159,7 @@ export default function TrialBanner() {
               ) : (
                 <Sparkles size={14} className="shrink-0" />
               )}
-              <span>{isGrace ? "Read-Only Mode" : isClosed ? "Trial Closed" : "Evaluation"}</span>
+              <span>{isGrace ? "Read-Only Mode" : isClosed ? "Trial Closed" : planChosen ? "Plan Chosen" : "Evaluation"}</span>
             </div>
 
             <div className="text-xs sm:text-sm font-medium">
@@ -156,6 +167,11 @@ export default function TrialBanner() {
                 <span>Your evaluation period has ended — workspace is now read-only.</span>
               ) : isClosed ? (
                 <span>Your evaluation workspace has closed. Upgrade to restore access.</span>
+              ) : planChosen ? (
+                <span>
+                  Your plan is set up and your card is on file. Nothing is charged until{" "}
+                  <strong>{expiryFormatted || "your evaluation ends"}</strong>.
+                </span>
               ) : (
                 <span>
                   You are on{trialLengthDays ? ` a ${trialLengthDays}-day` : " an"} evaluation of <strong>Zoiko Payroll</strong>.
@@ -165,7 +181,7 @@ export default function TrialBanner() {
           </div>
 
           <Link
-            to="/billing/plans"
+            to={planChosen ? "/organization-admin/subscription" : "/billing/plans"}
             style={{
               background: theme.btnBg,
               color: theme.btnText,
@@ -173,7 +189,7 @@ export default function TrialBanner() {
             }}
             className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-4 py-1.5 text-xs font-bold transition-all hover:opacity-95 hover:shadow-md active:scale-95"
           >
-            <span>Choose Plan</span>
+            <span>{planChosen ? "View Subscription" : "Choose Plan"}</span>
             <ArrowRight size={14} />
           </Link>
         </div>
