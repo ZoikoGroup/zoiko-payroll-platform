@@ -30921,6 +30921,18 @@ def _bulk_row_failure(row_ref: dict, exc: Exception) -> dict:
     return failure
 
 
+def _validate_employee_contact(fields: dict, country_code: Optional[str], current=None) -> dict:
+    """Server-side email / phone rules for every employee write path (see
+    contact_validation): normalises the values in place and turns a failure
+    into a 400 with a message the user can act on."""
+    from app.modules.payroll.contact_validation import ContactValidationError, normalize_employee_contact
+
+    try:
+        return normalize_employee_contact(fields, country_code, current=current)
+    except ContactValidationError as exc:
+        raise BadRequestException(str(exc)) from None
+
+
 def _resolve_employee_country(db: Session, organization_id: int, explicit_country_code: Optional[str]) -> str:
     """Per-employee jurisdiction override if given, else the org's default —
     same fallback pattern _resolve_employee_calc_inputs uses for payroll
@@ -30997,6 +31009,7 @@ def create_employee(db: Session, data: EmployeeCreate, organization_id: int) -> 
     country_code = _resolve_employee_country(db, organization_id, employee_data.get("country_code"))
     _assert_employee_country_entitled(db, organization_id, country_code)
     employee_data["country_code"] = country_code
+    _validate_employee_contact(employee_data, country_code)
     _fill_missing_basic_hra(employee_data, db, organization_id)
     strategy = get_employee_validation_strategy(country_code)
     employee_data["compliance_fields"] = strategy.validate(employee_data.get("compliance_fields") or {})
@@ -31081,6 +31094,9 @@ def update_employee(db: Session, employee_id: int, data: EmployeeUpdate, organiz
         updates["compliance_fields"] = strategy.validate(merged_compliance)
         updates["country_code"] = country_code
         updates.update(strategy.sync_to_columns(updates["compliance_fields"]))
+    # Only a changed email / phone is checked: an unchanged legacy value
+    # saved before these rules does not block editing other fields.
+    _validate_employee_contact(updates, country_code, current=employee)
 
     check_duplicate_employee_identifiers(
         db, organization_id,
@@ -31454,6 +31470,7 @@ def bulk_create_employees(db: Session, data: BulkEmployeeRequest, organization_i
         _fill_missing_basic_hra(mapped, db, organization_id)
         try:
             _assert_employee_country_entitled(db, organization_id, country_code)
+            _validate_employee_contact(mapped, country_code)
             strategy = get_employee_validation_strategy(country_code)
             mapped["compliance_fields"] = strategy.validate(row.complianceFields or {})
             mapped.update(strategy.sync_to_columns(mapped["compliance_fields"]))
@@ -31575,6 +31592,7 @@ def bulk_update_employees(db: Session, data: BulkEmployeeRequest, organization_i
                 mapped["compliance_fields"] = strategy.validate(merged_compliance)
                 mapped["country_code"] = country_code
                 mapped.update(strategy.sync_to_columns(mapped["compliance_fields"]))
+            _validate_employee_contact(mapped, mapped.get("country_code", employee.country_code), current=employee)
             check_duplicate_employee_identifiers(
                 db, organization_id,
                 mapped.get("email", employee.email),

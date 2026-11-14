@@ -3,6 +3,11 @@ import { useParams } from "react-router-dom";
 import { CheckCircle2, Clock, Loader2, TriangleAlert } from "lucide-react";
 import { getPublicForm, submitPublicForm } from "../service/payrollService";
 import zoikoPayrollLogo from "../assets/zoiko-payroll-logo.png";
+import { emailError, phoneError } from "../utils/contactValidation";
+
+// Standard email / phone answers get the same checks as everywhere else
+// employee contact details are entered (the server re-checks them).
+const isContactField = (field) => field.source !== "custom" && (field.key === "email" || field.key === "phone");
 
 // Public, no-login page an employee reaches from the "Send Template" email
 // link (/forms/fill/:token). The token is the only credential: it identifies
@@ -33,7 +38,11 @@ function FieldInput({ field, value, onChange }) {
   return (
     <input
       id={id}
-      type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
+      type={field.type === "number" ? "number"
+        : field.type === "date" ? "date"
+        : field.source !== "custom" && field.key === "email" ? "email"
+        : field.source !== "custom" && field.key === "phone" ? "tel"
+        : "text"}
       step={field.type === "number" ? "any" : undefined}
       value={value}
       required={field.required}
@@ -82,6 +91,14 @@ export default function PublicFormPage() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    for (const f of (form.fields || []).filter(isContactField)) {
+      const v = values[f.key];
+      const problem = f.key === "email" ? emailError(v) : phoneError(v);
+      if (problem) {
+        setSubmitError(`${f.label}: ${problem}`);
+        return;
+      }
+    }
     setSubmitting(true);
     setSubmitError("");
     try {
