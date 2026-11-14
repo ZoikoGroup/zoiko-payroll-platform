@@ -4985,6 +4985,186 @@ async def malaysia_workbook_apply(pack_row_id: int, file: UploadFile = File(...)
     return result
 
 
+# ── Belgium signing console (ZP-BE-ENG-001 Phase 3A; spec §14 content control) ──
+# Same governance as Poland: governed edit / sign with a source and a reason,
+# editors refused as approver (statutory_editors hook), activation refused while
+# any row is empty, unsourced or unsigned. onss_employer rows are reference only.
+@router.get("/compliance/belgium/packs", summary="Belgium packs with their status")
+def belgium_packs(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    return be_super_admin.list_packs(db)
+
+
+@router.get("/compliance/belgium/packs/{pack_row_id}/configuration",
+            summary="Every canonical row of a Belgium pack, grouped by catalogue group")
+def belgium_configuration(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                          db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    return be_super_admin.configuration(db, pack_row_id)
+
+
+@router.get("/compliance/belgium/packs/{pack_row_id}/signing-status",
+            summary="What still blocks activation of a Belgium pack (pending, empty, unsourced, editors)")
+def belgium_signing_status(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    return be_super_admin.signing_status(db, pack_row_id)
+
+
+@router.put("/compliance/belgium/configuration/rows/{kind}/{row_id}",
+            summary="Governed edit / sign of one Belgium statutory row (editable packs; source + reason; audited)")
+def belgium_configuration_update_row(kind: str, row_id: int, payload: dict = Body(...),
+                                     current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.update_row(db, kind, row_id, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.post("/compliance/belgium/seed-draft",
+             summary="Create the Draft Belgium pack from the catalogue (only while none exists; reason; audited)")
+def belgium_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                       db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.seed_draft(db, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.get("/compliance/belgium/decisions", summary="Belgium owner / specialist decisions (gaps register)")
+def belgium_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_service
+
+    return belgium_service.owner_decisions(db)
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/authority-examples",
+             summary="Register an official / independent worked example on a Belgium pack (reviewed source; G1)")
+def belgium_add_authority_example(pack_row_id: int, payload: dict = Body(...),
+                                  current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.add_authority_example(db, pack_row_id, payload, getattr(current_user, "id", None))
+    db.commit()
+    return result
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/slab-rows/{key}",
+             summary="Add a row to a Belgium band / formula / table key (editable packs; source + reason; audited)")
+def belgium_add_slab_row(pack_row_id: int, key: str, payload: dict = Body(...),
+                         current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.add_slab_row(db, pack_row_id, key, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.delete("/compliance/belgium/configuration/slab-rows/{row_id}",
+               summary="Retire (delete) a Belgium band / formula / table row of a Draft pack (reason; audited)")
+def belgium_retire_slab_row(row_id: int, reason: Optional[str] = Query(None),
+                            current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.retire_slab_row(db, row_id, {"reason": reason}, current_user.id)
+    db.commit()
+    return result
+
+
+@router.put("/compliance/belgium/joint-committees/{agreement_id}/wage-modules",
+            summary="Set the wage scales / overtime override of a DRAFT Belgian Joint Committee agreement (audited)")
+def belgium_set_agreement_wage_modules(agreement_id: int, payload: dict = Body(...),
+                                       current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    result = be_super_admin.set_agreement_wage_modules(db, agreement_id, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.get("/compliance/belgium/joint-committees",
+            summary="Belgian Joint Committee packs with committee / sub-committee parsed from the agreement code")
+def belgium_joint_committees(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin
+
+    return be_super_admin.joint_committees(db)
+
+
+# ── Belgium Block C2: golden certification and release-gate readiness ───────
+@router.get("/compliance/belgium/packs/{pack_row_id}/golden-check",
+            summary="Replay the Belgium pack's authority examples exactly (read-only; G1)")
+def belgium_golden_check(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                         db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin, belgium_golden
+
+    return belgium_golden.be_golden_check(db, be_super_admin._pack(db, pack_row_id))
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/golden-certification",
+             summary="Record the Belgium golden-vector certification run (the shared certification the activation reads)")
+def belgium_golden_certification(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                                 db: Session = Depends(get_db)):
+    from app.modules.payroll import be_super_admin, belgium_golden
+
+    run, check = belgium_golden.record_be_golden_certification(db, be_super_admin._pack(db, pack_row_id),
+                                                               getattr(current_user, "id", None))
+    db.commit()
+    return {"runId": run.id, "status": run.status, "check": check}
+
+
+@router.get("/compliance/belgium/readiness", summary="Belgium release gates G1-G7 computed from evidence")
+def belgium_readiness_view(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_readiness
+
+    return belgium_readiness.be_readiness(db)
+
+
+# ── Belgium Block D3: content intake workbook and bulk signing ──────────────
+@router.get("/compliance/belgium/packs/{pack_row_id}/content-workbook",
+            summary="Export the Belgium content workbook (XLSX; content only, no personal data)")
+def belgium_content_workbook(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                             db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from app.modules.payroll import be_content_workbook
+
+    name, data = be_content_workbook.be_content_workbook_export(db, pack_row_id)
+    return Response(content=data,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/content-workbook/import",
+             summary="Import the Belgium content workbook into a Draft pack (dry run by default; never signs)")
+async def belgium_content_workbook_import(pack_row_id: int, file: UploadFile = File(...), reason: str = Form(...),
+                                          dry_run: bool = Query(True), current_user=Depends(get_current_super_admin),
+                                          db: Session = Depends(get_db)):
+    from app.modules.payroll import be_content_workbook
+
+    data = await file.read()
+    out = be_content_workbook.be_content_workbook_import(db, pack_row_id, data, getattr(current_user, "id", None),
+                                                         reason=reason, dry_run=dry_run)
+    if out["written"]:
+        db.commit()
+    return out
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/bulk-sign",
+             summary="Sign selected Belgium rows in one action (not the importer / editor; each row audited)")
+def belgium_bulk_sign(pack_row_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                      db: Session = Depends(get_db)):
+    from app.modules.payroll import be_content_workbook
+
+    out = be_content_workbook.be_bulk_sign_rows(db, pack_row_id, payload, getattr(current_user, "id", None))
+    db.commit()
+    return out
+
+
 @router.post("/compliance/hong-kong/configuration/earning-codes/rows/{row_id}/split",
              summary="Effective-dated change of one HK earning-code catalogue row (editable packs only; reason + source; audited)")
 def hong_kong_earning_code_split(row_id: int, payload: HkCatalogueRowSplit,

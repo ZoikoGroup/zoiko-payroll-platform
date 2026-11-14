@@ -22,6 +22,7 @@ import JPComplianceCentreTab from "./JPComplianceCentreTab";
 import NZComplianceCentreTab from "./NZComplianceCentreTab";
 import PLComplianceCentreTab from "./PLComplianceCentreTab";
 import MYComplianceCentreTab from "./MYComplianceCentreTab";
+import BEComplianceCentreTab from "./BEComplianceCentreTab";
 import { normalizeCountryCode } from "../../../utils/currency";
 import {
   fetchComplianceData,
@@ -176,9 +177,13 @@ export default function CompliancePage() {
   // versioned records; generic Tax Configuration tab omitted like PL/NZ/JP.
   const MY_TAB = "Malaysia Compliance Centre";
   const isMalaysia = normalizeCountryCode(companyDetails.jurisdictionCountry) === "MY";
+  // Belgium (ZP-BE-ENG-001 Block A4): versioned employer / worker records and
+  // the applicability resolver; generic Tax Configuration tab omitted like PL.
+  const BE_TAB = "Belgium Compliance Centre";
+  const isBelgium = normalizeCountryCode(companyDetails.jurisdictionCountry) === "BE";
   const baseTabs = isSwitzerland
     ? BASE_TABS.filter((t) => t !== "Tax Configuration" && t !== "Documents")
-    : isNetherlands || isMexico || isSouthAfrica || isJapan || isNewZealand || isPoland || isMalaysia
+    : isNetherlands || isMexico || isSouthAfrica || isJapan || isNewZealand || isPoland || isMalaysia || isBelgium
       ? BASE_TABS.filter((t) => t !== "Tax Configuration")
       : BASE_TABS;
   // Plan country entitlements — every org, every calculation mode.
@@ -199,6 +204,7 @@ export default function CompliancePage() {
     ...(isNewZealand ? [NZ_TAB] : []),
     ...(isPoland ? [PL_TAB] : []),
     ...(isMalaysia ? [MY_TAB] : []),
+    ...(isBelgium ? [BE_TAB] : []),
   ];
   const selectedTab = countriesRequested ? tabs.indexOf(COUNTRIES_TAB) : activeTab;
   const currentTab = tabs[selectedTab];
@@ -446,6 +452,7 @@ export default function CompliancePage() {
       {currentTab === NZ_TAB && <NZComplianceCentreTab />}
       {currentTab === PL_TAB && <PLComplianceCentreTab />}
       {currentTab === MY_TAB && <MYComplianceCentreTab />}
+      {currentTab === BE_TAB && <BEComplianceCentreTab />}
 
     </div>
   );

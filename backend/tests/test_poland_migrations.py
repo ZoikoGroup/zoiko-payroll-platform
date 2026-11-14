@@ -99,6 +99,10 @@ def _policies(statements):
 
 
 # -- row-level security -----------------------------------------------------
+
+# Belgium Block B (2943a0490b5b) adds these columns to Belgium tables (standing re-pin rule).
+BE_BLOCK_B_COLUMNS = {"payroll_be_worker_profiles": {"pay_basis"}, "payroll_be_employment_classifications": {"contract_type", "contract_start_date", "contract_end_date"}, "payroll_be_employer_registrations": {"onss_special_160_status", "special_160_evidence_ref"}}
+
 def test_classify_agrees_with_the_policies_the_revision_applies(classified):
     _rls, worker, tenant = classified
     for table in TENANT:
@@ -214,12 +218,17 @@ def test_deploy_drift_filter_explains_every_pl_object():
                                         "payroll_my_clearance_hold_lines",  # + Malaysia P7 (5f314f975ac3)
                                         "payroll_my_filings", "payroll_my_settlements", "payroll_my_reconciliation_variances",  # + Malaysia P9 (efdc07f97eb5)
                                         "payroll_my_parallel_imports", "payroll_my_parallel_differences",  # + Malaysia P10 (f793f6074257)
-                                        "payroll_payslip_templates", "payroll_payslip_template_versions",
-                                        "payroll_payslip_template_assignments"}  # + payslip templates (f3a9c1d7e2b4)
-    # + Malaysia P2 (13574b996ccf) shared columns, payslip templates and Mexico m21 on the same chain.
-    assert columns == {**SHARED, **MX_M21,
-                       "payslip_items": SHARED["payslip_items"] | {"my_calculation_snapshot", "template_version_id"},
-                       "payroll_runs": SHARED["payroll_runs"] | {"my_approval_fingerprint"}}
+                                        "payroll_be_identifier_vault", "payroll_be_identifier_access_events",
+                                        "payroll_be_employer_registrations", "payroll_be_establishment_units",
+                                        "payroll_be_worker_profiles", "payroll_be_work_schedules",
+                                        "payroll_be_employment_classifications", "payroll_be_declarations",
+                                        "payroll_be_accumulator_entries",  # + Belgium P2 (1d76678ef1a1)
+                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
+    my_be_shared = {"payslip_items": {"my_calculation_snapshot", "be_calculation_snapshot", "template_version_id"},
+                    "payroll_runs": {"my_approval_fingerprint", "be_approval_fingerprint"}}  # + MY P2, BE P2
+    assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
+    # Malaysia P2 / Belgium P2 shared columns, payslip templates and Mexico m21 on the same chain.
+    assert columns == {**{t: SHARED[t] | my_be_shared[t] for t in SHARED}, **MX_M21}
 
 
 def test_revision_is_the_single_child_of_the_previous_head():

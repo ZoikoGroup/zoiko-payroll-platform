@@ -78,6 +78,7 @@ from app.modules.payroll.japan_org_router import router as japan_org_router
 from app.modules.payroll.nz_org_router import router as nz_org_router
 from app.modules.payroll.pl_org_router import router as pl_org_router
 from app.modules.payroll.my_org_router import router as my_org_router
+from app.modules.payroll.be_org_router import router as be_org_router
 from app.modules.payroll.mexico_transfer_router import router as mexico_transfer_router
 from app.modules.payroll.schemas import (
     SwedenLeaveLedgerResponse, SwedenLeaveLedgerUpsert, SwedenSickEpisodeResponse, SwedenSickEpisodeUpsert,
@@ -211,6 +212,8 @@ payroll_router.include_router(nz_org_router)
 payroll_router.include_router(pl_org_router)
 # Malaysia (ZP-MY-ENG-001 Phase 5): /api/payroll/malaysia, dormant (404) until MY onboarding is enabled.
 payroll_router.include_router(my_org_router)
+# Belgium (ZP-BE-ENG-001 Block A1): /api/payroll/belgium, dormant (404) unless belgium_dormancy admits the org.
+payroll_router.include_router(be_org_router)
 # Mexico Phase 10f: the tenant-run master-data transfer (its own guards, not /mexico's).
 payroll_router.include_router(mexico_transfer_router)
 

@@ -1165,3 +1165,66 @@ export const applyMyWorkbook = (packRowId, file, reason) => uploadMyWorkbook(pac
 export const addMyAuthorityExample = (packRowId, payload) =>
   apiFetch(`${MY_SA}/packs/${packRowId}/authority-examples`, { method: "POST", body: payload });
 export const runMyGoldenCheck = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/golden-check`, { method: "POST" });
+
+// ── Belgium (ZP-BE-ENG-001 Phase 3A/3B) signing console ─────────────────────
+// Same governance as Poland. Groups, labels, kinds, vocabularies, slab specs and
+// reference notes all come from the configuration API (no key lists here).
+const BE_SA = "/api/super-admin/compliance/belgium";
+export const getBeSummary = () => apiFetch("/api/super-admin/compliance/jurisdictions/BE/statutory-summary");
+export const listBePacks = () => apiFetch(`${BE_SA}/packs`);
+export const getBeConfiguration = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/configuration`);
+export const getBeSigningStatus = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/signing-status`);
+export const updateBeRow = (kind, rowId, payload) =>
+  apiFetch(`${BE_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
+export const getBeDecisions = () => apiFetch(`${BE_SA}/decisions`);
+export const seedBeDraftPack = (reason) => apiFetch(`${BE_SA}/seed-draft`, { method: "POST", body: { reason } });
+export const addBeAuthorityExample = (packRowId, payload) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/authority-examples`, { method: "POST", body: payload });
+export const addBeSlabRow = (packRowId, key, payload) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/slab-rows/${key}`, { method: "POST", body: payload });
+export const retireBeSlabRow = (rowId, reason) =>
+  apiFetch(`${BE_SA}/configuration/slab-rows/${rowId}`, { method: "DELETE", params: { reason } });
+export const listBeJointCommittees = () => apiFetch(`${BE_SA}/joint-committees`);
+// Block C2: golden replay of the authority examples, the shared BE certification
+// run the activation reads, and the release gates computed from evidence.
+export const getBeGoldenCheck = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/golden-check`);
+export const runBeGoldenCertification = (packRowId) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/golden-certification`, { method: "POST", body: {} });
+export const getBeReadiness = () => apiFetch(`${BE_SA}/readiness`);
+// Block D3: content intake workbook (XLSX) and bulk signing. The import is a
+// dry run unless dryRun is false; it never signs and only targets Draft packs.
+async function beFetchRaw(path, init = {}) {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init, headers: { ...(init.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) {
+    let data = {};
+    try { data = await res.json(); } catch { data = {}; }
+    throw new Error(data.detail || data.message || "The request was refused.");
+  }
+  return res;
+}
+export async function downloadBeContentWorkbook(packRowId) {
+  const res = await beFetchRaw(`${BE_SA}/packs/${packRowId}/content-workbook`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `belgium-content-${packRowId}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+export async function importBeContentWorkbook(packRowId, file, reason, dryRun = true) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("reason", reason);
+  const query = dryRun ? "?dry_run=true" : "?dry_run=false";
+  const res = await beFetchRaw(`${BE_SA}/packs/${packRowId}/content-workbook/import` + query,
+    { method: "POST", body: form });
+  return res.json();
+}
+export const bulkSignBeRows = (packRowId, rows, reason) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/bulk-sign`, { method: "POST", body: { rows, reason } });

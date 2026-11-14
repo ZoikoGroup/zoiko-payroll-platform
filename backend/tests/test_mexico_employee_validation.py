@@ -102,7 +102,8 @@ def test_strategy_map_and_message_unchanged():
     # + New Zealand (ZP-NZ-ENG-001 Phase 4), dormant behind NZ_TENANT_ONBOARDING_ENABLED.
     # + Poland (ZP-PL-ENG-001 Phase 0), dormant behind PL_TENANT_ONBOARDING_ENABLED.
     # + Malaysia (ZP-MY-ENG-001 Phase 0), dormant behind MY_TENANT_ONBOARDING_ENABLED.
-    assert list(_DORMANT_STRATEGIES) == ["MX", "BR", "ZA", "NZ", "PL", "MY"]
+    # + Belgium (ZP-BE-ENG-001 Phase 1), dormant behind BE_TENANT_ONBOARDING_ENABLED.
+    assert list(_DORMANT_STRATEGIES) == ["MX", "BR", "ZA", "NZ", "PL", "MY", "BE"]
     assert all(not getattr(cls, "MASK_DUPLICATE_VALUE", False) for cls in _STRATEGIES.values())
 
 
@@ -147,9 +148,11 @@ def test_bank_routing_other_countries_unchanged():
     # Brazil (ZP-BR-ENG-001) follows Mexico, merged from venu; Switzerland and
     # Saudi Arabia (Phase 4.1, IBAN routing) follow Brazil; Poland (ZP-PL-ENG-001
     # Phase 0, IBAN routing) follows South Africa; Malaysia (ZP-MY-ENG-001 Phase 0,
-    # SWIFT/BIC + account) follows Poland.
-    assert br.ROUTING_COUNTRIES[:-7] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
-                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-7:] == ("MX", "BR", "CH", "SA", "ZA", "PL", "MY")
+    # SWIFT/BIC + account) follows Poland; Belgium (ZP-BE-ENG-001 Phase 1, IBAN
+    # routing) follows Malaysia.
+    assert br.ROUTING_COUNTRIES[:-8] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
+                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-8:] == (
+        "MX", "BR", "CH", "SA", "ZA", "PL", "MY", "BE")
     assert br.ROUTING_FIELDS["MX"] == [{"key": "clabe", "label": "CLABE"}]
     assert (br.BTF_ROUTING_LABEL["MX"], br.PAYMENT_MODE_LABEL["MX"]) == ("CLABE", "SPEI")
     from app.modules.payroll.employee_validation import mask_routing

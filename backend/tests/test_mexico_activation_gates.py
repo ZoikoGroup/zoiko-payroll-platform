@@ -320,15 +320,15 @@ def test_governance_opt_in_tuples_gain_only_mexico():
                  "_REFUSAL_AUDIT_COUNTRIES", "_PACK_TRANSITION_GRAPH_COUNTRIES"):
         # + Brazil (ZP-BR-ENG-001) at the venu/main merge and + South Africa
         # (ZP-ZA-ENG-001 Phase 5) and + Poland (ZP-PL-ENG-001 Phase 4) and +
-        # Malaysia (ZP-MY-ENG-001 Phase 5), all opt-in with the same
-        # four-eyes/fail-closed rules.
-        assert getattr(service, name) == _BEFORE + ("MX", "BR", "ZA", "PL", "MY"), name
+        # Malaysia (ZP-MY-ENG-001 Phase 5) and + Belgium (ZP-BE-ENG-001 Phase 1),
+        # all opt-in with the same four-eyes/fail-closed rules.
+        assert getattr(service, name) == _BEFORE + ("MX", "BR", "ZA", "PL", "MY", "BE"), name
     assert service._GATED_PACK_COUNTRY_NAMES["MX"] == "Mexico"
     assert set(service._GATED_PACK_COUNTRY_NAMES) == {
-        "US", "DE", "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY"}
+        "US", "DE", "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE"}
     assert service._GOLDEN_FIXTURES_DIR_BY_COUNTRY["MX"] == "mx_golden"
     assert len(service._GOLDEN_FIXTURES_DIR_BY_COUNTRY) == 14
-    assert service._CANONICAL_PACK_ONLY_COUNTRIES == ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY")
+    assert service._CANONICAL_PACK_ONLY_COUNTRIES == ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")
 
 
 # -- Phase 11d (gap register A9): archive copies feed Draft packs only --

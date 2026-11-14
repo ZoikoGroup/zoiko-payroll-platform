@@ -225,8 +225,12 @@ def test_deploy_drift_filter_explains_every_nz_object():
                                         "payroll_my_clearance_hold_lines",  # + Malaysia P7 (5f314f975ac3)
                                         "payroll_my_filings", "payroll_my_settlements", "payroll_my_reconciliation_variances",  # + Malaysia P9 (efdc07f97eb5)
                                         "payroll_my_parallel_imports", "payroll_my_parallel_differences",  # + Malaysia P10 (f793f6074257)
-                                        "payroll_payslip_templates", "payroll_payslip_template_versions",
-                                        "payroll_payslip_template_assignments"}  # + payslip templates (f3a9c1d7e2b4)
+                                        "payroll_be_identifier_vault", "payroll_be_identifier_access_events",
+                                        "payroll_be_employer_registrations", "payroll_be_establishment_units",
+                                        "payroll_be_worker_profiles", "payroll_be_work_schedules",
+                                        "payroll_be_employment_classifications", "payroll_be_declarations",
+                                        "payroll_be_accumulator_entries",  # + Belgium P2 (1d76678ef1a1)
+                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
     assert set(NEW_TABLES) <= tables
     for table, names in SHARED.items():
         assert names <= columns[table], table

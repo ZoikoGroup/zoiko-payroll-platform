@@ -22,6 +22,7 @@ import JapanStatutoryProfilePanel from "./JapanStatutoryProfilePanel";
 import NewZealandStatutoryProfilePanel from "./NewZealandStatutoryProfilePanel";
 import PolandStatutoryProfilePanel from "./PolandStatutoryProfilePanel";
 import MalaysiaStatutoryProfilePanel from "./MalaysiaStatutoryProfilePanel";
+import BelgiumStatutoryProfilePanel from "./BelgiumStatutoryProfilePanel";
 import ZADeductionOrdersBlock from "./ZADeductionOrdersBlock";
 import CHFamilyAllowancePanel from "./CHFamilyAllowancePanel";
 import CHAbsenceEventsPanel from "./CHAbsenceEventsPanel";
@@ -120,6 +121,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
   const [showNzStatutory, setShowNzStatutory] = useState(false);
   const [showPlStatutory, setShowPlStatutory] = useState(false);
   const [showMyStatutory, setShowMyStatutory] = useState(false);
+  const [showBeStatutory, setShowBeStatutory] = useState(false);
   const [showChFamily, setShowChFamily] = useState(false);
   const [showChAbsence, setShowChAbsence] = useState(false);
   const [showHkForms, setShowHkForms] = useState(false);
@@ -588,6 +590,28 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                 </div>
               )}
 
+              {employee.countryCode === "BE" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4" data-testid="be-employee-block">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Belgium statutory records
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowBeStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Worker profile, work schedules, Joint Committee classification, declarations, national number
+                    (masked, vault) and the applicability resolver — each approved by a second user before Belgian
+                    payroll uses it.
+                  </p>
+                </div>
+              )}
+
 {employee.countryCode === "IT" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4">
                   <div className="flex items-center justify-between">
@@ -798,6 +822,9 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
       )}
       {showMyStatutory && (
         <MalaysiaStatutoryProfilePanel employee={employee} onClose={() => setShowMyStatutory(false)} />
+      )}
+      {showBeStatutory && (
+        <BelgiumStatutoryProfilePanel employee={employee} onClose={() => setShowBeStatutory(false)} />
       )}
       {showSwissStatutory && (
         <SwitzerlandStatutoryProfilePanel employee={employee} onClose={() => setShowSwissStatutory(false)} />

@@ -75,6 +75,11 @@ export const COUNTRIES = [
   // NRIC / TIN / EPF / SOCSO numbers are vault-only; citizenship, residence,
   // work pass and labour territory live on the Malaysia statutory profile.
   { code: "MY", name: "Malaysia" },
+  // Belgium (ZP-BE-ENG-001 Phase 1) — mirrors employee_validation.py's
+  // BEEmployeeValidation: the Belgian IBAN only. NISS/INSZ is vault-only
+  // (Phase 4) and is never an employee field; worker category, Joint Committee
+  // and every statutory fact live on the Belgian worker profile, never here.
+  { code: "BE", name: "Belgium" },
 ];
 
 // ISO 13616 IBAN check digits (mirrors employee_validation.py's
@@ -558,6 +563,13 @@ export const COUNTRY_FIELD_SPECS = {
     // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.MY).
     { key: "swift_bic", label: "SWIFT / BIC", type: "text", placeholder: "8 or 11 characters", upper: true, strip: " ", pattern: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/, error: "SWIFT/BIC must be 8 or 11 characters." },
     { key: "bank_account", label: "Account number", type: "text", placeholder: "6–20 digits", strip: " -", pattern: /^\d{6,20}$/, error: "Bank account number must be 6-20 digits." },
+  ],
+  // Belgium — mirrors backend BEEmployeeValidation: IBAN only. NISS/INSZ is
+  // held ONLY in the encrypted identifier vault (Phase 4) and is refused as
+  // an employee field.
+  BE: [
+    // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.BE).
+    { key: "iban", label: "IBAN", type: "text", placeholder: "BE + 14 digits", upper: true, strip: " ", pattern: /^BE\d{14}$/, check: ibanPassesMod97, error: "Belgian IBAN must be BE followed by 14 digits with a valid check digit." },
   ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).

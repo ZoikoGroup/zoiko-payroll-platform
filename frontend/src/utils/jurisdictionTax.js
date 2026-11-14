@@ -137,6 +137,17 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "hrd_registration_no", label: "HRD Corp registration number", pattern: "^[A-Za-z0-9 -]{4,20}$", example: "123456789", primary: false },
     ],
   },
+  // Belgium (ZP-BE-ENG-001 Phase 1) — mirrors backend core/jurisdiction.py
+  // JURISDICTION_TAX_SCHEMAS.BE exactly. Schema only: BE stays out of
+  // registration until its release gates G1–G7 are signed. Patterns are
+  // permissive: format and check digits pending verification, gap G-16.
+  BE: {
+    label: "Enterprise number / ONSS number",
+    fields: [
+      { key: "enterprise_number", label: "Enterprise number (KBO/BCE)", pattern: "^[0-9][0-9. ]{8,13}$", example: "0123.456.789", primary: true },
+      { key: "onss_employer_number", label: "ONSS/RSZ employer number", pattern: "^[0-9][0-9 /-]{4,15}$", example: "1234567-89", primary: false },
+    ],
+  },
 };
 
 const COUNTRY_NAME_TO_CODE = {
@@ -171,6 +182,17 @@ const COUNTRY_NAME_TO_CODE = {
   mys: "MY",
   "persekutuan malaysia": "MY",
   "federation of malaysia": "MY",
+  // Belgium — never the bare "be" (also a Swiss canton); the code "BE" itself
+  // resolves through JURISDICTION_TAX_SCHEMAS above.
+  belgium: "BE",
+  belgique: "BE",
+  "belgië": "BE",
+  belgie: "BE",
+  belgien: "BE",
+  "kingdom of belgium": "BE",
+  "royaume de belgique": "BE",
+  "koninkrijk belgië": "BE",
+  bel: "BE",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -187,6 +209,7 @@ const CODE_TO_COUNTRY_NAME = {
   ZA: "South Africa",
   PL: "Poland",
   MY: "Malaysia",
+  BE: "Belgium",
 };
 
 export function getJurisdictionCode(country) {

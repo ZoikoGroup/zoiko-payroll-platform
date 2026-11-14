@@ -34,6 +34,9 @@ import MYPayslipBreakdown from "./MYPayslipBreakdown";
 import MYRunPreflightPanel from "./MYRunPreflightPanel";
 import MYRunJournalPanel from "./MYRunJournalPanel";
 import PLRunJournalPanel from "./PLRunJournalPanel";
+import BEPayslipBreakdown from "./BEPayslipBreakdown";
+import BERunPreflightPanel from "./BERunPreflightPanel";
+import BEPaymentPanel from "./BEPaymentPanel";
 
 const EDITABLE_STATUSES = ["Draft", "Review"];
 
@@ -416,6 +419,7 @@ function EmployeeRow({ item, leave, fmtCurrency: orgFmtCurrency, currencyByCount
             {(item.country || item.countryCode) === "NZ" && item.nzCalculationSnapshot && <NZPayslipBreakdown snapshot={item.nzCalculationSnapshot} employeeName={item.employee} />}
             {(item.country || item.countryCode) === "PL" && item.plCalculationSnapshot && <PLPayslipBreakdown snapshot={item.plCalculationSnapshot} employeeName={item.employee} />}
             {(item.country || item.countryCode) === "MY" && item.myCalculationSnapshot && <MYPayslipBreakdown snapshot={item.myCalculationSnapshot} employeeName={item.employee} />}
+            {(item.country || item.countryCode) === "BE" && item.beCalculationSnapshot && <BEPayslipBreakdown snapshot={item.beCalculationSnapshot} employeeName={item.employee} />}
             <EarningsDeductionsBlock item={item} fmtCurrency={fmtCurrency} />
             <AttendanceLeaveBlock item={item} leave={leave} />
             <StatutoryTraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} snapshot={chSnapshot}
@@ -641,6 +645,10 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
               {items.some((i) => (i.country || i.countryCode) === "MY") && <MYRunPreflightPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "MY")
                 && ["Paid", "Closed"].includes((detail || run).status) && <MYRunJournalPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "BE") && <BERunPreflightPanel runId={run.id} />}
+              {items.some((i) => (i.country || i.countryCode) === "BE")
+                && ["Approved", "Authorized", "Paid", "Closed"].includes((detail || run).status)
+                && <BEPaymentPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "PL")
                 && ["Paid", "Closed"].includes((detail || run).status) && <PLRunJournalPanel runId={run.id} />}
               {items.some((i) => (i.country || i.countryCode) === "NZ") && (

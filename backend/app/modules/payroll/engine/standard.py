@@ -83,6 +83,7 @@ from app.modules.payroll.engine.countries import japan as _japan
 from app.modules.payroll.engine.countries import new_zealand as _new_zealand
 from app.modules.payroll.engine.countries import poland as _poland
 from app.modules.payroll.engine.countries import malaysia as _malaysia
+from app.modules.payroll.engine.countries import belgium as _belgium
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -165,6 +166,7 @@ _calc_japan = _japan.calculate
 _calc_new_zealand = _new_zealand.calculate
 _calc_poland = _poland.calculate
 _calc_malaysia = _malaysia.calculate
+_calc_belgium = _belgium.calculate
 
 
 _COUNTRY_CALC = {
@@ -254,6 +256,9 @@ _COUNTRY_CALC = {
     # Malaysia (ZP-MY-ENG-001): fail-closed (Phase 0 stub; Phase 3 orchestrator
     # over engine/jurisdictions/malaysia/*); never the generic calculator.
     "MY": _calc_malaysia,
+    # Belgium (ZP-BE-ENG-001): fail-closed orchestrator over
+    # engine/jurisdictions/belgium/* (Blocks A-B); never the generic calculator.
+    "BE": _calc_belgium,
 }
 
 
@@ -375,6 +380,9 @@ class StandardStrategy(PayrollStrategy):
             # Malaysia: EPF + SOCSO + EIS employee shares. PCB arrives as tds
             # above; the HRD levy is employer cost. 0 elsewhere.
             + deductions.get("my_employee_total", Decimal("0"))
+            # Belgium: employee ONSS after the social work bonus. Withholding
+            # arrives as tds above. 0 elsewhere.
+            + deductions.get("be_employee_total", Decimal("0"))
         )
 
         net_pay = max(_round2(ctx.gross - total_employee_deductions), Decimal("0"))
@@ -667,6 +675,8 @@ class StandardStrategy(PayrollStrategy):
             pl_result=deductions.get("pl_result"),
             # Malaysia (ZP-MY-ENG-001). Absent from every non-MY calculator dict.
             my_result=deductions.get("my_result"),
+            # Belgium (ZP-BE-ENG-001). Absent from every non-BE calculator dict.
+            be_result=deductions.get("be_result"),
             cpp_base_amount=deductions.get("cpp_base_amount", Decimal("0")),
             cpp_first_additional_amount=deductions.get("cpp_first_additional_amount", Decimal("0")),
             employer_cpp_base=deductions.get("employer_cpp_base", Decimal("0")),

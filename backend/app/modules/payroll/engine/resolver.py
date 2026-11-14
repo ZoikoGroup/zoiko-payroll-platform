@@ -186,6 +186,17 @@ def calculate_payroll(
             "Malaysia payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "BE" and key == "simple":
+        # Belgium (ZP-BE-ENG-001 BE-004/BE-007): simple mode would silently skip
+        # professional withholding and ONSS/RSZ, each a separate obligation with
+        # its own base. Fail-closed: countries/belgium.py.
+        from app.modules.payroll.engine.countries.belgium import BECalculationBlockedError
+
+        raise BECalculationBlockedError(
+            "BE_SIMPLE_MODE_UNSUPPORTED",
+            "Belgium payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)
@@ -314,6 +325,7 @@ def build_context_from_employee(
     nz_inputs: dict | None = None,
     poland_inputs: dict | None = None,
     malaysia_inputs: dict | None = None,
+    belgium_inputs: dict | None = None,
 ) -> PayrollContext:
     """Helper to build a PayrollContext from a PayrollEmployee ORM object
     and pre-computed salary components. Tax-profile fields (tax_code,
@@ -528,4 +540,7 @@ def build_context_from_employee(
         # Malaysia (ZP-MY-ENG-001): my_* context fields resolved by
         # malaysia_service.calc_inputs as of the run's pay date (Phase 5).
         **(malaysia_inputs or {}),
+        # Belgium (ZP-BE-ENG-001 Block A3): be_* context fields resolved by
+        # belgium_service.calc_inputs as of the run's pay date.
+        **(belgium_inputs or {}),
     )

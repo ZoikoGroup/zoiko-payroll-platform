@@ -29,6 +29,7 @@ export { default as JPCompliancePage } from "./JPCompliancePage";
 export { default as NZCompliancePage } from "./NZCompliancePage";
 export { default as PLCompliancePage } from "./PLCompliancePage";
 export { default as MYCompliancePage } from "./MYCompliancePage";
+export { default as BECompliancePage } from "./BECompliancePage";
 
 // Single source of truth for the route-slug naming — used by App.jsx (to
 // define the routes) and the CompliancePage.jsx landing page (to link to
@@ -64,4 +65,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   NZ: "new-zealand",
   PL: "poland",
   MY: "malaysia",
+  BE: "belgium",
 };
