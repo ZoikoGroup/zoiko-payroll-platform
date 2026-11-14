@@ -1549,6 +1549,7 @@ GET,/api/super-admin/compliance/policies/{id}/eligible-organizations,platform,re
 PUT,/api/super-admin/compliance/policies/{id}/hotfix-activate,platform,update,hotfix-activate,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/policies/{id}/impact-preview,aggregate,read,impact-preview,super_admin,platform,,,payroll_employees,yes,policy impact preview returns affected counts only
 GET,/api/super-admin/compliance/policies/{id}/organizations,platform,read,organizations,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/policies/{id}/overview,platform,read,overview,super_admin,platform,,,,no,
 PUT,/api/super-admin/compliance/policies/{id}/status,platform,update,status,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/policies/{pack_id}/versions,platform,read,versions,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/readiness,platform,read,readiness,super_admin,platform,,,,no,

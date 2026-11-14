@@ -620,7 +620,9 @@ def list_jurisdiction_packs(db: Session, country: str, state: str = None) -> Lis
         query = query.filter(JurisdictionPack.jurisdiction_state == state)
     else:
         query = query.filter(JurisdictionPack.jurisdiction_state.is_(None))
-    return query.order_by(JurisdictionPack.version.desc()).all()
+    # Newest first by creation, not by the version string: as text, "10.0"
+    # sorted before "2.0".
+    return query.order_by(JurisdictionPack.created_at.desc(), JurisdictionPack.id.desc()).all()
 
 
 def find_jurisdiction_pack_upsert_target(db: Session, data: "JurisdictionPackUpsert") -> Optional[JurisdictionPack]:
@@ -637,6 +639,47 @@ def find_jurisdiction_pack_upsert_target(db: Session, data: "JurisdictionPackUps
             .first()
         )
     return existing
+
+
+# JurisdictionPack column -> JurisdictionPackUpsert field it is written from.
+_PACK_UPSERT_SOURCE = {
+    "pack_id": "packId", "version": "version", "jurisdiction_country": "jurisdictionCountry",
+    "jurisdiction_state": "jurisdictionState", "jurisdiction_locality": "jurisdictionLocality",
+    "pack_type": "packType", "status": "status", "effective_from": "effectiveFrom",
+    "effective_to": "effectiveTo", "compliance_owner": "complianceOwner",
+    "engineering_owner": "engineeringOwner", "source_references": "sourceReferences",
+    "regulatory_authority": "regulatoryAuthority", "compliance_category": "complianceCategory",
+    "change_summary": "changeSummary", "next_review_date": "nextReviewDate",
+    "policy_defaults": "policyDefaults", "tax_year": "taxYear", "tax_regime": "taxRegime",
+    "default_tax_regime": "defaultTaxRegime", "currency": "currency",
+    "source_document_id": "sourceDocumentId",
+}
+
+# Pack metadata a new version inherits from the version it is based on when
+# the request leaves it blank. Never status, dates, version or change summary,
+# which describe the new version itself.
+_PACK_INHERITED_FIELDS = (
+    "compliance_owner", "engineering_owner", "source_references", "regulatory_authority",
+    "compliance_category", "next_review_date", "policy_defaults", "tax_regime",
+    "default_tax_regime", "currency", "source_document_id", "jurisdiction_locality",
+)
+
+
+def _pack_version_in_force(db: Session, pack_id: str) -> Optional[JurisdictionPack]:
+    """The Active version of `pack_id` whose effective window covers today
+    (newest first), or None."""
+    today = date.today()
+    return (
+        db.query(JurisdictionPack)
+        .filter(
+            JurisdictionPack.pack_id == pack_id,
+            JurisdictionPack.status == "Active",
+            or_(JurisdictionPack.effective_from.is_(None), JurisdictionPack.effective_from <= today),
+            or_(JurisdictionPack.effective_to.is_(None), JurisdictionPack.effective_to >= today),
+        )
+        .order_by(JurisdictionPack.created_at.desc())
+        .first()
+    )
 
 
 def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_id: Optional[int] = None) -> JurisdictionPack:
@@ -722,7 +765,20 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
     # defect class silently broke India's canonical sync until caught and
     # fixed by hand; validating it here closes the gap at the source
     # instead of relying on someone noticing later.
-    if data.effectiveFrom and data.effectiveTo and data.effectiveTo < data.effectiveFrom:
+    if existing:
+        # Update only what the caller sent. Every edit form sends a subset of
+        # the pack (EditOverviewModal has no sourceDocumentId, defaultTaxRegime,
+        # jurisdictionLocality or policyDefaults); overwriting every column
+        # from the payload set those to NULL on each edit - and losing
+        # source_document_id then blocked activation for the source-locked
+        # countries. A field sent explicitly as null still clears it.
+        sent = data.model_fields_set
+        fields = {k: v for k, v in fields.items() if _PACK_UPSERT_SOURCE.get(k, k) in sent}
+    eff_from = (data.effectiveFrom if not existing or "effectiveFrom" in data.model_fields_set
+                else existing.effective_from)
+    eff_to = (data.effectiveTo if not existing or "effectiveTo" in data.model_fields_set
+              else existing.effective_to)
+    if eff_from and eff_to and eff_to < eff_from:
         raise BadRequestException(
             "Effective To date cannot be before Effective From date — this pack would never resolve for any calculation."
         )
@@ -809,6 +865,18 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         .order_by(JurisdictionPack.created_at.desc())
         .first()
     )
+    # The version a new one is based on: the Active version in force when
+    # there is one (a correction to what is live), else the latest - the
+    # same choice list_all_jurisdiction_packs shows. Cloning the newest row
+    # copied an unfinished Draft's rates instead of the live pack's.
+    base = _pack_version_in_force(db, data.packId) or previous
+    if base is not None:
+        # Metadata the request leaves blank carries over from the base
+        # version instead of starting empty (owners, authority, sources,
+        # currency, regime, source document ...).
+        for key in _PACK_INHERITED_FIELDS:
+            if fields.get(key) in (None, "") and getattr(base, key, None) not in (None, ""):
+                fields[key] = getattr(base, key)
     row = JurisdictionPack(
         previous_version_id=previous.id if previous else None,
         created_by_id=actor_id, updated_by_id=actor_id,
@@ -824,7 +892,7 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         # one-line correction prohibitively tedious (retyping every rate),
         # which would just push Super Admins back toward editing Active
         # packs in place — defeating the guard's purpose.
-        _clone_pack_rates(db, source_pack_id=previous.id, target_pack_id=row.id)
+        _clone_pack_rates(db, source_pack_id=(base or previous).id, target_pack_id=row.id)
     record_tax_audit(
         db, actor_id=actor_id, action="create", entity_type="jurisdiction_pack", entity_id=row.id,
         jurisdiction_pack_id=row.id, tax_version=row.version, legal_reference=row.source_references,
@@ -8576,11 +8644,26 @@ def list_all_jurisdiction_packs(
         )
     rows = query.order_by(JurisdictionPack.pack_id, JurisdictionPack.created_at.desc()).all()
 
-    latest_by_pack_id = {}
-    for row in rows:
-        if row.pack_id not in latest_by_pack_id:
-            latest_by_pack_id[row.pack_id] = row
-    return list(latest_by_pack_id.values())
+    # One row per policy - but the version that matters, not merely the
+    # newest: the Active version in force today, else any Active version,
+    # else the latest created. Picking "latest created" hid a pack's Active
+    # version as soon as a new Draft version was started, so Super Admin (and
+    # every auto-select of the Active pack) saw no Active pack at all. Draft
+    # versions stay reachable through get_jurisdiction_pack_versions().
+    today = date.today()
+
+    def _rank(row) -> tuple:
+        active = (row.status or "") == "Active"
+        in_force = active and (row.effective_from is None or row.effective_from <= today) and (
+            row.effective_to is None or row.effective_to >= today)
+        return (in_force, active)
+
+    chosen = {}
+    for row in rows:  # newest first within each pack_id
+        current = chosen.get(row.pack_id)
+        if current is None or _rank(row) > _rank(current):
+            chosen[row.pack_id] = row
+    return list(chosen.values())
 
 
 def get_jurisdiction_pack_versions(db: Session, pack_id: str) -> List[JurisdictionPack]:
@@ -8593,6 +8676,113 @@ def get_jurisdiction_pack_versions(db: Session, pack_id: str) -> List[Jurisdicti
         .order_by(JurisdictionPack.created_at.asc())
         .all()
     )
+
+
+# Pack metadata shown on the Overview tab; listed as missing when empty.
+_PACK_OVERVIEW_METADATA = (
+    ("regulatory_authority", "Regulatory authority"), ("compliance_category", "Compliance category"),
+    ("compliance_owner", "Compliance owner"), ("engineering_owner", "Engineering owner"),
+    ("currency", "Currency"), ("next_review_date", "Next review date"),
+    ("source_references", "Source references"), ("change_summary", "Change summary"),
+)
+_PENDING_MARKERS = ("PENDING", "NOT CONFIGURED")
+
+
+def _has_share(value) -> bool:
+    text = str(value or "").strip().rstrip("%").strip()
+    if not text:
+        return False
+    try:
+        return Decimal(text) != 0
+    except Exception:
+        return True
+
+
+def get_jurisdiction_pack_overview(db: Session, pack_db_id: int) -> dict:
+    """Read-only Overview summary of one pack, for every country (the
+    generic Overview tab showed only free-text metadata, never the
+    configuration the pack actually holds).
+
+    Counts the pack's own canonical rows (organization_id IS NULL), groups
+    contribution rows by side and tax slabs by rule_type, lists the regions
+    covered, counts placeholder values still awaiting sign-off, and names the
+    empty metadata fields. Never fills in or guesses a value."""
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_db_id).first()
+    if pack is None:
+        raise NotFoundException(f"Pack {pack_db_id} not found.")
+    today = date.today()
+    active = (pack.status or "") == "Active"
+    in_force = active and (pack.effective_from is None or pack.effective_from <= today) and (
+        pack.effective_to is None or pack.effective_to >= today)
+
+    rates = db.query(ContributionRate).filter(
+        ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None),
+    ).all()
+    slabs = db.query(TaxSlab).filter(
+        TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None),
+    ).all()
+
+    def _pending(*values) -> bool:
+        return any(m in str(v or "").upper() for v in values for m in _PENDING_MARKERS)
+
+    employee_side = [r for r in rates if _has_share(r.employee_share) or _has_share(r.employee_rate_pct)]
+    employer_side = [r for r in rates if _has_share(r.employer_share) or _has_share(r.employer_rate_pct)]
+    parameters = [r for r in rates if r not in employee_side and r not in employer_side]
+
+    by_rule_type = {}
+    for slab in slabs:
+        key = slab.rule_type or "MARGINAL_RATE"
+        group = by_rule_type.setdefault(key, {"ruleType": key, "count": 0, "regimes": set(), "regions": set()})
+        group["count"] += 1
+        if slab.tax_regime:
+            group["regimes"].add(slab.tax_regime)
+        if slab.jurisdiction_state:
+            group["regions"].add(slab.jurisdiction_state)
+
+    row_dates = [r.effective_from for r in list(rates) + list(slabs) if r.effective_from]
+    regions = sorted({r.jurisdiction_state for r in list(rates) + list(slabs) if r.jurisdiction_state})
+    version_count = db.query(JurisdictionPack).filter(JurisdictionPack.pack_id == pack.pack_id).count()
+
+    registration_block = None
+    if pack.pack_type == "tax" and not pack.jurisdiction_state:
+        from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
+
+        registration_block = get_jurisdiction_onboarding_block_reason(db, pack.jurisdiction_country)
+
+    return {
+        "id": pack.id, "packId": pack.pack_id, "version": pack.version, "status": pack.status,
+        "packType": pack.pack_type, "jurisdictionCountry": pack.jurisdiction_country,
+        "jurisdictionState": pack.jurisdiction_state, "taxYear": pack.tax_year,
+        "effectiveFrom": pack.effective_from, "effectiveTo": pack.effective_to,
+        "lifecycle": {
+            "isActive": active,
+            "inForceToday": in_force,
+            "approved": pack.approved_by_id is not None,
+            "sourceDocumentAttached": pack.source_document_id is not None,
+            "versionCount": version_count,
+            "previousVersionId": pack.previous_version_id,
+        },
+        "contributions": {
+            "total": len(rates),
+            "employeeSide": len(employee_side),
+            "employerSide": len(employer_side),
+            "parameters": len(parameters),
+            "pendingSignOff": sum(1 for r in rates if _pending(r.label, r.total, r.text_value)),
+        },
+        "taxSlabs": {
+            "total": len(slabs),
+            "byRuleType": [
+                {**g, "regimes": sorted(g["regimes"]), "regions": sorted(g["regions"])}
+                for g in sorted(by_rule_type.values(), key=lambda g: g["ruleType"])
+            ],
+            "pendingSignOff": sum(1 for s_ in slabs if _pending(s_.rate_label)),
+        },
+        "regions": regions,
+        "rowsEffectiveFrom": min(row_dates) if row_dates else None,
+        "missingMetadata": [label for attr, label in _PACK_OVERVIEW_METADATA
+                            if getattr(pack, attr, None) in (None, "")],
+        "registrationBlockedReason": registration_block,
+    }
 
 
 def se_activation_blockers(db: Session, pack) -> list:

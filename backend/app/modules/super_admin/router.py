@@ -1283,6 +1283,20 @@ def upsert_compliance_policy(
 
 
 @router.get(
+    "/compliance/policies/{id}/overview",
+    summary="Overview summary of one pack: lifecycle, configuration counts, regions, missing metadata",
+)
+def get_compliance_policy_overview(
+    id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_jurisdiction_pack_overview(db, id)
+
+
+@router.get(
     "/compliance/policies/{pack_id}/versions", response_model=List[JurisdictionPackResponse], response_model_by_alias=True,
     summary="Full version history for one policy, oldest first",
 )
