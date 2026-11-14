@@ -252,6 +252,29 @@ def get_public_form(db: Session, token: str) -> dict:
     }
 
 
+_CONTACT_KEYS = ("email", "phone")
+
+
+def _normalized_contact_values(form: PayrollUpdateForm, values: dict, employee: PayrollEmployee) -> dict:
+    """The form's standard email / phone answers, validated and normalised
+    with the same server rules as every other employee write path (400 on a
+    bad value). An answer equal to what is already stored is left alone."""
+    from app.modules.payroll.service import _validate_employee_contact
+
+    contact = {}
+    for f in (form.fields_config or []):
+        key = f.get("key")
+        if f.get("source") == "custom" or key not in _CONTACT_KEYS:
+            continue
+        value = (values or {}).get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        contact[key] = value
+    if contact:
+        _validate_employee_contact(contact, getattr(employee, "country_code", None), current=employee)
+    return contact
+
+
 def submit_public_form(db: Session, token: str, values: dict) -> dict:
     send = _get_send_by_token(db, token)
 
@@ -267,6 +290,9 @@ def submit_public_form(db: Session, token: str, values: dict) -> dict:
     form = db.query(PayrollUpdateForm).filter(PayrollUpdateForm.id == send.form_id).first()
     allowed_keys = {f["key"] for f in (form.fields_config or [])}
     clean_values = {k: v for k, v in (values or {}).items() if k in allowed_keys}
+    # A bad email / phone is refused now, while the employee can still fix it.
+    employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == send.employee_id).first()
+    clean_values.update(_normalized_contact_values(form, clean_values, employee))
 
     submission = PayrollUpdateFormSubmission(
         organization_id=send.organization_id, send_id=send.id,
@@ -361,7 +387,19 @@ def review_submission(db: Session, organization_id: int, submission_id: int, app
     employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == send.employee_id).first()
 
     if approve:
-        _apply_submission(employee, form, submission.submitted_data or {})
+        # Approval applied email / phone with no checks at all; they now go
+        # through the same validation + duplicate-email check as an edit.
+        from app.modules.payroll.service import check_duplicate_employee_identifiers
+
+        data = dict(submission.submitted_data or {})
+        contact = _normalized_contact_values(form, data, employee)
+        if contact.get("email"):
+            check_duplicate_employee_identifiers(
+                db, organization_id, contact["email"], employee.country_code, None, {},
+                exclude_employee_id=employee.id,
+            )
+        data.update(contact)
+        _apply_submission(employee, form, data)
         submission.status = FormSubmissionStatus.APPROVED.value
     else:
         submission.status = FormSubmissionStatus.REJECTED.value

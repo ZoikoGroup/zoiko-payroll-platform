@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Globe2, ChevronRight, Eye, FileText, ShieldCheck, Zap, Palmtree } from "lucide-react";
-import { getComplianceJurisdictions } from "../service/superAdminService";
+import { getComplianceJurisdictions, getCompliancePolicies } from "../service/superAdminService";
 import { COUNTRY_CODE_TO_ROUTE } from "./JurisdictionCompliance";
 import CountryFlag from "../components/jurisdiction/CountryFlag";
 
@@ -18,13 +18,27 @@ import CountryFlag from "../components/jurisdiction/CountryFlag";
 // hardcoded jurisdiction list.
 export default function CompliancePage() {
   const [jurisdictions, setJurisdictions] = useState([]);
+  const [taxPacks, setTaxPacks] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     getComplianceJurisdictions()
       .then(setJurisdictions)
-      .finally(setLoading(false));
+      .finally(() => setLoading(false));
+    // Country-level tax packs of every jurisdiction (the list returns each
+    // pack's Active version when it has one) - drives the status badges.
+    getCompliancePolicies({ packType: "tax" })
+      .then((rows) => setTaxPacks((rows || []).filter((p) => !p.jurisdictionState)))
+      .catch(() => setTaxPacks(null));
   }, []);
+
+  function packStatus(code) {
+    if (!taxPacks) return null;
+    const own = taxPacks.filter((p) => p.jurisdictionCountry === code);
+    if (own.some((p) => p.status === "Active")) return { tone: "bg-success/10 text-success", text: "Active tax pack" };
+    if (own.length) return { tone: "bg-warning/10 text-warning", text: `No Active pack (${own.map((p) => p.status).join(", ")})` };
+    return { tone: "bg-surface-muted text-foreground-muted", text: "No tax pack" };
+  }
 
   const unmapped = jurisdictions.filter((j) => !COUNTRY_CODE_TO_ROUTE[j.code]);
 
@@ -107,6 +121,11 @@ export default function CompliancePage() {
                     <p className="text-xs text-foreground-muted">
                       {j.states?.length ? `${j.states.length} jurisdiction${j.states.length === 1 ? "" : "s"} configured` : "Country-level only"}
                     </p>
+                    {packStatus(j.code) && (
+                      <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${packStatus(j.code).tone}`}>
+                        {packStatus(j.code).text}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <ChevronRight size={16} className="text-foreground-disabled" />

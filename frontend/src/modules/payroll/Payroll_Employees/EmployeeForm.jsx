@@ -8,6 +8,7 @@ import { currencyInfoForCountry } from "../../../utils/currency";
 import { bankFieldsFor, bankComplianceKeys, ifscWarning } from "./bankFieldsFor";
 import { useEntitledCountries, toEmployeeCountryCode } from "../EntitledCountriesContext";
 import PlanLimitMessage, { isPlanLimitError } from "../../../components/PlanLimitMessage";
+import { emailError, phoneError, isUnchangedContact, normalizeEmail } from "../../../utils/contactValidation";
 
 function emptyCompliance() {
   return {};
@@ -74,13 +75,23 @@ const inputClass =
 const selectClass =
   "w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-200";
 
-function validate(form, countryAllowed) {
+function validate(form, countryAllowed, original) {
   const errors = {};
   if (!form.countryCode) errors.countryCode = "Country is required";
   else if (!countryAllowed) errors.countryCode = "Your plan does not include this country";
   if (!form.name.trim()) errors.name = "Employee name is required";
+  // Same rules as the server (utils/contactValidation.js). On an edit, a value
+  // unchanged from the stored one is not re-checked, so a record saved before
+  // these rules can still be edited.
   if (!form.email.trim()) errors.email = "Email is required";
-  else if (!/^\S+@\S+\.\S+$/.test(form.email)) errors.email = "Enter a valid email";
+  else if (!isUnchangedContact(original?.email, form.email)) {
+    const err = emailError(form.email);
+    if (err) errors.email = err;
+  }
+  if (form.phone && !isUnchangedContact(original?.phone, form.phone)) {
+    const err = phoneError(form.phone);
+    if (err) errors.phone = err;
+  }
   if (!form.designation.trim()) errors.designation = "Designation is required";
   if (!form.dateOfJoining) errors.dateOfJoining = "Date of joining is required";
   if (!form.ctc || Number(form.ctc) <= 0) errors.ctc = "Enter a valid annual CTC";
@@ -184,7 +195,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
   async function handleSubmit(e) {
     e.preventDefault();
     const countryAllowed = countryLocked || !entitlement.loaded || entitlement.isEntitled(form.countryCode);
-    const validationErrors = validate(form, countryAllowed);
+    const validationErrors = validate(form, countryAllowed, employee);
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) return;
 
@@ -199,7 +210,8 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
         ctc: Number(form.ctc),
         // Basic/HRA are no longer editable columns — the backend derives
         // them from CTC (40% / 20%) whenever they're absent.
-        phone: form.phone !== "" ? form.phone : null,
+        email: isUnchangedContact(employee?.email, form.email) ? form.email : normalizeEmail(form.email),
+        phone: (form.phone || "").trim() !== "" ? form.phone.trim() : null,
         dateOfBirth: form.dateOfBirth !== "" ? form.dateOfBirth : null,
         bankName: form.bankName !== "" ? form.bankName : null,
         bankAccountNumber: form.bankAccountNumber !== "" ? form.bankAccountNumber : null,
@@ -254,8 +266,17 @@ export default function EmployeeForm({ employee, onSaved, onCancel, currencyInfo
           <Field label="Email" error={errors.email}>
             <input type="email" className={`${inputClass} ${errors.email ? "border-error focus:border-error focus:ring-error/20" : ""}`} value={form.email} onChange={(e) => update("email", e.target.value)} />
           </Field>
-          <Field label="Phone">
-            <input className={inputClass} value={form.phone} onChange={(e) => update("phone", e.target.value)} />
+          <Field label="Phone (optional)" error={errors.phone}>
+            <input
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              maxLength={25}
+              placeholder="+44 7700 900123"
+              className={`${inputClass} ${errors.phone ? "border-error focus:border-error focus:ring-error/20" : ""}`}
+              value={form.phone ?? ""}
+              onChange={(e) => update("phone", e.target.value)}
+            />
           </Field>
           <Field label="Date of birth (optional)">
             <input type="date" className={inputClass} value={form.dateOfBirth} onChange={(e) => update("dateOfBirth", e.target.value)} />

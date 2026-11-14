@@ -29,6 +29,11 @@ export const getCompliancePolicies = (params) => apiFetch("/api/super-admin/comp
 export const upsertCompliancePolicy = (payload) =>
   apiFetch("/api/super-admin/compliance/policies", { method: "PUT", body: payload });
 
+// Read-only Overview summary of one pack (lifecycle, configuration counts,
+// regions, missing metadata) - every country's Overview tab.
+export const getCompliancePolicyOverview = (id) =>
+  apiFetch(`/api/super-admin/compliance/policies/${id}/overview`);
+
 export const getCompliancePolicyVersions = (packId) =>
   apiFetch(`/api/super-admin/compliance/policies/${encodeURIComponent(packId)}/versions`);
 
