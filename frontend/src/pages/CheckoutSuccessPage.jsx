@@ -84,8 +84,13 @@ export default function CheckoutSuccessPage() {
         return { status: res?.status, planCode: res?.plan_code, deferred: !!res?.deferred,
           trialEndsAt: res?.trial_ends_at || null };
       }
+      // A TRIALING row only counts once it carries a Stripe subscription (a plan
+      // whose first charge is deferred); a card-less evaluation trial is also
+      // TRIALING and must not read as a completed checkout.
       const sub = (await getMySubscription())?.subscription;
-      return { status: sub?.status, planCode: null, deferred: sub?.status === "TRIALING", trialEndsAt: null };
+      const paid = sub?.status === "ACTIVE" || (sub?.status === "TRIALING" && !!sub?.stripe_subscription_id);
+      return { status: paid ? sub.status : null, planCode: null, deferred: sub?.status === "TRIALING",
+        trialEndsAt: null };
     };
 
     (async () => {

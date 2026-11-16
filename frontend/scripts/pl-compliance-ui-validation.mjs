@@ -83,7 +83,7 @@ check("PLN currency and IBAN routing are wired", () => {
   assert(/PLN: \{ code: 'PLN'.*locale: 'pl-PL'/.test(currency), "PLN master entry");
   assert(/\{ code: "PL", name: "Poland", currency: "PLN" \}/.test(currency), "PLN country list entry");
   const bank = read("modules/payroll/Payroll_Employees/bankFieldsFor.js");
-  assert(/"ZA", "PL"\]/.test(bank) && /PL: \["iban"\]/.test(bank) && /PL: "IBAN"/.test(bank), "bank routing");
+  assert(/"ZA", "PL", "MY"\]/.test(bank) && /PL: \["iban"\]/.test(bank) && /PL: "IBAN"/.test(bank), "bank routing");
 });
 
 // ── Phase 7b: Super Admin Poland page (governed signing console) ──────────
@@ -144,13 +144,11 @@ const orgRouter = readFileSync(resolve(BACKEND, "pl_org_router.py"), "utf-8");
 const orgRoutes = new Set([...orgRouter.matchAll(/@router\.(get|post|put|patch|delete)\(\s*"([^"]+)"/g)]
   .map(([, method, path]) => `${method.toUpperCase()} /api/payroll/poland${path.replace(/\{[^}]+\}/g, "{}")}`));
 const payrollService = read("service/payrollService.js");
-// The Poland section runs from its `const PL` to the next top-level declaration
-// that is not Poland's own (PL / plList / plOne) — e.g. the payslip-template
-// block (`const PST`) that follows it. Slicing to end-of-file counted those
-// non-Poland calls as Poland routes.
+// Poland's block runs from its base constant to the next service base
+// constant (payslip templates, Malaysia, ...), never to the end of the file.
 const plStart = payrollService.indexOf('const PL = "/api/payroll/poland";');
-const plAfter = payrollService.slice(plStart + 1).search(/\nconst (?!pl|PL\b)\w+ = /);
-const plBlock = payrollService.slice(plStart, plAfter === -1 ? undefined : plStart + 1 + plAfter);
+const plNext = payrollService.slice(plStart + 1).search(/\nconst [A-Z_]+ = "\/api\/payroll\//);
+const plBlock = payrollService.slice(plStart, plNext < 0 ? undefined : plStart + 1 + plNext);
 const plCalls = [...plBlock.matchAll(/api\.(get|post|put|delete)\(`([^`]+)`/g)]
   .map(([, method, path]) => `${method.toUpperCase()} ${path.replace("${PL}", "/api/payroll/poland").split("?")[0]
     .replace(/\$\{[^}]+\}/g, "{}")}`);

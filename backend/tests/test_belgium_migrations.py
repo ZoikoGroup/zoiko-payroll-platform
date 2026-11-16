@@ -276,6 +276,13 @@ def test_deploy_drift_filter_explains_every_be_object():
     os.chdir(BACKEND)
     try:
         tables, columns = pending_objects(PARENT)
+        # Malaysia's chain (13574b996ccf ... f793f6074257) joins Belgium's at merge
+        # cf348b09db2b, so its objects are pending from here too. They are explained by
+        # the Malaysia migration tests; from Belgium's head only Malaysia is pending.
+        my_tables, my_columns = pending_objects("8a1f5ef9fa5d")
+        tables = tables - my_tables
+        columns = {t: c - my_columns.get(t, set()) for t, c in columns.items()}
+        columns = {t: c for t, c in columns.items() if c}
     finally:
         os.chdir(here)
     # Everything since this revision's parent: its own objects plus Block B's
@@ -290,7 +297,10 @@ def test_revision_is_the_single_child_of_the_previous_head():
     assert (module.revision, module.down_revision) == (REVISION, PARENT)
     children = [p.name for p in VERSIONS.glob("*.py")
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
-    assert sorted(children) == sorted([FILENAME, "2defe5c4edd6_merge_mx_cfdi_lifecycle_with_main.py"])
+    # The payslip templates revision is also the parent of Mexico's CFDI lifecycle merge
+    # (2defe5c4edd6) and of Malaysia's chain (13574b996ccf); all rejoin at merge d6b2e8f4a1c9.
+    assert sorted(children) == sorted([FILENAME, "2defe5c4edd6_merge_mx_cfdi_lifecycle_with_main.py",
+                                       "13574b996ccf_my_foundation.py"])
 
 
 def test_the_only_child_is_the_block_b_revision():

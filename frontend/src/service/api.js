@@ -7,6 +7,20 @@ const REFRESH_KEY = "zoiko_payroll_refresh";
 const USER_KEY = "zoiko_payroll_user";
 const AUTH_INVALID_EVENT = "zoiko-payroll-auth-session-invalid";
 const BROADCAST_CHANNEL_NAME = "zoiko_payroll_auth";
+// Idle-timeout bookkeeping, shared by every tab through localStorage:
+// { idleTimeoutMs, lastRefreshAt }. Privileged roles (org/super admin, ...) must
+// refresh at least once every PRIVILEGED_REFRESH_IDLE_MINUTES or the server
+// demands a fresh sign-in; the client uses this to keep active users signed
+// in and to warn idle users before the deadline.
+const SESSION_META_KEY = "zoiko_payroll_session_meta";
+const LAST_ACTIVITY_KEY = "zoiko_payroll_last_activity";
+const REFRESH_LOCK_NAME = "zoiko_payroll_refresh";
+// Fallback when the server did not send refresh_idle_timeout_seconds (older
+// backend, or a session stored before this change). Mirrors MFA_REQUIRED_ROLES.
+const PRIVILEGED_ROLES = ["super_admin", "support_operator", "platform_security", "org_admin"];
+const DEFAULT_PRIVILEGED_IDLE_MS = 30 * 60 * 1000;
+const ACTIVITY_THROTTLE_MS = 15 * 1000;
+export const SESSION_WARNING_MS = 5 * 60 * 1000;
 
 let refreshPromise = null;
 let sessionInvalidNotified = false;
@@ -55,6 +69,80 @@ export function getStoredUser() {
   return raw ? JSON.parse(raw) : null;
 }
 
+function readSessionMeta() {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_META_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSessionMeta(meta) {
+  try {
+    localStorage.setItem(SESSION_META_KEY, JSON.stringify(meta));
+  } catch {
+    // storage unavailable - the idle warning simply won't show
+  }
+}
+
+// Milliseconds a session may go without a token refresh before the server
+// requires a new sign-in, or null when there is no idle limit.
+export function getIdleTimeoutMs() {
+  const meta = readSessionMeta();
+  if (typeof meta.idleTimeoutMs === "number") return meta.idleTimeoutMs > 0 ? meta.idleTimeoutMs : null;
+  let role = null;
+  try {
+    role = getStoredUser()?.role || null;
+  } catch {
+    role = null;
+  }
+  return PRIVILEGED_ROLES.includes(role) ? DEFAULT_PRIVILEGED_IDLE_MS : null;
+}
+
+// Epoch ms when the server will stop accepting this session's refresh token
+// for inactivity, or null when unknown / not applicable.
+export function getSessionDeadline() {
+  const idle = getIdleTimeoutMs();
+  const { lastRefreshAt } = readSessionMeta();
+  if (!idle || !lastRefreshAt || !getRefreshToken()) return null;
+  return lastRefreshAt + idle;
+}
+
+function getLastActivityAt() {
+  return Number(localStorage.getItem(LAST_ACTIVITY_KEY)) || 0;
+}
+
+// Real user input keeps the session alive: refresh when the access token is
+// close to expiry, or when half of the idle window has passed. Driven by
+// activity rather than only a timer because browsers throttle or freeze
+// timers in background tabs and on sleep - the old timer-only refresh could
+// miss the idle window and sign out someone who was actively working.
+function refreshIfDueForActivity() {
+  const token = getAccessToken();
+  if (!token || !getRefreshToken() || refreshPromise) return;
+  const now = Date.now();
+  const expMs = getTokenExpMs(token);
+  const nearExpiry = Boolean(expMs) && expMs - now < 3 * 60 * 1000;
+  const idle = getIdleTimeoutMs();
+  const lastRefreshAt = readSessionMeta().lastRefreshAt || 0;
+  const idleHalfPassed = Boolean(idle) && now - lastRefreshAt > idle / 2;
+  if (nearExpiry || idleHalfPassed) tryRefreshToken();
+}
+
+let lastActivityMarked = 0;
+
+export function markUserActivity() {
+  const now = Date.now();
+  if (now - lastActivityMarked < ACTIVITY_THROTTLE_MS) return;
+  lastActivityMarked = now;
+  try {
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
+  } catch {
+    // ignore
+  }
+  refreshIfDueForActivity();
+}
+
 export function setStoredUser(user) {
   if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
   else localStorage.removeItem(USER_KEY);
@@ -95,9 +183,12 @@ export function scheduleProactiveRefresh() {
   if (now >= expMs) return;
 
   proactiveTimer = setTimeout(async () => {
-    if (getAccessToken() && getRefreshToken()) {
-      await tryRefreshToken();
-    }
+    if (!getAccessToken() || !getRefreshToken()) return;
+    // With an idle limit, only keep the session alive for a user who did
+    // something since the last refresh; an idle user gets the expiry warning
+    // instead of being silently kept signed in forever by an open tab.
+    if (getIdleTimeoutMs() && getLastActivityAt() <= (readSessionMeta().lastRefreshAt || 0)) return;
+    await tryRefreshToken();
   }, refreshDelay);
 }
 
@@ -110,6 +201,17 @@ export function setSession(data = {}) {
   if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
   if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
   if (accessToken || refreshToken || user) sessionInvalidNotified = false;
+  // A new refresh token restarts the server's idle window. (A step-up only
+  // replaces the access token and must not move the deadline.)
+  if (refreshToken) {
+    const meta = readSessionMeta();
+    if ("refresh_idle_timeout_seconds" in data) {
+      const seconds = Number(data.refresh_idle_timeout_seconds);
+      meta.idleTimeoutMs = seconds > 0 ? seconds * 1000 : 0;
+    }
+    meta.lastRefreshAt = Date.now();
+    writeSessionMeta(meta);
+  }
   scheduleProactiveRefresh();
   // Notify other tabs of the new tokens so they don't try to use a revoked
   // refresh token and get their whole session family ended.
@@ -124,10 +226,24 @@ export function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(SESSION_META_KEY);
+}
+
+// Sign out from the client (idle timeout reached, or the user chose to).
+export function endSession(reason = "signed_out") {
+  clearSession();
+  notifySessionInvalid(reason);
 }
 
 if (typeof window !== "undefined") {
+  // Listen for token rotations from other tabs from the start - not only
+  // after this tab itself first calls setSession.
+  getAuthChannel();
   scheduleProactiveRefresh();
+
+  for (const type of ["pointerdown", "keydown", "wheel", "touchstart", "mousemove"]) {
+    window.addEventListener(type, markUserActivity, { passive: true, capture: true });
+  }
 
   window.addEventListener("storage", (event) => {
     if (event.key === TOKEN_KEY && event.newValue) {
@@ -250,9 +366,27 @@ export async function apiRequest(path, { method = "GET", body, headers = {}, aut
 // api/client.js). Refresh tokens rotate (ZP-PRIV B08): two concurrent
 // refreshes with the same token would look like token theft and end the
 // session, so every caller must go through this one promise.
+// Serialise refreshes across tabs: every tab's proactive timer reads the same
+// token expiry and fires together, and two tabs presenting the same rotating
+// refresh token looks like token theft to the server (whole session revoked).
+function withRefreshLock(fn) {
+  if (typeof navigator !== "undefined" && navigator.locks?.request) {
+    return navigator.locks.request(REFRESH_LOCK_NAME, fn);
+  }
+  return fn();
+}
+
 export async function tryRefreshToken() {
   if (refreshPromise) return refreshPromise;
-  refreshPromise = (async () => {
+  const startingRefreshToken = getRefreshToken();
+  refreshPromise = withRefreshLock(async () => {
+    // Another tab rotated the token while this one waited for the lock -
+    // use the new tokens instead of replaying the old refresh token.
+    const current = getRefreshToken();
+    if (current && startingRefreshToken && current !== startingRefreshToken) {
+      scheduleProactiveRefresh();
+      return { ok: true, refreshedElsewhere: true };
+    }
     // Try up to 3 times. A refresh can fail with invalidSession when another
     // tab rotated the refresh token first (ZP-PRIV B08 reuse detection).
     // After a failed attempt, another tab may have already refreshed and
@@ -271,7 +405,7 @@ export async function tryRefreshToken() {
       await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
     }
     return { ok: false, invalidSession: true, reason: "refresh_exhausted_retries" };
-  })()
+  })
     .then((result) => {
       if (!result.ok && result.invalidSession) {
         clearSession();
@@ -322,6 +456,9 @@ async function refreshAccessToken() {
         accessToken: data.access_token,
         refreshToken: data.refresh_token || refreshToken,
         user: data.employee || data.user,
+        ...("refresh_idle_timeout_seconds" in data
+          ? { refresh_idle_timeout_seconds: data.refresh_idle_timeout_seconds }
+          : {}),
       });
       return { ok: true };
     }

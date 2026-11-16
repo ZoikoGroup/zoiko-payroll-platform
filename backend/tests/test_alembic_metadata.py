@@ -305,9 +305,9 @@ def test_alembic_heads_is_single_head():
     # efc56f3235e2 (Mexico mx_decision_inputs_m21, sweep S1): seven nullable columns the
     # decision options read (terminations, labour policies, statutory profiles); written on
     # 3880223bfaa0, re-parented (never applied) onto e7ec6c1933b4.
-    # rugvedh's Mexico CFDI lifecycle chain and main's Belgium filing chain
-    # are joined by the final no-op merge migration.
-    assert heads == ["4de7c091ab32"]
+    # rugvedh's head (4de7c091ab32: Mexico CFDI lifecycle + Belgium) and main's head
+    # (cf348b09db2b: Belgium + Malaysia) are joined by the final no-op merge d6b2e8f4a1c9.
+    assert heads == ["d6b2e8f4a1c9"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -319,7 +319,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["4de7c091ab32"]
+    assert list(script.get_heads()) == ["d6b2e8f4a1c9"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -366,6 +366,10 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         "cd62503afe26",
         "d4e5f6a7c8b9", "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf",
         "f0b1c2d3e4f5", "f1b78410d568",
+        # f3a9c1d7e2b4 (payslip templates): main's Belgium chain (1d76678ef1a1) and
+        # venu's Malaysia chain (13574b996ccf) both grow from it; rejoined by merge
+        # cf348b09db2b.
+        "f3a9c1d7e2b4",
         # f5c1a8d3e9b2: main's Mexico M8 (a6d2f9c4b8e1) and the ZP-PRIV chain
         # (a7c3e91f2b60) both grow from it; rejoined by merge c3e5a7b9d1f4.
         "f3a9c1d7e2b4", "f5c1a8d3e9b2",
@@ -376,7 +380,9 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 266   # union of rugvedh's Mexico lifecycle and main's Belgium chains plus their merge revision
+    assert len(revs) == 272   # rugvedh's 266 (Mexico lifecycle + Belgium + merge 4de7c091ab32)
+                              # + Malaysia 13574b996ccf, 5f314f975ac3, efdc07f97eb5, f793f6074257
+                              # + merge cf348b09db2b + merge d6b2e8f4a1c9
 
 
 def test_germany_head_chain_wiring_is_intact():

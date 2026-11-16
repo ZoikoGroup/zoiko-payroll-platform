@@ -118,6 +118,13 @@ def test_deploy_drift_filter_explains_every_object():
     os.chdir(BACKEND)
     try:
         tables, columns = pending_objects(PARENT)
+        # Malaysia's chain (13574b996ccf ... f793f6074257) joins Belgium's at merge
+        # cf348b09db2b, so its objects are pending from here too. They are explained by
+        # the Malaysia migration tests; from Belgium's head only Malaysia is pending.
+        my_tables, my_columns = pending_objects("8a1f5ef9fa5d")
+        tables = tables - my_tables
+        columns = {t: c - my_columns.get(t, set()) for t, c in columns.items()}
+        columns = {t: c for t, c in columns.items() if c}
     finally:
         os.chdir(here)
     assert tables == set(NEW_TABLES) | {"payroll_mx_document_access_events"}
@@ -134,7 +141,12 @@ def test_revision_is_the_single_child_and_the_single_head():
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
     assert children == [FILENAME]
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert list(script.get_heads()) == ["4de7c091ab32"]
+    # This revision is no longer the head itself: merge 4de7c091ab32 joins it with Mexico's CFDI
+    # lifecycle and merge cf348b09db2b with Malaysia's head (f793f6074257); merge d6b2e8f4a1c9 joins those two.
+    assert list(script.get_heads()) == ["d6b2e8f4a1c9"]
+    merge = script.get_revision("cf348b09db2b")
+    assert set(merge.down_revision) == {REVISION, "f793f6074257"}
+    assert set(script.get_revision("d6b2e8f4a1c9").down_revision) == {"4de7c091ab32", "cf348b09db2b"}
 
 
 def test_names_are_literal_and_the_migration_is_in_the_manifest():

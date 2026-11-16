@@ -4,7 +4,7 @@ import { getAccessToken, getStoredUser, setStoredUser, clearSession } from "../a
 import { AUTH_INVALID_EVENT, resetSessionInvalidNotice } from "../service/api";
 
 // Pages that never need a session — a dead session is not redirected from these.
-const PUBLIC_PATHS = ["/login", "/register", "/trial-register", "/forgot-password", "/reset-password", "/accept-invite"];
+const PUBLIC_PATHS = ["/login", "/register", "/trial-register", "/forgot-password", "/reset-password", "/accept-invite", "/forms/fill"];
 import { ROLES, VALID_ROLES } from "../config/roles";
 
 export const AuthContext = createContext(null);

@@ -273,7 +273,11 @@ def test_form_assignment_is_audited_and_reports_delivery_synchronously(db, organ
 
     result = forms_service.send_form(db, organization.id, form.id, [emp.id])
 
-    assert result["results"] == [{"employeeId": emp.id, "status": "sent"}]
+    # The test server has no SMTP host, so the invite is only mock-logged —
+    # reported honestly as not delivered (it used to claim "sent").
+    (res,) = result["results"]
+    assert (res["employeeId"], res["status"], res["email"]) == (emp.id, "not_delivered", "form@testorg.test")
+    assert "no SMTP host" in res["reason"]
     assert [(t, e) for t, e, _ in captured] == [("update_form_invite.html", "form@testorg.test")]
     (row,) = _rows(db, event_type="payroll.form_assigned")
     assert (row.outcome, row.recipient_email) == ("sent", "form@testorg.test")

@@ -315,7 +315,7 @@ def find_active_tax_pack(
     return _find_active_tax_pack(db, country, state, tax_regime, as_of or date_cls.today())
 
 
-_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG", "HK", "SA", "NL", "ZA", "JP", "NZ", "PL", "BE")
+_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG", "HK", "SA", "NL", "ZA", "JP", "NZ", "PL", "MY", "BE")
 
 
 def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str], new_country: Optional[str],
@@ -364,6 +364,12 @@ def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str]
     pl_refusal = entering_poland_refusal(old_country, new_country, organization_id)
     if pl_refusal:
         return pl_refusal
+    # Malaysia (ZP-MY-ENG-001 Phase 0): dormant until G1-G7 are signed.
+    from app.modules.payroll.malaysia_dormancy import entering_malaysia_refusal
+
+    my_refusal = entering_malaysia_refusal(old_country, new_country, organization_id)
+    if my_refusal:
+        return my_refusal
     # Belgium (ZP-BE-ENG-001 Phase 1): dormant until G1-G7 are signed.
     from app.modules.payroll.belgium_dormancy import entering_belgium_refusal
 

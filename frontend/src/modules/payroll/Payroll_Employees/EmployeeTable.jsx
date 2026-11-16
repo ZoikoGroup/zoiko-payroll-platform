@@ -59,7 +59,12 @@ const COLUMNS = [
   { key: "status", label: "Status" },
 ];
 
-export default function EmployeeTable({ employees, loading, onRowClick, selectedEmployeeId, selectedIds, onSelectionChange, currencyInfo, orgCountryCode }) {
+// showEmail (optional): adds an Email column, flagging employees without one —
+// used where the action emails employees (Send Template).
+export default function EmployeeTable({ employees, loading, onRowClick, selectedEmployeeId, selectedIds, onSelectionChange, currencyInfo, orgCountryCode, showEmail = false }) {
+  const columns = showEmail
+    ? [...COLUMNS.slice(0, 2), { key: "email", label: "Email" }, ...COLUMNS.slice(2)]
+    : COLUMNS;
   const [sortKey, setSortKey] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
 
@@ -146,7 +151,7 @@ export default function EmployeeTable({ employees, loading, onRowClick, selected
                   className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20 bg-background"
                 />
               </th>
-              {COLUMNS.map((col) => (
+              {columns.map((col) => (
                 <th
                   key={col.key}
                   scope="col"
@@ -202,6 +207,15 @@ export default function EmployeeTable({ employees, loading, onRowClick, selected
                     </div>
                   </div>
                 </td>
+                {showEmail && (
+                  <td className="whitespace-nowrap px-4 py-3.5 text-[13px] text-foreground-muted">
+                    {emp.email || (
+                      <span className="inline-flex items-center rounded-full bg-warning/10 px-3 py-1 text-[11px] font-bold text-warning">
+                        No email
+                      </span>
+                    )}
+                  </td>
+                )}
                 <td className="whitespace-nowrap px-4 py-3.5">
                   <DepartmentBadge dept={emp.department} />
                 </td>

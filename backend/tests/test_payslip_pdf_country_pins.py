@@ -52,6 +52,13 @@ def _render(db, organization, country, monkeypatch):
     fonts = os.path.join(os.path.dirname(reportlab.__file__), "fonts")
     monkeypatch.setattr(service, "unicode_font_candidates",
                         lambda: [(os.path.join(fonts, "Vera.ttf"), os.path.join(fonts, "VeraBd.ttf"))])
+    # reportlab binds a TTF font name only once per process (first registration
+    # wins), so a payslip rendered earlier by another test would keep the host
+    # font under these names. Unbind them for this test; monkeypatch restores them.
+    from reportlab.pdfbase import pdfmetrics
+
+    for name in ("RupeeFont", "RupeeFont-Bold"):
+        monkeypatch.delitem(pdfmetrics._fonts, name, raising=False)
     emp = PayrollEmployee(organization_id=organization.id, name="Pin Employee", employee_code=f"PIN-{country}",
                           email=f"pin-{country.lower()}@example.com", country_code=country)
     db.add(emp)
