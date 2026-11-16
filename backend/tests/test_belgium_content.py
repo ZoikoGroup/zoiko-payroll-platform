@@ -220,7 +220,9 @@ _STRUCTURAL_NUMBERS = {
     "belgium_payment_service.py": {0: "list index / zero amount", 1: "batch sequence (+1)",
                                    100: "idempotency key / column width 100", 200: "return reason column width"},
     "belgium_onss_rates.py": {
-        0: "first file / zero id fallback", 1: "at most one file per pay date (slice [:1])",
+        0: "first file / zero id fallback", 1: "at most one file per pay date (slice [:1]) / first day / quarter 1",
+        2: "calendar quarter 2", 3: "months per quarter (calendar) / quarter 3",
+        4: "YYYY width of the <Quarter> header / quarter 4",
         10: "ISO date string slice [:10]", 20: "malformed-number excerpt in a refusal",
         300: "reason / note column width (String(300))",
     },

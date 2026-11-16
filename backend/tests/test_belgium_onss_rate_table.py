@@ -351,3 +351,116 @@ def test_the_rate_table_is_frozen_with_the_payslip_for_replay():
     from app.modules.payroll import belgium_service as be
 
     assert "be_onss_rate_table" in be._BE_CTX_PLAIN
+
+
+# ── Decision 1: the rate table versions independently of the pack lifecycle ───────────────────────────────
+def _quarter_zip(quarter: str, employer_rate: str) -> bytes:
+    """A synthetic rate file with one base row (EC 000 x WC 495, type 0) carrying `employer_rate`."""
+    rates = (f'<?xml version="1.0" encoding="UTF-8"?><ContributionRateFile><Header><FileType>NOSSContributionRate'
+             f"</FileType><Quarter>{quarter}</Quarter><FormCreationDate>2026-11-16</FormCreationDate>"
+             f"<FormCreationHour>10:00:00.000</FormCreationHour></Header><ContributionRate><EmployerClass>000"
+             f"</EmployerClass><ContributionWorkerCode>495</ContributionWorkerCode><ContributionType>0"
+             f"</ContributionType><PersonalRate>1.11</PersonalRate><EmployerRate>{employer_rate}</EmployerRate>"
+             f"<SalaryModerationRate>0.00</SalaryModerationRate><TotalRate>0</TotalRate><IsFlatRate>false"
+             f"</IsFlatRate></ContributionRate></ContributionRateFile>").encode()
+    comb = (f'<?xml version="1.0" encoding="UTF-8"?><WorKerAndContributionCombFile><Header><FileType>'
+            f"NOSSWorkerAndContributionComb</FileType><Quarter>{quarter}</Quarter><FormCreationDate>2026-11-16"
+            f"</FormCreationDate><FormCreationHour>10:00:00.000</FormCreationHour></Header>"
+            f"</WorKerAndContributionCombFile>").encode()
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr(f"NOSSContributionRate_TEST_{quarter}.xml", rates)
+        z.writestr(f"NOSSWorkerAndContributionComb_TEST_{quarter}.xml", comb)
+    return out.getvalue()
+
+
+def _quarter_source(db, tmp_path, quarter: str, data: bytes):
+    from app.modules.payroll.models import SourceArtifact
+
+    path = tmp_path / f"dmfa_rate_TEST_{quarter}.zip"
+    path.write_bytes(data)
+    src = SourceArtifact(agency="Synthetic", title=f"SYNTHETIC TEST ONLY rate file {quarter}",
+                         form_number=f"SYN-RATE-{quarter}", checksum_sha256=hashlib.sha256(data).hexdigest(),
+                         file_path=str(path))
+    db.add(src)
+    db.commit()
+    return src
+
+
+def _live_quarter(db, pack, tmp_path, quarter, start, end, employer_rate):
+    """Register (REGISTRAR), attest (ATTESTER), mark live (MARKER) and sign (SIGNER) one quarter's file."""
+    from app.modules.payroll import belgium_onss_rates as r
+    from app.modules.payroll.models import PayrollBeOnssRate
+
+    src = _quarter_source(db, tmp_path, quarter, _quarter_zip(quarter, employer_rate))
+    f = r.be_onss_register_rate_file(db, pack.id, {"sourceDocumentId": src.id, "effectiveFrom": start,
+                                                   "effectiveTo": end, "reason": "TEST ONLY"}, REGISTRAR)
+    r.be_onss_attest_rate_file(db, f.id, "TEST ONLY: genuine ONSS publication", ATTESTER)
+    r.be_onss_mark_live(db, f.id, {"employerClasses": ["000"], "workerCodes": ["495"], "reason": "TEST ONLY"},
+                        MARKER)
+    for row in db.query(PayrollBeOnssRate).filter_by(rate_file_id=f.id, status="PENDING"):
+        r.be_onss_sign_rate(db, row.id, "TEST ONLY", SIGNER)
+    db.commit()
+    return f
+
+
+def _base_on(table, on: date) -> Decimal:
+    from app.modules.payroll.engine.jurisdictions.belgium.onss_table import be_onss_table_compute
+    from app.modules.payroll.engine.jurisdictions.belgium.pack import BePack
+
+    decision = _decision(manual=False)
+    return be_onss_table_compute(BePack({}, [], 1, on), table, decision, decision["employer"], Decimal("1000"),
+                                 RND)["lines"]["BASE"]
+
+
+def test_a_new_quarter_is_registered_attested_and_signed_while_the_pack_is_active(db, seeded_be, tmp_path):
+    from app.modules.payroll import belgium_onss_rates as r
+
+    seeded_be.status = "Active"                                     # the TEST pack (synthetic DB), never the real one
+    db.commit()
+    q3 = _live_quarter(db, seeded_be, tmp_path, "20263", "2026-07-01", "2026-09-30", "3.33")
+    q1 = _live_quarter(db, seeded_be, tmp_path, "20271", "2027-01-01", "2027-03-31", "7.77")
+    rule = r.be_onss_add_type_rule(db, seeded_be.id, {"code": "495", "payBasis": "PAY_100", "outcome": "0",
+                                                      "effectiveFrom": "2026-01-01", "reason": "TEST ONLY"}, MARKER)
+    r.be_onss_sign_type_rule(db, rule.id, "TEST ONLY", SIGNER)
+    db.commit()
+    assert seeded_be.status == "Active"                             # nothing needed a new pack version
+    assert (q3.status, q1.status) == ("ATTESTED", "ATTESTED")
+    august = r.be_onss_rate_table_input(db, seeded_be.id, date(2026, 8, 31))
+    february = r.be_onss_rate_table_input(db, seeded_be.id, date(2027, 2, 15))
+    assert (august["quarter"], august["fileId"]) == ("20263", q3.id)
+    assert (february["quarter"], february["fileId"]) == ("20271", q1.id)
+    assert _base_on(august, date(2026, 8, 31)) == Decimal("33.30")     # Q3 2026 rate (3.33 %)
+    assert _base_on(february, date(2027, 2, 15)) == Decimal("77.70")   # Q1 2027 rate (7.77 %)
+    assert r.be_onss_rate_table_input(db, seeded_be.id, date(2026, 11, 15)) is None   # no Q4 file: engine blocks
+
+
+def test_the_attestation_and_row_signing_stay_the_gates_on_an_active_pack(db, seeded_be, tmp_path):
+    from app.modules.payroll import belgium_onss_rates as r
+    from app.modules.payroll.models import PayrollBeOnssRate
+
+    seeded_be.status = "Active"
+    db.commit()
+    src = _quarter_source(db, tmp_path, "20271", _quarter_zip("20271", "7.77"))
+    f = r.be_onss_register_rate_file(db, seeded_be.id, {"sourceDocumentId": src.id, "effectiveFrom": "2027-01-01",
+                                                        "effectiveTo": "2027-03-31", "reason": "TEST ONLY"}, REGISTRAR)
+    with pytest.raises(BadRequestException):
+        r.be_onss_attest_rate_file(db, f.id, "TEST ONLY", REGISTRAR)          # four-eyes still applies
+    r.be_onss_mark_live(db, f.id, {"employerClasses": ["000"], "workerCodes": ["495"], "reason": "TEST ONLY"},
+                        MARKER)
+    row = db.query(PayrollBeOnssRate).filter_by(rate_file_id=f.id, status="PENDING").one()
+    with pytest.raises(BadRequestException):
+        r.be_onss_sign_rate(db, row.id, "TEST ONLY", MARKER)                  # four-eyes still applies
+    db.commit()
+    table = r.be_onss_rate_table_input(db, seeded_be.id, date(2027, 2, 15))
+    assert table["fileAttested"] is False and {x["status"] for x in table["rates"]} == {"PENDING"}
+
+
+def test_a_window_outside_its_own_quarter_is_refused(db, seeded_be, tmp_path):
+    from app.modules.payroll import belgium_onss_rates as r
+
+    src = _quarter_source(db, tmp_path, "20271", _quarter_zip("20271", "7.77"))
+    for start, end in (("2026-12-01", "2027-03-31"), ("2027-01-01", "2027-04-30")):
+        with pytest.raises(BadRequestException):
+            r.be_onss_register_rate_file(db, seeded_be.id, {"sourceDocumentId": src.id, "effectiveFrom": start,
+                                                            "effectiveTo": end, "reason": "TEST ONLY"}, REGISTRAR)
