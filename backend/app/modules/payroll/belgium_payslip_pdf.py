@@ -92,6 +92,11 @@ def be_payslip_pdf_bytes(data: dict, item, run, company_name: str, company_addre
     snapshot = {k: v for k, v in (getattr(item, "be_calculation_snapshot", None) or {}).items()
                 if k != "frozenContext"}
     if not snapshot:
+        from app.modules.payroll.belgium_observability import be_log_event
+
+        be_log_event("be.payslip.pdf_refused", code=BE_PAYSLIP_PDF_NO_SNAPSHOT,
+                     organization_id=getattr(item, "organization_id", None), payslip_id=getattr(item, "id", None),
+                     employee_id=getattr(item, "employee_id", None))
         raise HTTPException(status.HTTP_409_CONFLICT, detail={
             "code": BE_PAYSLIP_PDF_NO_SNAPSHOT,
             "message": "This Belgian payslip has no frozen Belgian calculation, so no PDF is produced "

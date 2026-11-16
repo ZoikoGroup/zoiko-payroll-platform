@@ -142,12 +142,15 @@ def test_revision_is_the_single_child_and_the_single_head():
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
     assert children == [FILENAME]
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    # This revision is no longer the head itself: merge 4de7c091ab32 joins it with Mexico's CFDI
-    # lifecycle and merge cf348b09db2b with Malaysia's head (f793f6074257); merge d6b2e8f4a1c9 joins those two.
-    assert list(script.get_heads()) == ["d6b2e8f4a1c9"]
+    # This revision is no longer the head itself: merge cf348b09db2b joins it with Malaysia's
+    # head (f793f6074257), Belgium Block K (b7e4c2a9d5f1) sits on that merge, merge 4de7c091ab32
+    # joins it with Mexico's CFDI lifecycle, and merges d6b2e8f4a1c9 / e3f9a7c1b5d2 rejoin them all.
+    assert list(script.get_heads()) == ["e3f9a7c1b5d2"]
     merge = script.get_revision("cf348b09db2b")
     assert set(merge.down_revision) == {REVISION, "f793f6074257"}
+    assert script.get_revision("b7e4c2a9d5f1").down_revision == "cf348b09db2b"
     assert set(script.get_revision("d6b2e8f4a1c9").down_revision) == {"4de7c091ab32", "cf348b09db2b"}
+    assert set(script.get_revision("e3f9a7c1b5d2").down_revision) == {"d6b2e8f4a1c9", "b7e4c2a9d5f1"}
 
 
 def test_names_are_literal_and_the_migration_is_in_the_manifest():

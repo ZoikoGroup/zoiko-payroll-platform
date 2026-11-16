@@ -72,6 +72,18 @@ def _money(value) -> str:
 
 
 def calculate(ctx: PayrollContext) -> dict:
+    """The Belgian calculation; a block is logged (code + internal ids only, Block I3) and re-raised."""
+    try:
+        return _be_calculate(ctx)
+    except BECalculationBlockedError as blocked:
+        from app.modules.payroll.belgium_observability import be_log_event
+
+        be_log_event("be.calculation.blocked", code=blocked.key, employee_id=getattr(ctx, "be_employee_id", None),
+                     organization_id=getattr(ctx, "be_organization_id", None) or getattr(ctx, "organization_id", None))
+        raise
+
+
+def _be_calculate(ctx: PayrollContext) -> dict:
     organization_id = getattr(ctx, "be_organization_id", None) or getattr(ctx, "organization_id", None)
     pay_date = as_date(getattr(ctx, "be_pay_date", None) or getattr(ctx, "pay_date", None))
     if pay_date is None:

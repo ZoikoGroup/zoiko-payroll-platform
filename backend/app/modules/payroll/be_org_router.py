@@ -507,6 +507,70 @@ def be_acknowledge_exception(run_id: int, body: Dict[str, Any] = Body(...), curr
     return out
 
 
+@router.post("/runs/{run_id}/exceptions/acknowledge-bulk",
+             summary="Acknowledge several engine exceptions of one run in one batched write (reason; audited per item)")
+def be_acknowledge_exceptions_bulk(run_id: int, body: Dict[str, Any] = Body(...),
+                                   current_user=Depends(get_current_org_admin), db: Session = Depends(get_db)):
+    out = be.acknowledge_be_run_exceptions(db, _org_id(current_user), run_id, body, _actor(current_user))
+    db.commit()
+    return out
+
+
+# ── Block K1: employee documents (preview now; generation only with an Active template) ──
+def _be_document_response(view: dict, fmt: str, name: str):
+    if (fmt or "json").lower() == "pdf":
+        import io
+
+        from fastapi.responses import StreamingResponse
+
+        from app.modules.payroll import belgium_reports as rep
+
+        return StreamingResponse(io.BytesIO(rep.be_report_pdf(view)), media_type="application/pdf",
+                                 headers={"Content-Disposition": f'inline; filename="{name}.pdf"'})
+    return view
+
+
+@router.get("/reports/individual-account",
+            summary="Preview an employee's individual account for a year (committed payroll only; NISS masked)")
+def be_report_individual_account(employeeId: int, year: int, format: str = "json",
+                                 current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_reports as rep
+
+    view = rep.be_report_preview(db, _org_id(current_user), rep.INDIVIDUAL_ACCOUNT,
+                                 {"employeeId": employeeId, "year": year})
+    return _be_document_response(view, format, f"individual-account-{employeeId}-{year}")
+
+
+@router.get("/reports/belcotax-copies/{filing_id}",
+            summary="Preview the employee copy of a Belcotax fiche (amounts, dependants used, lineage)")
+def be_report_belcotax_copy(filing_id: int, format: str = "json", current_user=Depends(get_current_payroll_operator),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_reports as rep
+
+    view = rep.be_report_preview(db, _org_id(current_user), rep.BELCOTAX_EMPLOYEE_COPY, {"filingId": filing_id})
+    return _be_document_response(view, format, f"fiche-copy-{filing_id}")
+
+
+@router.get("/reports/holiday-certificates/{certificate_id}", summary="Preview a holiday certificate (BE-027)")
+def be_report_holiday_certificate(certificate_id: int, format: str = "json",
+                                  current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_reports as rep
+
+    view = rep.be_report_preview(db, _org_id(current_user), rep.HOLIDAY_CERTIFICATE, {"certificateId": certificate_id})
+    return _be_document_response(view, format, f"holiday-certificate-{certificate_id}")
+
+
+@router.post("/reports/{report_type}/generate",
+             summary="Issue a Belgian employee document (refused unless its template is Active)")
+def be_report_generate(report_type: str, body: Dict[str, Any] = Body(...), current_user=Depends(get_current_org_admin),
+                       db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_reports as rep
+
+    row = rep.be_report_generate(db, _org_id(current_user), report_type.upper(), body, _actor(current_user))
+    db.commit()
+    return {"reportId": row.id, "reportType": row.report_type, "status": row.status, "scope": row.scope_key}
+
+
 # ── Block C1: filings, obligations, calendar, exception queue (spec §10 / §13) ──
 # Every builder is idempotent (the same payload returns the same row); every
 # filing write is scoped to the caller's organisation in belgium_filing.

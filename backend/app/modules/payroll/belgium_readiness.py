@@ -67,10 +67,16 @@ def be_launch_organizations() -> frozenset:
 def _be_evidence_check(db: Session, tag: str) -> tuple:
     from app.modules.payroll import belgium_service as be
 
+    from app.modules.payroll import belgium_governance as gov
+
     accepted, submitted = be._evidence(db, tag)
     if accepted is not None:
         return True, f"{tag} recorded (artifact #{accepted.id})"
-    return False, f"{tag} {'submitted, not reviewed' if submitted else 'missing'}"
+    evidence = gov.be_accepted_gate_evidence(db, tag)          # K2: accepted by a second Super Admin
+    if evidence is not None:
+        return True, f"{tag} accepted (gate evidence #{evidence.id})"
+    pending = db.query(gov._models().PayrollBeGateEvidence.id).filter_by(evidence_type=tag, status="PENDING").first()
+    return False, f"{tag} {'submitted, not reviewed' if submitted or pending else 'missing'}"
 
 
 def _be_g1(db, pack, add):

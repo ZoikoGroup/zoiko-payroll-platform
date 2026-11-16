@@ -50,8 +50,10 @@ def _dec(value) -> Decimal:
 
 
 def be_parallel_amounts(item) -> dict:
-    """The committed figures, read from the payslip as stored (never recomputed)."""
-    s = item.be_calculation_snapshot or {}
+    """The committed figures, read from the payslip as stored (never recomputed). `item` is a PayslipItem or the
+    snapshot facts of one (J2: the import reads only these paths)."""
+    s = item.get("snapshot") if isinstance(item, dict) else item.be_calculation_snapshot
+    s = s or {}
     return {"gross": _dec(item.gross_pay), "withholding": _dec(s.get("be_withholding")),
             "onss_employee": _dec(s.get("be_onss_employee")), "work_bonus_social": _dec(s.get("be_social_work_bonus")),
             "net": _dec(item.net_pay), "employer_onss": _dec(s.get("be_employer_total"))}
@@ -219,9 +221,16 @@ def import_be_parallel(db: Session, organization_id: int, data: dict, actor_id) 
     if (db.query(I.id).filter(I.organization_id == organization_id, I.run_id == run.id, I.file_hash == digest,
                               I.status != "WITHDRAWN").first()):
         raise BadRequestException("This exact file was already imported for the run.")
-    items = (db.query(PayslipItem, PayrollEmployee.employee_code, PayrollEmployee.legal_entity_id)
-             .join(PayrollEmployee, PayrollEmployee.id == PayslipItem.employee_id)
-             .filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == be.BE).all())
+    snap = PayslipItem.be_calculation_snapshot                                         # J2: paths only
+    stored = ("be_withholding", "be_onss_employee", "be_social_work_bonus", "be_employer_total")
+    be_rows = (db.query(PayslipItem.id, PayslipItem.employee_id, PayslipItem.gross_pay, PayslipItem.net_pay,
+                        *(snap[k].label(k) for k in stored), PayrollEmployee.employee_code,
+                        PayrollEmployee.legal_entity_id)
+               .join(PayrollEmployee, PayrollEmployee.id == PayslipItem.employee_id)
+               .filter(PayslipItem.payroll_run_id == run.id, PayslipItem.country_code == be.BE).all())
+    items = [(be._BeItemFacts(id=r.id, employee_id=r.employee_id, gross_pay=r.gross_pay, net_pay=r.net_pay,
+                              snapshot={k: getattr(r, k) for k in stored}), r.employee_code, r.legal_entity_id)
+             for r in be_rows]
     if not items:
         raise BadRequestException("The run has no Belgian payslips.")
     entities = {entity for _item, _code, entity in items}

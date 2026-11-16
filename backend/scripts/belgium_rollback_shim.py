@@ -1,4 +1,7 @@
-"""Belgium (ZP-BE-ENG-001) Block I1: the schema shim for a code-only rollback.
+"""SUPERSEDED (owner decision 2026-11-16): Belgian rollback = dormancy + fix-forward; the Belgian schema is permanent
+(main's migrations build on it). Kept as a tool and for the record — see docs/belgium/DEPLOY_NOTES.md section 4.3.
+
+Belgium (ZP-BE-ENG-001) Block I1: the schema shim for a code-only rollback.
 
 `git revert -m 1 <Belgium merge>` alone cannot be deployed while the database keeps the Belgian schema: the
 reverted tree no longer knows alembic revision 8a1f5ef9fa5d (`alembic upgrade head` fails), and
