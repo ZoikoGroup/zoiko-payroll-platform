@@ -276,9 +276,10 @@ def test_deploy_drift_filter_explains_every_be_object():
     os.chdir(BACKEND)
     try:
         tables, columns = pending_objects(PARENT)
-        # Malaysia's chain (13574b996ccf ... f793f6074257) joins Belgium's at merge
-        # cf348b09db2b, so its objects are pending from here too. They are explained by
-        # the Malaysia migration tests; from Belgium's head only Malaysia is pending.
+        # Malaysia's chain (13574b996ccf ... f793f6074257, merge cf348b09db2b) and the
+        # Mexico CFDI lifecycle (merge 4de7c091ab32) join Belgium's after its head, so
+        # their objects are pending from here too. They are explained by their own
+        # migration tests; from Belgium's head only those two branches are pending.
         my_tables, my_columns = pending_objects("8a1f5ef9fa5d")
         tables = tables - my_tables
         columns = {t: c - my_columns.get(t, set()) for t, c in columns.items()}
@@ -287,7 +288,7 @@ def test_deploy_drift_filter_explains_every_be_object():
         os.chdir(here)
     # Everything since this revision's parent: its own objects plus Block B's
     # (tables, and the Block B columns on this revision's tables).
-    assert tables == set(NEW_TABLES) | set(LATER_TABLES) | set(BLOCK_C_TABLES) | {"payroll_mx_document_access_events"}
+    assert tables == set(NEW_TABLES) | set(LATER_TABLES) | set(BLOCK_C_TABLES)
     assert {t: c for t, c in columns.items() if t in SHARED} == SHARED
     assert {t: c for t, c in columns.items() if t not in SHARED and not t.startswith("payroll_mx_")} in ({}, LATER)
 
