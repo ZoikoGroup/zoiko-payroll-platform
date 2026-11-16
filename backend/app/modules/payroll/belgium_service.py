@@ -318,13 +318,19 @@ def _evidence(db: Session, tag: str):
 def owner_decisions(db: Session) -> list:
     """Owner / specialist decisions (gaps register): OPEN until reviewed
     evidence tagged BE-DECISION-<key> exists (uploader != reviewer)."""
+    from app.modules.payroll import belgium_governance as gov
+
     out = []
     for key, label, blocks in _content().OWNER_DECISIONS:
         tag = f"BE-DECISION-{key}"
         accepted, submitted = _evidence(db, tag)
+        decided = gov.be_current_decision(db, key)              # K3: a DECIDED record (proposer != decider)
+        proposed = db.query(gov._models().PayrollBeDecision.id).filter_by(gap_key=key, status="PROPOSED").first()
         out.append({"key": key, "label": label, "blocksLaunch": blocks, "evidenceTag": tag,
-                    "state": "RECORDED" if accepted else ("SUBMITTED" if submitted else "OPEN"),
-                    "artifactId": accepted.id if accepted else None})
+                    "state": "RECORDED" if (accepted or decided) else
+                    ("SUBMITTED" if (submitted or proposed) else "OPEN"),
+                    "artifactId": accepted.id if accepted else None,
+                    "decisionId": decided.id if decided else None})
     return out
 
 

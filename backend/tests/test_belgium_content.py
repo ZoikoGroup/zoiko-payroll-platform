@@ -196,6 +196,12 @@ _STRUCTURAL_NUMBERS = {
         2025: "DEMO employees' illustrative hire year", 2026: "DEMO month year", 9: "DEMO month (September)",
         30: "DEMO month end day",
     },
+    "belgium_governance.py": {
+        0: "first tuple element / first sheet row", 1: "tuple index / header row", 2: "sheet column (proposal)",
+        3: "sheet column (sources) / register cell (state text) / minimum register cells",
+        4: "repository root (parents index)", 300: "reference / question / reason column width",
+        500: "note column width", 4000: "proposal / sources / decided value text width",
+    },
     "belgium_reports.py": {
         0: "zero / first tuple element / table origin", 1: "first day / tuple index / last cell (-1)",
         2: "template tuple index (document version)", 3: "template tuple index (components) / spacing (mm)",

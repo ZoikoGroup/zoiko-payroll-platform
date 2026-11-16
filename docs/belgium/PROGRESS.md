@@ -900,3 +900,30 @@ value) → one migration on main's head cf348b09db2b.
   correction, non-Belcotax refused; holiday certificate draft preview, issue refused until APPROVED, approved
   immutable, stable rendering; generation refused until Active, then supersedes. Guard: layout numbers registered.
 - UI: API only in this block (no screen); the shared Report Templates screens show the seeded templates.
+
+## Block K2 + K3 — gate evidence and decision records
+
+- Migration b7e4c2a9d5f1 be_gate_evidence_decisions (child of main's merge head cf348b09db2b; single head; manifest
+  regenerated, one line added): payroll_be_gate_evidence and payroll_be_decisions, platform-level (no organisation,
+  no RLS policy — like payroll_source_artifacts); four-eyes CHECKs in the database (decider <> recorder / proposer;
+  DECIDED needs a value; SUPERSEDED needs its successor). tests/test_belgium_block_k_migration.py (6).
+- K2 `belgium_governance.py`: evidence for G1-G7 against the exact tags the readiness checks require (BE-CONNECTIVITY-*,
+  BE-FILING-E2E, BE-SIGNOFF-*, BE-OWNER-*; taken from belgium_readiness) or SUPPORTING (never counted); PENDING ->
+  ACCEPTED / REJECTED by another Super Admin, then immutable; history kept. belgium_readiness._be_evidence_check
+  counts an ACCEPTED row only for that exact tag (the reviewed-artifact path stays). Every other gate check is still
+  derived from data: G7 (owner evidence only) becomes eligible once its five tags are accepted; G6 stays NOT MET
+  with accepted sign-offs while the keys / G-21 decision are missing.
+- K3: decision records per gap (G-01, G-02, G-06/17, G-11, G-12, G-13, G-16, G-21, G-26, G-30): proposal, sources,
+  linked content keys, decided value; PROPOSED -> DECIDED by another person; a later decision supersedes (linked).
+  "Import drafted proposals" creates PROPOSED rows from the AI-draft workbook's Decision proposals sheet (8) and the
+  gaps register (G-11, G-12); nothing is decided. owner_decisions (readiness) = RECORDED once a DECIDED record exists.
+  Engine link confirmed: G-02 feeds be_rounding_onss / _withholding / _holiday and G-26 be_wht_taxable_basis_rule —
+  the engine reads only the SIGNED pack rows; a decision changes no row (content four-eyes is not bypassed); the
+  record shows whether its rows are signed. A G-26 decision for a different allocation METHOD than the engine's
+  proportional allocation would need an engine change.
+- UI: Overview → "Evidence" panel per gate (record, accept / reject, history); Owner decisions tab → decision records
+  (import proposals, propose, decide by another person, history, linked content state). Lint clean, vite build ok,
+  be-console validation 19.
+- Routes: 7 new Super Admin platform routes; registry: no existing route changed.
+- Tests: test_belgium_governance.py (8). Re-pins (separate commit): alembic head b7e4c2a9d5f1 / count 269, deploy
+  drift sets, NZ x5, PL, ZA pending sets gain the two tables.

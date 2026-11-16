@@ -23431,10 +23431,122 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/belgium/decision-records",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "decision-records",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/decision-records",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "decision-records",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/decision-records/import-proposals",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "import-proposals",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/decision-records/{decision_id}/decide",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "decide",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/belgium/decisions",
    "data_class": "platform",
    "action": "read",
    "resource": "decisions",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/belgium/gate-evidence",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "gate-evidence",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/gate-evidence",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "gate-evidence",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/gate-evidence/{evidence_id}/decide",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "decide",
    "principals": [
     "super_admin"
    ],
