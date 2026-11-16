@@ -45,6 +45,18 @@ def be_payslip_is_demo(snapshot: dict, organization_id) -> bool:
     return belgium_demo.be_snapshot_is_demo(snapshot) or belgium_demo.be_is_demo_org(organization_id)
 
 
+# Block L2: the header / section / net-pay labels and their nl / fr / de content keys (D10) — the same keys as the
+# on-screen view (frontend bePayslipLines.js BE_PAYSLIP_LABELS); tests/test_belgium_payslip_labels.py pins the match.
+BE_PAYSLIP_LABEL_KEYS = {
+    "Payslip": "be.payslip.header",
+    "Bases": "be.payslip.section.bases",
+    "Employee contributions and withholding": "be.payslip.section.employee",
+    "Net pay": "be.payslip.net",
+    "Employer contributions (not deducted)": "be.payslip.section.employer",
+    "Obligations": "be.payslip.section.obligations",
+}
+
+
 def be_payslip_sections(snapshot: dict) -> list:
     """(title, [(label, amount)]) — the same split as the on-screen view (bePayslipLines.js)."""
     s = snapshot or {}

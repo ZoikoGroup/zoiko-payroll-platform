@@ -10,7 +10,7 @@ structure (translators: keep the keys, translate the text).
 
 ## 1. Header
 
-`be.payslip.header` (proposed key: the header labels are not yet content-keyed)
+`be.payslip.header` (section titles: `be.payslip.section.bases`, `.employee`, `.employer`, `.obligations`)
 
 - **Employee**, **Payslip** number and **Pay date**: which month this pays and when.
 - **NISS / BIS**: masked (see above).
@@ -52,7 +52,7 @@ base.
 
 ## 4. Net pay
 
-`be.payslip.net` (proposed key: not yet content-keyed)
+`be.payslip.net`
 
 Gross pay minus the employee lines above. This is the amount transferred to your bank account (IBAN on file).
 
