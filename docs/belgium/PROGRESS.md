@@ -927,3 +927,19 @@ value) → one migration on main's head cf348b09db2b.
 - Routes: 7 new Super Admin platform routes; registry: no existing route changed.
 - Tests: test_belgium_governance.py (8). Re-pins (separate commit): alembic head b7e4c2a9d5f1 / count 269, deploy
   drift sets, NZ x5, PL, ZA pending sets gain the two tables.
+
+## Block L1 — the new rollback proof (dormancy)
+
+- tests/test_belgium_dormancy_proof.py (5): full schema (21 payroll_be_* tables) + Belgium off by every setting
+  (onboarding unset, canary empty, demo off, identifier keys unset, no Active pack): every /api/payroll/belgium route
+  404 (with the Draft pack and Belgian records present); calculate_payroll for BE blocked in standard and simple
+  mode and a Belgian preview refused (a refusal type, not a crash); Super Admin console (packs, decisions, joint
+  committees, readiness, gate evidence, decision records) 200 with zero INSERT / UPDATE / DELETE; Australia (DB:
+  add_payslip_item), Poland and Malaysia (engine dispatcher; Malaysia with its tests' PCB stand-in, PCB not built)
+  identical with the Belgian tables empty and full (>= 8 tables holding rows); app startup with no Belgian setting
+  (runs tests/test_belgium_production_startup.py). Local: 5 passed.
+- CI: "Belgium rollback proof (dormancy)" as the last step of privacy-isolation in both deploy workflows (the only
+  rollback proof). DEPLOY_NOTES §4.1 names it as the guarantee; belgium_rollback_shim.py header marked HISTORICAL
+  (Malaysia's migrations build on the Belgian ones).
+- Limit: Poland / Malaysia are compared through the engine dispatcher, not a full database run (their DB runs need
+  their full content fixtures); Australia covers the shared database path.

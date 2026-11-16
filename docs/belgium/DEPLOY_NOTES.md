@@ -117,6 +117,17 @@ stay deployable, as the recorded evidence below shows. Rolling back therefore ne
 Nothing else is needed. The Belgian tables and the two nullable columns stay, as they are additive and read only by
 Belgian code. Existing Belgian data stays intact and auditable.
 
+**The rollback guarantee is `tests/test_belgium_dormancy_proof.py`**, run by CI as the last step of the
+`privacy-isolation` job ("Belgium rollback proof (dormancy)") in both deploy workflows. It uses the full schema
+(21 tables) with Belgium switched off by every setting, and proves:
+- every `/api/payroll/belgium` route answers 404;
+- the Belgian calculation is blocked in every mode, and a Belgian preview is refused;
+- the Super Admin console loads read-only, with no write;
+- Australia, Poland and Malaysia calculate identically whether the Belgian tables are empty or full;
+- the app starts with no Belgian setting.
+
+A change that breaks switching Belgium off fails CI before it can deploy.
+
 ### 4.2 Fix forward
 
 A Belgian defect is fixed by a normal change on top: a targeted fix, CI, merge, deploy. Belgian behaviour is behind
