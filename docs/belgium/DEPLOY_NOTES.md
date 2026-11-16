@@ -92,109 +92,46 @@ Also: `GET /api/payroll/belgium/employer-registrations` as any org admin returns
 
 ## 4. Rollback
 
-Belgium is dormant, so a Belgian problem affects no customer. Rolling back means removing the Belgian **code**.
-Start with 4.1. Removing the schema (4.3) is only done when someone explicitly requires it.
+**Owner decision (2026-11-16): rollback = dormancy + fix-forward. The Belgian schema is permanent.**
 
-### 4.0 Behaviour only (no deploy)
+Main's migration chain now **builds on the Belgian head**. The merge revision `cf348b09db2b` joins
+`8a1f5ef9fa5d` (Belgium) with the Malaysian chain, so the three Belgian revisions can never be removed from the
+history again. Main also keeps changing files that Belgium touched. A "revert all Belgian code" rollback cannot
+stay deployable, as the recorded evidence below shows. Rolling back therefore never removes code or schema.
 
-Belgium is already closed. Keep `BE_TENANT_ONBOARDING_ENABLED` unset, `BE_CANARY_ORG_IDS` empty and the registry
-row PLANNED (`BELGIUM_ACTIVATION_RUNBOOK.md` §3). If a shared, non-Belgian path misbehaves, a targeted fix is
-smaller than a revert.
+### 4.1 Switch Belgium off (no deploy, no database change)
 
-### 4.1 Default: revert the code, keep the Belgian schema (no database operation)
+1. Unset `BE_TENANT_ONBOARDING_ENABLED`, empty `BE_CANARY_ORG_IDS` and restart the backend. Every
+   `/api/payroll/belgium` route then answers 404 for every organisation; this is the state proven by
+   `tests/test_belgium_production_startup.py`.
+2. Keep or return the registry row to **PLANNED**, through the governed transition; see
+   `BELGIUM_ACTIVATION_RUNBOOK.md` §3. Organisations cannot onboard Belgium while it is PLANNED.
+3. If a Belgian pack is Active, retire it through the governed pack workflow. That is a Super Admin action and is
+   audited; it is never done by script.
 
-The schema is additive: 19 empty tables and 2 nullable columns. The pre-Belgium code works against it unchanged.
-`python -m scripts.be_rollback_orm_check --workdir <scratch dir>` runs main's pre-Belgium code (6081174) against
-a database at 8a1f5ef9fa5d that holds the Belgian schema and the Draft pack. Organisation, employees, a run,
-payslip generation, status change, payslip read / list / PDF and updates for an existing country (IN) behave
-**identically** to a database built by the pre-Belgium code itself.
+Nothing else is needed. The Belgian tables and the two nullable columns stay, as they are additive and read only by
+Belgian code. Existing Belgian data stays intact and auditable.
 
-**A plain `git revert` is not enough.** The deploy pipeline rejects it, and the same check proves why. With the
-pre-Belgium code against the Belgian database:
-- `alembic upgrade head` fails with "Can't locate revision identified by '8a1f5ef9fa5d'";
-- `scripts/deploy_migrate.sh` then refuses to stamp: "payslip_items: DB has columns not on the model:
-  ['be_calculation_snapshot']" (and `payroll_runs` … `be_approval_fingerprint`);
-- the script exits 1 **before the restart**: nothing changes, but the rollback never takes effect.
+### 4.2 Fix forward
 
-So the revert carries a small **schema shim**, `backend/scripts/belgium_rollback_shim.py`. It restores only:
-- the three Belgian revision files and their manifest lines, so the alembic head stays `8a1f5ef9fa5d` and
-  `upgrade head` is a no-op;
-- the two nullable column declarations, so there is no drift. The 19 tables need no model, because extra tables
-  are not drift;
-- the alembic / drift-set pin tests as re-pinned for Belgium, so CI agrees.
+A Belgian defect is fixed by a normal change on top: a targeted fix, CI, merge, deploy. Belgian behaviour is behind
+`country == "BE"` branches and the Belgian hooks (`BELGIUM_SECURITY_REVIEW.md` §3), so a fix stays local to
+Belgium. If a shared (non-Belgian) path misbehaves because of a Belgian hunk, the fix removes or guards that hunk;
+that is a code change, not a schema change.
 
-No Belgian route, service, engine, setting or screen remains. Proven by the same check: revert plus shim gives
-`deploy_migrate.sh` exit 0, drift clean, identical payroll operations, and 135/135 pin tests passing in the
-shim tree.
+### 4.3 Superseded: the code-only revert with a schema shim (Blocks I1 / J1, kept for the record)
 
-The shim is committed (`backend/scripts/belgium_rollback_shim.py`, unit tests in
-`tests/test_belgium_rollback_shim.py`). CI re-proves this whole path on every run, in the last steps of the
-`privacy-isolation` job of both deploy workflows. The job fetches the pre-Belgium commit and runs
-`tests/test_belgium_rollback_proof.py` (`ZP_BE_ROLLBACK_PROOF=1`). That job gates deploy, so a change that breaks
-the rollback path fails CI. Locally:
-`ZP_BE_ROLLBACK_PROOF=1 python -m pytest -q tests/test_belgium_rollback_proof.py` (needs the commit in history).
-
-Exact commands (repository root):
-
-```bash
-git checkout main && git pull
-git checkout -b revert-belgium                       # owner's branch for the revert PR
-git revert -m 1 <Belgium merge commit>               # main's pre-merge parent is parent 1
-python backend/scripts/belgium_rollback_shim.py --merge <Belgium merge commit> --dry-run   # review the plan
-python backend/scripts/belgium_rollback_shim.py --merge <Belgium merge commit>
-cd backend && alembic heads && cd ..                 # expect exactly: 8a1f5ef9fa5d (head)
-git add -A backend/alembic backend/app/modules/payroll/models.py backend/tests
-git commit -m "revert(belgium): remove Belgian code, keep the additive schema (rollback shim)"
-git push -u origin revert-belgium                    # open the PR; CI green; merge -> normal deploy
-```
-
-The shim refuses if a file it would restore was changed on `main` after the merge; restore that file by hand.
-After the deploy, verify with §3.1 (`8a1f5ef9fa5d`), §3.2 (19 tables, unused) and
-`python -m scripts.check_schema_drift` (clean). Re-introducing Belgium later is a normal merge on top: its revision
-files are already there.
-
-### 4.2 What stays behind after 4.1
-
-The 19 empty `payroll_be_*` tables (RLS on), two always-NULL columns, the three revision files, and any Draft
-Belgian pack rows in the shared pack tables. No code reads or writes any of them.
-
-### 4.3 Schema removal (only if explicitly required)
-
-Run it **while the Belgian migration files are still present**: before the revert (the current deploy), or from a
-checkout of the Belgian merge commit. After a revert, alembic cannot downgrade revisions whose files are gone.
-
-1. **Read-only "tables empty" checks.** Every count must be 0. If any is not, STOP: that is real data.
-
-   ```sql
-   -- the generated query from 3.7 (every payroll_be_* table), plus:
-   SELECT count(*) FROM payslip_items WHERE be_calculation_snapshot IS NOT NULL;
-   SELECT count(*) FROM payroll_runs  WHERE be_approval_fingerprint IS NOT NULL;
-   ```
-
-2. **Downgrade on the backend host**, from the deployed Belgian checkout, with the remote-migration
-   acknowledgement the deploy pipeline uses (`scripts/deploy_migrate.sh`):
-
-   ```bash
-   cd /var/www/zoiko-payroll/backend/backend
-   source venv/bin/activate
-   export ZOIKO_ALLOW_REMOTE_MIGRATIONS=I_UNDERSTAND
-   alembic current                      # expect 8a1f5ef9fa5d
-   alembic downgrade 2943a0490b5b       # drops the 5 Block C tables
-   alembic downgrade 1d76678ef1a1       # drops the 5 Block B tables + the Block B decision columns
-   alembic downgrade f3a9c1d7e2b4       # drops the 9 foundation tables + the 2 shared columns
-   alembic current                      # expect f3a9c1d7e2b4
-   unset ZOIKO_ALLOW_REMOTE_MIGRATIONS
-   ```
-
-   If the code was already reverted with the shim (4.1), use the shim tree. It has the revision files, so the
-   same commands work there. Then remove the shim in the next step.
-
-3. **Revert the code without the shim.** Use `git revert -m 1 <merge>` alone (or, after 4.1, revert the shim
-   commit). The deploy then finds the database at `f3a9c1d7e2b4` = head: the upgrade is a no-op and the drift
-   check is clean.
-
-Downgrades were rehearsed on empty tables (`python -m scripts.be_deploy_rehearsal`, Block H2a). The §1 database
-backup is the last resort.
+- **I1** (2026-11-13) proved the pre-Belgium code works unchanged against a database with the Belgian schema
+  (`scripts/be_rollback_orm_check.py`). It also proved that a plain `git revert` of the Belgium merge cannot be
+  deployed, and added `scripts/belgium_rollback_shim.py` to make it deployable. **J1** ran that proof in CI.
+- **2026-11-16:** after merging main (Malaysia, merge revision `cf348b09db2b`), the proof failed:
+  - revert plus shim then fails the drift check (`payroll_runs.my_approval_fingerprint` is a Malaysian column that
+    the pre-Belgium code does not know);
+  - 13 pin tests fail, because the shim restores whole files that main has since changed.
+  The CI step was removed (it would have blocked main's deploy for a scenario that is no longer the strategy) and
+  the proof test deleted. The two scripts remain as tools; they are not part of the rollback procedure.
+- **Schema removal is no longer possible:** the Belgian revisions are ancestors of other countries' migrations.
+  The database backup in §1 remains the last resort for a failed deploy.
 
 ## 5. First manual steps after a good deploy (owner's decision; none is automatic)
 

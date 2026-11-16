@@ -91,17 +91,6 @@ jobs:
       - name: Belgium migrations on PostgreSQL (RLS round trip)
         run: python -m pytest -q -p no:cacheprovider tests/test_belgium_migrations.py tests/test_belgium_block_b_migration.py tests/test_belgium_block_c_migration.py
         working-directory: backend
-      # Belgium (ZP-BE-ENG-001 Block J1): the code-only rollback path stays deployable.
-      # Main before the Belgium merge + scripts/belgium_rollback_shim.py must pass
-      # scripts/deploy_migrate.sh against a database that keeps the Belgian schema
-      # (throwaway SQLite; see docs/belgium/DEPLOY_NOTES.md section 4.1).
-      - name: Fetch the pre-Belgium commit (rollback proof)
-        run: git fetch --no-tags --depth=1 origin 6081174560b0613bd11d3eaf3027b8fe359aeb73
-      - name: Belgium code-only rollback proof (revert + shim deploys cleanly)
-        run: python -m pytest -q -p no:cacheprovider tests/test_belgium_rollback_proof.py
-        working-directory: backend
-        env:
-          ZP_BE_ROLLBACK_PROOF: "1"
 
   deploy:
     needs: [test, privacy-isolation]

@@ -832,3 +832,15 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
 - tests/test_belgium_bulk_acknowledge.py (3): bulk == one-by-one (approval record + audit rows), all-or-nothing +
   refusals (other organisation, approved run, malformed / empty / no reason), route authorization identical.
 - Registry: only the new route (fresh == stored after regeneration). ORG_ADMIN_GUIDE + runbook playbook updated.
+
+## 2026-11-16 — merge of origin/main and the rollback decision
+
+- origin/main (Belgium PR #161 up to edfec72 + Malaysia, merge revision cf348b09db2b) merged into nikhil (a2eb94c,
+  user-approved; no conflicts). Single head cf348b09db2b; registry fresh == stored; Belgium + migration + Malaysia
+  tests 883 passed, 4 skipped.
+- The J1 rollback proof then FAILED (revert + shim: drift on payroll_runs.my_approval_fingerprint; 13 pin tests):
+  main's merge revision builds on the Belgian head and main keeps changing files Belgium touched, so a code-only
+  revert cannot stay deployable. **Owner decision: rollback = dormancy + fix-forward; the Belgian schema is
+  permanent.** CI rollback-proof steps removed from both workflows; tests/test_belgium_rollback_proof.py deleted;
+  belgium_rollback_shim.py / be_rollback_orm_check.py marked SUPERSEDED (kept as tools); DEPLOY_NOTES §4 rewritten
+  (4.1 switch off, 4.2 fix forward, 4.3 superseded record).

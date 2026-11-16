@@ -1,4 +1,7 @@
-"""Belgium (ZP-BE-ENG-001) Block I1: does the pre-Belgium code work on a database that keeps the Belgian schema?
+"""SUPERSEDED (owner decision 2026-11-16): Belgian rollback = dormancy + fix-forward; the Belgian schema is permanent
+(main's migrations build on it). Kept as a tool and for the record — see docs/belgium/DEPLOY_NOTES.md section 4.3.
+
+Belgium (ZP-BE-ENG-001) Block I1: does the pre-Belgium code work on a database that keeps the Belgian schema?
 
 Scripted check (not part of the default test run: it needs the git history of the pre-Belgium commit).
 
