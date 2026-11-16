@@ -1075,3 +1075,22 @@ release gates G1–G7 met by real evidence.
 - Found while testing: the pushed parse-run commit 78a8fd5 broke the DEMO seed (2 demo tests, 1 observability
   test fail on 884f656): sourced rows with only a proposed text were taken as drafted values, and the dated band
   proposals were read without their windows. Fixed in belgium_demo.py (separate commit).
+
+## Block M-ECWC follow-up — Decision 1: rate-table versioning independent of the pack lifecycle (2026-11-16)
+
+- Owner decision: a new quarter's ONSS rate file is registered, attested and signed even when the pack is Active;
+  no new pack version. belgium_onss_rates no longer refuses non-Draft packs (rate files, live subset, type rules);
+  the pack must still be Belgian. The only gates stay the file attestation and the row / combination / rule
+  signing (four-eyes each).
+- Because several quarters now coexist on one pack: a file's window must lie inside its own published quarter
+  (header <Quarter>, e.g. 20271 -> 2027-01-01 .. 2027-03-31) and windows on one pack never overlap, so the pay date
+  picks exactly one file (one file per pack and quarter was already unique).
+- Tests (+3, SYNTHETIC rates): Q3 2026 and Q1 2027 files registered, attested and signed while the pack is Active;
+  the engine lookup picks the quarter of the pay date (BASE 33.30 at 3.33 % in August 2026, 77.70 at 7.77 % in
+  February 2027; no file for November 2026 -> no table, the engine blocks); attestation / signing four-eyes still
+  refuse on an Active pack; a window outside its own quarter is refused. Against the previous service the new
+  tests fail ("BE-PAYROLL-2026 is Active: … Draft pack only", window not refused).
+- Production verified by the owner before this change (main 9735dca deployed): RLS on the 19 organisation tables,
+  none on the platform ONSS tables; 0 rows in every payroll_be_* table in system mode (orgs_visible = 49); no Active
+  Belgian pack; no Belgian registry row. The skipped "Post-deploy privacy smoke" is the configured HP-10 condition
+  (secret ZP_SMOKE_BASE_URL unset) — an open control owned by the repository admin / ZP-PRIV owner, not Belgian.

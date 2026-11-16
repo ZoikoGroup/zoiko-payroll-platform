@@ -15,7 +15,13 @@ Owner decisions (2026-11-16):
 Lifecycle: register (reads the ARCHIVED source file, verifies its checksum, loads every record as REFERENCE) →
 attest (another Super Admin) → mark the supported subset live (PENDING) → sign each row / combination (another
 Super Admin than the one who marked it live and the registrar). Type rules: add (PENDING) → sign (another person).
-Every code is TEXT ("000", "015"), never a number. Only Draft packs take new rate files and rules.
+Every code is TEXT ("000", "015"), never a number.
+
+Decision 1 (owner, 2026-11-16): the rate table versions INDEPENDENTLY of the pack's own lifecycle. Rate files,
+their rows and the type rules key on (pack, quarter) and are added, attested and signed whatever the pack's status
+(Draft or Active): a new quarter never needs a new pack version. File attestation and row signing (four-eyes each)
+are the only gates. Each file's window lies inside its own published quarter and windows never overlap, so the
+pay date picks exactly one file.
 """
 from __future__ import annotations
 
@@ -67,16 +73,26 @@ def _day(value, name: str) -> date:
         raise BadRequestException(f"{name} must be an ISO date (YYYY-MM-DD).")
 
 
-def _draft_belgian_pack(db: Session, pack_row_id: int):
+def _belgian_pack(db: Session, pack_row_id: int):
+    """The Belgian pack the rate table belongs to — any status (Decision 1: the rate table versions independently
+    of the pack lifecycle; attestation and row signing are its only gates)."""
     from app.modules.payroll.models import JurisdictionPack
 
     pack = db.get(JurisdictionPack, int(pack_row_id))
     if pack is None or str(pack.jurisdiction_country or "").upper() not in ("BE", "BELGIUM"):
         raise NotFoundException("Belgian pack")
-    if pack.status != "Draft":
-        raise BadRequestException(f"{pack.pack_id} is {pack.status}: rate files and type rules are added to a Draft "
-                                  "pack only.")
     return pack
+
+
+def _quarter_bounds(quarter: str) -> tuple:
+    """First and last day of the published quarter "YYYYQ" (e.g. 20271 -> 2027-01-01 .. 2027-03-31)."""
+    import calendar
+
+    year, number = int(quarter[:4]), int(quarter[4:])
+    if number not in (1, 2, 3, 4):
+        raise BadRequestException(f"The rate file's <Quarter> {quarter} is not a calendar quarter.")
+    first_month, last_month = (number - 1) * 3 + 1, number * 3
+    return date(year, first_month, 1), date(year, last_month, calendar.monthrange(year, last_month)[1])
 
 
 # ── the official file (parsed read-only; never unpacked to disk) ──────────────
@@ -157,7 +173,7 @@ def be_onss_register_rate_file(db: Session, pack_row_id: int, data: dict, actor_
     from app.modules.payroll.models import SourceArtifact
 
     m = _models()
-    pack = _draft_belgian_pack(db, pack_row_id)
+    pack = _belgian_pack(db, pack_row_id)
     data = dict(data or {})
     reason = _reason(data.get("reason"))
     source = db.get(SourceArtifact, int(data.get("sourceDocumentId") or 0))
@@ -169,6 +185,16 @@ def be_onss_register_rate_file(db: Session, pack_row_id: int, data: dict, actor_
     parsed = be_onss_parse_rate_zip(_archived_bytes(source))
     if db.query(m.PayrollBeOnssRateFile).filter_by(jurisdiction_pack_id=pack.id, quarter=parsed["quarter"]).first():
         raise BadRequestException(f"A rate file for quarter {parsed['quarter']} is already registered on this pack.")
+    q_start, q_end = _quarter_bounds(parsed["quarter"])
+    if start < q_start or end > q_end:
+        raise BadRequestException(f"The window {start} .. {end} must lie inside the file's own quarter "
+                                  f"{parsed['quarter']} ({q_start} .. {q_end}).")
+    F = m.PayrollBeOnssRateFile
+    overlap = (db.query(F).filter(F.jurisdiction_pack_id == pack.id, F.status != "REJECTED",
+                                  F.effective_from <= end, F.effective_to >= start).first())
+    if overlap is not None:
+        raise BadRequestException(f"The window overlaps rate file {overlap.quarter} ({overlap.effective_from} .. "
+                                  f"{overlap.effective_to}) on this pack: one file per pay date.")
     row = m.PayrollBeOnssRateFile(jurisdiction_pack_id=pack.id, quarter=parsed["quarter"], effective_from=start,
                                   effective_to=end, source_document_id=source.id,
                                   checksum_sha256=source.checksum_sha256, reference_rows=len(parsed["rates"]),
@@ -242,7 +268,7 @@ def be_onss_mark_live(db: Session, file_id: int, data: dict, actor_id) -> dict:
     the rows + combinations of the contribution codes in use. Everything else stays REFERENCE."""
     m = _models()
     row = _file(db, file_id)
-    _draft_belgian_pack(db, row.jurisdiction_pack_id)
+    _belgian_pack(db, row.jurisdiction_pack_id)
     data = dict(data or {})
     reason = _reason(data.get("reason"))
     ecs = _codes(data.get("employerClasses"), "employerClasses")
@@ -317,7 +343,7 @@ def _condition(value, vocabulary, name: str) -> str:
 
 def be_onss_add_type_rule(db: Session, pack_row_id: int, data: dict, actor_id) -> object:
     c = _content()
-    pack = _draft_belgian_pack(db, pack_row_id)
+    pack = _belgian_pack(db, pack_row_id)
     data = dict(data or {})
     reason = _reason(data.get("reason"))
     code = str(data.get("code") or "").strip()
