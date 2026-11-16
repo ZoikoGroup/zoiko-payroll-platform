@@ -1117,11 +1117,23 @@ def _clone_pack_rates(db: Session, source_pack_id: int, target_pack_id: int) -> 
     (e.g. both LQS windows in force at once), lost their source, and every
     Singapore CPF band lost its FULL / PHASE_IN basis (all payroll under the
     new version BLOCKED). Only the identity, the pack link and the
-    bookkeeping timestamps differ from the source row."""
+    bookkeeping timestamps differ from the source row.
+
+    A row identical in every copied value column (sort_order and who created
+    or edited it aside) to one already
+    copied is skipped (production audit 2026-11-14: UK #24 held 47 such
+    copies, US #32 two). Published packs are never edited in place, so a new
+    version is how those copies get cleared."""
     for model in (ContributionRate, TaxSlab):
         columns = [c.name for c in model.__table__.columns if c.name not in _PACK_ROW_CLONE_SKIP]
+        identity = [c for c in columns if c not in ("sort_order", "created_by_id", "updated_by_id")]
+        seen = set()
         for row in db.query(model).filter(model.jurisdiction_pack_id == source_pack_id,
-                                          model.organization_id.is_(None)).all():
+                                          model.organization_id.is_(None)).order_by(model.id).all():
+            key = tuple(getattr(row, c) for c in identity)
+            if key in seen:
+                continue
+            seen.add(key)
             db.add(model(jurisdiction_pack_id=target_pack_id, **{c: getattr(row, c) for c in columns}))
     db.commit()
 
@@ -8882,11 +8894,18 @@ def get_compliance_pack_health(db: Session) -> dict:
         if p.status == "Active":
             key = (p.jurisdiction_country, p.jurisdiction_state or "", p.jurisdiction_locality or "", p.tax_regime or "")
             scopes.setdefault(key, []).append(p)
+    content = {}
+    for r in rates:
+        content.setdefault(r.jurisdiction_pack_id, set()).add(("rate", r.component_key))
+    for s_ in slabs:
+        content.setdefault(s_.jurisdiction_pack_id, set()).add(("slab", s_.rule_type or "MARGINAL_RATE"))
     overlaps = []
     for (country, state, locality, regime), group in sorted(scopes.items()):
         group.sort(key=lambda p: p.id)
         for i, a in enumerate(group):
             for b in group[i + 1:]:
+                if not _packs_share_content(content.get(a.id, set()), content.get(b.id, set())):
+                    continue  # complementary packs (e.g. a programme pack and a tax pack)
                 if (a.effective_from or lo) <= (b.effective_to or hi) and (b.effective_from or lo) <= (a.effective_to or hi):
                     overlaps.append({"country": country, "state": state or None, "locality": locality or None,
                                      "taxRegime": regime or None, "packs": [ref(a), ref(b)],
@@ -9013,11 +9032,17 @@ def _overlapping_active_tax_pack(db: Session, row: JurisdictionPack, target_from
     as different states / regimes, and locality was ignored (so a city pack
     clashed with its own state's pack while two packs for one city were never
     compared as a pair). Blank state / locality / regime now compare equal, a
-    missing Effective From is open-ended, and locality is part of the scope."""
+    missing Effective From is open-ended, and locality is part of the scope.
+
+    Two packs for one scope that hold DIFFERENT content are not a conflict:
+    state rows resolve per component_key / rule_type, so Maine's paid-leave
+    programme pack (#56, rates only) and its income-tax pack (#118, brackets
+    only) are both used. A conflict needs a shared component or bracket type,
+    or a pack with no rows yet (nothing shows it is complementary)."""
     def same(column, value):
         return sa_func.coalesce(column, "") == (value or "")
 
-    return (
+    candidates = (
         db.query(JurisdictionPack)
         .filter(
             JurisdictionPack.id != row.id,
@@ -9031,8 +9056,34 @@ def _overlapping_active_tax_pack(db: Session, row: JurisdictionPack, target_from
             or_(JurisdictionPack.effective_to.is_(None), JurisdictionPack.effective_to >= target_from),
         )
         .order_by(JurisdictionPack.id)
-        .first()
+        .all()
     )
+    if not candidates:
+        return None
+    mine = _pack_content_keys(db, [row.id]).get(row.id, set())
+    theirs = _pack_content_keys(db, [c.id for c in candidates])
+    return next((c for c in candidates if _packs_share_content(mine, theirs.get(c.id, set()))), None)
+
+
+def _pack_content_keys(db: Session, pack_ids) -> dict:
+    """{pack id: {("rate", component_key) | ("slab", rule_type), ...}} from
+    the packs' canonical rows."""
+    keys = {pid: set() for pid in pack_ids}
+    if not keys:
+        return keys
+    for pid, key in db.query(ContributionRate.jurisdiction_pack_id, ContributionRate.component_key).filter(
+            ContributionRate.jurisdiction_pack_id.in_(list(keys)), ContributionRate.organization_id.is_(None)):
+        keys[pid].add(("rate", key))
+    for pid, rule in db.query(TaxSlab.jurisdiction_pack_id, TaxSlab.rule_type).filter(
+            TaxSlab.jurisdiction_pack_id.in_(list(keys)), TaxSlab.organization_id.is_(None)):
+        keys[pid].add(("slab", rule or "MARGINAL_RATE"))
+    return keys
+
+
+def _packs_share_content(a: set, b: set) -> bool:
+    """Two overlapping Active packs conflict unless both hold rows and none of
+    those rows share a component key or bracket type."""
+    return not a or not b or bool(a & b)
 
 
 def set_jurisdiction_pack_status(

@@ -68,3 +68,57 @@ def test_two_packs_for_the_same_city_still_clash(db):
 def test_back_to_back_periods_can_both_be_active(db):
     _pack(db, "H1", "Active", end=date(2026, 6, 30))
     assert _activate(db, _pack(db, "H2", start=date(2026, 7, 1))).status == "Active"
+
+
+# ── Complementary packs (Maine #56 paid-leave programme + #118 income tax) ────
+
+from decimal import Decimal  # noqa: E402
+
+from app.modules.payroll.models import ContributionRate, TaxSlab  # noqa: E402
+
+
+def _rate(db, pack, key):
+    db.add(ContributionRate(organization_id=None, jurisdiction_country="IN", jurisdiction_pack_id=pack.id,
+                            component_key=key, label=key, employee_share="1%", employer_share="0%", total="1%"))
+    db.commit()
+
+
+def _bracket(db, pack, rule_type="MARGINAL_RATE"):
+    db.add(TaxSlab(organization_id=None, jurisdiction_country="IN", jurisdiction_pack_id=pack.id,
+                   min_amount=Decimal("0"), rate_pct=Decimal("5"), rate_label="5%", tax_formula="", rule_type=rule_type))
+    db.commit()
+
+
+def test_a_programme_pack_and_a_tax_pack_can_both_be_active(db):
+    programme = _pack(db, "ME-PROGRAMME", "Active", state="ME", start=None)
+    _rate(db, programme, "paid_leave")
+    tax = _pack(db, "ME-TAX", state="ME")
+    _bracket(db, tax)
+    assert _activate(db, tax).status == "Active"
+
+
+def test_packs_sharing_a_bracket_type_still_clash(db):
+    first = _pack(db, "TAX-A", "Active", state="ME")
+    _bracket(db, first)
+    second = _pack(db, "TAX-B", state="ME")
+    _bracket(db, second)
+    with pytest.raises(BadRequestException, match="already Active"):
+        _activate(db, second)
+
+
+def test_packs_sharing_a_component_still_clash(db):
+    first = _pack(db, "RATE-A", "Active", state="ME")
+    _rate(db, first, "paid_leave")
+    second = _pack(db, "RATE-B", state="ME")
+    _rate(db, second, "paid_leave")
+    _bracket(db, second)  # extra content does not hide the shared component
+    with pytest.raises(BadRequestException, match="already Active"):
+        _activate(db, second)
+
+
+def test_health_panel_does_not_list_complementary_packs(db):
+    programme = _pack(db, "ME-PROGRAMME", "Active", state="ME", start=None)
+    _rate(db, programme, "paid_leave")
+    tax = _pack(db, "ME-TAX", "Active", state="ME")
+    _bracket(db, tax)
+    assert service.get_compliance_pack_health(db)["issues"]["overlappingActive"] == []

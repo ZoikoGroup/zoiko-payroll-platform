@@ -117,3 +117,30 @@ def test_us_payslip_with_copied_federal_brackets_matches_a_single_set():
 def test_india_payslip_with_copied_brackets_matches_a_single_set():
     single = calc("IN", 150000, IN_RATES, IN_SLABS)
     assert calc("IN", 150000, IN_RATES, _copies(IN_SLABS, 2)).tds == single.tds
+
+
+# ── E1: a new pack version leaves exact copies behind ───────────────────────
+
+def test_new_version_copies_each_identical_row_once(db):
+    from app.modules.payroll.models import ContributionRate
+    from app.modules.payroll.schemas import JurisdictionPackUpsert
+
+    pack = _uk_pack(db)
+    for _ in range(2):
+        db.add(_canonical_band(pack, "12570", "50270", "8"))
+    db.add(_canonical_band(pack, "50270", None, "2"))
+    db.add(_canonical_band(pack, "12570", "50270", "8", category="B"))  # differs: kept
+    for sort in (1, 2):  # same rate stored twice, only the display order differs
+        db.add(ContributionRate(organization_id=None, jurisdiction_country="UK", jurisdiction_pack_id=pack.id,
+                                component_key="ni", label="NI", employee_share="8%", employer_share="15%",
+                                total="23%", sort_order=sort))
+    db.commit()
+
+    new = service.upsert_jurisdiction_pack(db, JurisdictionPackUpsert(
+        packId="UK-DUP-TEST", jurisdictionCountry="UK", packType="tax", version="1.1", status="Draft"))
+    slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == new.id).all()
+    assert sorted((s.ni_category, s.min_amount) for s in slabs) == [
+        ("A", Decimal("12570")), ("A", Decimal("50270")), ("B", Decimal("12570"))]
+    assert db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == new.id).count() == 1
+    # The published version itself is untouched.
+    assert db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).count() == 4
