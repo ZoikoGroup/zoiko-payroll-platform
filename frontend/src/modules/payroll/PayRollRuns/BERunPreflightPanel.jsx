@@ -8,7 +8,7 @@ import { errorText } from "../../../components/jurisdiction/new_zealand/nzOrgOpt
 // resolver, pending content) refuse approval and cannot be waived; an engine
 // EXCEPTION (e.g. the special social security contribution that is never
 // computed) stops approval until an org admin acknowledges it with a reason;
-// Dimona IN is a placeholder until Block C. Approval (four-eyes) and the
+// an accepted Dimona IN is required (Block C1). Approval (four-eyes) and the
 // approval fingerprint are enforced server-side; this panel only shows them.
 // Block J3: exceptions can be selected (or all selected) and acknowledged with
 // one reason in a single batched request; one row keeps its own Acknowledge.

@@ -16,8 +16,8 @@ Each hook follows how the platform calls it (Phase 1 hook caller table):
   is purged. Deleting a Belgian employee is refused while the Belgian retention
   decisions are OPEN (gap G-21) — enforced inside retained_record_label, which
   only the deletion check (retention_service.assert_employee_deletable) calls.
-* pack_holidays returns [] (no guessed dates), statutory_summary reports
-  NOT_BUILT, payslip_hold_view returns None (read-only display).
+* pack_holidays returns the signed holidays only (no guessed dates), statutory_summary
+  reports the gates (CERTIFIED / NOT_CERTIFIED), payslip_hold_view returns None (read-only display).
 
 No statutory value lives here. No NISS/INSZ is read, logged or returned.
 """
@@ -33,8 +33,6 @@ from app.core.exceptions import BadRequestException, NotFoundException
 BE = "BE"
 SPEC = "ZP-BE-ENG-001 v1.0"
 
-NOT_BUILT_MESSAGE = ("Belgian payroll is not built yet (ZP-BE-ENG-001); it stays disabled until the Belgium "
-                     "release gates G1-G7 are signed.")
 RELEASE_GATES_UNMET = "Belgium release gates G1–G7 not met"
 DELETION_REFUSED_MESSAGE = ("Belgium: employee records cannot be deleted until Belgian statutory retention rules "
                             "are approved (spec §15).")

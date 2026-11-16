@@ -844,3 +844,31 @@ four-eyes functions, uq_be_accum_payslip_accumulator) and the tests that prove t
   permanent.** CI rollback-proof steps removed from both workflows; tests/test_belgium_rollback_proof.py deleted;
   belgium_rollback_shim.py / be_rollback_orm_check.py marked SUPERSEDED (kept as tools); DEPLOY_NOTES §4 rewritten
   (4.1 switch off, 4.2 fix forward, 4.3 superseded record).
+
+## Block K0 — self-audit
+
+Scan of belgium*.py, be_*.py, engine/countries/belgium*, engine/jurisdictions/belgium/, the Belgian frontend and
+docs/belgium/*.md for TODO / FIXME / "not yet" / NOT_BUILT / stub / placeholder / NotImplementedError, plus the
+plan's deliverables (§5 reused tables, §7 decisions D1-D15).
+
+| # | Item | Where | Class |
+|---|------|-------|-------|
+| 1 | Individual account: a Draft ReportTemplate record only, no content or rendering | belgium_service.seed_be_individual_account_template | Engineering → K1 |
+| 2 | 281.10 employee copy: a plain-text rendition, no template | belgium_filing.employee_copy | Engineering → K1 |
+| 3 | Holiday certificate (BE-027): no rendering at all | — | Engineering → K1 |
+| 4 | Gate evidence: only a reviewed SourceArtifact tag (no status, no rejection, no gate field, no history, no UI) | belgium_service._evidence, belgium_readiness | Engineering → K2 |
+| 5 | Owner decisions: state derived from BE-DECISION-* evidence tags; no proposal / decided value / approver / history | belgium_service.owner_decisions, BEOwnerDecisionsTab | Engineering → K3 |
+| 6 | Filing payload renderers (canonical payload → official XSD) empty | belgium_filing.RENDERERS | Authority content (G-08 / G-31 / G-33) |
+| 7 | Transmission: only UncertifiedAdapter (abstract base raises NotImplementedError) | belgium_filing | Authority (gate G3, D9) |
+| 8 | Employee-document labels nl / fr / de: content keys only | content keys (D10) | Translation content + decision G-13 |
+| 9 | Release-1 scope exclusions (several lines, non-resident, reductions, benefit in kind, special statuses, contracts / categories outside the signed list) | engine blocks; runbook "Engineering (not built)" | Human decision — DECIDED (G-27); not stubs |
+| 10 | BSSC never computed (exception only) | engine | Specialist content (G-06 / G-17, D7) |
+| 11 | BE_ENGINE_NOT_BUILT: reserved code, raised nowhere | engine errors.py | None (documented in the runbook) |
+| 12 | Payslip header / net-pay labels not yet content-keyed | payslip view | Engineering, small (not in Block K scope) |
+| 13 | Stale: unused NOT_BUILT_MESSAGE, belgium_service docstring ("statutory_summary reports NOT_BUILT"), preflight-panel comment ("Dimona placeholder until Block C") | belgium_service.py, BERunPreflightPanel.jsx | Fixed in K0 |
+
+Confirmed for K1-K3: items 1-5 are genuine engineering. Correction: the Block H payslip integration uses NEITHER
+template engine (a dedicated Belgian PDF renderer; main's PR #158 payslip templates refuse Belgium), so K1 reuses
+payroll_report_templates / payroll_generated_reports (plan §5) with a Belgian renderer, gated by
+template_activation_refusal. K2 / K3 need two new tables (SourceArtifact cannot carry status / rejection / decided
+value) → one migration on main's head cf348b09db2b.
