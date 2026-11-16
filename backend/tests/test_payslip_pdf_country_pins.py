@@ -18,16 +18,16 @@ import pytest
 # payslip_line_items refactor changed every country's PDF. The merged code renders
 # exactly the bytes origin/main renders for these countries (checked side by side), so
 # the Mexican Recibo dispatch still changes none of them. (First recorded at 6d081c9.)
-# Re-recorded again with page compression off, so the pin no longer depends on the
-# zlib build and matches on every platform.
+# Re-recorded again with page compression off and reportlab's bundled Vera font, so
+# the pin depends on neither the zlib build nor the host's installed fonts.
 PINNED = {
-    "UK": "42bcf01326a957d5be7ffb6c4d1d05e1addd0b318da61eb0858a55c7feabf27d",
-    "US": "143ffbc3d4a016b62f2f7b317a98e8f846ed9ea833e645d75c88f1af1cef5d3d",
-    "DE": "dd2a891479f22a0794e3d100c6f49877835e52c64101fc63b59fd7d0e161ff28",
-    "HK": "085ef8e25953016449f01dd30e49cedd59a3b4b9330821ef95fd4734975ea2e5",
-    "SG": "158310ad85abac42ae1271b06d668a29243b9ea59a5135b827dad38c5fc79518",
-    "IN": "bc339db05eae09a89776e843c3f605e7c08966b5459a487531c5a0fea012b7fc",
-    "NL": "eda3e9a880db606633089e965a9bbf6ff8043d8b01af4b417653fba8994b8403",
+    "UK": "02c863a3d2c99dee118bd2e29537233767e58cebade6ec09c5a70da515e12722",
+    "US": "e08ec619d609d6741f0b7df40c96c1a5cd74d62ac4dddc51871ce003f2bf2714",
+    "DE": "34f286fb6366a75a1fa050453245ee06cc6a1a71239d5421cbcfb6da8b1f26b1",
+    "HK": "632c8435ac3487a461746d7eebb2244b324f165e57f1b10e644e7f0afdfd344e",
+    "SG": "8962e4c62984a3823378b4295899b4ef8fb807de2ba720a510bafafac920775b",
+    "IN": "7096ead7a552977d9c384e6b31c19c70e9512866415e46ef43650cc6b584a986",
+    "NL": "a9ce3e9b37cfa933d21e1686b549a8fe61ec4b90d691771521e8ebbf764e45c7",
 }
 
 
@@ -42,6 +42,16 @@ def _render(db, organization, country, monkeypatch):
     # (stock zlib on the Linux CI/production image, zlib-ng in Windows CPython
     # 3.14), so a compressed pin can only ever match one platform.
     monkeypatch.setattr(rl_config, "pageCompression", 0)
+    # The renderer embeds the first Unicode TTF installed on the host (Arial on
+    # Windows, DejaVu/Liberation on Linux), so pin the font to the Vera TTFs that
+    # ship inside reportlab itself: the bytes are then the same on every machine.
+    import os
+
+    import reportlab
+
+    fonts = os.path.join(os.path.dirname(reportlab.__file__), "fonts")
+    monkeypatch.setattr(service, "unicode_font_candidates",
+                        lambda: [(os.path.join(fonts, "Vera.ttf"), os.path.join(fonts, "VeraBd.ttf"))])
     emp = PayrollEmployee(organization_id=organization.id, name="Pin Employee", employee_code=f"PIN-{country}",
                           email=f"pin-{country.lower()}@example.com", country_code=country)
     db.add(emp)
