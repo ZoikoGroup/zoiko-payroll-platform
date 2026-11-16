@@ -8,6 +8,7 @@ import { bankPaymentModeLabel, bankBtfLabel, combineRoutingValue } from "../Payr
 import { nlEmployeeLines, nlEmployerLines } from "../PayRollRuns/nlPayslipLines";
 import { beEmployeeLines, beEmployerLines, beObligationLines } from "../PayRollRuns/bePayslipLines";
 import { getPayslipById, getPayslipRenderedHtml } from "../../../service/payrollService";
+import MexicoRecibo from "./MexicoRecibo";
 
 const printStyles = `
 @media print {
@@ -113,6 +114,14 @@ export default function PayslipStub({ payslip, onClose, currencyCode = "INR", co
   }, [payslip]);
 
   if (!payslip) return null;
+
+  // Mexico: Recibo de nómina v2.0 — its own document (CFDI and payment states,
+  // SAT codes, employer costs apart), drawn from the server's recibo view. A
+  // blocked Mexican payslip (no result) keeps the blocked view below.
+  if ((payslip.country || payslip.countryCode) === "MX" && payslip.mxCalculationSnapshot?.result
+      && payslip.status !== "FAILED") {
+    return <MexicoRecibo payslip={payslip} onClose={onClose} />;
+  }
 
   const companyName = company?.name?.trim() || "Company name not set";
   const companyAddress = company?.address?.trim() || "Address not set — add it in Compliance › Company Details";

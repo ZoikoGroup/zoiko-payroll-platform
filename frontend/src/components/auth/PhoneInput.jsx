@@ -14,6 +14,7 @@ const DIAL_CODES = {
   "Puerto Rico": ["PR", "+1"], "France": ["FR", "+33"], "Ireland": ["IE", "+353"], "Sweden": ["SE", "+46"],
   "Brazil": ["BR", "+55"], "Hong Kong": ["HK", "+852"], "Italy": ["IT", "+39"], "Netherlands": ["NL", "+31"],
   "Saudi Arabia": ["SA", "+966"], "Singapore": ["SG", "+65"], "Switzerland": ["CH", "+41"],
+  "Mexico": ["MX", "+52"],
 };
 
 export function dialCodeForCountry(country) {

@@ -21,6 +21,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "0e697c2388bf"
@@ -199,7 +200,7 @@ def test_deploy_drift_filter_explains_every_nz_object():
     finally:
         os.chdir(here)
     # P5 (ac08988ecd3a) and P6 (c6ea8c6c35ce) are pending on the same chain.
-    assert tables - set(NEW_TABLES) == {"payroll_nz_employments", "payroll_nz_public_holiday_decisions",
+    assert tables - set(NEW_TABLES) - MX_LIFECYCLE_TABLES == {"payroll_nz_employments", "payroll_nz_public_holiday_decisions",
                                         "payroll_nz_leave_entitlements", "payroll_nz_gross_earnings_ledger",
                                         "payroll_nz_leave_events", "payroll_nz_final_pay_cases",
                                         "payroll_nz_leave_pay_calculations", "payroll_nz_cash_up_requests",

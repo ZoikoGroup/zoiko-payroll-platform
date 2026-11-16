@@ -71,7 +71,11 @@ def validate_run(db: Session, run, actor_id: Optional[int]) -> dict:
                       "no Approved CFDI release loaded from a verified pinned SAT set (Super Admin → Mexico → CFDI "
                       "catalogs)", run.organization_id)
     from app.modules.payroll import mexico_cfdi_catalog_service as cat
+    from app.modules.payroll import mexico_cfdi_lifecycle
 
+    stale = mexico_cfdi_lifecycle.catalog_stale_reason(release, run.pay_date)     # CFDI lifecycle L5
+    if stale:
+        raise MXBlock("MX_CFDI_CATALOG_STALE", stale, run.organization_id)
     set_id = cat.release_set_id(release)
     now = datetime.now(timezone.utc)
     results = []
@@ -94,6 +98,9 @@ def validate_run(db: Session, run, actor_id: Optional[int]) -> dict:
                "codes": dict(Counter(r["code"] for r in results if r["code"])),
                "rules": dict(Counter(f["rule"] for r in results for f in r["findings"])),
                "payloadHashes": [r["payloadSha256"] for r in results if r["payloadSha256"]],
+               # CFDI lifecycle L1: VALIDATED_LOCAL / VALIDATION_FAILED per payslip (ids only)
+               "validPayslips": [r["payslipItemId"] for r in results if r["valid"]],
+               "refusedPayslips": [r["payslipItemId"] for r in results if not r["valid"]],
                "awaitingG1Decision": bool(awaiting), "validatedAt": now.isoformat()}
     _audit(db, run, actor_id, summary)
     db.commit()

@@ -165,8 +165,11 @@ def test_sandbox_preview_is_watermarked_and_only_for_snapshot_templates(db, libr
 
     R = _R()
     reg = library["MX-PAYROLL-REGISTER"].id
-    blocked = R.mx_template_sandbox_preview(db, reg, {"payDate": "2026-06-15", "dailySalary": "600"})
-    assert blocked["outcome"] == "BLOCKED" and blocked["block"]["code"] == "MX_ROUNDING_RULE_MISSING"
+    plain = R.mx_template_sandbox_preview(db, reg, {"payDate": "2026-06-15", "dailySalary": "600"})
+    # D-01 and D-03 are transcribed (2026-11-11): without candidates the preview calculates, still a
+    # sandbox preview (never a report) and with no candidate watermark.
+    assert plain["outcome"] == "CALCULATED" and R.SANDBOX_PREVIEW_MARK in plain["watermarks"]
+    assert "CANDIDATE — NOT APPROVED — NOT A GOLDEN VECTOR" not in plain["watermarks"]
     out = R.mx_template_sandbox_preview(db, reg, {
         "payDate": "2026-06-15", "periodStart": "2026-06-01", "periodEnd": "2026-06-15", "dailySalary": "600",
         "candidates": [{"decision": "D-01", "value": "HALF_UP:0.01"}, {"decision": "D-03", "value": "GENERAL"}]})
