@@ -101,11 +101,15 @@ def test_literal_names_manifest_single_child_and_single_head():
     assert f"{FILENAME}|{REVISION}|{PARENT}|" in manifest
     children = [p.name for p in VERSIONS.glob("*.py")
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
-    assert children == [FILENAME]
+    # rugvedh's merge d6b2e8f4a1c9 (Mexico CFDI lifecycle + Malaysia) also grows from PARENT;
+    # merge e3f9a7c1b5d2 rejoins it with this revision and is the single head.
+    assert sorted(children) == sorted([FILENAME, "d6b2e8f4a1c9_merge_mexico_and_malaysia_heads.py"])
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
     # Block M-ECWC (e9c4b7a2d6f3) is the single child of this revision and the head.
     assert script.get_heads() == ["e9c4b7a2d6f3"]
     assert script.get_revision("e9c4b7a2d6f3").down_revision == REVISION
+    assert script.get_heads() == ["e3f9a7c1b5d2"]
+    assert set(script.get_revision("e3f9a7c1b5d2").down_revision) == {REVISION, "d6b2e8f4a1c9"}
 
 
 def test_the_deploy_drift_filter_explains_both_tables():
@@ -118,6 +122,13 @@ def test_the_deploy_drift_filter_explains_both_tables():
     try:
         tables, columns = pending_objects(PARENT)
         later_tables, later_columns = pending_objects(REVISION)       # Block M-ECWC and after: its own tests
+        # The Mexico CFDI lifecycle joins after PARENT too (merges 4de7c091ab32 / d6b2e8f4a1c9),
+        # so its objects are pending from here as well; they are still pending from this
+        # revision, which separates them from this revision's own two tables.
+        mx_tables, mx_columns = pending_objects(REVISION)
+        tables = tables - mx_tables
+        columns = {t: c - mx_columns.get(t, set()) for t, c in columns.items()}
+        columns = {t: c for t, c in columns.items() if c}
     finally:
         os.chdir(here)
     assert tables - later_tables == set(NEW_TABLES)

@@ -100,8 +100,10 @@ def test_literal_names_manifest_chain_and_lock_timeout():
     children = [p.name for p in VERSIONS.glob("*.py")
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
     # Since the 2026-11-14 main -> venu merge the payslip templates revision is also the
-    # parent of Belgium's chain (1d76678ef1a1); both rejoin at merge cf348b09db2b.
-    assert sorted(children) == sorted([f"{REVISION}_{SUFFIX}.py", "1d76678ef1a1_be_foundation.py"])
+    # parent of Belgium's chain (1d76678ef1a1), and of rugvedh's Mexico CFDI lifecycle
+    # merge (2defe5c4edd6); all rejoin at merges cf348b09db2b / d6b2e8f4a1c9.
+    assert sorted(children) == sorted([f"{REVISION}_{SUFFIX}.py", "1d76678ef1a1_be_foundation.py",
+                                       "2defe5c4edd6_merge_mx_cfdi_lifecycle_with_main.py"])
     text = (VERSIONS / f"{REVISION}_{SUFFIX}.py").read_text(encoding="utf-8")
     for table in NEW_TABLES:
         assert f'op.create_table(\n            "{table}"' in text, table

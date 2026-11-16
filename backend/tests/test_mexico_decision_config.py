@@ -369,12 +369,17 @@ def test_the_sandbox_calculates_with_approved_d01_and_d03_and_no_candidates(db):
     db.commit()
     data = {"payDate": "2026-06-15", "periodStart": "2026-06-01", "periodEnd": "2026-06-15", "dailySalary": "600",
             "zone": "GENERAL", "workState": "CDMX", "payFrequencyCode": "04", "seniorityDate": "2026-01-01"}
-    assert mexico_sandbox_service.run_mx_sandbox(db, data)["block"]["code"] == "MX_ROUNDING_RULE_MISSING"
+    # The canonical 2026 pack now transcribes the rounding and CEAV rows, so
+    # the sandbox can calculate before any decision-register answers exist.
+    initial = mexico_sandbox_service.run_mx_sandbox(db, data)
+    assert initial["outcome"] == "CALCULATED" and initial["approvedDecisions"] == {}
     answer(db, "D-01", "HALF_UP:0.01")
     answer(db, "D-03", "GENERAL")
     out = mexico_sandbox_service.run_mx_sandbox(db, data)
     assert out["outcome"] == "CALCULATED" and out["candidates"] == []
-    assert out["approvedPackRows"] == ["D-01", "D-03"] and set(out["approvedDecisions"]) == {"D-01", "D-03"}
+    # Transcribed canonical pack rows take precedence over decision overlays;
+    # the approved choices are still recorded in the decision trace.
+    assert out["approvedPackRows"] == [] and set(out["approvedDecisions"]) == {"D-01", "D-03"}
     assert D(out["result"]["mx_result"]["isr_withheld"]) == D("726.36")            # = the X2 what-if (D-01 brief)
 
 

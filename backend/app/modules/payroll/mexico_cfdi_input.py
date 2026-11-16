@@ -415,6 +415,13 @@ def _document_input(db: Session, run, item, release, base: dict) -> dict:
         if not receiver["sdi"]:
             _missing(["SalarioDiarioIntegrado"], "employee")
     perceptions, deductions, others, unmapped = _concept_lines(db, release.id, set_id, result, on)
+    # CFDI lifecycle L5: a negative statutory bucket has no CFDI node (a correction is a cancellation and a
+    # replacement, never a negative line)
+    negative = [p["key"] for p in perceptions if p["taxed"] < 0 or p["exempt"] < 0] + \
+               [d["key"] for d in deductions + others if d["amount"] < 0]
+    if negative:
+        raise MXBlock("MX_CFDI_NEGATIVE_BUCKET",
+                      "negative amounts cannot be stamped (no supported CFDI node): " + ", ".join(map(str, negative)))
     if unmapped:
         raise MXBlock("MX_CFDI_CONCEPT_UNMAPPED",
                       "no APPROVED SAT-code mapping for: " + ", ".join(unmapped) + " (CFDI catalogs tab — a "
