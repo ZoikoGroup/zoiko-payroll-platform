@@ -14,7 +14,7 @@ Belgium is **dormant** after this deploy. No customer sees or uses it until the 
 | # | Check | How |
 |---|-------|-----|
 | 1 | CI green on the PR | `test` (full suite, Python 3.12), `privacy-isolation` (PostgreSQL 15: RLS + the 3 Belgian migration round trips, last step), frontend build |
-| 2 | Single Alembic head = `8a1f5ef9fa5d` | `cd backend && alembic heads` → exactly one line, `8a1f5ef9fa5d (head)`. If `main` gained another migration since the PR was opened, there are two heads: stop and re-chain before merging (see `MERGE_PLAN.md`) |
+| 2 | Single Alembic head = `b7e4c2a9d5f1` (Belgium Block K, on main's merge `cf348b09db2b`) | `cd backend && alembic heads` → exactly one line, `b7e4c2a9d5f1 (head)`. If `main` gained another migration since the PR was opened, there are two heads: stop and re-chain before merging (see `MERGE_PLAN.md`) |
 | 3 | `main` has not moved past the PR base | GitHub shows "This branch has no conflicts"; otherwise merge `main` into `nikhil` again and re-run CI |
 | 4 | Database backup | Take a production backup with the standard procedure **immediately before** merging, and note its name and time. Example: `pg_dump -Fc -f zoiko_pre_be_$(date +%Y%m%d%H%M).dump "$DATABASE_URL"`, then confirm the file size is non-zero |
 | 5 | Deploy window | Low-traffic window; someone who can SSH to the backend host is available for 30 min after the merge |
@@ -25,7 +25,11 @@ Belgium is **dormant** after this deploy. No customer sees or uses it until the 
 Three additive migrations, applied in order by `alembic upgrade head` (`f3a9c1d7e2b4` → `1d76678ef1a1` →
 `2943a0490b5b` → `8a1f5ef9fa5d`):
 
-- **19 new tables**, all empty, each with row-level security ENABLED + FORCED and the tenant policy:
+Block K adds a fourth, `b7e4c2a9d5f1` (after main's merge revision `cf348b09db2b`), with **2 platform tables**:
+`payroll_be_gate_evidence` and `payroll_be_decisions` (Super Admin records, no organisation, so no RLS policy —
+like `payroll_source_artifacts`).
+
+- **19 new tenant / worker tables**, all empty, each with row-level security ENABLED + FORCED and the tenant policy:
   `payroll_be_identifier_vault`, `payroll_be_identifier_access_events`, `payroll_be_employer_registrations`,
   `payroll_be_establishment_units`, `payroll_be_worker_profiles`, `payroll_be_work_schedules`,
   `payroll_be_employment_classifications`, `payroll_be_declarations`, `payroll_be_accumulator_entries`,
@@ -54,18 +58,19 @@ Run as a read-only role (or in a transaction you roll back). Every query only re
 
 ```sql
 -- 3.1 Alembic is at the single head
-SELECT version_num FROM alembic_version;                       -- expect exactly: 8a1f5ef9fa5d
+SELECT version_num FROM alembic_version;                       -- expect exactly: b7e4c2a9d5f1
 
--- 3.2 The 19 Belgian tables exist
+-- 3.2 The 21 Belgian tables exist (19 tenant / worker + 2 platform)
 SELECT count(*) FROM information_schema.tables
- WHERE table_schema = 'public' AND table_name LIKE 'payroll\_be\_%';                   -- expect 19
+ WHERE table_schema = 'public' AND table_name LIKE 'payroll\_be\_%';                   -- expect 21
 
 -- 3.3 Row-level security is enabled AND forced on every one, each with a policy
 SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
        (SELECT count(*) FROM pg_policies p WHERE p.tablename = c.relname) AS policies
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE 'payroll\_be\_%'
- ORDER BY c.relname;                                      -- expect 19 rows: t | t | >= 1
+ ORDER BY c.relname;     -- expect t | t | >= 1 on the 19 tenant / worker tables; payroll_be_gate_evidence and
+                         -- payroll_be_decisions are platform tables: f | f | 0 (no organisation, by design)
 
 -- 3.4 The two shared columns exist and are unused
 SELECT table_name, column_name, is_nullable FROM information_schema.columns

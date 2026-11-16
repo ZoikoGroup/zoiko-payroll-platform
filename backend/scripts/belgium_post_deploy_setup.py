@@ -26,7 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 PRODUCTION_NAMES = ("production", "prod", "live")
 SHARED_COLUMNS = (("payslip_items", "be_calculation_snapshot"), ("payroll_runs", "be_approval_fingerprint"))
-EXPECTED_BE_TABLES = 19
+EXPECTED_BE_TABLES = 21          # 19 tenant / worker tables (RLS) + 2 platform tables (Block K, no RLS)
+PLATFORM_BE_TABLES = ("payroll_be_gate_evidence", "payroll_be_decisions")   # Super Admin records, no organisation
 
 
 class Refused(SystemExit):
@@ -120,7 +121,7 @@ def verify(db) -> list:
             "AND c.relname LIKE 'payroll\\_be\\_%'"))}
         policies = {r[0] for r in db.execute(sa.text("SELECT tablename FROM pg_policies "
                                                       "WHERE tablename LIKE 'payroll\\_be\\_%'"))}
-        bad = [t for t in tables if rls.get(t) != (True, True) or t not in policies]
+        bad = [t for t in tables if t not in PLATFORM_BE_TABLES and (rls.get(t) != (True, True) or t not in policies)]
         out.append(("3.3 RLS enabled + forced + policy", not bad, f"missing on {bad}" if bad else "all"))
     else:
         out.append(("3.3 RLS enabled + forced + policy", True, f"n/a on {bind.dialect.name} (PostgreSQL only)"))
@@ -136,7 +137,8 @@ def verify(db) -> list:
     active = [f"{p.pack_id} v{p.version}" for p in db.query(JurisdictionPack).filter(
         JurisdictionPack.jurisdiction_country == "BE", JurisdictionPack.status == "Active")]
     out.append(("3.6 no Belgian pack Active", not active, ", ".join(active) or "none Active"))
-    rows = {t: db.execute(sa.text(f'SELECT count(*) FROM "{t}"')).scalar() for t in tables}
+    rows = {t: db.execute(sa.text(f'SELECT count(*) FROM "{t}"')).scalar() for t in tables
+            if t not in PLATFORM_BE_TABLES}                     # Super Admin evidence / decisions are not payroll data
     filled = {t: n for t, n in rows.items() if n}
     out.append(("3.7 no Belgian data rows", not filled, str(filled) if filled else "all empty"))
     return out

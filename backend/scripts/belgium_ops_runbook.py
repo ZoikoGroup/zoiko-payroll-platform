@@ -32,6 +32,9 @@ IDENTIFIERS = {
     "BE_DMFA": "calendar report type", "BE_FINPROF": "calendar report type", "BE_BELCOTAX": "calendar report type",
     "BE_ONSS_ADVANCE": "calendar report type", "BE_HOLIDAY_FUND": "calendar report type",
     "BE_SEPA_BATCH": "payment channel", "BE_PAYMENT_BATCH": "payment treatment",
+    "BE_RECORDS": "report field source kind", "BE_LEDGER": "report field source kind",
+    "BE_SNAPSHOT": "report field source kind", "BE_FILING": "report field source kind",
+    "BE_HOLIDAY_CERT": "report field source kind",
 }
 
 # Owners
