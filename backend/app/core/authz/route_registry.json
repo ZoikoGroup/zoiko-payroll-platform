@@ -4469,6 +4469,98 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/belgium/reports/belcotax-copies/{filing_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "belcotax-copies",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_holiday_certificates",
+    "payroll_be_identifier_vault",
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/reports/holiday-certificates/{certificate_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "holiday-certificates",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_holiday_certificates",
+    "payroll_be_identifier_vault",
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/reports/individual-account",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "individual-account",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_holiday_certificates",
+    "payroll_be_identifier_vault",
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/reports/{report_type}/generate",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "generate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_holiday_certificates",
+    "payroll_be_identifier_vault",
+    "payroll_employees",
+    "payroll_generated_reports",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/belgium/runs/{run_id}/exceptions/acknowledge",
    "data_class": "worker",
@@ -4482,11 +4574,24 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_be_declarations",
-    "payroll_be_employment_classifications",
-    "payroll_be_work_schedules",
-    "payroll_be_worker_profiles",
-    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/runs/{run_id}/exceptions/acknowledge-bulk",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "acknowledge-bulk",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
     "payslip_items"
    ],
    "overridden": false
@@ -23326,10 +23431,122 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/belgium/decision-records",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "decision-records",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/decision-records",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "decision-records",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/decision-records/import-proposals",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "import-proposals",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/decision-records/{decision_id}/decide",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "decide",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/belgium/decisions",
    "data_class": "platform",
    "action": "read",
    "resource": "decisions",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/belgium/gate-evidence",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "gate-evidence",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/gate-evidence",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "gate-evidence",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/gate-evidence/{evidence_id}/decide",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "decide",
    "principals": [
     "super_admin"
    ],
@@ -23551,6 +23768,22 @@
     "payroll_employees"
    ],
    "overridden": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/report-templates/seed",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "seed",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
   },
   {
    "method": "POST",

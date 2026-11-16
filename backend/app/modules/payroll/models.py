@@ -36,7 +36,7 @@ from sqlalchemy import (
     ForeignKey, Text, Numeric, SmallInteger, UniqueConstraint, Index, JSON, text,
 )
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, deferred
 from sqlalchemy.sql import func
 from app.database import Base
 from app.modules.payroll.bank_routing import resolve_routing
@@ -2051,7 +2051,10 @@ class PayslipItem(Base):
     # Belgium (ZP-BE-ENG-001): frozen BE inputs + be_result (independent ONSS /
     # withholding / holiday / sector bases, BE-007) + trace, replayed exactly as
     # computed; NULL for non-BE payslips (1d76678ef1a1). Never a NISS.
-    be_calculation_snapshot = Column(JSON, nullable=True)
+    # Block J2: deferred — a PayslipItem query (any country's run listing,
+    # notifications …) no longer loads every Belgian snapshot; Belgian readers
+    # load the paths they need (belgium_service.be_snapshot_facts) or undefer.
+    be_calculation_snapshot = deferred(Column(JSON, nullable=True))
     # Payslip templates (f3a9c1d7e2b4): the organisation's published template
     # version this payslip is shown with, frozen when its run is approved so a
     # later template change never alters an issued payslip. NULL = the
@@ -15517,4 +15520,69 @@ class PayrollBeParallelDifference(_BeCommon, Base):
                            name="ck_be_parallel_difference_four_eyes"),
         Index("ix_be_parallel_difference_import", "import_id"),
         Index("uq_be_parallel_difference", "import_id", "employee_id", "concept", unique=True),
+    )
+
+
+# Belgium (ZP-BE-ENG-001 Block K2 / K3; migration b7e4c2a9d5f1). Platform-level Super Admin records (no
+# organisation, so no row-level-security policy, like payroll_source_artifacts). Four-eyes in the database.
+_BE_GATES = ("G1", "G2", "G3", "G4", "G5", "G6", "G7")
+
+
+class PayrollBeGateEvidence(Base):
+    """Evidence for a Belgian release gate: recorded by one Super Admin, ACCEPTED or REJECTED by another. Never
+    edited after the decision; new evidence is a new row (history). Readiness counts an ACCEPTED row only for the
+    exact evidence tag a gate check requires — evidence alone never marks a gate met."""
+    __tablename__ = "payroll_be_gate_evidence"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    gate            = Column(String(2), nullable=False)
+    evidence_type   = Column(String(50), nullable=False)
+    reference       = Column(String(300), nullable=False)
+    note            = Column(String(500), nullable=True)
+    source_artifact_id = Column(Integer, ForeignKey("payroll_source_artifacts.id", ondelete="SET NULL"), nullable=True)
+    status          = Column(String(10), nullable=False, default="PENDING", server_default="PENDING")
+    recorded_by_id  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    recorded_at     = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    decided_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decided_at      = Column(DateTime(timezone=True), nullable=True)
+    decision_reason = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"gate IN {_nz_in(_BE_GATES)}", name="ck_be_gate_evidence_gate"),
+        sa.CheckConstraint("status IN ('PENDING', 'ACCEPTED', 'REJECTED')", name="ck_be_gate_evidence_status"),
+        sa.CheckConstraint("status = 'PENDING' OR (decided_by_id IS NOT NULL AND decided_at IS NOT NULL AND "
+                           "(recorded_by_id IS NULL OR decided_by_id <> recorded_by_id))",
+                           name="ck_be_gate_evidence_four_eyes"),
+        Index("ix_be_gate_evidence_gate", "gate", "evidence_type"),
+    )
+
+
+class PayrollBeDecision(Base):
+    """An owner / specialist decision on a gap (G-01 …): PROPOSED by one person, DECIDED by another; a later decision
+    of the same gap SUPERSEDES the earlier one (linked, never overwritten). A decision does not change content by
+    itself: the decided value reaches the engine only through the signed content rows it names (content_keys)."""
+    __tablename__ = "payroll_be_decisions"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    gap_key          = Column(String(20), nullable=False)
+    question         = Column(String(300), nullable=True)
+    proposal_text    = Column(Text, nullable=False)
+    source_references = Column(Text, nullable=True)
+    content_keys     = Column(JSON, nullable=True)
+    decided_value    = Column(Text, nullable=True)
+    status           = Column(String(10), nullable=False, default="PROPOSED", server_default="PROPOSED")
+    proposed_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    proposed_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    decided_by_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decided_at       = Column(DateTime(timezone=True), nullable=True)
+    decision_reason  = Column(String(300), nullable=True)
+    superseded_by_id = Column(Integer, ForeignKey("payroll_be_decisions.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PROPOSED', 'DECIDED', 'SUPERSEDED')", name="ck_be_decision_status"),
+        sa.CheckConstraint("status = 'PROPOSED' OR (decided_value IS NOT NULL AND decided_by_id IS NOT NULL AND "
+                           "decided_at IS NOT NULL AND (proposed_by_id IS NULL OR decided_by_id <> proposed_by_id))",
+                           name="ck_be_decision_four_eyes"),
+        sa.CheckConstraint("status <> 'SUPERSEDED' OR superseded_by_id IS NOT NULL", name="ck_be_decision_superseded"),
+        Index("ix_be_decision_gap", "gap_key", "status"),
     )

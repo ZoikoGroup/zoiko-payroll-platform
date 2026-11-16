@@ -6,6 +6,7 @@ import {
 import { inputClass, labelClass } from "../constants";
 import { card, useLoad } from "../japan/jpFormat";
 import { ErrorNote } from "../new_zealand/nzShared";
+import BEGateEvidencePanel from "./BEGateEvidencePanel";
 
 // Belgium pack overview (ZP-BE-ENG-001 §14 "Belgium readiness"): pack status,
 // the release gates G1–G7 exactly as the backend computes them from evidence
@@ -173,6 +174,7 @@ export default function BEOverviewDashboard({ pack }) {
         </ul>
         <GateDetails details={summary.gateDetails} />
       </div>
+      <BEGateEvidencePanel onChange={reload} />
       {(summary.packs || []).length === 0 ? <SeedDraftPanel onDone={reload} /> : pack && <SigningCounts key={pack.id} pack={pack} />}
       {pack && <GoldenCertification key={`g${pack.id}`} pack={pack} />}
     </div>

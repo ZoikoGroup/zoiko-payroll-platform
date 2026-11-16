@@ -5025,6 +5025,91 @@ def belgium_configuration_update_row(kind: str, row_id: int, payload: dict = Bod
     return result
 
 
+@router.post("/compliance/belgium/report-templates/seed",
+             summary="Create the Draft Belgian employee-document templates for a year (activation stays gated)")
+def belgium_seed_report_templates(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                                  db: Session = Depends(get_db)):
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import belgium_reports
+
+    year = str((payload or {}).get("year") or "").strip()
+    if not year.isdigit():
+        raise BadRequestException("year is required (YYYY).")
+    rows = belgium_reports.be_seed_report_templates(db, year, current_user.id)
+    db.commit()
+    return {"templates": [{"id": r.id, "key": r.template_key, "type": r.report_type, "status": r.status}
+                          for r in rows]}
+
+
+# ── Block K2: release-gate evidence (four-eyes; never marks a gate met by itself) ──
+@router.get("/compliance/belgium/gate-evidence", summary="Belgium gate evidence per gate (required tags + history)")
+def belgium_gate_evidence_list(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    return belgium_governance.be_list_gate_evidence(db)
+
+
+@router.post("/compliance/belgium/gate-evidence", summary="Record evidence for a Belgian release gate (PENDING)")
+def belgium_gate_evidence_record(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                                 db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    row = belgium_governance.be_record_gate_evidence(db, payload, current_user.id)
+    db.commit()
+    return belgium_governance.be_gate_evidence_view(row)
+
+
+@router.post("/compliance/belgium/gate-evidence/{evidence_id}/decide",
+             summary="Accept or reject gate evidence (a Super Admin other than the recorder)")
+def belgium_gate_evidence_decide(evidence_id: int, payload: dict = Body(...),
+                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    row = belgium_governance.be_decide_gate_evidence(db, evidence_id, (payload or {}).get("outcome"),
+                                                     (payload or {}).get("reason"), current_user.id)
+    db.commit()
+    return belgium_governance.be_gate_evidence_view(row)
+
+
+# ── Block K3: owner / specialist decision records (proposer != decider; superseded, never overwritten) ──
+@router.get("/compliance/belgium/decision-records", summary="Belgium decision records per gap (current + history)")
+def belgium_decision_records(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    return belgium_governance.be_list_decisions(db)
+
+
+@router.post("/compliance/belgium/decision-records", summary="Propose a decision for a Belgian gap (PROPOSED)")
+def belgium_decision_propose(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                             db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    row = belgium_governance.be_propose_decision(db, payload, current_user.id)
+    db.commit()
+    return belgium_governance.be_decision_view(db, row)
+
+
+@router.post("/compliance/belgium/decision-records/import-proposals",
+             summary="Create PROPOSED records from the drafted decision proposals (nothing is decided)")
+def belgium_decision_import(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    rows = belgium_governance.be_import_decision_proposals(db, current_user.id)
+    db.commit()
+    return {"created": [r.gap_key for r in rows]}
+
+
+@router.post("/compliance/belgium/decision-records/{decision_id}/decide",
+             summary="Decide a proposal (a Super Admin other than the proposer; supersedes the previous decision)")
+def belgium_decision_decide(decision_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    row = belgium_governance.be_decide(db, decision_id, payload, current_user.id)
+    db.commit()
+    return belgium_governance.be_decision_view(db, row)
+
+
 @router.post("/compliance/belgium/seed-draft",
              summary="Create the Draft Belgium pack from the catalogue (only while none exists; reason; audited)")
 def belgium_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),

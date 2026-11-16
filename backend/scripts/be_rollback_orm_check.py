@@ -1,4 +1,7 @@
-"""Belgium (ZP-BE-ENG-001) Block I1: does the pre-Belgium code work on a database that keeps the Belgian schema?
+"""SUPERSEDED (owner decision 2026-11-16): Belgian rollback = dormancy + fix-forward; the Belgian schema is permanent
+(main's migrations build on it). Kept as a tool and for the record — see docs/belgium/DEPLOY_NOTES.md section 4.3.
+
+Belgium (ZP-BE-ENG-001) Block I1: does the pre-Belgium code work on a database that keeps the Belgian schema?
 
 Scripted check (not part of the default test run: it needs the git history of the pre-Belgium commit).
 
@@ -21,6 +24,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import re as _re
 import os
 import pathlib
 import subprocess
@@ -122,7 +126,8 @@ def sh(args, cwd, env, stdin=None, check=True):
 
 
 def env_for(db: pathlib.Path) -> dict:
-    env = {k: v for k, v in os.environ.items() if k not in ("ZP_TEST_POSTGRES_URL", "DATABASE_URL")}
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("ZP_TEST_POSTGRES_URL", "DATABASE_URL", "ZP_REQUIRE_POSTGRES_TESTS")}   # SQLite only
     env.update(PAYROLL_DATABASE_URL=f"sqlite:///{db.as_posix()}", ENVIRONMENT="development",
                ASSIST_SWEEP_ENABLED="false", TRIAL_SWEEP_ENABLED="false", SMTP_HOST="", SMTP_FROM_EMAIL="")
     return env
@@ -235,7 +240,9 @@ def main() -> int:
     print(json.dumps({"ormCompatible": same, "plainRevert": {"upgradeExit": up.returncode, "driftExit":
                       drift.returncode, "deployMigrateExit": dm.returncode},
                       "revertWithShim": {"deployMigrateExit": dm2.returncode, "driftExit": drift2.returncode,
-                                         "opsIdentical": shim_same, "pinTestsExit": pins.returncode}}))
+                                         "opsIdentical": shim_same, "pinTestsExit": pins.returncode,
+                                         "pinTestsPassed": int(_re.search(r"(\d+) passed", summary).group(1))
+                                         if _re.search(r"(\d+) passed", summary) else 0}}))
     return 0 if ok else 1
 
 
