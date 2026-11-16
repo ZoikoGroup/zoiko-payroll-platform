@@ -352,21 +352,32 @@ def test_deactivate_organization_response_precedes_email_send(db, organization, 
     organization.email = "admin@testorg.test"
     db.commit()
 
+    import threading
+
     timeline = []
-    monkeypatch.setattr(
-        email_service, "send_organization_suspended_email",
-        lambda *a, **kw: timeline.append("email_sent") or True,
-    )
+    response_started = threading.Event()
+
+    def _fake_send(*a, **kw):
+        # Each BaseHTTPMiddleware layer (ZP-PRIV) relays the response through its
+        # own task, so the inner app can finish and start its background task
+        # (in a worker thread) a few scheduler ticks before the outermost layer
+        # forwards the response start. Give that relay a bounded moment. If the
+        # email were sent inline instead, the handler is blocked right here, the
+        # response cannot start, the wait times out and the order below fails.
+        response_started.wait(timeout=5)
+        timeline.append("email_sent")
+        return True
+
+    monkeypatch.setattr(email_service, "send_organization_suspended_email", _fake_send)
 
     async def recording_app(scope, receive, send):
         # The response START (status + headers) is the point the client has its
-        # answer. With several BaseHTTPMiddleware layers (ZP-PRIV) a background
-        # task may begin before the final body chunk reaches this outer send,
-        # so the final chunk is not a stable marker; the start is.
+        # answer, so it is the marker (the final body chunk is not stable).
         async def _send(message):
             await send(message)
             if message["type"] == "http.response.start":
                 timeline.append("response_sent")
+                response_started.set()
         await app(scope, receive, _send)
 
     app.dependency_overrides[get_db] = lambda: db

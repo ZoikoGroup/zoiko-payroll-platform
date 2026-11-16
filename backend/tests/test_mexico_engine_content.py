@@ -184,12 +184,12 @@ def test_phase5_keys_are_named_value_free_and_tables_stay_empty():
         assert c.MX_PARAMETER_KEYS[key][0] == "amount"
     assert set(c.MX_REQUIRED_TEXT_KEYS) == {"mx_rounding_rule", "mx_sbc_min_rule"}
     # Batches 1-2 transcribed the subsidy remainder rule and the overtime tiers; W1-1 the
-    # SBC floor rule and the INFONAVIT percentage basis. The rounding rule (a G1 decision)
-    # and the INFONAVIT fixed-amount basis (regulation not saved) have no row yet
+    # SBC floor rule and the INFONAVIT percentage basis; D-01 (2026-11-11) the rounding rule.
+    # The INFONAVIT fixed-amount basis (regulation not saved) has no row yet
     present = {r.key for r in c.MX_SCALAR_CONTENT}
-    assert {"mx_subsidy_remainder_rule", "mx_sbc_min_rule", "mx_infonavit_percentage_basis",
+    assert {"mx_subsidy_remainder_rule", "mx_sbc_min_rule", "mx_infonavit_percentage_basis", "mx_rounding_rule",
             *c.MX_PER_CASE_KEYS} <= present
-    assert not {"mx_rounding_rule", "mx_infonavit_fixed_amount_basis"} & present
+    assert "mx_infonavit_fixed_amount_basis" not in present
 
 
 def test_activation_content_check_requires_rounding_and_sbc_floor(monkeypatch):

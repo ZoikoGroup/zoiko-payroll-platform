@@ -1,7 +1,7 @@
 """be_onss_rate_table: Belgium ONSS rate table (Block M-ECWC)
 
 Revision ID: e9c4b7a2d6f3
-Revises: b7e4c2a9d5f1
+Revises: e3f9a7c1b5d2
 Create Date: 2026-11-16
 
 ZP-BE-ENG-001 Block M-ECWC. Additive only; nothing existing changes meaning.
@@ -28,7 +28,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e9c4b7a2d6f3"
-down_revision: Union[str, Sequence[str], None] = "b7e4c2a9d5f1"
+down_revision: Union[str, Sequence[str], None] = "e3f9a7c1b5d2"   # main's merge of Mexico + Malaysia with Block K
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

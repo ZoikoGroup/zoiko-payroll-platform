@@ -2,7 +2,7 @@
 
 Four new platform tables exactly the models (codes are TEXT), six new employer-registration columns (facts UNKNOWN by
 default), autogenerate no-diff, idempotent replay, a round trip that removes only what it added, the four-eyes and
-vocabulary CHECKs in the database, literal names, manifest entry, single child of b7e4c2a9d5f1 and the single head,
+vocabulary CHECKs in the database, literal names, manifest entry, single child of main's merge e3f9a7c1b5d2 and the single head,
 and the deploy drift filter explains every new table and column. SYNTHETIC data only."""
 import re
 
@@ -15,7 +15,7 @@ from sqlalchemy.pool import StaticPool
 from tests.test_belgium_migrations import BACKEND, VERSIONS, _cols, _indexes, _load, _metadata
 
 REVISION = "e9c4b7a2d6f3"
-PARENT = "b7e4c2a9d5f1"
+PARENT = "e3f9a7c1b5d2"            # main's merge revision (Mexico + Malaysia + Belgium Block K)
 FILENAME = f"{REVISION}_be_onss_rate_table.py"
 NEW_TABLES = ("payroll_be_onss_rate_files", "payroll_be_onss_rates", "payroll_be_onss_code_combinations",
               "payroll_be_onss_type_rules")

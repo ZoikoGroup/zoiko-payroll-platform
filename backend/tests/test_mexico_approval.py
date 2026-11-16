@@ -135,9 +135,9 @@ def test_oos5_other_countries_keep_the_draft_to_approved_auto_advance(db):
 
 
 def test_a_qa_pack_with_batch1_content_is_still_refused(db):
-    """Today's real national pack (Batch 1: ISR, UMA, subsidy, on archive
-    copies) cannot be approved: the required text rules are not transcribed
-    and no cited source is VERIFIED."""
+    """Today's real national pack (on archive copies) cannot be approved: its
+    content is now complete (D-01's mx_rounding_rule transcribed 2026-11-11),
+    but no cited source is VERIFIED."""
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import mexico_service
     from scripts.seed_mexico_canonical_packs import load_manifest, seed_mexico
@@ -147,7 +147,7 @@ def test_a_qa_pack_with_batch1_content_is_still_refused(db):
     db.commit()
     checks = {ch["key"]: ch for ch in mexico_service.activation_checks(db, pack, actor_id=APPROVER)}
     assert checks["evidence"]["met"] is True                       # every Batch 1 row links its hashed source
-    assert checks["content"]["met"] is False and checks["sources_verified"]["met"] is False
-    with pytest.raises(BadRequestException, match="approval is refused"):
+    assert checks["content"]["met"] is True and checks["sources_verified"]["met"] is False
+    with pytest.raises(BadRequestException, match="approval is refused.*not VERIFIED"):
         _approve(db, pack)
     assert pack.approved_by_id is None

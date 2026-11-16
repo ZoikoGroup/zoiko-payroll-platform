@@ -7,6 +7,7 @@
  *   GET  /billing/trial-status    → banner payload
  *   GET  /billing/plan-change-impact → countries a plan change keeps/pauses/restores
  *   POST /billing/checkout        → create Stripe Checkout Session
+ *   POST /billing/checkout/confirm → activate from a paid Checkout Session
  */
 import { api } from "./api";
 
@@ -43,6 +44,15 @@ export const createCheckoutSession = (planCode, { acknowledgeCountryPause = fals
     plan_code: planCode,
     acknowledge_country_pause: acknowledgeCountryPause,
   });
+
+/**
+ * Confirm a just-paid Stripe Checkout Session (the `session_id` Stripe
+ * appends to the success URL). The server re-reads the session from Stripe
+ * and activates the subscription if the webhook hasn't yet — idempotent.
+ * Returns { status, workspace_type, plan_code, deferred, trial_ends_at }.
+ */
+export const confirmCheckoutSession = (sessionId) =>
+  api.post("/api/billing/checkout/confirm", { session_id: sessionId });
 
 /** Fetch the calling org's own invoices, newest first (Step 3). */
 export const listMyInvoices = () => api.get("/api/billing/my-subscription/invoices");

@@ -286,9 +286,10 @@ def test_deploy_drift_filter_explains_every_be_object():
     os.chdir(BACKEND)
     try:
         tables, columns = pending_objects(PARENT)
-        # Malaysia's chain (13574b996ccf ... f793f6074257) joins Belgium's at merge
-        # cf348b09db2b, so its objects are pending from here too. They are explained by
-        # the Malaysia migration tests; from Belgium's head only Malaysia is pending.
+        # Malaysia's chain (13574b996ccf ... f793f6074257, merge cf348b09db2b) and the
+        # Mexico CFDI lifecycle (merge 4de7c091ab32) join Belgium's after its head, so
+        # their objects are pending from here too. They are explained by their own
+        # migration tests; from Belgium's head only those two branches are pending.
         my_tables, my_columns = pending_objects("8a1f5ef9fa5d")
         tables = tables - my_tables
         columns = {t: c - my_columns.get(t, set()) for t, c in columns.items()}
@@ -299,7 +300,7 @@ def test_deploy_drift_filter_explains_every_be_object():
     # (tables, and the Block B columns on this revision's tables).
     assert tables == set(NEW_TABLES) | set(LATER_TABLES) | set(BLOCK_C_TABLES)
     assert {t: c for t, c in columns.items() if t in SHARED} == SHARED
-    assert {t: c for t, c in columns.items() if t not in SHARED} in ({}, LATER_BLOCK_B)   # later blocks subtracted
+    assert {t: c for t, c in columns.items() if t not in SHARED and not t.startswith("payroll_mx_")} in ({}, LATER_BLOCK_B)
 
 
 def test_revision_is_the_single_child_of_the_previous_head():
@@ -307,9 +308,10 @@ def test_revision_is_the_single_child_of_the_previous_head():
     assert (module.revision, module.down_revision) == (REVISION, PARENT)
     children = [p.name for p in VERSIONS.glob("*.py")
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
-    # Since the 2026-11-14 main -> venu merge the payslip templates revision is also the
-    # parent of Malaysia's chain (13574b996ccf); both rejoin at merge cf348b09db2b.
-    assert sorted(children) == sorted([FILENAME, "13574b996ccf_my_foundation.py"])
+    # The payslip templates revision is also the parent of Mexico's CFDI lifecycle merge
+    # (2defe5c4edd6) and of Malaysia's chain (13574b996ccf); all rejoin at merge d6b2e8f4a1c9.
+    assert sorted(children) == sorted([FILENAME, "2defe5c4edd6_merge_mx_cfdi_lifecycle_with_main.py",
+                                       "13574b996ccf_my_foundation.py"])
 
 
 def test_the_only_child_is_the_block_b_revision():
