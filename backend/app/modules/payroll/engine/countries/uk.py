@@ -286,6 +286,30 @@ def assess_auto_enrolment(age: int | None, annual_gross: Decimal, rate_map: dict
 
 
 # ── National Insurance category bands ──────────────────────────────────
+_SLAB_IDENTITY_FIELDS = (
+    "rule_type", "min_amount", "max_amount", "rate_pct", "employer_rate_pct", "ni_category",
+    "rate_label", "tax_formula", "formula_expression", "flat_amount", "adjustment_amount",
+    "filing_status", "tax_regime", "jurisdiction_state", "jurisdiction_locality",
+)
+
+
+def _drop_identical_slabs(slabs):
+    """Keep the first of any rows identical in every field the calculation
+    reads. Band and bracket sums add each row in, so an exact copy of a row
+    (production audit 2026-11-14: UK pack #24 held 47 such copies, synced
+    one-for-one into every UK org) would charge that band twice. Rows that
+    differ in any of these fields are all kept."""
+    seen = set()
+    kept = []
+    for s in slabs:
+        key = tuple(getattr(s, f, None) for f in _SLAB_IDENTITY_FIELDS)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(s)
+    return kept
+
+
 def _resolve_ni_bands(slabs, ni_category: str | None):
     """TaxSlab rows with rule_type="NI_BAND" for this employee's NI
     category, sorted by band. Returns [] when the employee has no
@@ -310,7 +334,7 @@ def _resolve_ni_bands(slabs, ni_category: str | None):
         s for s in slabs
         if getattr(s, "rule_type", None) == "NI_BAND" and getattr(s, "ni_category", None) == ni_category
     ]
-    return sorted(bands, key=lambda s: s.min_amount)
+    return sorted(_drop_identical_slabs(bands), key=lambda s: s.min_amount)
 
 
 # Real, published per-period NI_BAND variants (ZP-TAX-UK-2026-27-001
@@ -359,7 +383,7 @@ def _resolve_ni_bands_by_frequency(slabs, ni_category: str | None, pay_frequency
         s for s in slabs
         if getattr(s, "rule_type", None) == rule_type and getattr(s, "ni_category", None) == ni_category
     ]
-    return sorted(bands, key=lambda s: s.min_amount)
+    return sorted(_drop_identical_slabs(bands), key=lambda s: s.min_amount)
 
 
 def _calculate_ni_from_bands(annual_gross: Decimal, bands: list) -> tuple[Decimal, Decimal]:
@@ -465,8 +489,11 @@ def calculate(ctx: PayrollContext) -> dict:
 
     # NI_BAND rows (if any) live in the same TaxSlab list as income-tax
     # brackets — filtered out before either consumer sees the other's rows.
-    income_slabs = [s for s in ctx.slabs if getattr(s, "rule_type", None) not in _UK_NI_BAND_RULE_TYPES]
-    state_income_slabs = [s for s in ctx.state_slabs if getattr(s, "rule_type", None) not in _UK_NI_BAND_RULE_TYPES]
+    # Exact copies of an income-tax bracket are dropped too (see _drop_identical_slabs).
+    income_slabs = _drop_identical_slabs(
+        [s for s in ctx.slabs if getattr(s, "rule_type", None) not in _UK_NI_BAND_RULE_TYPES])
+    state_income_slabs = _drop_identical_slabs(
+        [s for s in ctx.state_slabs if getattr(s, "rule_type", None) not in _UK_NI_BAND_RULE_TYPES])
 
     # Directors NIC (§9.2: "Do not process a director as an ordinary
     # employee solely because the same percentage rates apply") — takes

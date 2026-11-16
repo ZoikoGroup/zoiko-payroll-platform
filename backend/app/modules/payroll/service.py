@@ -7966,6 +7966,17 @@ def resolve_uk_configuration(
     )
 
 
+# Every TaxSlab column the sync below copies or the engine reads (sort_order
+# and the pack id excepted): two canonical rows equal in all of them are the
+# same bracket stored twice.
+_SYNC_SLAB_IDENTITY_FIELDS = (
+    "rule_type", "min_amount", "max_amount", "rate_pct", "rate_label", "tax_formula",
+    "formula_expression", "flat_amount", "adjustment_amount", "ni_category", "employer_rate_pct",
+    "filing_status", "tax_table_number", "tax_column", "assessment_basis", "effective_from",
+    "effective_to", "tax_regime", "jurisdiction_state", "jurisdiction_locality",
+)
+
+
 def sync_org_rates_from_canonical(
     db: Session, organization_id: int, country: str, state: Optional[str] = None,
     tax_regime: Optional[str] = None, payroll_date=None,
@@ -8136,7 +8147,15 @@ def sync_org_rates_from_canonical(
         db.query(TaxSlab).filter(
             TaxSlab.organization_id == organization_id, TaxSlab.jurisdiction_country == country,
         ).delete()
+        # An exact copy of a canonical row (production audit 2026-11-14: UK
+        # pack #24 held 47) is copied once, not once per copy - bracket and
+        # band sums add every row in, so a copy would be charged twice.
+        seen_slabs: set = set()
         for ts in canonical_slabs:
+            slab_key = tuple(getattr(ts, f, None) for f in _SYNC_SLAB_IDENTITY_FIELDS)
+            if slab_key in seen_slabs:
+                continue
+            seen_slabs.add(slab_key)
             db.add(TaxSlab(
                 organization_id=organization_id, jurisdiction_country=country,
                 min_amount=ts.min_amount, max_amount=ts.max_amount, rate_pct=ts.rate_pct,
