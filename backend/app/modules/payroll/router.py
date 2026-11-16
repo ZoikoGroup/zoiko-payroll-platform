@@ -284,6 +284,12 @@ def create_employee(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    # Email is required for a new employee, as bulk create and the employee
+    # form already require (payslips, invites and forms are sent to it).
+    # Checked here, at the API, so a call without one is refused before the
+    # billing check; the format itself is checked in service.create_employee.
+    if not (data.email or "").strip():
+        raise BadRequestException("Email is required for a new employee.")
     current_count = billing_bwm.count_billable_workers(db, current_user.organization_id)
     require_scope_limit(MAX_BWM, requested_qty=current_count + 1)(current_user=current_user, db=db)
     return service.create_employee(db, data, current_user.organization_id)
