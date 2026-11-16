@@ -20,7 +20,7 @@ from app.modules.payroll.engine.countries.shared import (
     _param_text, resolve_periods_per_year, resolve_direct_period_threshold,
     telescope_period_amount,
     _UK_NO_INDEPENDENT_PA_TAPER_ENABLED_COUNTRIES, _UK_K_CODE_50PCT_CAP_ENABLED_COUNTRIES,
-    _UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES, _UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES,
+    _UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES, _UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES, _drop_identical_slabs,
     _UK_STUDENT_LOAN_ROUND_DOWN_ENABLED_COUNTRIES, _UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES,
 )
 
@@ -286,30 +286,6 @@ def assess_auto_enrolment(age: int | None, annual_gross: Decimal, rate_map: dict
 
 
 # ── National Insurance category bands ──────────────────────────────────
-_SLAB_IDENTITY_FIELDS = (
-    "rule_type", "min_amount", "max_amount", "rate_pct", "employer_rate_pct", "ni_category",
-    "rate_label", "tax_formula", "formula_expression", "flat_amount", "adjustment_amount",
-    "filing_status", "tax_regime", "jurisdiction_state", "jurisdiction_locality",
-)
-
-
-def _drop_identical_slabs(slabs):
-    """Keep the first of any rows identical in every field the calculation
-    reads. Band and bracket sums add each row in, so an exact copy of a row
-    (production audit 2026-11-14: UK pack #24 held 47 such copies, synced
-    one-for-one into every UK org) would charge that band twice. Rows that
-    differ in any of these fields are all kept."""
-    seen = set()
-    kept = []
-    for s in slabs:
-        key = tuple(getattr(s, f, None) for f in _SLAB_IDENTITY_FIELDS)
-        if key in seen:
-            continue
-        seen.add(key)
-        kept.append(s)
-    return kept
-
-
 def _resolve_ni_bands(slabs, ni_category: str | None):
     """TaxSlab rows with rule_type="NI_BAND" for this employee's NI
     category, sorted by band. Returns [] when the employee has no

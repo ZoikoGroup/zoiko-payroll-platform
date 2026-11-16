@@ -88,3 +88,32 @@ def test_sync_copies_each_identical_canonical_row_once(db, organization):
                                         TaxSlab.jurisdiction_country == "UK").all()
     assert sorted((r.ni_category, r.min_amount) for r in org_rows) == [
         ("A", Decimal("12570")), ("A", Decimal("50270")), ("B", Decimal("12570"))]
+
+
+# ── A5: every country's income-tax bracket sum (shared engine) ───────────────
+
+from app.modules.payroll.engine.countries.shared import _calculate_annual_tax  # noqa: E402
+from tests.test_engine_jurisdiction_upgrade import IN_RATES, IN_SLABS, US_RATES, US_SLABS  # noqa: E402
+
+
+def test_shared_bracket_sum_counts_a_copied_bracket_once():
+    single = _calculate_annual_tax(Decimal("80000"), US_SLABS)
+    assert _calculate_annual_tax(Decimal("80000"), _copies(US_SLABS)) == single == Decimal("11000")
+
+
+def test_copied_filing_status_bracket_is_counted_once():
+    # The US pack #32 shape: a filing-status bracket stored twice.
+    mfj = [Slab(Decimal("0"), Decimal("100000"), Decimal("12"), filing_status="MFJ")]
+    single_set = _calculate_annual_tax(Decimal("60000"), mfj, filing_status="MFJ")
+    assert _calculate_annual_tax(Decimal("60000"), _copies(mfj, 2), filing_status="MFJ") == single_set
+
+
+def test_us_payslip_with_copied_federal_brackets_matches_a_single_set():
+    single = calc("US", 8000, US_RATES, US_SLABS)
+    copied = calc("US", 8000, US_RATES, _copies(US_SLABS, 2))
+    assert copied.tds == single.tds and single.tds > 0
+
+
+def test_india_payslip_with_copied_brackets_matches_a_single_set():
+    single = calc("IN", 150000, IN_RATES, IN_SLABS)
+    assert calc("IN", 150000, IN_RATES, _copies(IN_SLABS, 2)).tds == single.tds
