@@ -167,7 +167,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                                         "payroll_be_worker_profiles", "payroll_be_work_schedules",
                                         "payroll_be_employment_classifications", "payroll_be_declarations",
                                         "payroll_be_accumulator_entries",  # + Belgium P2 (1d76678ef1a1)
-                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
+                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_be_gate_evidence", "payroll_be_decisions", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
         nz_run_columns = {"nz_approval_fingerprint", "nz_payment_kind", "nz_run_options",   # + P6 options
                           "pl_approval_fingerprint",                                        # + Poland P2
                           "my_approval_fingerprint",                                        # + Malaysia P2
@@ -299,7 +299,7 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                         "payroll_be_worker_profiles", "payroll_be_work_schedules",
                         "payroll_be_employment_classifications", "payroll_be_declarations",
                         "payroll_be_accumulator_entries"}
-        be_block_b_tables = {"payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
+        be_block_b_tables = {"payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_be_gate_evidence", "payroll_be_decisions"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
         be_shared = {"payslip_items": {"template_version_id", "be_calculation_snapshot"},
                      "payroll_runs": {"be_approval_fingerprint"}}
         tables, columns = pending_objects("e7ec6c1933b4")
@@ -322,7 +322,9 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         # cf348b09db2b joins the two chains: a database at either chain's head has only the
         # other chain pending.
         tables, columns = pending_objects("8a1f5ef9fa5d")     # Belgium head (main, PR #161)
-        assert tables == my_tables and columns == {**my_runs, "payslip_items": {"my_calculation_snapshot"}}
+        be_block_k_tables = {"payroll_be_gate_evidence", "payroll_be_decisions"}  # + Belgium Block K (b7e4c2a9d5f1)
+        assert tables == my_tables | be_block_k_tables
+        assert columns == {**my_runs, "payslip_items": {"my_calculation_snapshot"}}
         tables, columns = pending_objects("f793f6074257")     # Malaysia head (venu)
         assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
         assert tables == be_p2_tables | be_block_b_tables
