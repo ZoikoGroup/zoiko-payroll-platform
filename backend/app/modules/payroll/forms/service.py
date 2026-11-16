@@ -23,6 +23,7 @@ from app.modules.payroll.models import (
 from app.modules.payroll.service import FIELD_MAP, log_activity, ActivityStatus
 from app.core.exceptions import NotFoundException
 from app.modules.communications.service import dispatch_email, idempotency_key
+from app.services import email_service
 from app.services.email_service import send_update_form_invite_email
 from app.config import settings
 
@@ -135,25 +136,72 @@ def send_form(db: Session, organization_id: int, form_id: int, employee_ids: Lis
         db.commit()
         db.refresh(send)
 
-        form_link = f"{settings.FRONTEND_URL}/forms/fill/{token}"
+        # Same base-URL resolution every other emailed link uses
+        # (FRONTEND_BASE_URL, else FRONTEND_URL) — not raw FRONTEND_URL.
+        form_link = f"{email_service.frontend_base_url()}/forms/fill/{token}"
         # Deliberately synchronous (dispatch_email, not queue_email): this
-        # endpoint's response reports per-employee delivery ("sent"/"failed"),
-        # which the caller can only see if the send has actually happened.
-        # Each send row carries a fresh token, so the key is per send row.
+        # endpoint's response reports per-employee delivery, which the caller
+        # can only see if the send has actually happened. Each send row
+        # carries a fresh token, so the key is per send row.
+        key = idempotency_key(organization_id, "payroll.form_assigned", employee.email, None, f"form_send:{send.id}")
+        email_service.reset_last_send_disposition()
         sent_ok = dispatch_email(
-            "payroll", "payroll.form_assigned", None, employee.email,
-            idempotency_key(organization_id, "payroll.form_assigned", employee.email, None, f"form_send:{send.id}"),
+            "payroll", "payroll.form_assigned", None, employee.email, key,
             send_update_form_invite_email, employee.email, employee.name, form.name, form_link,
             expires_at.strftime("%b %d, %Y"),
             send_kwargs={"organization_id": organization_id},
             organization_id=organization_id, recipient_user_id=None, db=db,
         )
-        results.append({"employeeId": emp_id, "status": "sent" if sent_ok else "failed",
-                         **({"reason": "Email delivery failed."} if not sent_ok else {})})
+        result = _delivery_result(db, emp_id, employee.email, sent_ok, key)
+        if result["status"] != "sent":
+            # The employee never got this link — retire it rather than leave
+            # a live token nobody received.
+            send.status = FormSendStatus.EXPIRED.value
+            send.expires_at = datetime.now(timezone.utc)
+            db.commit()
+        results.append(result)
 
     sent_count = len([r for r in results if r["status"] == "sent"])
     log_activity(db, organization_id, f"Sent '{form.name}' to {sent_count} employee(s).", ActivityStatus.INFO)
     return {"results": results}
+
+
+_NOT_DELIVERED_REASONS = {
+    email_service.DISPOSITION_MOCKED:
+        "Email is not configured on this server (no SMTP host), so no email was sent.",
+    email_service.DISPOSITION_BLOCKED:
+        "Outbound email is turned off on this server (local/test mode), so no email was sent.",
+    email_service.DISPOSITION_LOCAL_SANDBOX:
+        "Captured by the local mail sandbox on this server; not delivered to the employee.",
+}
+
+
+def _delivery_result(db: Session, employee_id: int, email: str, sent_ok: bool, key: str) -> dict:
+    """What really happened to one recipient's invite. "sent" only when the
+    message was handed to an SMTP server; "not_delivered" when the server
+    only logged it (no SMTP host) or blocked it (local/test mode);
+    "failed" with the provider's own error when sending raised."""
+    result = {"employeeId": employee_id, "email": email}
+    if not sent_ok:
+        from app.modules.communications.models import CommunicationEvent
+
+        row = (db.query(CommunicationEvent)
+               .filter(CommunicationEvent.idempotency_key == key)
+               .order_by(CommunicationEvent.id.desc()).first())
+        detail = (row.provider_response or "").strip() if row is not None else ""
+        reason = "Email delivery failed."
+        if detail and "returned False" not in detail:
+            reason = f"Email delivery failed: {detail[:200]}"
+        return {**result, "status": "failed", "reason": reason}
+
+    info = email_service.last_send_disposition() or {}
+    disposition = info.get("disposition")
+    if disposition in _NOT_DELIVERED_REASONS:
+        return {**result, "status": "not_delivered", "reason": _NOT_DELIVERED_REASONS[disposition]}
+    if info.get("redirected_to"):
+        return {**result, "status": "sent",
+                "note": f"Staging mode: delivered to the sandbox inbox {info['redirected_to']} instead."}
+    return {**result, "status": "sent"}
 
 
 # ── Public (unauthenticated) fetch/submit ────────────────────────────────

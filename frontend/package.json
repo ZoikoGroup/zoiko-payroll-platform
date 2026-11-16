@@ -10,7 +10,7 @@
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "lint": "eslint .",
     "check:undefined": "node scripts/check-undefined.mjs",
-    "test": "node scripts/phase8cg-minijob-validation.mjs && node scripts/attendance-passthrough-validation.mjs && node scripts/privacy-ui-validation.mjs && node scripts/za-compliance-ui-validation.mjs && node scripts/jp-compliance-ui-validation.mjs && node scripts/nz-compliance-ui-validation.mjs && node scripts/pl-compliance-ui-validation.mjs && node scripts/be-scaffold-ui-validation.mjs && node scripts/be-console-ui-validation.mjs"
+    "test": "node scripts/phase8cg-minijob-validation.mjs && node scripts/attendance-passthrough-validation.mjs && node scripts/privacy-ui-validation.mjs && node scripts/za-compliance-ui-validation.mjs && node scripts/jp-compliance-ui-validation.mjs && node scripts/nz-compliance-ui-validation.mjs && node scripts/pl-compliance-ui-validation.mjs && node scripts/my-compliance-ui-validation.mjs && node scripts/session-timeout-validation.mjs && node scripts/employee-wizard-validation.mjs && node scripts/be-scaffold-ui-validation.mjs && node scripts/be-console-ui-validation.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.17.0",

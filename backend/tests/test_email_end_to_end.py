@@ -303,7 +303,10 @@ def test_update_form_invite_email_via_real_send_form(db, organization, caplog):
     with caplog.at_level(logging.INFO):
         result = forms_service.send_form(db, organization.id, form.id, [employee.id])
 
-    assert result["results"] == [{"employeeId": employee.id, "status": "sent"}]
+    # No SMTP host in tests: the template is rendered and mock-logged, and
+    # the sender is told it was NOT delivered rather than "sent".
+    (res,) = result["results"]
+    assert (res["employeeId"], res["status"]) == (employee.id, "not_delivered")
     sent = _mock_send_templates(caplog)
     assert "update_form_invite.html" in sent, sent
 

@@ -76,6 +76,14 @@ NZ_TABLES = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz
                                         "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
                                         "payroll_pl_parallel_imports",
                                         "payroll_pl_parallel_differences",  # + Poland P9 (e7ec6c1933b4)
+                                        "payroll_my_identifier_vault", "payroll_my_identifier_access_events",
+                                        "payroll_my_employer_registrations", "payroll_my_worker_profiles",
+                                        "payroll_my_work_assignments", "payroll_my_tax_declarations",
+                                        "payroll_my_accumulator_entries",  # + Malaysia P2 (13574b996ccf)
+                                        "payroll_my_employer_events", "payroll_my_clearance_holds",
+                                        "payroll_my_clearance_hold_lines",  # + Malaysia P7 (5f314f975ac3)
+                                        "payroll_my_filings", "payroll_my_settlements", "payroll_my_reconciliation_variances",  # + Malaysia P9 (efdc07f97eb5)
+                                        "payroll_my_parallel_imports", "payroll_my_parallel_differences",  # + Malaysia P10 (f793f6074257)
                                         "payroll_be_identifier_vault", "payroll_be_identifier_access_events",
                                         "payroll_be_employer_registrations", "payroll_be_establishment_units",
                                         "payroll_be_worker_profiles", "payroll_be_work_schedules",
@@ -258,10 +266,10 @@ def test_deploy_drift_filter_explains_every_za_object():
                                                              "mx_sdi_evidence_ref"} == {name for name, _t in module._PROFILE_COLUMNS}
     assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot",
                                         "nz_calculation_snapshot", "nz_correction_of_id", "pl_calculation_snapshot",
-                                        "be_calculation_snapshot", "template_version_id"}  # + Belgium P2
+                                        "be_calculation_snapshot", "my_calculation_snapshot", "template_version_id"}  # + Belgium P2
     assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint",
                                        "jp_payment_kind", "nz_approval_fingerprint", "nz_payment_kind",
-                                       "nz_run_options", "pl_approval_fingerprint", "be_approval_fingerprint"}
+                                       "nz_run_options", "pl_approval_fingerprint", "my_approval_fingerprint", "be_approval_fingerprint"}
 
 
 def test_revision_is_a_single_child_of_the_previous_head():

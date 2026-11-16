@@ -305,10 +305,11 @@ def test_alembic_heads_is_single_head():
     # efc56f3235e2 (Mexico mx_decision_inputs_m21, sweep S1): seven nullable columns the
     # decision options read (terminations, labour policies, statutory profiles); written on
     # 3880223bfaa0, re-parented (never applied) onto e7ec6c1933b4.
-    # f3a9c1d7e2b4 (2026-11-11, payslip templates) is the single child of efc56f3235e2; Belgium
-    # 1d76678ef1a1 (be_foundation) was re-chained onto f3a9c1d7e2b4 when origin/main was merged into
-    # nikhil, and 8a1f5ef9fa5d (Belgium Block C be_filing_parallel, child of 2943a0490b5b) is the single head.
-    assert heads == ["8a1f5ef9fa5d"]
+    # f3a9c1d7e2b4 (2026-11-11, payslip templates) is the single child of efc56f3235e2.
+    # Two chains grow from it: Belgium on main (1d76678ef1a1 -> 2943a0490b5b -> 8a1f5ef9fa5d,
+    # PR #161) and Malaysia on venu (13574b996ccf -> 5f314f975ac3 -> efdc07f97eb5 -> f793f6074257).
+    # cf348b09db2b (2026-11-14 main -> venu merge) joins both heads without editing either chain.
+    assert heads == ["cf348b09db2b"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -320,7 +321,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["8a1f5ef9fa5d"]
+    assert list(script.get_heads()) == ["cf348b09db2b"]
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -363,6 +364,10 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         "cd62503afe26",
         "d4e5f6a7c8b9", "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf",
         "f0b1c2d3e4f5", "f1b78410d568",
+        # f3a9c1d7e2b4 (payslip templates): main's Belgium chain (1d76678ef1a1) and
+        # venu's Malaysia chain (13574b996ccf) both grow from it; rejoined by merge
+        # cf348b09db2b.
+        "f3a9c1d7e2b4",
         # f5c1a8d3e9b2: main's Mexico M8 (a6d2f9c4b8e1) and the ZP-PRIV chain
         # (a7c3e91f2b60) both grow from it; rejoined by merge c3e5a7b9d1f4.
         "f5c1a8d3e9b2",
@@ -373,7 +378,8 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 263   # + f3a9c1d7e2b4 (payslip templates, child of efc56f3235e2) + 8a1f5ef9fa5d (Belgium Block C be_filing_parallel, child of 2943a0490b5b) + 2943a0490b5b (Belgium Block B be_absence_holiday_payment, child of 1d76678ef1a1) + 1d76678ef1a1 (Belgium P2 be_foundation, re-chained onto f3a9c1d7e2b4) + efc56f3235e2 (Mexico mx_decision_inputs_m21, child of e7ec6c1933b4) + e7ec6c1933b4 (Poland P9 pl_parallel_cycles, child of e75b9219e1f8)
+    assert len(revs) == 268   # 260 + Malaysia 13574b996ccf, 5f314f975ac3, efdc07f97eb5, f793f6074257
+                              # + Belgium 1d76678ef1a1, 2943a0490b5b, 8a1f5ef9fa5d + merge cf348b09db2b
 
 
 def test_germany_head_chain_wiring_is_intact():

@@ -177,7 +177,7 @@ export default function AssistInlinePanel({ contextObject, title, subtitle }) {
             {error ? <p className="rounded-[10px] bg-error-light px-3 py-2 text-[12px] text-error">{error}</p> : null}
             {messages.length === 0 ? (
               <div className="flex flex-col gap-3">
-                <div className="max-w-[90%] rounded-[14px] rounded-bl-[4px] border border-border bg-white px-3.5 py-2.5 text-[13px] text-foreground">
+                <div className="max-w-[90%] rounded-[14px] rounded-bl-[4px] border border-border bg-surface-muted px-3.5 py-2.5 text-[13px] text-foreground">
                   {subtitle || "Ask about this run's readiness, exceptions, or status — I'll answer using only this run's own data."}
                 </div>
                 {suggestions.length ? (
@@ -187,7 +187,7 @@ export default function AssistInlinePanel({ contextObject, title, subtitle }) {
                         key={s.intent_id + s.position}
                         type="button"
                         onClick={() => sendMessage(s.prompt)}
-                        className="rounded-[10px] border border-border bg-white px-2.5 py-1.5 text-left text-[11px] font-medium text-foreground-muted transition hover:border-primary hover:text-primary"
+                        className="rounded-[10px] border border-border bg-surface px-2.5 py-1.5 text-left text-[11px] font-medium text-foreground-muted transition hover:border-primary hover:text-primary"
                       >
                         {s.prompt}
                       </button>
@@ -213,7 +213,7 @@ export default function AssistInlinePanel({ contextObject, title, subtitle }) {
               onChange={(e) => setInput(e.target.value)}
               placeholder={t("assist.placeholder")}
               disabled={sending}
-              className="min-w-0 flex-1 rounded-[10px] border border-border bg-white px-3 py-2 text-[13px] text-foreground outline-none focus:border-primary disabled:opacity-60"
+              className="min-w-0 flex-1 rounded-[10px] border border-border bg-surface px-3 py-2 text-[13px] text-foreground placeholder-foreground-muted outline-none focus:border-primary disabled:opacity-60"
             />
             <button
               type="submit"

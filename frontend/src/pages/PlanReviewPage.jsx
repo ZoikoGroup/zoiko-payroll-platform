@@ -109,7 +109,9 @@ export default function PlanReviewPage() {
     setError(null);
     setSubmittingAction("trial");
     try {
-      await apiFetch("/api/billing/start-trial", { method: "POST" });
+      // The evaluation itself is always Professional; the plan being
+      // reviewed is recorded so the Subscription page can show the choice.
+      await apiFetch("/api/billing/start-trial", { method: "POST", body: { plan_code: planCode } });
       navigate("/payroll");
     } catch (err) {
       setError(err.message || "Could not start your trial. Please try again.");
@@ -223,7 +225,7 @@ export default function PlanReviewPage() {
                 }}
               >
                 {submittingAction === "trial" && <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />}
-                {submittingAction === "trial" ? "Starting your trial…" : "Start Trial Instead — No Card Required"}
+                {submittingAction === "trial" ? "Starting your trial…" : "Try Professional Free for 30 Days — No Card Required"}
               </button>
             )}
 

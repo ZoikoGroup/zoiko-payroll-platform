@@ -441,7 +441,7 @@ export default function PayrollShell({ children }) {
         />
         <TrialBanner />
         <DunningBanner />
-        <main className="w-full">{children}</main>
+        <main className="w-full pb-24">{children}</main>
       </div>
 
       <AssistLauncher />

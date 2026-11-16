@@ -43,7 +43,7 @@ export const FOCUS_RING =
 // Mobile ≤767px: full-screen drawer with safe-area insets. Tablet/desktop:
 // floating panel, 480px (≤90vw), max-height min(780px, 90dvh) (§09).
 export const PANEL_CLASS =
-  "fixed inset-0 z-[9998] flex flex-col overflow-hidden bg-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:inset-auto md:bottom-24 md:right-5 md:h-[min(780px,calc(100dvh-7.5rem))] md:w-[min(520px,92vw)] md:rounded-[20px] md:border md:border-border md:pt-0 md:pb-0 md:shadow-[0_24px_64px_rgba(8,43,69,0.22)]";
+  "fixed inset-0 z-[9998] flex flex-col overflow-hidden bg-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:inset-auto md:bottom-24 md:right-6 md:h-[min(780px,calc(100dvh-7.5rem))] md:w-[min(520px,92vw)] md:rounded-[20px] md:border md:border-border md:pt-0 md:pb-0 md:shadow-[0_24px_64px_rgba(8,43,69,0.22)]";
 
 const TOPIC_ICONS = {
   globe: Globe,
@@ -108,8 +108,8 @@ export const ConciergeLauncher = forwardRef(function ConciergeLauncher({ open, o
       <div className={`fixed bottom-6 right-6 z-[9997] h-14 w-14 ${open ? "max-md:hidden" : ""}`}>
         <div
           aria-hidden="true"
-          className={`concierge-glow pointer-events-none absolute inset-0 rounded-2xl bg-primary blur-xl transition-opacity duration-300 ${
-            open ? "opacity-80" : "opacity-55"
+          className={`concierge-glow pointer-events-none absolute inset-0 rounded-2xl bg-primary blur-lg transition-opacity duration-300 ${
+            open ? "opacity-70" : "opacity-40"
           }`}
         />
         <button

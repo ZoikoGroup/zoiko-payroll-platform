@@ -1114,6 +1114,58 @@ export const addPlAuthorityExample = (packRowId, payload) =>
   apiFetch(`${PL_SA}/packs/${packRowId}/authority-examples`, { method: "POST", body: payload });
 export const runPlGoldenCheck = (packRowId) => apiFetch(`${PL_SA}/packs/${packRowId}/golden-check`, { method: "POST" });
 
+// Malaysia (ZP-MY-ENG-001 Phase 8a): the governed signing console and the
+// statutory workbook (export -> fill -> preview -> apply as UNSIGNED rows ->
+// sign). Undefined policies may be signed NOT_SUPPORTED (the feature stays blocked).
+const MY_SA = "/api/super-admin/compliance/malaysia";
+export const getMySummary = () => apiFetch("/api/super-admin/compliance/jurisdictions/MY/statutory-summary");
+export const listMyPacks = () => apiFetch(`${MY_SA}/packs`);
+export const getMyConfiguration = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/configuration`);
+export const getMySigningStatus = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/signing-status`);
+export const updateMyRow = (kind, rowId, payload) =>
+  apiFetch(`${MY_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
+export const signMyRows = (refs, reason, sourceDocumentId) =>
+  apiFetch(`${MY_SA}/configuration/sign`, { method: "POST", body: { refs, reason, sourceDocumentId } });
+export const getMyDecisions = () => apiFetch(`${MY_SA}/decisions`);
+export const seedMyDraftPack = (reason) => apiFetch(`${MY_SA}/seed-draft`, { method: "POST", body: { reason } });
+export const getMyRolloverPlan = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/rollover`);
+export const rolloverMyPack = (packRowId, reason) =>
+  apiFetch(`${MY_SA}/packs/${packRowId}/rollover`, { method: "POST", body: { reason } });
+export const downloadMyWorkbook = async (packRowId) => {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}${MY_SA}/packs/${packRowId}/workbook/export`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error("Could not download the workbook.");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `malaysia-pack-${packRowId}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+// Multipart upload: apiFetch JSON-encodes bodies, so the file goes through fetch.
+const uploadMyWorkbook = async (packRowId, step, file, reason) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (reason) formData.append("reason", reason);
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE}${MY_SA}/packs/${packRowId}/workbook/${step}`, {
+    method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: formData,
+  });
+  let data = {};
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  if (!res.ok) throw new Error(data.detail || "The workbook was refused.");
+  return data;
+};
+export const previewMyWorkbook = (packRowId, file) => uploadMyWorkbook(packRowId, "preview", file);
+export const applyMyWorkbook = (packRowId, file, reason) => uploadMyWorkbook(packRowId, "apply", file, reason);
+// Malaysia Phase 10 — authority examples and the golden check (gate G1).
+export const addMyAuthorityExample = (packRowId, payload) =>
+  apiFetch(`${MY_SA}/packs/${packRowId}/authority-examples`, { method: "POST", body: payload });
+export const runMyGoldenCheck = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/golden-check`, { method: "POST" });
+
 // ── Belgium (ZP-BE-ENG-001 Phase 3A/3B) signing console ─────────────────────
 // Same governance as Poland. Groups, labels, kinds, vocabularies, slab specs and
 // reference notes all come from the configuration API (no key lists here).

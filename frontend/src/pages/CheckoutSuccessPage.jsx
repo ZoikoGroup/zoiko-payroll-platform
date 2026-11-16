@@ -70,7 +70,11 @@ export default function CheckoutSuccessPage() {
       attempts.current += 1;
       try {
         const sub = await getMySubscription();
-        if (sub?.subscription?.status === "ACTIVE") {
+        // A plan whose first charge is deferred (chosen during the free
+        // evaluation) stays TRIALING with a Stripe subscription - that is
+        // set up too; waiting for ACTIVE would always end on "pending".
+        const s = sub?.subscription;
+        if (s?.status === "ACTIVE" || (s?.status === "TRIALING" && s?.stripe_subscription_id)) {
           clearInterval(timer);
           setStatus("active");
           return;

@@ -157,14 +157,23 @@ def test_drift_filter_explains():
                                         "payroll_pl_reconciliation_variances",  # + Poland P8 (e75b9219e1f8)
                                         "payroll_pl_parallel_imports",
                                         "payroll_pl_parallel_differences",  # + Poland P9 (e7ec6c1933b4)
+                                        "payroll_my_identifier_vault", "payroll_my_identifier_access_events",
+                                        "payroll_my_employer_registrations", "payroll_my_worker_profiles",
+                                        "payroll_my_work_assignments", "payroll_my_tax_declarations",
+                                        "payroll_my_accumulator_entries",  # + Malaysia P2 (13574b996ccf)
+                                        "payroll_my_employer_events", "payroll_my_clearance_holds",
+                                        "payroll_my_clearance_hold_lines",  # + Malaysia P7 (5f314f975ac3)
+                                        "payroll_my_filings", "payroll_my_settlements", "payroll_my_reconciliation_variances",  # + Malaysia P9 (efdc07f97eb5)
+                                        "payroll_my_parallel_imports", "payroll_my_parallel_differences",  # + Malaysia P10 (f793f6074257)
                                         "payroll_be_identifier_vault", "payroll_be_identifier_access_events",
                                         "payroll_be_employer_registrations", "payroll_be_establishment_units",
                                         "payroll_be_worker_profiles", "payroll_be_work_schedules",
                                         "payroll_be_employment_classifications", "payroll_be_declarations",
                                         "payroll_be_accumulator_entries",  # + Belgium P2 (1d76678ef1a1)
                                         "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
-    pl_shared = {"payslip_items": {"pl_calculation_snapshot", "be_calculation_snapshot", "template_version_id"},  # + Belgium P2
-                 "payroll_runs": {"pl_approval_fingerprint", "be_approval_fingerprint"}}
+    pl_shared = {"payslip_items": {"pl_calculation_snapshot", "my_calculation_snapshot", "be_calculation_snapshot",
+                                   "template_version_id"},  # + Malaysia P2, Belgium P2
+                 "payroll_runs": {"pl_approval_fingerprint", "my_approval_fingerprint", "be_approval_fingerprint"}}
     assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
     assert columns == {**{t: SHARED.get(t, set()) | pl_shared.get(t, set()) for t in {*SHARED, *pl_shared}},
                        "users": {"auth_provider", "google_id", "avatar_url"},

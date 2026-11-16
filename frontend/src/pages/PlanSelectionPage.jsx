@@ -116,7 +116,7 @@ function getPriceLabel(plan) {
 }
 
 /** Plans to highlight as "Most Popular" */
-const HIGHLIGHTED_PLANS = ["PROFESSIONAL", "BUSINESS"];
+const HIGHLIGHTED_PLANS = ["PROFESSIONAL"];
 
 // ── Component ─────────────────────────────────────────────────────────────
 

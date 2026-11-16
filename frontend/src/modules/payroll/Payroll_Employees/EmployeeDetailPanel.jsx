@@ -21,6 +21,7 @@ import SouthAfricaStatutoryProfilePanel from "./SouthAfricaStatutoryProfilePanel
 import JapanStatutoryProfilePanel from "./JapanStatutoryProfilePanel";
 import NewZealandStatutoryProfilePanel from "./NewZealandStatutoryProfilePanel";
 import PolandStatutoryProfilePanel from "./PolandStatutoryProfilePanel";
+import MalaysiaStatutoryProfilePanel from "./MalaysiaStatutoryProfilePanel";
 import BelgiumStatutoryProfilePanel from "./BelgiumStatutoryProfilePanel";
 import ZADeductionOrdersBlock from "./ZADeductionOrdersBlock";
 import CHFamilyAllowancePanel from "./CHFamilyAllowancePanel";
@@ -119,6 +120,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
   const [showJpStatutory, setShowJpStatutory] = useState(false);
   const [showNzStatutory, setShowNzStatutory] = useState(false);
   const [showPlStatutory, setShowPlStatutory] = useState(false);
+  const [showMyStatutory, setShowMyStatutory] = useState(false);
   const [showBeStatutory, setShowBeStatutory] = useState(false);
   const [showChFamily, setShowChFamily] = useState(false);
   const [showChAbsence, setShowChAbsence] = useState(false);
@@ -180,7 +182,7 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex-1 overflow-y-auto px-6 pt-5 pb-24">
           {mode === "edit" ? (
             <EmployeeForm
               employee={employee}
@@ -566,6 +568,28 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
                 </div>
               )}
 
+              {employee.countryCode === "MY" && (
+                <div className="bg-surface-muted rounded-[18px] p-5 mt-4" data-testid="my-employee-block">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted">
+                      Malaysia statutory records
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowMyStatutory(true)}
+                      className="flex items-center gap-1.5 rounded-[10px] border border-border bg-surface px-3 py-1.5 text-[12px] font-semibold text-primary transition-colors hover:border-primary"
+                    >
+                      <Landmark size={13} /> Manage
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[12px] text-foreground-muted">
+                    Worker profile and coverage, work assignment (labour territory), TP1 / TP3 / CP38 / zakat declarations,
+                    employer events and clearance holds, NRIC / TIN (masked, vault) — each approved by a second user before
+                    Malaysian payroll uses it.
+                  </p>
+                </div>
+              )}
+
               {employee.countryCode === "BE" && (
                 <div className="bg-surface-muted rounded-[18px] p-5 mt-4" data-testid="be-employee-block">
                   <div className="flex items-center justify-between">
@@ -795,6 +819,9 @@ const [showItalyStatutory, setShowItalyStatutory] = useState(false);
       )}
       {showPlStatutory && (
         <PolandStatutoryProfilePanel employee={employee} onClose={() => setShowPlStatutory(false)} />
+      )}
+      {showMyStatutory && (
+        <MalaysiaStatutoryProfilePanel employee={employee} onClose={() => setShowMyStatutory(false)} />
       )}
       {showBeStatutory && (
         <BelgiumStatutoryProfilePanel employee={employee} onClose={() => setShowBeStatutory(false)} />

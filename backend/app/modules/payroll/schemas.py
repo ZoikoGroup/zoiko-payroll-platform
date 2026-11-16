@@ -1563,6 +1563,9 @@ class PayslipItemResponse(BaseModel):
     # health / PPK / funds, trace) without the frozen inputs. PL only;
     # declared so response_model does not strip it.
     plCalculationSnapshot: Optional[dict] = None
+    # Malaysia (ZP-MY-ENG-001): the frozen my_result (coverage, bases,
+    # schedule rows used, trace) without the frozen inputs. MY only.
+    myCalculationSnapshot: Optional[dict] = None
     # Mexico (ZP-MX-ENG-001 Phase 6): mx_calculation_snapshot (mx_result +
     # input / content hashes, or the blocked reasons). Emitted for MX only;
     # declared here so response_model does not strip it.

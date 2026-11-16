@@ -125,6 +125,18 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "krs", label: "KRS (National Court Register number, 10 digits)", pattern: "^\\d{10}$", example: "0000123456", primary: false },
     ],
   },
+  // Malaysia (ZP-MY-ENG-001 Phase 0) — mirrors backend core/jurisdiction.py
+  // JURISDICTION_TAX_SCHEMAS.MY exactly: EMPLOYER references only (employee
+  // NRIC / TIN / EPF / SOCSO numbers are vault-only). Formats pending G1.
+  MY: {
+    label: "HASiL employer no. / EPF / PERKESO / HRD",
+    fields: [
+      { key: "hasil_employer_no", label: "HASiL employer number (E number)", pattern: "^[A-Za-z0-9 -]{6,20}$", example: "E 1234567890", primary: true },
+      { key: "epf_employer_no", label: "EPF employer number", pattern: "^[A-Za-z0-9 -]{6,20}$", example: "012345678", primary: false },
+      { key: "perkeso_employer_code", label: "PERKESO employer code", pattern: "^[A-Za-z0-9 -]{6,20}$", example: "A12345678B", primary: false },
+      { key: "hrd_registration_no", label: "HRD Corp registration number", pattern: "^[A-Za-z0-9 -]{4,20}$", example: "123456789", primary: false },
+    ],
+  },
   // Belgium (ZP-BE-ENG-001 Phase 1) — mirrors backend core/jurisdiction.py
   // JURISDICTION_TAX_SCHEMAS.BE exactly. Schema only: BE stays out of
   // registration until its release gates G1–G7 are signed. Patterns are
@@ -164,6 +176,12 @@ const COUNTRY_NAME_TO_CODE = {
   "rzeczpospolita polska": "PL",
   "republic of poland": "PL",
   pol: "PL",
+  // Malaysia — never the bare "my" (an ordinary English word); the code "MY"
+  // itself resolves through JURISDICTION_TAX_SCHEMAS above.
+  malaysia: "MY",
+  mys: "MY",
+  "persekutuan malaysia": "MY",
+  "federation of malaysia": "MY",
   // Belgium — never the bare "be" (also a Swiss canton); the code "BE" itself
   // resolves through JURISDICTION_TAX_SCHEMAS above.
   belgium: "BE",
@@ -190,6 +208,7 @@ const CODE_TO_COUNTRY_NAME = {
   NL: "Netherlands",
   ZA: "South Africa",
   PL: "Poland",
+  MY: "Malaysia",
   BE: "Belgium",
 };
 

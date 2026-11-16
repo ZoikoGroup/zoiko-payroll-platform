@@ -15,6 +15,7 @@ export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
@@ -107,12 +108,19 @@ export default function ResetPasswordPage() {
               <div className="relative mb-5">
                 <Lock size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
-                  id="confirm" type={showPassword ? "text" : "password"} required
+                  id="confirm" type={showConfirm ? "text" : "password"} required
                   autoComplete="new-password"
                   value={confirm} onChange={(e) => setConfirm(e.target.value)}
                   placeholder="Re-enter your new password"
-                  className={authInputClass({ withIcon: true })}
+                  className={authInputClass({ withIcon: true, withTrailing: true })}
                 />
+                <button
+                  type="button" onClick={() => setShowConfirm((v) => !v)}
+                  aria-label={showConfirm ? "Hide confirm password" : "Show confirm password"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-blue-600"
+                >
+                  {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
 
               <AuthPrimaryButton type="submit" busy={submitting} busyLabel="Updating…">

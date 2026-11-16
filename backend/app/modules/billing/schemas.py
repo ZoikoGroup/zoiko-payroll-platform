@@ -454,6 +454,21 @@ class BillingMySubscriptionResponse(BaseModel):
     # "countries": [{code, name, status, isPrimary}]} — see
     # billing/jurisdiction_entitlement.py.
     country_usage: Optional[dict] = None
+    # Resolved server-side so the Subscription page never has to infer the
+    # plan by joining on plan_version_id (which broke after the v2 version
+    # migration) or present a trial as a paid plan.
+    plan_code: Optional[str] = None
+    plan_name: Optional[str] = None
+    # Current catalog list price per month; None for Enterprise (negotiated).
+    monthly_price_usd: Optional[Decimal] = None
+    # TRIALING — a no-card evaluation, or a paid plan whose first charge is
+    # deferred (has_payment_method tells the two apart).
+    is_trial: bool = False
+    # A Stripe subscription (card on file) exists for this organization.
+    has_payment_method: bool = False
+    # The plan the admin was looking at when they started the evaluation
+    # (the evaluation itself always runs on Professional features).
+    intended_plan_code: Optional[str] = None
 
 
 class BillingTrialStatusResponse(BaseModel):
@@ -465,6 +480,9 @@ class BillingTrialStatusResponse(BaseModel):
     current_period_start: datetime
     current_period_end: datetime
     plan_code: Optional[str] = None
+    # Card on file (Stripe subscription) — the banner must not ask an org
+    # that already chose and paid for a plan to "Choose Plan" again.
+    has_payment_method: bool = False
 
 
 class BillingDunningStatusResponse(BaseModel):
@@ -529,6 +547,13 @@ class BillingCheckoutResponse(BaseModel):
     plan_changed: bool = False
     plan_code: Optional[str] = None
     message: Optional[str] = None
+
+
+class BillingStartTrialRequest(BaseModel):
+    """POST /billing/start-trial — optional: the plan the admin was reviewing.
+    Recorded so the Subscription page can show what they picked; the
+    evaluation itself is always Professional."""
+    plan_code: Optional[str] = Field(None, max_length=30)
 
 
 class BillingStartTrialResponse(BaseModel):

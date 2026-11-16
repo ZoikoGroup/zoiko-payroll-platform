@@ -25,7 +25,7 @@ import os
 import sys
 import tempfile
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -817,3 +817,176 @@ def test_webhook_for_another_environments_checkout_is_acknowledged_not_500(clien
     assert r.status_code == 200, r.text
     _db.expire_all()
     assert _db.query(BillingSubscription).count() == count_before
+
+
+# ── QA bug #6: billing shows a different plan / double checkout ─────────────
+
+def _make_org_with_admin(code, email, *, sub_status=None, stripe_sub_id=None, version=None,
+                         workspace_type="PRODUCTION"):
+    org = Organization(
+        organization_name=f"{code} Corp", organization_code=code, workspace_type=workspace_type,
+        country="DE", is_active=True, billing_classification="COMMERCIAL_ACTIVE", charge_enabled=True,
+    )
+    _db.add(org)
+    _db.flush()
+    _db.add(User(email=email, hashed_password=hash_password("strong-password"), role=UserRole.ORG_ADMIN,
+                 first_name="T", last_name="Admin", organization_id=org.id, is_active=True))
+    sub = None
+    if sub_status:
+        sub = BillingSubscription(
+            organization_id=org.id, plan_version_id=(version or _version).id,
+            billing_authority=BillingAuthority.STANDALONE.value, status=sub_status,
+            current_period_start=datetime.utcnow() - timedelta(days=1),
+            current_period_end=datetime.utcnow() + timedelta(days=20),
+            stripe_subscription_id=stripe_sub_id,
+        )
+        _db.add(sub)
+    _db.commit()
+    return org, sub
+
+
+def test_trialing_subscription_with_card_changes_plan_in_place_not_second_checkout(client):
+    """A paid plan whose first charge is deferred is TRIALING with a Stripe
+    subscription. Choosing another plan used to open a SECOND Checkout:
+    a second Stripe subscription that keeps billing after the webhook
+    overwrote the first subscription id locally."""
+    org, sub = _make_org_with_admin("DEFCHK", "deferred-admin@example.com",
+                                    sub_status=SubscriptionStatus.TRIALING.value, stripe_sub_id="sub_FAKE_DEFERRED")
+    stripe_sub = MagicMock()
+    stripe_sub.to_dict.return_value = {"id": "sub_FAKE_DEFERRED", "items": {"data": [{"id": "si_DEFERRED"}]}}
+    with patch.object(stripe.Subscription, "retrieve", return_value=stripe_sub), \
+         patch.object(stripe.Subscription, "modify") as modify, \
+         patch.object(stripe.checkout.Session, "create") as session_create:
+        token = _login(client, "deferred-admin@example.com")
+        r = client.post("/api/billing/checkout", json={"plan_code": "BUSINESS"}, headers=_auth(token))
+    assert r.status_code == 200, r.text
+    assert r.json()["plan_changed"] is True
+    session_create.assert_not_called()
+    assert modify.call_args.args[0] == "sub_FAKE_DEFERRED"
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.organization_id == org.id).one() \
+        .plan_version_id == _business_version.id
+
+
+def test_no_card_trial_upgrade_defers_first_charge_to_trial_end(client):
+    token = _login(client, "eval-admin@example.com")
+    r = client.post("/api/billing/checkout", json={"plan_code": "PROFESSIONAL"}, headers=_auth(token))
+    assert r.status_code == 200, r.text
+    kwargs = stripe.checkout.Session.create.call_args.kwargs
+    _db.expire_all()
+    trial_sub = _db.query(BillingSubscription).filter(BillingSubscription.organization_id == _eval_org.id).one()
+    expected = int(trial_sub.current_period_end.replace(tzinfo=timezone.utc).timestamp())
+    assert kwargs["subscription_data"]["trial_end"] == expected
+    # Tagged so another deployment sharing the Stripe account ignores it.
+    assert kwargs["metadata"]["organization_code"] == "EVALCHK"
+    assert kwargs["metadata"]["zp_environment"] == "development"
+
+
+def test_webhook_checkout_from_another_environment_is_ignored(client):
+    org, _ = _make_org_with_admin("ENVCHK", "env-admin@example.com")
+    r = _post_webhook(client, "checkout.session.completed", {
+        "metadata": {"organization_id": str(org.id), "organization_code": "ENVCHK",
+                     "zp_environment": "production", "plan_version_id": str(_version.id)},
+        "subscription": "sub_PROD_ENV",
+    }, event_id="evt_env_mismatch_001")
+    assert r.status_code == 200, r.text
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.organization_id == org.id).count() == 0
+
+
+def test_webhook_checkout_for_a_colliding_org_id_is_ignored(client):
+    """Same org id, but a different organization in this database."""
+    org, _ = _make_org_with_admin("IDCHK", "id-admin@example.com")
+    r = _post_webhook(client, "checkout.session.completed", {
+        "metadata": {"organization_id": str(org.id), "organization_code": "SOMEONE-ELSE",
+                     "zp_environment": "development", "plan_version_id": str(_version.id)},
+        "subscription": "sub_COLLIDE",
+    }, event_id="evt_org_collision_001")
+    assert r.status_code == 200, r.text
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.organization_id == org.id).count() == 0
+
+
+def _core_plan_with_retired_v1():
+    plan = plan_catalog.create_plan(db=_db, code="CORE", name="Core", actor_user_id=_super.id)
+    versions = []
+    for _n in (1, 2):
+        v = plan_catalog.create_plan_version(db=_db, plan_id=plan.id, feature_set={"features": []},
+                                             scale_limits={}, actor_user_id=_super.id)
+        plan_catalog.approve_plan_version(_db, v.id, actor_user_id=_super.id)
+        plan_catalog.publish_plan_version(_db, v.id, published_by_user_id=_super.id)
+        _db.refresh(v)
+        versions.append(v)
+    v1, v2 = versions
+    v1.stripe_price_id = "price_FAKE_CORE_V1"
+    v1.status = "RETIRED"
+    v2.stripe_price_id = "price_FAKE_CORE_V2"
+    _db.commit()
+    return v1, v2
+
+
+def test_subscription_updated_with_old_version_price_keeps_current_version(client):
+    """After the v2 version migration Stripe still bills the v1 price; every
+    subscription update used to move the customer back to the RETIRED v1."""
+    v1, v2 = _core_plan_with_retired_v1()
+    org, sub = _make_org_with_admin("CORECHK", "core-admin@example.com", sub_status=SubscriptionStatus.ACTIVE.value,
+                                    stripe_sub_id="sub_FAKE_CORE", version=v2)
+    r = _post_webhook(client, "customer.subscription.updated", {
+        "id": "sub_FAKE_CORE", "status": "active",
+        "items": {"data": [{"price": {"id": "price_FAKE_CORE_V1"}}]},
+    }, event_id="evt_core_v1_price_001")
+    assert r.status_code == 200, r.text
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.id == sub.id).one().plan_version_id == v2.id
+
+
+def test_subscription_updated_applies_current_stripe_state_not_a_stale_event(client):
+    """A delayed event still naming the old price must not roll back a newer
+    plan change: the handler re-reads the subscription from Stripe."""
+    org, sub = _make_org_with_admin("STALECHK", "stale-admin@example.com",
+                                    sub_status=SubscriptionStatus.ACTIVE.value, stripe_sub_id="sub_FAKE_STALE",
+                                    version=_business_version)
+    current = MagicMock()
+    current.to_dict.return_value = {"id": "sub_FAKE_STALE", "status": "active",
+                                    "items": {"data": [{"price": {"id": "price_FAKE_BUSINESS"}}]}}
+    with patch.object(stripe.Subscription, "retrieve", return_value=current):
+        r = _post_webhook(client, "customer.subscription.updated", {
+            "id": "sub_FAKE_STALE", "status": "active",
+            "items": {"data": [{"price": {"id": "price_FAKE12345"}}]},  # stale: old Professional price
+        }, event_id="evt_stale_001")
+    assert r.status_code == 200, r.text
+    _db.expire_all()
+    assert _db.query(BillingSubscription).filter(BillingSubscription.id == sub.id).one() \
+        .plan_version_id == _business_version.id
+
+
+def test_my_subscription_reports_trial_plan_price_and_payment_facts(client):
+    token = _login(client, "eval-admin@example.com")
+    r = client.get("/api/billing/my-subscription", headers=_auth(token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["plan_code"] == "PROFESSIONAL" and body["plan_name"] == "Professional"
+    assert float(body["monthly_price_usd"]) == 50.0
+    assert body["is_trial"] is True and body["has_payment_method"] is False
+
+    status = client.get("/api/billing/trial-status", headers=_auth(token)).json()
+    assert status["has_payment_method"] is False
+
+
+def test_start_trial_records_the_plan_the_admin_picked(client):
+    _make_org_with_admin("STARTCHK", "start-admin@example.com")
+    token = _login(client, "start-admin@example.com")
+    r = client.post("/api/billing/start-trial", json={"plan_code": "business"}, headers=_auth(token))
+    assert r.status_code == 200, r.text
+    body = client.get("/api/billing/my-subscription", headers=_auth(token)).json()
+    # The evaluation runs on Professional features; the choice is remembered.
+    assert body["plan_code"] == "PROFESSIONAL" and body["is_trial"] is True
+    assert body["intended_plan_code"] == "BUSINESS"
+
+
+def test_start_trial_still_works_without_a_body(client):
+    _make_org_with_admin("NOBODYCHK", "nobody-admin@example.com")
+    token = _login(client, "nobody-admin@example.com")
+    r = client.post("/api/billing/start-trial", headers=_auth(token))
+    assert r.status_code == 200, r.text
+    assert client.get("/api/billing/my-subscription", headers=_auth(token)).json()["intended_plan_code"] is None

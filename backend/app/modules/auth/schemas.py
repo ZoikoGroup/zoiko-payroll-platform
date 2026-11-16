@@ -187,6 +187,10 @@ class LoginResponse(BaseModel):
     mfa_enrollment_required: bool = False
     mfa_token: Optional[str] = None
     recovery_codes: Optional[List[str]] = None
+    # Privileged roles only: seconds a session may go without a token refresh
+    # before re-authentication is required (None = no idle limit). Lets the
+    # client warn before the deadline rather than sign the user out silently.
+    refresh_idle_timeout_seconds: Optional[int] = None
 
 
 class MfaChallengeRequest(BaseModel):
@@ -224,7 +228,8 @@ class UserCreateRequest(BaseModel):
     first_name: str = Field(..., min_length=1, max_length=120)
     last_name: str = Field(..., min_length=1, max_length=120)
     role: UserRole
-    phone: Optional[str] = None
+    # users.phone is String(40); longer values used to fail at the DB as a 500.
+    phone: Optional[str] = Field(None, max_length=40)
     send_invite: bool = True
 
 
@@ -259,3 +264,6 @@ class TrialStatusResponse(BaseModel):
     trial_status: Optional[str] = None
     trial_started_at: Optional[datetime] = None
     trial_expires_at: Optional[datetime] = None
+    # A paid plan was already chosen (Stripe subscription, first charge
+    # deferred to trial_expires_at) - the banner must not ask to choose again.
+    has_payment_method: bool = False

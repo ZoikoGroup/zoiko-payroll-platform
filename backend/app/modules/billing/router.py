@@ -20,6 +20,7 @@ See billing/admin_router.py for the Super Admin CRUD surface.
 """
 
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -41,12 +42,14 @@ from app.modules.billing.models import (
     BillingPlanVersion,
     BillingSubscription,
     EnterpriseOrderForm,
+    PlanVersionStatus,
     SubscriptionStatus,
 )
 from app.modules.billing.schemas import (
     BillingCancelRequest,
     BillingCheckoutRequest,
     BillingCheckoutResponse,
+    BillingStartTrialRequest,
     BillingStartTrialResponse,
     BillingMySubscriptionResponse,
     BillingPublishedPlanResponse,
@@ -144,9 +147,24 @@ def get_my_subscription(
         flags["plan_code"] = "ENTERPRISE"
     else:
         flags = plan_catalog.list_entitlement_flags(db, subscription.plan_version_id)
+    plan = _plan_for_subscription(db, subscription)
+    if subscription.billing_authority == BillingAuthority.ENTERPRISE_ORDER_FORM.value:
+        plan_code, plan_name, monthly_price = "ENTERPRISE", (plan.name if plan else "Enterprise"), None
+    elif plan is not None:
+        plan_code, plan_name = plan.code, plan.name
+        monthly_price = sum((i.unit_amount for i in plan_catalog.resolve_plan_price_items(db, plan.code)),
+                            Decimal("0.00"))
+    else:
+        plan_code = plan_name = monthly_price = None
     return BillingMySubscriptionResponse(
         subscription=subscription,
         entitlement_flags=flags,
+        plan_code=plan_code,
+        plan_name=plan_name,
+        monthly_price_usd=monthly_price,
+        is_trial=subscription.status == SubscriptionStatus.TRIALING.value,
+        has_payment_method=bool(subscription.stripe_subscription_id),
+        intended_plan_code=_intended_plan_code(db, current_user.organization_id),
         country_usage={
             "used": sum(1 for r in rows if r.status == jurisdiction_entitlement.ACTIVE),
             "limit": jurisdiction_entitlement.resolve_country_limit(db, current_user.organization_id),
@@ -214,7 +232,61 @@ def get_trial_status(
         current_period_start=subscription.current_period_start,
         current_period_end=subscription.current_period_end,
         plan_code=plan_code,
+        has_payment_method=bool(subscription.stripe_subscription_id),
     )
+
+
+def _plan_for_subscription(db: Session, subscription: BillingSubscription) -> Optional[BillingPlan]:
+    if subscription.plan_version_id is None:
+        return None
+    version = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == subscription.plan_version_id).first()
+    if version is None:
+        return None
+    return db.query(BillingPlan).filter(BillingPlan.id == version.plan_id).first()
+
+
+def _intended_plan_code(db: Session, organization_id: int) -> Optional[str]:
+    """The plan the admin chose before starting the no-card evaluation, as
+    recorded on the TRIAL_SUBSCRIPTION_CREATED audit event (None if not
+    recorded, e.g. the direct Professional-trial sign-up)."""
+    event = (
+        db.query(BillingCommercialAuditEvent)
+        .filter(BillingCommercialAuditEvent.organization_id == organization_id,
+                BillingCommercialAuditEvent.event_type == "TRIAL_SUBSCRIPTION_CREATED")
+        .order_by(BillingCommercialAuditEvent.id.desc())
+        .first()
+    )
+    code = (event.payload or {}).get("intended_plan_code") if event is not None else None
+    return code or None
+
+
+def _billing_environment() -> str:
+    """Which deployment created a Stripe object. A Stripe account is often
+    shared by several environments, and org ids collide across databases."""
+    return (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "unspecified").strip().lower()
+
+
+def _version_for_stripe_price(db: Session, price_id: Optional[str]) -> Optional[BillingPlanVersion]:
+    """Plan version a Stripe price belongs to, resolved to that plan's
+    CURRENT published version. Stripe subscriptions created before a plan's
+    v2 migration still carry the v1 price; mapping straight to the price's
+    own (now RETIRED) version silently moved customers back to v1 on every
+    subscription update."""
+    if not price_id:
+        return None
+    versions = db.query(BillingPlanVersion).filter(BillingPlanVersion.stripe_price_id == price_id).all()
+    if not versions:
+        return None
+    published = [v for v in versions if v.status == PlanVersionStatus.PUBLISHED.value]
+    if published:
+        return max(published, key=lambda v: v.version)
+    version = max(versions, key=lambda v: v.version)
+    plan = db.query(BillingPlan).filter(BillingPlan.id == version.plan_id).first()
+    if plan is not None:
+        current = plan_catalog.get_published_plan_version(db, plan.code)
+        if current is not None:
+            return current
+    return version
 
 
 @router.get(
@@ -431,8 +503,16 @@ def create_checkout_session(
     # Check 3: an org already on an ACTIVE paid subscription changes plan
     # in place (no second subscription, no second checkout); choosing the
     # plan it is already on is refused rather than opening a duplicate.
+    # A TRIALING subscription that already has a Stripe subscription (a paid
+    # plan whose first charge is deferred) is the same case: opening a second
+    # Checkout would create a second Stripe subscription, and the webhook
+    # would overwrite the first one's id locally while Stripe still bills it.
     active_sub = entitlements.get_active_subscription(db, organization_id)
-    if active_sub and active_sub.status == SubscriptionStatus.ACTIVE.value and active_sub.plan_version_id:
+    has_stripe_sub = bool(active_sub and active_sub.stripe_subscription_id)
+    if active_sub and active_sub.plan_version_id and (
+        active_sub.status == SubscriptionStatus.ACTIVE.value
+        or (active_sub.status == SubscriptionStatus.TRIALING.value and has_stripe_sub)
+    ):
         sub_plan_version = (
             db.query(BillingPlanVersion)
             .filter(BillingPlanVersion.id == active_sub.plan_version_id)
@@ -458,7 +538,14 @@ def create_checkout_session(
     # Carried through Stripe metadata so the checkout.session.completed
     # webhook (which is where Organization.service_commencement_at is
     # actually SET — see stripe_webhook below) can read it back.
-    commencement = body.service_commencement_at or datetime.utcnow()
+    commencement = body.service_commencement_at
+    if (commencement is None and active_sub is not None and not has_stripe_sub
+            and active_sub.status == SubscriptionStatus.TRIALING.value and active_sub.current_period_end):
+        # Choosing a plan during the free evaluation keeps the remaining
+        # free days: the card is collected now, the first charge happens
+        # when the evaluation ends (it used to charge immediately).
+        commencement = active_sub.current_period_end
+    commencement = commencement or datetime.utcnow()
     # Normalize to naive-UTC, this codebase's datetime.utcnow()-based
     # convention throughout — a browser-originated request always sends a
     # timezone-AWARE ISO string (JS Date.toISOString() always appends "Z"),
@@ -479,6 +566,8 @@ def create_checkout_session(
         }],
         metadata={
             "organization_id": str(organization_id),
+            "organization_code": org.organization_code or "",
+            "zp_environment": _billing_environment(),
             "plan_version_id": str(version.id),
             "service_commencement_at": commencement.isoformat(),
         },
@@ -532,6 +621,7 @@ def create_checkout_session(
 
 @router.post("/start-trial", response_model=BillingStartTrialResponse)
 def start_trial(
+    body: Optional[BillingStartTrialRequest] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_org_admin),
 ):
@@ -583,6 +673,12 @@ def start_trial(
             "The Professional plan is not available for evaluation yet — please try again later."
         )
 
+    intended_plan_code = None
+    if body is not None and body.plan_code:
+        candidate = body.plan_code.strip().upper()
+        if db.query(BillingPlan.id).filter(BillingPlan.code == candidate).first() is not None:
+            intended_plan_code = candidate
+
     org.workspace_type = "EVALUATION"
     org.billing_onboarding_status = "TRIALING"
 
@@ -608,6 +704,7 @@ def start_trial(
                 "trial_days": 30,
                 "current_period_end": trial_end.isoformat(),
                 "source": "plan_review_page",
+                "intended_plan_code": intended_plan_code,
             },
         )
     )
@@ -663,7 +760,8 @@ def _change_subscription_plan(db: Session, org, sub: BillingSubscription, plan: 
             sub.stripe_subscription_id,
             items=[{"id": items[0]["id"], "price": stripe_price_id}],
             proration_behavior="create_prorations",
-            metadata={"organization_id": str(org.id), "plan_version_id": str(version.id)},
+            metadata={"organization_id": str(org.id), "organization_code": org.organization_code or "",
+                      "zp_environment": _billing_environment(), "plan_version_id": str(version.id)},
         )
     except stripe.error.StripeError as e:
         raise BadRequestException(f"Stripe could not change the plan: {str(e)}")
@@ -701,6 +799,27 @@ def _webhook_target_exists(db: Session, org_id_str: str, version_id_str: str) ->
         db.query(Organization.id).filter(Organization.id == org_id).first() is not None
         and db.query(BillingPlanVersion.id).filter(BillingPlanVersion.id == version_id).first() is not None
     )
+
+
+def _foreign_checkout_reason(db: Session, metadata: dict) -> Optional[str]:
+    """Why a checkout belongs to another deployment sharing this Stripe
+    account, or None. Checkouts created before these tags existed carry
+    neither and fall through to the org/version existence check."""
+    from app.modules.organizations.models import Organization
+
+    env = (metadata.get("zp_environment") or "").strip().lower()
+    if env and env != _billing_environment():
+        return f"created by environment '{env}', this is '{_billing_environment()}'"
+    code = (metadata.get("organization_code") or "").strip()
+    if code:
+        try:
+            org_id = int(metadata.get("organization_id"))
+        except (TypeError, ValueError):
+            return "missing organization id"
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+        if org is None or (org.organization_code or "") != code:
+            return f"organization {org_id} is not '{code}' in this database"
+    return None
 
 
 def _sync_subscription_price_item(db: Session, sub: BillingSubscription, plan_code: str) -> None:
@@ -923,7 +1042,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         version_id_str = (data_object.get("metadata") or {}).get("plan_version_id")
         commencement_str = (data_object.get("metadata") or {}).get("service_commencement_at")
 
-        if org_id_str and version_id_str and not _webhook_target_exists(db, org_id_str, version_id_str):
+        metadata = data_object.get("metadata") or {}
+        foreign_reason = _foreign_checkout_reason(db, metadata)
+        if foreign_reason:
+            logger.warning("[stripe-webhook] %s ignored (%s, event %s)", event_type, foreign_reason, event_id)
+        elif org_id_str and version_id_str and not _webhook_target_exists(db, org_id_str, version_id_str):
             # A Stripe account is often shared by several environments (and
             # `stripe listen` forwards every event on it): a checkout created
             # by another environment names an organization/plan version this
@@ -1065,6 +1188,19 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             BillingSubscription.stripe_subscription_id == stripe_sub_id
         ).first()
         if sub:
+            # Stripe does not deliver events in order and retries old ones:
+            # apply the subscription's CURRENT state from Stripe, not the
+            # (possibly stale) snapshot in this event, so a late delivery can
+            # never roll back a newer plan change. Falls back to the payload
+            # if Stripe can't be reached.
+            state = data_object
+            try:
+                fresh = stripe.Subscription.retrieve(stripe_sub_id)
+                fresh_dict = fresh.to_dict() if hasattr(fresh, "to_dict") else fresh
+                if isinstance(fresh_dict, dict) and fresh_dict.get("id") == stripe_sub_id:
+                    state = fresh_dict
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[stripe-webhook] could not re-read %s, using event payload: %s", stripe_sub_id, exc)
             status_map = {
                 "active": SubscriptionStatus.ACTIVE.value,
                 "trialing": SubscriptionStatus.TRIALING.value,
@@ -1073,17 +1209,15 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 "canceled": SubscriptionStatus.CANCELLED.value,
                 "incomplete_expired": SubscriptionStatus.CANCELLED.value,
             }
-            sub.status = status_map.get(data_object.get("status"), sub.status)
-            period_start, period_end = _subscription_period(data_object)
+            sub.status = status_map.get(state.get("status"), sub.status)
+            period_start, period_end = _subscription_period(state)
             if period_start:
                 sub.current_period_start = period_start
             if period_end:
                 sub.current_period_end = period_end
-            price_id = (((data_object.get("items") or {}).get("data") or [{}])[0].get("price") or {})
+            price_id = (((state.get("items") or {}).get("data") or [{}])[0].get("price") or {})
             price_id = price_id.get("id") if isinstance(price_id, dict) else price_id
-            version = db.query(BillingPlanVersion).filter(
-                BillingPlanVersion.stripe_price_id == price_id
-            ).first() if price_id else None
+            version = _version_for_stripe_price(db, price_id)
             if version:
                 sub.plan_version_id = version.id
                 plan = db.query(BillingPlan).filter(BillingPlan.id == version.plan_id).first()
@@ -1101,7 +1235,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db.add(BillingCommercialAuditEvent(
                 organization_id=sub.organization_id,
                 event_type="SUBSCRIPTION_UPDATED",
-                payload={"stripe_status": data_object.get("status"), "plan_version_id": sub.plan_version_id},
+                payload={"stripe_status": state.get("status"), "plan_version_id": sub.plan_version_id},
                 stripe_event_id=event_id,
             ))
             if version:

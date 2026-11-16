@@ -21,6 +21,13 @@ const tabs = [
   { id: "add",         label: "Add Employee",  icon: UserPlus },
 ];
 
+// Toolbar entries that open a workflow — highlighted while open, the same way
+// the List/Add tabs are (previously only those two ever showed as active).
+const toolbarButtonClass = (active, hoverText) =>
+  `flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold transition-all duration-200 ${
+    active ? "bg-primary/10 text-primary" : `text-foreground-muted hover:bg-background dark:hover:bg-surface-muted ${hoverText}`
+  }`;
+
 export default function EmployeeListPage() {
   const { addToast } = useToast();
   const [activeTab, setActiveTab] = useState("list");
@@ -115,7 +122,8 @@ export default function EmployeeListPage() {
     if (selectedEmployee && updatedMap.has(selectedEmployee.id)) {
       setSelectedEmployee(updatedMap.get(selectedEmployee.id));
     }
-    setActiveTab("list");
+    // Stay on the Update Employees result screen; its Done button returns
+    // to the list (switching here unmounted the result before it showed).
   }
 
   function handleExportEmployees() {
@@ -207,6 +215,7 @@ export default function EmployeeListPage() {
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
+              aria-pressed={activeTab === t.id}
               className={`flex items-center gap-1.5 px-4 py-2 text-[13px] font-semibold rounded-[12px] transition-all duration-200 ${
                 activeTab === t.id ? "bg-primary/10 text-primary" : "text-foreground-muted hover:text-foreground hover:bg-background dark:hover:bg-surface-muted"
               }`}
@@ -220,28 +229,32 @@ export default function EmployeeListPage() {
 
           <button
             onClick={() => setActiveTab("bulk-import")}
-            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:bg-background dark:hover:bg-surface-muted hover:text-primary"
+            aria-pressed={activeTab === "bulk-import"}
+            className={toolbarButtonClass(activeTab === "bulk-import", "hover:text-primary")}
           >
             <Upload size={15} />
             Import
           </button>
           <button
             onClick={() => setActiveTab("bulk-update")}
-            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:bg-background dark:hover:bg-surface-muted hover:text-category-teal"
+            aria-pressed={activeTab === "bulk-update"}
+            className={toolbarButtonClass(activeTab === "bulk-update", "hover:text-category-teal")}
           >
             <RefreshCw size={15} />
             Update Employees
           </button>
           <button
             onClick={() => setActiveTab("send-template")}
-            className="flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:bg-background dark:hover:bg-surface-muted hover:text-primary"
+            aria-pressed={activeTab === "send-template"}
+            className={toolbarButtonClass(activeTab === "send-template", "hover:text-primary")}
           >
             <Send size={15} />
             Send Template
           </button>
           <button
             onClick={() => setActiveTab("review-submissions")}
-            className="relative flex items-center gap-1.5 rounded-[12px] px-3.5 py-2 text-[13px] font-semibold text-foreground-muted transition-all duration-200 hover:bg-background dark:hover:bg-surface-muted hover:text-warning"
+            aria-pressed={activeTab === "review-submissions"}
+            className={`relative ${toolbarButtonClass(activeTab === "review-submissions", "hover:text-warning")}`}
           >
             <Inbox size={15} />
             Review Submissions
@@ -384,6 +397,7 @@ export default function EmployeeListPage() {
               onClose={() => setActiveTab("list")}
               onSaved={handleEmployeesBulkUpdated}
               currencyInfo={currencyInfo}
+              orgCountryCode={orgCountryCode}
             />
           </div>
         )}
@@ -396,6 +410,7 @@ export default function EmployeeListPage() {
               onClose={() => setActiveTab("list")}
               onSent={refreshPendingSubmissionCount}
               currencyInfo={currencyInfo}
+              orgCountryCode={orgCountryCode}
             />
           </div>
         )}

@@ -710,6 +710,27 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^\d{10}$", "example": "0000123456", "primary": False},
         ],
     },
+    # Malaysia (ZP-MY-ENG-001 Phase 0) - schema only, EMPLOYER references only.
+    # Deliberately NOT in REGISTRATION_COUNTRIES: live Malaysian payroll stays
+    # disabled until release gates G1-G7 are signed (MY-002). Employee
+    # identifiers (MyKad/NRIC, passport, TIN, EPF / SOCSO member numbers) are
+    # personal data and live only in the identifier vault, never here. The
+    # authorities' exact number formats are not given by the specification:
+    # these patterns only bound length and characters (pending G1).
+    "MY": {
+        "label": "HASiL employer no. / EPF / PERKESO / HRD",
+        "currency": "MYR",
+        "fields": [
+            {"key": "hasil_employer_no", "label": "HASiL employer number (E number)",
+             "pattern": r"^[A-Za-z0-9 -]{6,20}$", "example": "E 1234567890", "primary": True},
+            {"key": "epf_employer_no", "label": "EPF employer number",
+             "pattern": r"^[A-Za-z0-9 -]{6,20}$", "example": "012345678", "primary": False},
+            {"key": "perkeso_employer_code", "label": "PERKESO employer code",
+             "pattern": r"^[A-Za-z0-9 -]{6,20}$", "example": "A12345678B", "primary": False},
+            {"key": "hrd_registration_no", "label": "HRD Corp registration number",
+             "pattern": r"^[A-Za-z0-9 -]{4,20}$", "example": "123456789", "primary": False},
+        ],
+    },
     # Belgium (ZP-BE-ENG-001 Phase 1, BE-001) — schema only. BE stays out of
     # REGISTRATION_COUNTRIES and is registry-gated (tax_resolver.
     # _REGISTRY_ROW_REQUIRED_COUNTRIES) and dormant (belgium_dormancy).
@@ -799,6 +820,14 @@ COUNTRY_NAME_TO_CODE = {
     "rzeczpospolita polska": "PL",
     "republic of poland": "PL",
     "pol": "PL",
+    # Without these, "Malaysia" truncates to "MA" (Morocco) in
+    # payroll.service._normalize_country. The bare word "my" is deliberately NOT
+    # an alias (it is an ordinary English word); "MY" resolves through
+    # JURISDICTION_TAX_SCHEMAS like every other code.
+    "malaysia": "MY",
+    "mys": "MY",
+    "persekutuan malaysia": "MY",
+    "federation of malaysia": "MY",
     # Belgium (ZP-BE-ENG-001 Phase 1). Without these, "Belgium" reaches "BE"
     # only through the blind [:2] truncation in payroll.service.
     # _normalize_country. The bare "be" is deliberately NOT an alias ("BE"
@@ -843,6 +872,7 @@ CODE_TO_COUNTRY_NAME = {
     "JP": "Japan",
     "NZ": "New Zealand",
     "PL": "Poland",
+    "MY": "Malaysia",
     "BE": "Belgium",
 }
 
