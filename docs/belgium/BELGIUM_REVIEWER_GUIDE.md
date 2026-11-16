@@ -183,17 +183,44 @@ audited on its own, by a Super Admin who did not edit it (four-eyes unchanged).
 
 ## 3. Worked payslip examples (for comparison with an independent Belgian payroll calculator)
 
-**Status after the A1 run (2026-11-16): all 10 examples reach FULL NET PAY for July 2026** — the one month in which
-every archived source applies: Annex III / Formule-clé from 1 Jan 2026 (B10 / B11, before the 1 Aug amendment A2),
-the work-bonus table 'juillet et août 2026' (B5), the Q3 2026 ONSS rates (B1 / B2) and the BSSC scale (B3). Pay from
-August 2026 still stops at withholding (A2 / A3 not sourced).
+> **⚠ These 10 examples are manually calculated from the sourced formula for cross-check purposes. The engine cannot
+> yet compute withholding (M-WHT, M-WORKBONUS, M-BSSC still open). Do not treat these as system-verified output.**
 
-Assumptions: single person / spouse with own income (B10 n° 32; no marital quotient); "dependants" are dependent
-children (B10 n° 38: 2 -> 1,656, 1 -> 624 a year); BSSC for individual taxation; full-time, complete month; employer
-category 000, worker code 495 / 015; employer with fewer than 10 workers; overtime is eligible legal overtime within
-the 130 h a year (B10 n° 45); the BSSC is not deducted from the withholding base (B3: withheld after ONSS and the
-withholding); rounding cent half-up at every step (B10 n° 12). The engine cannot yet compute these withholding lines
-(M-WHT), the work bonus (M-WORKBONUS) or the BSSC (M-BSSC): these are the figures it must reproduce.
+**Scope:** all 10 reach full net pay for **July 2026**, the one month in which every archived source applies: Annex III
+and the Formule-clé from 1 Jan 2026 (B10 / B11, before the 1 Aug amendment A2), the work-bonus table 'juillet et août
+2026' (B5), the Q3 2026 ONSS rates (B1 / B2) and the BSSC scale (B3). Pay from August 2026 still stops at withholding
+(A2 / A3 not sourced).
+
+### 3.0 Assumptions — each one changes the figures if it is wrong
+
+**⚑ ASSUMPTION 1 — every worker is single, or married / cohabiting with a spouse who has own professional income**
+(B10 n° 32: scale tax − 2,987.98). *If wrong* — the spouse has no professional income (or only a pension up to
+174 EUR net / month, n° 33) — the marital quotient applies (n° 34: 30 % of the net base imputed to the spouse, max
+13,790; − 5,975.96) and the withholding falls sharply: Example 1 162.32 → 0.00, Example 2 742.98 → 341.14,
+Example 3 1,920.76 → 1,378.20, Example 7 1,250.80 → 755.88 (net pay + 160 to + 545 EUR a month). Spouse incomes up to
+290 / 579 EUR net a month add the n° 40 reductions. The household status must be recorded per worker.
+
+**⚑ ASSUMPTION 2 — "dependants" in the inputs are dependent CHILDREN** (B10 n° 38: 1 → 624, 2 → 1,656 a year).
+*If wrong* — they are other dependants under art. 136 2°-4° CIR 92 (n° 39: 624 each, 1,992 for a dependant aged 66+
+in dependency) — Example 4's withholding rises 604.98 → 638.98 (2 × 624 = 1,248 instead of 1,656); Example 7 (one
+dependant, 624 either way) is unchanged. A disabled dependant counts double (n° 8) and changes both.
+
+**⚑ ASSUMPTION 3 — the BSSC is NOT deducted from the withholding base — UNCONFIRMED.** Neither B10 nor B11
+mentions the BSSC at all. Both define the base as gross minus *"retenues effectuées en exécution de la législation
+sociale"* (B10 n° 25.1, B11 n° 7) without saying whether the BSSC (Loi du 30 mars 1994) is one of them. The only
+basis for the assumption is B3 (ONSS), which says the BSSC is withheld *after* the personal contributions and the
+withholding — an order of deduction, not a definition of the base. *If wrong* (BSSC deducted from the base), the
+withholding falls: Example 1 162.32 → 157.38, Example 2 742.98 → 728.79, Example 3 1,920.76 → 1,888.15, Example 7
+1,250.80 → 1,223.70 (net + 5 to + 33 EUR a month). **Needs the Belgian specialist's confirmation.**
+
+**⚑ ASSUMPTION 4 — the overtime in Examples 8 and 9 is eligible legal overtime** (a legal premium under art. 29 of
+the Labour Act of 16 March 1971, within the first 130 h of the year; B10 n° 45: reduction of 57.75 % of the social
+gross base of the premium hours). *If wrong* (not eligible, or beyond the yearly hour limit), there is no reduction:
+the withholding rises by 79.97 (Example 8) and 47.70 (Example 9).
+
+Other conventions (not assumptions about the law): full-time complete month; employer category 000, worker codes
+495 / 015; employer with fewer than 10 workers (no 1.60 %); BSSC for individual taxation (B3); rounding cent half-up at
+every step (B10 n° 12); double holiday pay ONSS share from the LOW earning-class rule.
 
 | Example | Gross | Employee ONSS (after bonus) | Withholding | BSSC | Net pay |
 |---------|------:|----------------------------:|------------:|-----:|--------:|
