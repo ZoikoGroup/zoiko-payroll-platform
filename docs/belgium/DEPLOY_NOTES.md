@@ -18,7 +18,7 @@ Belgium is **dormant** after this deploy. No customer sees or uses it until the 
 | 3 | `main` has not moved past the PR base | GitHub shows "This branch has no conflicts"; otherwise merge `main` into `nikhil` again and re-run CI |
 | 4 | Database backup | Take a production backup with the standard procedure **immediately before** merging, and note its name and time. Example: `pg_dump -Fc -f zoiko_pre_be_$(date +%Y%m%d%H%M).dump "$DATABASE_URL"`, then confirm the file size is non-zero |
 | 5 | Deploy window | Low-traffic window; someone who can SSH to the backend host is available for 30 min after the merge |
-| 6 | Environment unchanged | Production must **not** set `BE_TENANT_ONBOARDING_ENABLED`, `BE_CANARY_ORG_IDS`, `BE_DEMO_PACKS_ENABLED`, `BE_DEMO_ORG_IDS`. `BE_IDENTIFIER_KEYRING` / `BE_IDENTIFIER_FINGERPRINT_KEY` stay unset until activation (`tests/test_belgium_production_startup.py` proves the app starts and Belgium stays dormant with none of them set) |
+| 6 | Environment unchanged | At deploy time production must **not** set `BE_TENANT_ONBOARDING_ENABLED`, `BE_CANARY_ORG_IDS` (opened later only by the owner, per §6), `BE_DEMO_PACKS_ENABLED`, `BE_DEMO_ORG_IDS`. `BE_IDENTIFIER_KEYRING` / `BE_IDENTIFIER_FINGERPRINT_KEY` stay unset until activation (`tests/test_belgium_production_startup.py` proves the app starts and Belgium stays dormant with none of them set) |
 
 ## 2. What the deploy changes
 
@@ -182,3 +182,32 @@ decides to start content work:
 
 Never on production: `scripts/seed_belgium_demo.py`, `BE_DEMO_PACKS_ENABLED` or `BE_DEMO_ORG_IDS`. The demo is
 refused in a production environment anyway (`STAGING_REHEARSAL.md`).
+
+## 6. Canary setup before G1 (Option 2; owner decision 2026-11-16: staging first, then production)
+
+One named organisation prepares its Belgian **setup** while Belgium stays PLANNED for everyone else. Payroll stays
+blocked: every BE-PAYROLL-2026 row is `[PENDING G1]` and no Belgian pack is Active, so preview, calculation, approval,
+payslips, payments and filings refuse.
+
+What opens for the canary only (`belgium_dormancy.be_canary_may_enter_planned`, tests in
+`tests/test_belgium_canary_onboarding.py`): an EXISTING organisation on `BE_CANARY_ORG_IDS` may change its country to
+Belgium while the Belgian registry row is **PLANNED**. Still refused: new registration or checkout into Belgium, any
+organisation off the list, `BE_TENANT_ONBOARDING_ENABLED` on its own, a missing or NOT_AVAILABLE registry row, and every
+other country.
+
+1. **Seed** (if not done): §5 step 1, `belgium_post_deploy_setup --confirm`. The registry row must exist as PLANNED.
+2. **Create the test organisation** through the normal Super Admin administration, with a **non-Belgian** country
+   (Belgium is refused at creation), as an EVALUATION workspace, and assign it two existing, different admin users
+   (four-eyes on registrations / profiles / schedules). Do not save its Compliance page yet. Note its id.
+3. **Allow-list it** on the backend host: `BE_CANARY_ORG_IDS=<id>` (leave `BE_TENANT_ONBOARDING_ENABLED` unset, keep
+   `BE_IDENTIFIER_KEYRING` / `BE_IDENTIFIER_FINGERPRINT_KEY` unset, never set the DEMO settings), then restart.
+4. **Move it into Belgium:** Super Admin → the organisation → country **Belgium** → save. Its Compliance country
+   follows automatically (the page back-fills from the organisation).
+5. **Setup work** (organisation admins, Belgium screens): employer registration, worker profiles, work schedules,
+   classifications, holiday certificates. National numbers cannot be entered while the vault keys are unset (by
+   decision); everything else can.
+6. **Verify:** another organisation's admin still gets 404 on `/api/payroll/belgium/...`; a payroll preview for the
+   canary is refused; the registry row is still PLANNED; no Belgian pack is Active.
+
+**Switch off:** empty `BE_CANARY_ORG_IDS` and restart: the Belgian screens answer 404 again for the canary (§4.1). Its
+setup rows stay in place, owned by that organisation only.

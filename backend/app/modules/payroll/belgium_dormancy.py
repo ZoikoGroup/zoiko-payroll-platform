@@ -56,3 +56,23 @@ def entering_belgium_refusal(old_country: Optional[str], new_country: Optional[s
     if is_belgium(new_country) and not is_belgium(old_country) and not onboarding_enabled(organization_id):
         return DORMANT_MESSAGE
     return None
+
+
+def be_canary_may_enter_planned(db, new_country: Optional[str], organization_id: Optional[int]) -> bool:
+    """Owner decision 2026-11-16 (Option 2, canary setup before G1): an EXISTING organisation on
+    BE_CANARY_ORG_IDS may move INTO Belgium while Belgium's service registry row is PLANNED, so its
+    setup (registrations, workers, schedules) can be prepared ahead of the gates. Nothing else opens:
+
+      * only an organisation id on the canary list (the global onboarding flag alone does not admit);
+      * only an existing organisation changing country (new registration and checkout stay refused);
+      * only while the registry row EXISTS and is PLANNED (absent or NOT_AVAILABLE stays refused);
+      * payroll itself stays blocked by the content gate ([PENDING G1], no Active pack).
+    """
+    if organization_id is None or not is_belgium(new_country):
+        return False
+    if int(organization_id) not in canary_organization_ids():
+        return False
+    from app.modules.billing.models import JurisdictionServiceRegistry
+
+    row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == BE).first()
+    return row is not None and row.availability == "PLANNED"
