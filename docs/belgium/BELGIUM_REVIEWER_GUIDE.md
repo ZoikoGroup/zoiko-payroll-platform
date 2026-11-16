@@ -1,5 +1,7 @@
 # Belgium reviewer guide — AI-drafted 2026 content (Block E3)
 
+> **Employer base rate conflict — 24.92% (spec) vs 19.88% (2026/3 rate file, employer category 000) — requires a Belgian-payroll-literate reviewer to confirm which category applies to typical private-sector employers before signing. Do not resolve this by picking the number that matches the spec.**
+
 Audience: the two internal reviewers and the Belgian payroll specialist. Workbook:
 `docs/belgium/content/BE_2026_AI_DRAFT.xlsx` (every row of BE-PAYROLL-2026, proposed by AI on 2026-11-13 with
 its source, retrieval date and confidence). Nothing in it is signed; the engine keeps blocking until humans sign.
@@ -164,7 +166,7 @@ audited on its own, by a Super Admin who did not edit it (four-eyes unchanged).
 - `be_onss_fund_contributions`: asbestos fund 0.01 % is due **Q1-Q3 2026 only** (B1 and B2 agree: absent from the Q4 file) — dated rows. The closure fund (FFE) is NOT sourced (TechLib FFE_2026.xls not fetched).
 - `be_red_social_work_bonus`: the formula changes on **1 Jul 2026** and **1 Sep 2026** (B5); **January-June 2026 are not in the 2026/3 edition** (need 2026/1 and 2026/2). Two tables (employés / ouvriers), components A + B, S at 100 %, annual cap EUR 3,594.36 from 1 Jul 2026. **Engine gap:** one band key, no category dimension, read on the 108 % base for manual workers — kept on the proposal sheet (fail closed).
 - BSSC (B3): the page gives quarterly brackets with percentages of the monthly pay; the guide reads the quarterly amount as 3x the monthly one (the page's monthly-practice figures 14.44 x 3 = 43.32 and 51.64 x 3 = 154.92 confirm it; brackets join within EUR 0.03). Household status (individual / joint with or without a working spouse) must be recorded per worker. **Engine gap:** no catalogue key holds a scale; the engine never computes BSSC (D7).
-- `be_onss_supported_employer_categories`: **importer defect** — the code `000` is stored as `0` (numeric normalisation in be_content_workbook._norm). Fails closed (EC 000 is then not in the signed list) but the stored value is wrong; fix before a real import.
+- `be_onss_supported_employer_categories`: importer defect **FIXED 2026-11-16** — codes were stored without leading zeros (`000` → `0`). Text columns now keep their exact characters, a numeric cell for a code list is refused (format the cell as Text), and a re-import repairs a mangled value. Verified on a local copy: stored `000`.
 
 ## 3. Worked payslip examples (for comparison with an independent Belgian payroll calculator)
 

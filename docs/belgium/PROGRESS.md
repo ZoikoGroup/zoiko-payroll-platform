@@ -1033,3 +1033,18 @@ release gates G1–G7 met by real evidence.
 - BELGIUM_REVIEWER_GUIDE.md: counts before / after, sources, conflicts, the 10 examples recomputed to 'net
   before withholding' with sourced ONSS / work bonus / BSSC / employer lines — all 10 still stop at withholding
   (A1-A3). Tests: workbook + content + inbox 35 passed; privacy scan 0 new findings.
+
+## 2026-11-16 — importer fix: leading-zero codes
+
+- be_content_workbook: text columns (textValue, dimension, name, formulaText, version, treatment) are compared and
+  written as the exact string, never through Decimal (`000` stayed `0` before); a numeric cell for a code-list key
+  is an ERROR ("enter the codes as TEXT"); a stored `0` vs a `000` cell is now a change, so a re-import repairs it.
+  Number columns are still normalised.
+- Tests (test_belgium_content_workbook.py, +7): leading-zero round trip through import, storage, export and
+  re-import for 000, 000,001,010, 015 and 010,015,027,046 (real code shapes from the B2 rate file: 83 of 232
+  employer categories, 23 of 117 worker codes start with 0); repair; numeric-cell refusal; numbers still
+  normalised. Against the old importer 4 of them fail; with the fix 17 / 17 pass.
+- Fresh LOCAL copy re-run: dry run 264 changes, 0 errors; stored be_onss_supported_employer_categories = '000'
+  (text). Nothing signed, pack Draft, no account; the real pack untouched.
+- Reviewer guide + workbook Instructions carry the employer-base-rate conflict note (24.92 % vs 19.88 %).
+  BELGIUM_GAPS_AND_DECISIONS.md gains Block M: M-BSSC, M-WORKBONUS, M-ECWC with their blocked keys.

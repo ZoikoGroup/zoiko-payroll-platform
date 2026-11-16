@@ -64,6 +64,20 @@ This register is authoritative for open gaps and approved decisions. A gap is cl
 | D14 | DECIDED | be_identifiers.py with its own BE_IDENTIFIER_KEYRING / BE_IDENTIFIER_FINGERPRINT_KEY settings. |
 | D15 | DECIDED | Employer substitute holidays stored in payroll_holidays with category "Substitute", audited via payroll_tax_configuration_audit. |
 
+## Block M — engine changes found by the source parse run (2026-11-16)
+
+Content is sourced (HIGH, archived ONSS 2026/3) but cannot be imported or used until the engine changes; each
+blocked catalogue key keeps blocking (fail closed) until its sub-item lands. Build only on the owner's instruction.
+
+| Sub-item | Engine gap | Blocked catalogue key(s) | Content waiting on |
+|----------|------------|--------------------------|--------------------|
+| M-BSSC | BSSC scale representation: `be_bssc_pending` is a text placeholder; the engine never computes BSSC (D7). Needs a band key with a household dimension (individual / joint with a working spouse / joint without), the monthly advance and the quarterly settlement, and a household status per worker (G-06 / G-17). | `be_bssc_pending` (to be replaced by a BSSC band key) | Workbook sheet 'BSSC scale 2026-3 (proposal)' (B3) |
+| M-WORKBONUS | Social work bonus 100 % / 108 % split: one band key without a worker-category dimension, evaluated on the 108 % base for manual workers; the source has separate employé / ouvrier tables, components A + B (capping B first), S at 100 % for both, proration J/D or H/U and an annual cap. | `be_red_social_work_bonus` | Workbook sheet 'Work bonus 2026-3 (proposal)' (B5; Jul-Aug and from 1 Sep 2026) |
+| M-ECWC | Employer category x worker code banding: the band rows exist only as proposals because rows can be added only after the code lists are signed, there is one row set per quarter, and the rate file's ContributionType per worker code (015 = type 1, 495 = type 0) is not modelled. Code lists must keep leading zeros (importer fixed 2026-11-16). | `be_onss_employer_base_rate`, `be_onss_fund_contributions` (and their prerequisites `be_onss_supported_employer_categories`, `be_onss_supported_worker_codes`) | Workbook sheet 'Band proposals (post code list)' (B2 Q1-Q4) |
+
+Also found (not one of the three, recorded for completeness): the engine applies no wage moderation on the 1.60 %
+special contribution (B2 code 855: 1.60 % + 0.09 %) — key `be_onss_special_160`.
+
 ## Notes
 
 - (Phase 1) Lowercase "be" resolves to BE through the shared case-insensitive code match in core.jurisdiction.get_jurisdiction_code (same as every country, e.g. "pl" -> PL). There is no bare "be" name alias.
