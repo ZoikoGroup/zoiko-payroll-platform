@@ -188,3 +188,40 @@ a second Super Admin who did not import or edit the rows **bulk-signs** them wit
 
 Each decision is recorded as a reviewed source artifact tagged `BE-DECISION-<key>` (uploader != reviewer);
 the Overview lists their state.
+
+## 4. Blocking questions for the specialist — professional withholding (added 2026-11-16)
+
+Both block the withholding engine (M-WHT) and the signing of the withholding rows at gate G1. Answer each as a
+decision record (Super Admin > Belgium > Decision records; proposer ≠ decider).
+
+### SQ-WHT-1 — Is the BSSC deducted before or after calculating the withholding base?
+
+- **The ambiguity.** B10 (Annex III to the Royal Decree of 11 Dec 2025, n° 25.1) and B11 (Formule-clé
+  ESS-SR/2025-0928, n° 7) define the withholding base as the gross pay minus *"les retenues effectuées en exécution
+  de la législation sociale ou d'un statut légal ou réglementaire y assimilé"* — neither mentions the special social
+  security contribution (BSSC, Loi du 30 mars 1994). B3 (ONSS administrative instructions 2026/3, cotisation
+  spéciale pour la sécurité sociale) says the BSSC is withheld *after* the personal social security contributions
+  and the professional withholding — an order of deduction, not a definition of the withholding base.
+- **The choice:**
+  - **(a) BSSC NOT deducted** — the base is gross − employee ONSS (after the social work bonus); the BSSC is
+    withheld afterwards from the net. (The assumption used in the reviewer guide's worked examples.)
+  - **(b) BSSC deducted** — the base is gross − employee ONSS − BSSC.
+- **What it changes** (reviewer guide §3.0, Assumption 3): withholding lower by about 5-33 EUR a month in the
+  worked examples under (b).
+- **Please cite** the provision or administrative guidance the answer rests on.
+
+### SQ-WHT-2 — G-26: how is employee ONSS allocated between regular and exceptional pay?
+
+- **Already in the pack** as decision G-26 (§3 above, key `be_wht_taxable_basis_rule`). Repeated here because it
+  decides the base of every withholding line.
+- **The ambiguity.** B10 n° 25.1 deducts the social withholdings from the gross pay, and n° 53 applies the
+  exceptional rates to the allowance itself; neither says how the employee ONSS of a month that holds both regular and
+  exceptional pay (e.g. a double holiday pay or bonus month) is split between the two bases.
+- **The choice:**
+  - **(a) Pro rata** to the ONSS-liable amount of each part (what the engine does today: `_allocate`).
+  - **(b) Each part's own ONSS** computed separately on its own component (e.g. ONSS on the double holiday pay
+    deducted only from that allowance's base).
+  - **(c) Another rule** the specialist specifies, with its source.
+- **What it changes:** the split of the month's withholding between the regular scale and the exceptional rate, and
+  so the total withholding in every mixed month (worked example 10).
+
