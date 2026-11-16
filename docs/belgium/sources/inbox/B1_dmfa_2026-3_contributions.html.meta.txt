@@ -1,0 +1,6 @@
+list-id: B1
+official: yes
+retrieved: 2026-11-16
+url: https://www.socialsecurity.be/employer/instructions/dmfa/fr/latest/instructions/socialsecuritycontributions/contributions.html
+http-status: 200
+note: ONSS administrative instructions 2026/3 (official publication), saved as served (HTML).

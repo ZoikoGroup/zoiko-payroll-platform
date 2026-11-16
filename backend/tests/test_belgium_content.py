@@ -219,6 +219,11 @@ _STRUCTURAL_NUMBERS = {
                                50: "source form-number width", 200: "source agency width", 300: "source title width"},
     "belgium_payment_service.py": {0: "list index / zero amount", 1: "batch sequence (+1)",
                                    100: "idempotency key / column width 100", 200: "return reason column width"},
+    "belgium_onss_rates.py": {
+        0: "first file / zero id fallback", 1: "at most one file per pay date (slice [:1])",
+        10: "ISO date string slice [:10]", 20: "malformed-number excerpt in a refusal",
+        300: "reason / note column width (String(300))",
+    },
     "be_identifiers.py": {
         1: "regex group index; key versions start at 1", 2: "two hex characters per key byte",
         4: "base64 padding block", 12: "AES-GCM nonce length in bytes", 32: "AES-256 key length in bytes",

@@ -6,7 +6,7 @@ Kinds: **BLOCK** the calculation is refused · **EXCEPTION** the payslip is calc
 
 Logs: every block / refusal / filing state / reveal step is one `zoiko.belgium` log line `be.event {...}` with the code and internal ids only (`app/modules/payroll/belgium_observability.py`).
 
-92 codes. Owners: Authority / mandate holder (2); Engineering (not built — no workaround) (9); Org admin — employee statutory data (19); Org admin — organisation setup (10); Payroll operator (35); Super Admin content (Belgian specialist signs) (17).
+102 codes. Owners: Authority / mandate holder (2); Engineering (not built — no workaround) (11); Org admin — employee statutory data (19); Org admin — organisation setup (11); Payroll operator (35); Super Admin content (Belgian specialist signs) (24).
 
 | Code | Kind | Meaning | Likely cause | Owner | How to fix |
 |------|------|---------|--------------|-------|------------|
@@ -62,6 +62,16 @@ Logs: every block / refusal / filing state / reveal step is one `zoiko.belgium` 
 | `BE_NO_COMMITTED_PAYROLL` | REFUSAL | No committed Belgian payroll in the period. | Runs not approved yet. | Payroll operator | Approve the period's runs first. |
 | `BE_OBLIGATION_NOT_PAID` | REFUSAL | Only a PAID obligation is reconciled. | Reconcile too early. | Payroll operator | Record the payment first. |
 | `BE_OBLIGATION_RECONCILED` | REFUSAL | The obligation is reconciled. | Payment after reconciliation. | Payroll operator | Record a variance instead. |
+| `BE_ONSS_FACT_MISSING` | BLOCK | An employer fact selecting the ContributionType (closure-fund sector, workforce class, wage moderation) or its evidence is missing. | Registration recorded without the fact or its evidence reference. | Org admin — organisation setup | Employer registration: record the fact with its evidence reference (four-eyes). |
+| `BE_ONSS_RATE_FILE_UNATTESTED` | BLOCK | The quarter's ONSS rate file is not attested as the genuine publication. | Registered but not yet attested. | Super Admin content (Belgian specialist signs) | A Super Admin other than the registrar attests the archived file. |
+| `BE_ONSS_RATE_FLAT_UNSUPPORTED` | BLOCK | A flat amount or quarterly minimum applies; not calculated yet. | The rate row carries a flat amount / minimum. | Engineering (not built — no workaround) | Escalate. |
+| `BE_ONSS_RATE_MARKERS_MIXED` | BLOCK | Employer base and fund contributions are not both on the rate table. | One key signed RATE_TABLE, the other SLAB_ROWS. | Super Admin content (Belgian specialist signs) | Sign both keys RATE_TABLE (or both SLAB_ROWS). |
+| `BE_ONSS_RATE_PERSONAL_UNSUPPORTED` | BLOCK | A combined contribution has a personal share; not calculated yet. | The combined code is employee-borne. | Engineering (not built — no workaround) | Escalate; do not mark this code live. |
+| `BE_ONSS_RATE_ROW_MISSING` | BLOCK | No live rate row for the employer category, code and ContributionType. | The code is not in the live subset of the quarter's file. | Super Admin content (Belgian specialist signs) | Super Admin: mark the supported codes live and sign them. |
+| `BE_ONSS_RATE_TABLE_MISSING` | BLOCK | No ONSS rate file covers the pay date's quarter. | The quarter's DmfA rate file is not registered on the pack. | Super Admin content (Belgian specialist signs) | Super Admin: register the archived quarterly rate ZIP, attest, sign the subset. |
+| `BE_ONSS_RATE_UNSIGNED` | BLOCK | A rate row, combination or type rule in use is not signed. | Made live but not yet signed (a signed file does not sign its rows). | Super Admin content (Belgian specialist signs) | A Super Admin other than the registrar / the one who made it live signs it. |
+| `BE_ONSS_TYPE_AMBIGUOUS` | BLOCK | Signed type rules give different ContributionTypes for the same facts. | Overlapping type rules. | Super Admin content (Belgian specialist signs) | Super Admin: correct the overlapping rules. |
+| `BE_ONSS_TYPE_UNRESOLVED` | BLOCK | No signed type rule gives the code's ContributionType for these facts. | Type rules missing for this combination of facts. | Super Admin content (Belgian specialist signs) | Super Admin: add the rule from the DmfA glossary annex 3; another signs it. |
 | `BE_OVERTIME_FACTS_MISSING` | BLOCK | Overtime paid without the overtime facts. | Overtime amount without hours / attendance. | Payroll operator | Record attendance hours for the period. |
 | `BE_OVERTIME_PREMIUM_SHORT` | EXCEPTION | The overtime premium paid is short. | Premium input too low. | Payroll operator | Correct the premium. |
 | `BE_OVERTIME_PREMIUM_UNVERIFIED` | EXCEPTION | The overtime premium rule is not verified. | Content unsigned. | Super Admin content (Belgian specialist signs) | Specialist signs; acknowledge meanwhile. |

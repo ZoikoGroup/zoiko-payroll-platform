@@ -148,6 +148,9 @@ def _text_problem(key: str, kind: str, value: str) -> Optional[str]:
     content = _content()
     if value == content.NOT_SUPPORTED:
         return None
+    if key in content.RATE_TABLE_KEYS:                    # Block M-ECWC: the ONSS rate table or the EC x WC bands
+        return None if value in (content.SLAB_ROWS, content.RATE_TABLE) else \
+            f"must be {content.RATE_TABLE}, {content.SLAB_ROWS} or {content.NOT_SUPPORTED}"
     if kind in content.SLAB_KINDS:
         return None if value == content.SLAB_ROWS else f"must be {content.SLAB_ROWS} or {content.NOT_SUPPORTED}"
     if kind == content.KIND_DATE:

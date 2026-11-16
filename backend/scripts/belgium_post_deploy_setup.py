@@ -26,8 +26,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 PRODUCTION_NAMES = ("production", "prod", "live")
 SHARED_COLUMNS = (("payslip_items", "be_calculation_snapshot"), ("payroll_runs", "be_approval_fingerprint"))
-EXPECTED_BE_TABLES = 21          # 19 tenant / worker tables (RLS) + 2 platform tables (Block K, no RLS)
-PLATFORM_BE_TABLES = ("payroll_be_gate_evidence", "payroll_be_decisions")   # Super Admin records, no organisation
+EXPECTED_BE_TABLES = 25          # 19 tenant / worker tables (RLS) + 6 platform tables (Blocks K, M-ECWC; no RLS)
+PLATFORM_BE_TABLES = ("payroll_be_gate_evidence", "payroll_be_decisions",   # Super Admin records, no organisation
+                      "payroll_be_onss_rate_files", "payroll_be_onss_rates", "payroll_be_onss_code_combinations",
+                      "payroll_be_onss_type_rules")                       # M-ECWC: pack content, no organisation
 
 
 class Refused(SystemExit):

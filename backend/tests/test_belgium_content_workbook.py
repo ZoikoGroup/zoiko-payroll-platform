@@ -254,3 +254,82 @@ def test_the_committed_ai_draft_has_valid_sheet_names_and_patterns_covering_ever
     cells = [cell for row in data for cell in row[header.index("memberCells")].split("; ")]
     assert len(cells) == len(set(cells)) == len(c.COMPONENTS) * len(c.OBLIGATIONS)    # each class cell once
     assert all(row[header.index("reason")] and row[header.index("source")] for row in data)
+
+
+# ── leading-zero ONSS codes (parse run 2026-11-16 defect: "000" was stored as "0") ─────────────────────────
+# Real code shapes from the ONSS DmfA rate file 2026 Q4: 83 of 232 employer categories and 23 of 117 worker
+# codes start with 0 (e.g. 000, 001, 010; 010, 015, 027, 046). Codes are identifiers, not statutory values.
+LEADING_ZERO_CODES = [("be_onss_supported_employer_categories", "000"),
+                      ("be_onss_supported_employer_categories", "000,001,010"),
+                      ("be_onss_supported_worker_codes", "015"),
+                      ("be_onss_supported_worker_codes", "010,015,027,046")]
+
+
+def _code_row(db, pack, key):
+    from app.modules.payroll.models import ContributionRate
+
+    return db.query(ContributionRate).filter_by(jurisdiction_pack_id=pack.id, component_key=key).one()
+
+
+@pytest.mark.parametrize("key,codes", LEADING_ZERO_CODES)
+def test_leading_zero_codes_round_trip_unchanged(db, seeded, key, codes):
+    src = _verified_source(db)
+    book = _export(db, seeded)
+    row, header = _find(book["Scalar keys"], "key", key)
+    _set(book["Scalar keys"], row, header, textValue=codes, sourceDocumentId=src.id)
+    dry = _import(db, seeded, book)
+    assert dry["errors"] == 0, dry
+    assert any(i["key"] == key and i["status"] == "OK" and i["reason"] == f"textValue -> {codes}" for i in dry["items"])
+    done = _import(db, seeded, book, dry_run=False)
+    db.commit()
+    assert done["errors"] == 0
+    stored = _code_row(db, seeded, key)
+    db.refresh(stored)
+    assert stored.text_value == codes                                                  # storage: exact characters
+    again = _export(db, seeded)                                                        # read-back through the export
+    row2, header2 = _find(again["Scalar keys"], "key", key)
+    assert again["Scalar keys"].cell(row=row2, column=header2.index("textValue") + 1).value == codes
+    assert not [i for i in _import(db, seeded, again)["items"] if i["key"] == key]     # re-import: no false change
+
+
+def test_a_mangled_code_is_seen_as_a_change_and_repaired(db, seeded):
+    key = "be_onss_supported_employer_categories"
+    src = _verified_source(db)
+    stored = _code_row(db, seeded, key)
+    stored.text_value = "0"                                                            # what the old importer wrote
+    db.commit()
+    book = _export(db, seeded)
+    row, header = _find(book["Scalar keys"], "key", key)
+    _set(book["Scalar keys"], row, header, textValue="000", sourceDocumentId=src.id)
+    assert _import(db, seeded, book)["changes"] >= 1                                   # "000" != "0" (was equal)
+    _import(db, seeded, book, dry_run=False)
+    db.commit()
+    db.refresh(stored)
+    assert stored.text_value == "000"
+
+
+def test_a_numeric_cell_for_a_code_list_is_refused(db, seeded):
+    key = "be_onss_supported_employer_categories"
+    src = _verified_source(db)
+    book = _export(db, seeded)
+    row, header = _find(book["Scalar keys"], "key", key)
+    _set(book["Scalar keys"], row, header, textValue=0, sourceDocumentId=src.id)     # Excel already dropped "00"
+    dry = _import(db, seeded, book)
+    errors = [i for i in dry["items"] if i["key"] == key and i["status"] == "ERROR"]
+    assert errors and "TEXT" in errors[0]["reason"]
+    _import(db, seeded, book, dry_run=False)
+    db.commit()
+    assert _code_row(db, seeded, key).text_value in (None, "")                        # nothing written
+
+
+def test_number_columns_are_still_normalised(db, seeded):
+    src = _verified_source(db)
+    book = _export(db, seeded)
+    row, header = _find(book["Scalar keys"], "key", "be_onss_manual_base_uplift")
+    _set(book["Scalar keys"], row, header, employeeRatePct="8.00", sourceDocumentId=src.id)
+    _import(db, seeded, book, dry_run=False)
+    db.commit()
+    again = _export(db, seeded)
+    row2, header2 = _find(again["Scalar keys"], "key", "be_onss_manual_base_uplift")
+    _set(again["Scalar keys"], row2, header2, employeeRatePct="8")                     # same number, other spelling
+    assert not [i for i in _import(db, seeded, again)["items"] if i["key"] == "be_onss_manual_base_uplift"]

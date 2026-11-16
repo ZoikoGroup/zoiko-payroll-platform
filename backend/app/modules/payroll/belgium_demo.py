@@ -145,13 +145,16 @@ def be_seed_demo_pack(db: Session, actor_id=None, workbook: Optional[bytes] = No
     db.add(pack)
     db.flush()
 
+    columns = {"textValue": "text_value", "employeeRatePct": "employee_rate_pct",
+               "employerRatePct": "employer_rate_pct", "flatAmount": "flat_amount"}
     drafted = {}
     for row in sheets.get("Scalar keys", []) + sheets.get("Parallel tolerances", []):
         key = row.get("key")
-        if key and str(row.get("confidence") or "") not in ("", "NOT FOUND"):
+        # A drafted row must carry a value: a sourced row whose value cannot be imported yet (only a proposed text,
+        # e.g. a key without a vocabulary) keeps its DEMO placeholder.
+        if key and str(row.get("confidence") or "") not in ("", "NOT FOUND") \
+                and any(_val(row.get(name)) for name in columns):
             drafted[key] = row
-    columns = {"textValue": "text_value", "employeeRatePct": "employee_rate_pct",
-               "employerRatePct": "employer_rate_pct", "flatAmount": "flat_amount"}
     for order, key in enumerate(content.KEYS):
         values, origin = {}, "drafted"
         if key in drafted:
@@ -203,8 +206,13 @@ def be_seed_demo_pack(db: Session, actor_id=None, workbook: Optional[bytes] = No
         key = row.get("key")
         if key in content.RULE_TYPES:
             drafted_rules.add(content.RULE_TYPES[key])
+            start, end = _val(row.get("effectiveFrom")), _val(row.get("effectiveTo"))
+            # dated proposals (one set per ONSS rate-file quarter) keep their own windows and names
             slab(content.RULE_TYPES[key], f"AI draft band {key}", min_amount=_val(row.get("minAmount")),
-                 rate_pct=_val(row.get("ratePct")), filing_status=_val(row.get("dimension")))
+                 rate_pct=_val(row.get("ratePct")), filing_status=_val(row.get("dimension")),
+                 tax_formula=_val(row.get("name")),
+                 effective_from=date.fromisoformat(start[:10]) if start else None,
+                 effective_to=date.fromisoformat(end[:10]) if end else None)
     for row in sheets.get("Filing schema versions", []):
         key = row.get("key")
         if key in content.RULE_TYPES and _val(row.get("version")) and str(row.get("confidence") or "") != "NOT FOUND":

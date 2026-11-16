@@ -14827,6 +14827,10 @@ _BE_PAY_BASES = ("SALARIED", "HOURLY")
 _BE_CONTRACT_TYPES = ("INDEFINITE", "FIXED_TERM", "SPECIFIC_WORK", "REPLACEMENT", "STUDENT", "FLEXI", "OCCASIONAL",
                       "APPRENTICESHIP", "NOT_SUPPORTED")
 _BE_SPECIAL_160_STATUSES = ("APPLIES", "NOT_APPLICABLE", "UNKNOWN")
+# Block M-ECWC: employer facts selecting the ONSS ContributionType (mirrors belgium_content; UNKNOWN blocks).
+_BE_CLOSURE_FUND_SECTORS = ("COMMERCIAL", "NON_COMMERCIAL", "NOT_SUBJECT", "UNKNOWN")
+_BE_WORKFORCE_CLASSES = ("UNDER_10", "FROM_10_TO_19", "FROM_20", "UNKNOWN")
+_BE_WAGE_MODERATION_STATUSES = ("APPLIES", "NOT_APPLICABLE", "UNKNOWN")
 _BE_ABSENCE_KINDS = ("SICKNESS", "WORK_ACCIDENT", "OCCUPATIONAL_DISEASE", "MATERNITY", "BIRTH_LEAVE", "OTHER_LEAVE")
 _BE_COMPONENTS = ("SALARY", "HOURLY_PAY", "OVERTIME_PREMIUM", "SUNDAY_HOLIDAY_PREMIUM", "SECTOR_PREMIUM", "BONUS",
                   "THIRTEENTH_MONTH", "HOLIDAY_PAY_SIMPLE", "HOLIDAY_PAY_DOUBLE", "DEPARTURE_HOLIDAY_PAY",
@@ -14959,11 +14963,27 @@ class PayrollBeEmployerRegistration(_BeCommon, Base):
     onss_special_160_status            = Column(String(16), nullable=False, default="UNKNOWN",
                                                 server_default="UNKNOWN")
     special_160_evidence_ref           = Column(String(300), nullable=True)
+    # Block M-ECWC: facts selecting the ONSS ContributionType (DmfA zone 00083), each with its evidence.
+    closure_fund_sector                = Column(String(16), nullable=False, default="UNKNOWN",
+                                                server_default="UNKNOWN")
+    closure_fund_sector_evidence_ref   = Column(String(300), nullable=True)
+    workforce_class                    = Column(String(16), nullable=False, default="UNKNOWN",
+                                                server_default="UNKNOWN")
+    workforce_class_evidence_ref       = Column(String(300), nullable=True)
+    wage_moderation_status             = Column(String(16), nullable=False, default="UNKNOWN",
+                                                server_default="UNKNOWN")
+    wage_moderation_evidence_ref       = Column(String(300), nullable=True)
 
     __table_args__ = (
         *_be_versioned_checks("employer"),
         sa.CheckConstraint(f"onss_special_160_status IN {_nz_in(_BE_SPECIAL_160_STATUSES)}",
                            name="ck_be_employer_special_160_status"),
+        sa.CheckConstraint(f"closure_fund_sector IN {_nz_in(_BE_CLOSURE_FUND_SECTORS)}",
+                           name="ck_be_employer_closure_fund_sector"),
+        sa.CheckConstraint(f"workforce_class IN {_nz_in(_BE_WORKFORCE_CLASSES)}",
+                           name="ck_be_employer_workforce_class"),
+        sa.CheckConstraint(f"wage_moderation_status IN {_nz_in(_BE_WAGE_MODERATION_STATUSES)}",
+                           name="ck_be_employer_wage_moderation"),
         sa.CheckConstraint("legal_language IS NULL OR legal_language IN ('NL', 'FR', 'DE')",
                            name="ck_be_employer_legal_language"),
         sa.CheckConstraint("verification_state IN ('UNVERIFIED', 'VERIFIED', 'REJECTED')",
@@ -15646,4 +15666,152 @@ class PayrollBeDecision(Base):
                            name="ck_be_decision_four_eyes"),
         sa.CheckConstraint("status <> 'SUPERSEDED' OR superseded_by_id IS NOT NULL", name="ck_be_decision_superseded"),
         Index("ix_be_decision_gap", "gap_key", "status"),
+    )
+
+
+# ── Belgium Block M-ECWC: the ONSS rate table (DmfA rate file + DmfA glossary zone 00083) ──────────────────
+# Platform content (no organisation, no RLS — like payroll_source_artifacts). Every code is TEXT ("000", "015"),
+# never a number. A rate row reaches the engine only when its quarterly file is ATTESTED authentic (four-eyes,
+# checksum-bound) AND the row itself is SIGNED (four-eyes); the rest of the file is REFERENCE data only.
+_BE_ONSS_FILE_STATUSES = ("PENDING", "ATTESTED", "REJECTED")
+_BE_ONSS_ROW_STATUSES = ("REFERENCE", "PENDING", "SIGNED")
+_BE_ONSS_CODE_KINDS = ("WORKER", "CONTRIBUTION", "UNRELATED")
+
+
+class PayrollBeOnssRateFile(Base):
+    """One quarterly ONSS DmfA rate file (the archived official ZIP) for a Belgian pack. A Super Admin registers
+    it; ANOTHER attests that the archived file (checksum) is the genuine ONSS publication for that quarter — an
+    authenticity attestation, not a review of values."""
+    __tablename__ = "payroll_be_onss_rate_files"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id", ondelete="CASCADE"), nullable=False)
+    quarter             = Column(String(5), nullable=False)               # header <Quarter>, e.g. "20263"
+    effective_from      = Column(Date, nullable=False)
+    effective_to        = Column(Date, nullable=False)
+    source_document_id  = Column(Integer, ForeignKey("payroll_source_artifacts.id", ondelete="RESTRICT"),
+                                 nullable=False)
+    checksum_sha256     = Column(String(64), nullable=False)
+    reference_rows      = Column(Integer, nullable=False, default=0, server_default="0")
+    status              = Column(String(10), nullable=False, default="PENDING", server_default="PENDING")
+    registered_by_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    registered_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    attested_by_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    attested_at         = Column(DateTime(timezone=True), nullable=True)
+    attestation_reason  = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"status IN {_nz_in(_BE_ONSS_FILE_STATUSES)}", name="ck_be_onss_file_status"),
+        sa.CheckConstraint("status = 'PENDING' OR (attested_by_id IS NOT NULL AND attested_at IS NOT NULL AND "
+                           "(registered_by_id IS NULL OR attested_by_id <> registered_by_id))",
+                           name="ck_be_onss_file_four_eyes"),
+        sa.CheckConstraint("effective_to >= effective_from", name="ck_be_onss_file_window"),
+        UniqueConstraint("jurisdiction_pack_id", "quarter", name="uq_be_onss_file_pack_quarter"),
+    )
+
+
+class PayrollBeOnssRate(Base):
+    """One record of a rate file: employer category x code (kind) x ContributionType -> personal / employer / wage
+    moderation / total rate, flat flag, quarterly minimum. REFERENCE rows are never read by the engine; a row in
+    the supported subset is made PENDING by one Super Admin and SIGNED by another."""
+    __tablename__ = "payroll_be_onss_rates"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    rate_file_id        = Column(Integer, ForeignKey("payroll_be_onss_rate_files.id", ondelete="CASCADE"),
+                                 nullable=False)
+    employer_class      = Column(String(3), nullable=False)
+    code_kind           = Column(String(12), nullable=False)
+    code                = Column(String(3), nullable=False)
+    contribution_type   = Column(String(1), nullable=False)
+    personal_rate       = Column(Numeric(12, 6), nullable=True)
+    employer_rate       = Column(Numeric(12, 6), nullable=True)
+    moderation_rate     = Column(Numeric(12, 6), nullable=True)
+    total_rate          = Column(Numeric(12, 6), nullable=True)
+    is_flat             = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    minimum_flat        = Column(Numeric(14, 2), nullable=True)
+    file_status         = Column(String(10), nullable=True)               # NEW / UPDATED as published
+    status              = Column(String(10), nullable=False, default="REFERENCE", server_default="REFERENCE")
+    marked_live_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    marked_live_at      = Column(DateTime(timezone=True), nullable=True)
+    signed_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    signed_at           = Column(DateTime(timezone=True), nullable=True)
+    sign_reason         = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"status IN {_nz_in(_BE_ONSS_ROW_STATUSES)}", name="ck_be_onss_rate_status"),
+        sa.CheckConstraint(f"code_kind IN {_nz_in(_BE_ONSS_CODE_KINDS)}", name="ck_be_onss_rate_code_kind"),
+        sa.CheckConstraint("status <> 'SIGNED' OR (signed_by_id IS NOT NULL AND signed_at IS NOT NULL AND "
+                           "(marked_live_by_id IS NULL OR signed_by_id <> marked_live_by_id))",
+                           name="ck_be_onss_rate_four_eyes"),
+        UniqueConstraint("rate_file_id", "employer_class", "code_kind", "code", "contribution_type",
+                         name="uq_be_onss_rate_key"),
+        Index("ix_be_onss_rate_lookup", "rate_file_id", "employer_class", "code", "status"),
+    )
+
+
+class PayrollBeOnssCodeCombination(Base):
+    """Which contribution code may combine with a worker code for an employer category (rate file
+    WorkerAndContributionComb, OwednessCode as published). Only a SIGNED combination in the supported subset is
+    applied by the engine; the rest is reference data."""
+    __tablename__ = "payroll_be_onss_code_combinations"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    rate_file_id        = Column(Integer, ForeignKey("payroll_be_onss_rate_files.id", ondelete="CASCADE"),
+                                 nullable=False)
+    employer_class      = Column(String(3), nullable=False)
+    worker_code         = Column(String(3), nullable=False)
+    contribution_code   = Column(String(3), nullable=False)
+    owedness_code       = Column(String(1), nullable=True)
+    status              = Column(String(10), nullable=False, default="REFERENCE", server_default="REFERENCE")
+    marked_live_by_id   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    marked_live_at      = Column(DateTime(timezone=True), nullable=True)
+    signed_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    signed_at           = Column(DateTime(timezone=True), nullable=True)
+    sign_reason         = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint(f"status IN {_nz_in(_BE_ONSS_ROW_STATUSES)}", name="ck_be_onss_comb_status"),
+        sa.CheckConstraint("status <> 'SIGNED' OR (signed_by_id IS NOT NULL AND signed_at IS NOT NULL AND "
+                           "(marked_live_by_id IS NULL OR signed_by_id <> marked_live_by_id))",
+                           name="ck_be_onss_comb_four_eyes"),
+        UniqueConstraint("rate_file_id", "employer_class", "worker_code", "contribution_code",
+                         name="uq_be_onss_comb_key"),
+    )
+
+
+class PayrollBeOnssTypeRule(Base):
+    """How the engine selects a code's ContributionType from the facts (DmfA glossary annex 3 'valeurs
+    autorisées pour le type de cotisation'): conditions on the worker's ONSS pay basis and the employer's
+    closure-fund sector, workforce class and wage-moderation status ('ANY' or a comma list) -> a one-digit type
+    or NOT_DUE. Signed content (four-eyes): no type is ever defaulted in code."""
+    __tablename__ = "payroll_be_onss_type_rules"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id", ondelete="CASCADE"), nullable=False)
+    code                = Column(String(3), nullable=False)
+    pay_basis           = Column(String(40), nullable=False, default="ANY", server_default="ANY")
+    closure_fund_sector = Column(String(60), nullable=False, default="ANY", server_default="ANY")
+    workforce_class     = Column(String(60), nullable=False, default="ANY", server_default="ANY")
+    wage_moderation     = Column(String(40), nullable=False, default="ANY", server_default="ANY")
+    outcome             = Column(String(8), nullable=False)               # "0".."9" or NOT_DUE
+    effective_from      = Column(Date, nullable=False)
+    effective_to        = Column(Date, nullable=True)
+    source_document_id  = Column(Integer, ForeignKey("payroll_source_artifacts.id", ondelete="SET NULL"),
+                                 nullable=True)
+    note                = Column(String(300), nullable=True)
+    status              = Column(String(10), nullable=False, default="PENDING", server_default="PENDING")
+    created_by_id       = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at          = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    signed_by_id        = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    signed_at           = Column(DateTime(timezone=True), nullable=True)
+    sign_reason         = Column(String(300), nullable=True)
+
+    __table_args__ = (
+        sa.CheckConstraint("status IN ('PENDING', 'SIGNED')", name="ck_be_onss_type_rule_status"),
+        sa.CheckConstraint("status <> 'SIGNED' OR (signed_by_id IS NOT NULL AND signed_at IS NOT NULL AND "
+                           "(created_by_id IS NULL OR signed_by_id <> created_by_id))",
+                           name="ck_be_onss_type_rule_four_eyes"),
+        sa.CheckConstraint("effective_to IS NULL OR effective_to >= effective_from",
+                           name="ck_be_onss_type_rule_window"),
+        Index("ix_be_onss_type_rule_code", "jurisdiction_pack_id", "code"),
     )

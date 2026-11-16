@@ -1012,3 +1012,66 @@ docs/belgium/sources/inbox/ holds README.md only — nothing to register; skippe
 Engineering is complete. What remains is not engineering: specialist content signing (G1), authority
 access and transmission certification (G3), owner decisions recorded through the decision records, and the
 release gates G1–G7 met by real evidence.
+
+## 2026-11-16 — source parse run: B1, B2, B3, B5 (ONSS 2026/3)
+
+- Fetched by GET from socialsecurity.be and archived in docs/belgium/sources/inbox/ with a `.meta.txt` each
+  (URL, HTTP 200, retrieval date): B1 contributions, B3 BSSC, B5 work bonus (HTML, 2026/3 edition) and B2 the
+  official DmfA rate files 2026 Q1-Q4 (ZIP: XML + XSD; plus the .xlsm workbooks). A1-A3 (FPS Finance, Moniteur
+  belge) NOT fetched: both sites answer automated requests with a human-verification (CAPTCHA) page.
+- `scripts/be_source_inbox.py`: manifest regenerated (11 documents). B1 / B3 / B5 and the four ZIPs ARCHIVED; the
+  .xlsm files UNVERIFIED by the owner's rule (only the extraction source is archived). B2 extracted from the ZIP
+  XML in memory (no unpacking, lxml without entities / network); cross-checked read-only against the .xlsm sheet
+  TB1 (no macro run): 0 differences in every common record, all four quarters.
+- Workbook BE_2026_AI_DRAFT.xlsx: confidence HIGH 9 → 20, NOT FOUND 71 → 63 (305 importable rows). New dated
+  proposal sheets (not imported): employer base 19.88 % + two fund contributions per quarter, the BSSC 2026/3
+  scale, the work-bonus tables (1 Jul / 1 Sep 2026). Engine gaps recorded: BSSC never computed (no key), work
+  bonus needs a category dimension and S at 100 %, no wage moderation on the 1.60 %.
+- D3 dry run on a fresh LOCAL SQLite copy (canonical seed + registered sources): 264 changes, 0 errors; import
+  written, every row still [PENDING G1], pack Draft; nothing signed, no account. Defect found (not fixed, code):
+  be_content_workbook._norm stores the code `000` as `0`.
+- BELGIUM_REVIEWER_GUIDE.md: counts before / after, sources, conflicts, the 10 examples recomputed to 'net
+  before withholding' with sourced ONSS / work bonus / BSSC / employer lines — all 10 still stop at withholding
+  (A1-A3). Tests: workbook + content + inbox 35 passed; privacy scan 0 new findings.
+
+## 2026-11-16 — importer fix: leading-zero codes
+
+- be_content_workbook: text columns (textValue, dimension, name, formulaText, version, treatment) are compared and
+  written as the exact string, never through Decimal (`000` stayed `0` before); a numeric cell for a code-list key
+  is an ERROR ("enter the codes as TEXT"); a stored `0` vs a `000` cell is now a change, so a re-import repairs it.
+  Number columns are still normalised.
+- Tests (test_belgium_content_workbook.py, +7): leading-zero round trip through import, storage, export and
+  re-import for 000, 000,001,010, 015 and 010,015,027,046 (real code shapes from the B2 rate file: 83 of 232
+  employer categories, 23 of 117 worker codes start with 0); repair; numeric-cell refusal; numbers still
+  normalised. Against the old importer 4 of them fail; with the fix 17 / 17 pass.
+- Fresh LOCAL copy re-run: dry run 264 changes, 0 errors; stored be_onss_supported_employer_categories = '000'
+  (text). Nothing signed, pack Draft, no account; the real pack untouched.
+- Reviewer guide + workbook Instructions carry the employer-base-rate conflict note (24.92 % vs 19.88 %).
+  BELGIUM_GAPS_AND_DECISIONS.md gains Block M: M-BSSC, M-WORKBONUS, M-ECWC with their blocked keys.
+
+## Block M-ECWC — the ONSS rate table (structure only; owner decisions 2026-11-16)
+
+- Source B9 archived: ONSS DmfA glossary 2026/3 (complete PDF, sha256 b8d7f2b2…, reference ZP-BE-SRC-b8d7f2b2b985).
+  Zone 00083 "type de cotisation" (p. 38): with the contribution worker code it identifies the contribution, whether
+  it is due and its rate; the allowed values per code are in annex 3 (p. 292).
+- Migration `e9c4b7a2d6f3` (single head, additive): four platform tables (`payroll_be_onss_rate_files`,
+  `payroll_be_onss_rates`, `payroll_be_onss_code_combinations`, `payroll_be_onss_type_rules`; codes TEXT, four-eyes
+  CHECKs) and six columns on `payroll_be_employer_registrations` (closure-fund sector, workforce class, wage-moderation
+  status — UNKNOWN by default — each with an evidence reference). 25 Belgian tables (19 tenant + 6 platform).
+- belgium_onss_rates.py: register an ARCHIVED quarterly rate ZIP (checksum verified; every record loaded as
+  REFERENCE) → attest authenticity (another Super Admin; checksum re-verified) → mark the supported subset live
+  (codes must be in the pack's code lists) → sign each row / combination (not the registrar, not who made it live).
+  Type rules: add → sign (another person). Draft packs only. 10 Super Admin routes (platform, super_admin only).
+- Engine (engine/jurisdictions/belgium/onss_table.py): `be_onss_employer_base_rate` and `be_onss_fund_contributions`
+  signed `RATE_TABLE` read the table by (employer category, worker code, ContributionType, quarter); SLAB_ROWS keeps
+  the EC x WC band path; a mix blocks. A row is used only when the file is ATTESTED and the row SIGNED. Every type
+  comes from a signed rule over the worker's PAY_100 / PAY_108 basis and the employer facts (UNKNOWN or missing
+  evidence blocks); none / ambiguous / pending rules block; NOT_DUE skips a combined code. Flat amounts, quarterly
+  minimums and personal shares on combined codes block (not built). The table is frozen with the payslip.
+- Tests: test_belgium_onss_rate_table.py (25: unsigned row in a signed file blocks; missing fact / evidence blocks;
+  809 across sector x workforce x moderation -> 0 / 2 / 4 / 5 / NOT_DUE; four-eyes; text codes; REFERENCE never
+  reaches the engine) and test_belgium_block_m_migration.py (6). SYNTHETIC rates only — the real B2 rates are NOT
+  imported as live content (reference-only decision).
+- Found while testing: the pushed parse-run commit 78a8fd5 broke the DEMO seed (2 demo tests, 1 observability
+  test fail on 884f656): sourced rows with only a proposed text were taken as drafted values, and the dated band
+  proposals were read without their windows. Fixed in belgium_demo.py (separate commit).

@@ -51,6 +51,7 @@ from app.modules.payroll.engine.jurisdictions.belgium import wages as _wages
 from app.modules.payroll.engine.jurisdictions.belgium import working_time as _working_time
 from app.modules.payroll.engine.jurisdictions.belgium import withholding as _withholding
 from app.modules.payroll.engine.jurisdictions.belgium.errors import BECalculationBlockedError
+from app.modules.payroll.engine.jurisdictions.belgium.onss_table import be_onss_registration_facts
 from app.modules.payroll.engine.jurisdictions.belgium.pack import ZERO, BePack, as_date, dec
 
 __all__ = ["BECalculationBlockedError", "calculate", "ENGINE_BUILD"]
@@ -129,7 +130,9 @@ def _be_calculate(ctx: PayrollContext) -> dict:
         lambda on: BePack(ctx.rate_map, ctx.slabs, organization_id, on), decision["worker"], line,
         getattr(ctx, "be_absence_episodes", None), agreement, pay, getattr(ctx, "be_daily_rate", None),
         period_start or pay_date.replace(day=1), period_end)
-    onss = _onss.compute(pack, built["bases"], decision, getattr(ctx, "be_pension_premium", None))
+    onss = _onss.compute(pack, built["bases"], decision, getattr(ctx, "be_pension_premium", None),
+                         getattr(ctx, "be_onss_rate_table", None),
+                         be_onss_registration_facts(getattr(ctx, "be_registration", None)))
     wht = _withholding.compute(pack, pay, built, decision, approved, onss,
                                getattr(ctx, "be_exceptional_reference", None), getattr(ctx, "be_pack_version", None))
 

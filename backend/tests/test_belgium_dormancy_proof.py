@@ -2,7 +2,7 @@
 
 The Belgian schema is permanent (main's migrations build on it), so rolling Belgium back means switching it OFF:
 BE_TENANT_ONBOARDING_ENABLED unset, BE_CANARY_ORG_IDS empty, demo packs off, identifier keys unset, no Active
-Belgian pack, the registry row PLANNED or absent. With the full schema present (21 payroll_be_* tables) and that
+Belgian pack, the registry row PLANNED or absent. With the full schema present (25 payroll_be_* tables) and that
 state, this proves:
 
   * every /api/payroll/belgium/* route answers 404;
@@ -24,7 +24,7 @@ import pytest
 from app.core.exceptions import BadRequestException
 
 NISS = "12312312312"  # privacy-scan: allow (synthetic TEST ONLY value)
-BE_TABLES = 21
+BE_TABLES = 25                   # 19 tenant / worker + 6 platform (Block K, Block M-ECWC)
 
 
 @pytest.fixture

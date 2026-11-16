@@ -107,22 +107,30 @@ def _text(value) -> str:
     return str(value)
 
 
-def _norm(value) -> Optional[str]:
-    """A cell or a stored value as a comparable string (None when empty)."""
+# Columns whose content is TEXT (codes, choices, formulas, names): compared and written as the stripped string,
+# never through Decimal — "000" (ONSS employer category) must stay "000", not become "0".
+TEXT_COLUMNS = frozenset({"textValue", "dimension", "name", "formulaText", "version", "treatment"})
+
+
+def _norm(value, *, text: bool = False) -> Optional[str]:
+    """A cell or a stored value as a comparable string (None when empty). Numbers are normalised ("8.00" ->
+    "8") unless `text` is set: a text column keeps its exact characters (leading zeros included)."""
     if value is None:
         return None
     if hasattr(value, "isoformat") and not isinstance(value, str):
         return value.isoformat()[:10]
-    text = str(value).strip()
-    if text == "":
+    raw = str(value).strip()
+    if raw == "":
         return None
+    if text:
+        return raw
     try:
-        number = Decimal(text)
-        if number.is_finite() and not any(c.isalpha() for c in text.replace("E", "").replace("e", "")):
+        number = Decimal(raw)
+        if number.is_finite() and not any(c.isalpha() for c in raw.replace("E", "").replace("e", "")):
             return format(number.normalize(), "f")
     except InvalidOperation:
         pass
-    return text
+    return raw
 
 
 def _pack_rows(db: Session, pack):
@@ -308,7 +316,13 @@ class _Report:
 
 
 def _changed(row: dict, current: dict, columns) -> dict:
-    return {c: row.get(c) for c in columns if c in row and _norm(row.get(c)) != _norm(current.get(c))}
+    return {c: row.get(c) for c in columns
+            if c in row and _cell(c, row.get(c)) != _cell(c, current.get(c))}
+
+
+def _cell(column: str, value) -> Optional[str]:
+    """_norm with the column's kind: text columns keep their characters, number columns are normalised."""
+    return _norm(value, text=column in TEXT_COLUMNS)
 
 
 def _apply(report, sheet, n, header, key, changed, fn, payload_cols):
@@ -316,7 +330,7 @@ def _apply(report, sheet, n, header, key, changed, fn, payload_cols):
     try:
         fn()
         for column in changed:
-            report.add(sheet, n, column, header, "OK", f"{column} -> {_norm(changed[column])}", key)
+            report.add(sheet, n, column, header, "OK", f"{column} -> {_cell(column, changed[column])}", key)
     except (BadRequestException, NotFoundException) as error:
         text = str(getattr(error, "detail", error))
         column = next((c for c in payload_cols if c in text), next(iter(changed), None))
@@ -413,7 +427,12 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
             source = ref(sheet, n, header, row, key)
             if source is None:
                 continue
-            payload = {k: ("" if _norm(v) is None else _norm(v)) for k, v in changed.items()}
+            if key in content.CODE_LIST_KEYS and "textValue" in changed and                     isinstance(changed["textValue"], (int, float, Decimal)) and not isinstance(changed["textValue"], bool):
+                report.add(sheet, n, "textValue", header, "ERROR",
+                           "codes must be entered as TEXT (format the cell as Text): a numeric cell has already lost "
+                           "any leading zeros (e.g. ONSS employer category 000)", key)
+                continue
+            payload = {k: ("" if _cell(k, v) is None else _cell(k, v)) for k, v in changed.items()}
             _apply(report, sheet, n, header, key, changed,
                    lambda: sa.update_row(db, "rate", rid, {**payload, "sourceDocumentId": source, "reason": reason},
                                          actor_id), tuple(changed))
@@ -432,7 +451,7 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
             source = ref(SHEET_SLAB, n, header, row, key)
             if source is None:
                 continue
-            payload = {c: _norm(v) for c, v in values.items() if _norm(v) is not None}
+            payload = {c: _cell(c, v) for c, v in values.items() if _cell(c, v) is not None}
             _apply(report, SHEET_SLAB, n, header, key, payload,
                    lambda: sa.add_slab_row(db, pack.id, key, {**payload, "sourceDocumentId": source,
                                                               "reason": reason}, actor_id), tuple(payload))
@@ -461,7 +480,7 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
         source = ref(SHEET_SLAB, n, header, row, key)
         if source is None:
             continue
-        payload = {("taxFormula" if k == "name" else k): ("" if _norm(v) is None else _norm(v))
+        payload = {("taxFormula" if k == "name" else k): ("" if _cell(k, v) is None else _cell(k, v))
                    for k, v in changed.items()}
         _apply(report, SHEET_SLAB, n, header, key, changed,
                lambda: sa.update_row(db, "slab", rid, {**payload, "sourceDocumentId": source, "reason": reason},
@@ -501,7 +520,7 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
             source = ref(SHEET_SCHEMA, n, header, row, key)
             if source is None:
                 continue
-            payload = {k: _norm(v) for k, v in cols.items() if _norm(v) is not None}
+            payload = {k: _cell(k, v) for k, v in cols.items() if _cell(k, v) is not None}
             _apply(report, SHEET_SCHEMA, n, header, key, {"version": row.get("version"), **{
                        k: v for k, v in cols.items() if k != "name"}},
                    lambda: sa.add_slab_row(db, pack.id, key, {**payload, "sourceDocumentId": source,
@@ -518,7 +537,7 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
         source = ref(SHEET_SCHEMA, n, header, row, key)
         if source is None:
             continue
-        payload = {("taxFormula" if k == "version" else k): ("" if _norm(v) is None else _norm(v))
+        payload = {("taxFormula" if k == "version" else k): ("" if _cell(k, v) is None else _cell(k, v))
                    for k, v in changed.items()}
         _apply(report, SHEET_SCHEMA, n, header, key, changed,
                lambda: sa.update_row(db, "slab", rid, {**payload, "sourceDocumentId": source, "reason": reason},

@@ -76,7 +76,8 @@ def calc_inputs(db: Session, run=None, employee=None, resolved_pack=None, as_of=
                if pack is not None else None)
     run_period = (getattr(run, "period_start", None), getattr(run, "period_end", None)) if run is not None else period
     return resolve_be_calc_inputs(db, employee.organization_id, employee, _as_date(pay_date, "payDate"),
-                                  pack_version=version, period=run_period)
+                                  pack_version=version, period=run_period,
+                                  pack_row_id=getattr(pack, "id", None) if pack is not None else None)
 
 
 # ── 2. before_run_transition: Block B3 (see before_run_transition below) ────
@@ -634,7 +635,14 @@ def _enum(data: dict, key: str, allowed) -> None:
 BE_REGISTRATION_FIELDS = (
     "effective_from", "effective_to", "legal_entity_id", "legal_name", "enterprise_number", "employer_category_code",
     "withholding_declaration_frequency", "holiday_fund_ref", "legal_language", "mandate_refs",
-    "filing_credential_ref", "source_document_id", "evidence_ref", "onss_special_160_status", "special_160_evidence_ref")
+    "filing_credential_ref", "source_document_id", "evidence_ref", "onss_special_160_status", "special_160_evidence_ref",
+    # Block M-ECWC: facts selecting the ONSS ContributionType, each with its evidence reference
+    "closure_fund_sector", "closure_fund_sector_evidence_ref", "workforce_class", "workforce_class_evidence_ref",
+    "wage_moderation_status", "wage_moderation_evidence_ref")
+# (fact column, its evidence column, vocabulary name in belgium_content)
+BE_ONSS_EMPLOYER_FACTS = (("closure_fund_sector", "closure_fund_sector_evidence_ref", "CLOSURE_FUND_SECTORS"),
+                          ("workforce_class", "workforce_class_evidence_ref", "WORKFORCE_CLASSES"),
+                          ("wage_moderation_status", "wage_moderation_evidence_ref", "WAGE_MODERATION_STATUSES"))
 BE_UNIT_FIELDS = ("registration_id", "unit_number", "name", "address", "region", "effective_from", "effective_to",
                   "legal_entity_id", "evidence_ref")
 BE_PROFILE_FIELDS = ("effective_from", "effective_to", "legal_entity_id", "worker_category", "onss_worker_code",
@@ -784,6 +792,10 @@ def record_be_employer_registration(db: Session, organization_id: int, payload: 
     _enum(data, "onss_special_160_status", _content().SPECIAL_160_STATUSES)                    # G-25
     if data.get("onss_special_160_status") in ("APPLIES", "NOT_APPLICABLE") and not data.get("special_160_evidence_ref"):
         raise BadRequestException("The special-contribution status needs its evidence (special_160_evidence_ref).")
+    for fact, evidence, vocabulary in BE_ONSS_EMPLOYER_FACTS:                                   # M-ECWC
+        _enum(data, fact, getattr(_content(), vocabulary))
+        if data.get(fact) not in (None, "UNKNOWN") and not data.get(evidence):
+            raise BadRequestException(f"{fact} needs its evidence reference ({evidence}).")
     if data.get("employer_category_code") is not None:
         data["employer_category_code"] = data["employer_category_code"].upper()
         if not _CODE.fullmatch(data["employer_category_code"]):
@@ -1510,7 +1522,7 @@ def _be_holiday_absence_inputs(db: Session, organization_id: int, employee, pay_
 
 
 def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date: date, pack_version=None,
-                           period=None) -> dict:
+                           period=None, pack_row_id=None) -> dict:
     """Every Belgian input in force ON THE PAY DATE. Nothing is inferred: a
     missing record stays None and the engine refuses with its own reason. Pay
     basis (G-22) and contract (G-23) come from the worker profile and the
@@ -1529,6 +1541,8 @@ def resolve_be_calc_inputs(db: Session, organization_id: int, employee, pay_date
         **_be_working_time_inputs(db, organization_id, employee, period),
         **_be_holiday_absence_inputs(db, organization_id, employee, pay_date),
         "be_identifier_masked": _be_identifier_masked(db, organization_id, employee.id),
+        # M-ECWC: the quarter of the ONSS rate table in force (None when no file: the table path then blocks)
+        "be_onss_rate_table": _be_onss_rate_table(db, pack_row_id, pay_date),
         "be_ytd": be_ytd_snapshot(db, organization_id, employee.id, entity, pay_date),
         "be_pack_version": pack_version, "be_organization_id": organization_id, "be_legal_entity_id": entity,
         "be_employee_id": employee.id,
@@ -1540,7 +1554,8 @@ _BE_CTX_DECIMALS = ("gross", "basic", "hra", "special_allowance", "overtime", "a
                     "be_daily_rate")
 _BE_CTX_PLAIN = ("pay_frequency", "be_components", "be_source_periods", "be_pay_frequency", "be_pack_version",
                  "be_organization_id", "be_legal_entity_id", "be_employee_id", "trace_id", "be_component_mappings",
-                 "be_allowance_items", "be_working_time", "be_indexation", "be_holiday", "be_identifier_masked")
+                 "be_allowance_items", "be_working_time", "be_indexation", "be_holiday", "be_identifier_masked",
+                 "be_onss_rate_table")
 _BE_CTX_DATES = ("pay_date", "be_pay_date", "period_start", "period_end", "be_date_of_birth")
 _BE_RECORD_KEYS = ("be_registration", "be_profile")
 _BE_LIST_KEYS = ("be_classifications", "be_schedules", "be_declarations", "be_absence_episodes",
@@ -1551,6 +1566,15 @@ _BE_RATE_FIELDS = ("component_key", "label", "employee_rate_pct", "employer_rate
 _BE_SLAB_FIELDS = ("id", "rule_type", "filing_status", "tax_regime", "assessment_basis", "rate_label", "rate_pct",
                    "min_amount", "max_amount", "flat_amount", "tax_formula", "formula_expression", "sort_order",
                    "effective_from", "effective_to")
+
+
+def _be_onss_rate_table(db: Session, pack_row_id, pay_date: date):
+    """The ONSS rate-table input for the engine (Block M-ECWC); None without a pack or a file for the quarter."""
+    if pack_row_id is None:
+        return None
+    from app.modules.payroll import belgium_onss_rates
+
+    return belgium_onss_rates.be_onss_rate_table_input(db, pack_row_id, pay_date)
 
 
 # Block J2: snapshot data-shape versions (JSON only, no migration).

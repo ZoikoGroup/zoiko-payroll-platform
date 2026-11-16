@@ -14,7 +14,7 @@ Belgium is **dormant** after this deploy. No customer sees or uses it until the 
 | # | Check | How |
 |---|-------|-----|
 | 1 | CI green on the PR | `test` (full suite, Python 3.12), `privacy-isolation` (PostgreSQL 15: RLS + the 3 Belgian migration round trips, last step), frontend build |
-| 2 | Single Alembic head = `b7e4c2a9d5f1` (Belgium Block K, on main's merge `cf348b09db2b`) | `cd backend && alembic heads` → exactly one line, `b7e4c2a9d5f1 (head)`. If `main` gained another migration since the PR was opened, there are two heads: stop and re-chain before merging (see `MERGE_PLAN.md`) |
+| 2 | Single Alembic head = `e9c4b7a2d6f3` (Belgium Block M-ECWC, on Block K `b7e4c2a9d5f1`, on main's merge `cf348b09db2b`) | `cd backend && alembic heads` → exactly one line, `e9c4b7a2d6f3 (head)`. If `main` gained another migration since the PR was opened, there are two heads: stop and re-chain before merging (see `MERGE_PLAN.md`) |
 | 3 | `main` has not moved past the PR base | GitHub shows "This branch has no conflicts"; otherwise merge `main` into `nikhil` again and re-run CI |
 | 4 | Database backup | Take a production backup with the standard procedure **immediately before** merging, and note its name and time. Example: `pg_dump -Fc -f zoiko_pre_be_$(date +%Y%m%d%H%M).dump "$DATABASE_URL"`, then confirm the file size is non-zero |
 | 5 | Deploy window | Low-traffic window; someone who can SSH to the backend host is available for 30 min after the merge |
@@ -28,6 +28,13 @@ Three additive migrations, applied in order by `alembic upgrade head` (`f3a9c1d7
 Block K adds a fourth, `b7e4c2a9d5f1` (after main's merge revision `cf348b09db2b`), with **2 platform tables**:
 `payroll_be_gate_evidence` and `payroll_be_decisions` (Super Admin records, no organisation, so no RLS policy —
 like `payroll_source_artifacts`).
+
+Block M-ECWC adds a fifth, `e9c4b7a2d6f3` (after `b7e4c2a9d5f1`), with **4 more platform tables** — the ONSS rate
+table: `payroll_be_onss_rate_files`, `payroll_be_onss_rates`, `payroll_be_onss_code_combinations`,
+`payroll_be_onss_type_rules` (pack content, no organisation, no RLS) — and **6 columns** on
+`payroll_be_employer_registrations` (`closure_fund_sector`, `workforce_class`, `wage_moderation_status`, each
+`NOT NULL DEFAULT 'UNKNOWN'` with a CHECK, plus their nullable `*_evidence_ref`). The tables are empty; existing
+registrations read UNKNOWN, which only matters once a pack signs its ONSS keys `RATE_TABLE`.
 
 - **19 new tenant / worker tables**, all empty, each with row-level security ENABLED + FORCED and the tenant policy:
   `payroll_be_identifier_vault`, `payroll_be_identifier_access_events`, `payroll_be_employer_registrations`,
@@ -47,7 +54,7 @@ payslip templates refuse a BE scope (Block H1).
 
 Rehearsed locally: `python -m scripts.be_deploy_rehearsal /tmp/be_rehearsal.db` (from `backend/`) replays the
 deploy from `f3a9c1d7e2b4` on a throwaway SQLite file:
-- the drift filter explains all 21 Belgian objects;
+- the drift filter explains all 25 Belgian tables and the added columns;
 - a second upgrade is a no-op;
 - the orphan-path stamp walk never skips pending migrations;
 - the three downgrades work on empty tables.
@@ -58,19 +65,20 @@ Run as a read-only role (or in a transaction you roll back). Every query only re
 
 ```sql
 -- 3.1 Alembic is at the single head
-SELECT version_num FROM alembic_version;                       -- expect exactly: b7e4c2a9d5f1
+SELECT version_num FROM alembic_version;                       -- expect exactly: e9c4b7a2d6f3
 
--- 3.2 The 21 Belgian tables exist (19 tenant / worker + 2 platform)
+-- 3.2 The 25 Belgian tables exist (19 tenant / worker + 6 platform)
 SELECT count(*) FROM information_schema.tables
- WHERE table_schema = 'public' AND table_name LIKE 'payroll\_be\_%';                   -- expect 21
+ WHERE table_schema = 'public' AND table_name LIKE 'payroll\_be\_%';                   -- expect 25
 
 -- 3.3 Row-level security is enabled AND forced on every one, each with a policy
 SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
        (SELECT count(*) FROM pg_policies p WHERE p.tablename = c.relname) AS policies
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE 'payroll\_be\_%'
- ORDER BY c.relname;     -- expect t | t | >= 1 on the 19 tenant / worker tables; payroll_be_gate_evidence and
-                         -- payroll_be_decisions are platform tables: f | f | 0 (no organisation, by design)
+ ORDER BY c.relname;     -- expect t | t | >= 1 on the 19 tenant / worker tables; payroll_be_gate_evidence,
+                         -- payroll_be_decisions and the four payroll_be_onss_* tables are platform tables:
+                         -- f | f | 0 (no organisation, by design)
 
 -- 3.4 The two shared columns exist and are unused
 SELECT table_name, column_name, is_nullable FROM information_schema.columns
@@ -119,7 +127,7 @@ Belgian code. Existing Belgian data stays intact and auditable.
 
 **The rollback guarantee is `tests/test_belgium_dormancy_proof.py`**, run by CI as the last step of the
 `privacy-isolation` job ("Belgium rollback proof (dormancy)") in both deploy workflows. It uses the full schema
-(21 tables) with Belgium switched off by every setting, and proves:
+(25 tables) with Belgium switched off by every setting, and proves:
 - every `/api/payroll/belgium` route answers 404;
 - the Belgian calculation is blocked in every mode, and a Belgian preview is refused;
 - the Super Admin console loads read-only, with no write;
