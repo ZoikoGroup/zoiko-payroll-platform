@@ -302,10 +302,10 @@ def test_core_org_employee_in_its_country_allowed_other_country_by_mode():
 def test_core_employee_api_blocked_outside_its_country(client):
     headers = _headers(client, _core_api)
     r = client.post("/api/payroll/employees", headers=headers,
-                    json={"employee_code": "CA-1", "name": "India Hire"})
+                    json={"employee_code": "CA-1", "name": "India Hire", "email": "ca-1@example.com"})
     assert r.status_code == 200, r.text
     r = client.post("/api/payroll/employees", headers=headers,
-                    json={"employee_code": "CA-2", "name": "US Hire", "country_code": "US"})
+                    json={"employee_code": "CA-2", "name": "US Hire", "country_code": "US", "email": "ca-2@example.com"})
     assert r.status_code == 403, r.text
     assert "Your Core plan includes 1 country (India)" in r.text
 

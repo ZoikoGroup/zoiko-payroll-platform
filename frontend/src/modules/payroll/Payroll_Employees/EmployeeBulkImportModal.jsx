@@ -7,6 +7,7 @@ import { COUNTRIES, COUNTRY_FIELD_SPECS, COMPLIANCE_SPECS, DUPLICATE_ID_FIELDS, 
 import { useEntitledCountries, toEmployeeCountryCode } from "../EntitledCountriesContext";
 import { getCurrencyForJurisdiction } from "../../../utils/currency";
 import PlanLimitMessage, { isPlanLimitError, PLAN_SELECTION_ROUTE } from "../../../components/PlanLimitMessage";
+import { emailError, phoneError } from "../../../utils/contactValidation";
 
 const COLUMN_MAP = {
   "ID": "_existingId",
@@ -69,11 +70,13 @@ const REQUIRED_BASE_HEADERS = ["Employee Name", "Email", "Designation", "Date of
 // A sample employee per country, so each template reads like that
 // country's own payroll (salary in its currency, a local bank).
 const COUNTRY_SAMPLES = {
-  IN: { name: "Asha Rao", email: "asha.rao@example.com", phone: "9876543210", bank: "HDFC Bank", account: "123456789012", ctc: 1200000 },
-  US: { name: "Jordan Lee", email: "jordan.lee@example.com", phone: "4155550123", bank: "Chase", account: "000123456789", ctc: 85000 },
-  UK: { name: "Oliver Smith", email: "oliver.smith@example.com", phone: "07700900123", bank: "Barclays", account: "12345678", ctc: 45000 },
+  IN: { name: "Asha Rao", email: "asha.rao@example.com", phone: "+91 98765 43210", bank: "HDFC Bank", account: "123456789012", ctc: 1200000 },
+  US: { name: "Jordan Lee", email: "jordan.lee@example.com", phone: "+1 415 555 0123", bank: "Chase", account: "000123456789", ctc: 85000 },
+  UK: { name: "Oliver Smith", email: "oliver.smith@example.com", phone: "+44 7700 900123", bank: "Barclays", account: "12345678", ctc: 45000 },
 };
-const GENERIC_SAMPLE = { name: "Alex Morgan", email: "alex.morgan@example.com", phone: "5550123", bank: "Example Bank", account: "12345678", ctc: 60000 };
+// Phone samples carry the country code ("+..."): Excel keeps them as text, so
+// the leading + and 0 are not lost the way a plain number cell loses them.
+const GENERIC_SAMPLE = { name: "Alex Morgan", email: "alex.morgan@example.com", phone: "+44 20 7946 0123", bank: "Example Bank", account: "12345678", ctc: 60000 };
 
 function countryName(countryCode) {
   return COUNTRIES.find((c) => c.code === countryCode)?.name || countryCode;
@@ -178,6 +181,8 @@ function instructionRowsFor(countryCode) {
     else if (base === "Employment Type") accepts = EMPLOYMENT_TYPES.join(", ");
     else if (base === "Status") accepts = EMPLOYEE_STATUSES.join(", ");
     else if (base === "Date of Joining (YYYY-MM-DD)") accepts = "Date, e.g. 2026-01-15";
+    else if (base === "Email") accepts = "A valid email address, e.g. name@company.com";
+    else if (base === "Phone") accepts = "Digits with the country code, e.g. +44 7700 900123 (a number without + is read as a number of this country)";
     else if (spec?.choices && spec.choices.every((c) => ["true", "false"].includes(c.toLowerCase()))) accepts = "Yes or No";
     else if (spec?.choices) accepts = `${[...new Set(spec.choices)].join(", ")} (any capitalisation)`;
     else if (spec?.type === "date") accepts = "Date, e.g. 2026-01-15";
@@ -293,6 +298,10 @@ function toRowObject(rawRow, importCountry) {
     if (!(field in row)) row[field] = "";
   }
 
+  // Email is compared and stored trimmed + lowercased (as the server does);
+  // a phone typed as a number cell arrives as a number — read it as text.
+  row.email = String(row.email ?? "").trim().toLowerCase();
+  row.phone = String(row.phone ?? "").trim();
   row.dateOfJoining = normalizeDate(row.dateOfJoining);
   // Department is free text — the uploaded value is used as-is (no whitelist).
   row.department = row.department || DEPARTMENTS[0];
@@ -353,7 +362,8 @@ function validateRow(row, entitlement, importCountry) {
   }
   if (!String(row.name || "").trim()) errors.push("Employee name is required");
   if (!String(row.email || "").trim()) errors.push("Email is required");
-  else if (!/^\S+@\S+\.\S+$/.test(row.email)) errors.push("Email format looks incorrect");
+  else if (emailError(row.email)) errors.push(emailError(row.email));
+  if (phoneError(row.phone)) errors.push(phoneError(row.phone));
   if (!String(row.designation || "").trim()) errors.push("Designation is required");
   if (!row.dateOfJoining || isNaN(new Date(row.dateOfJoining))) errors.push("Date of joining is missing or invalid");
   if (!row.ctc || Number(row.ctc) <= 0) errors.push("CTC must be a positive number");

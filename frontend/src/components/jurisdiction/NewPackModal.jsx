@@ -2,22 +2,33 @@ import { useState } from "react";
 import Modal from "../Modal";
 import { useToast } from "../../context/ToastContext";
 import { upsertCompliancePolicy } from "../../service/superAdminService";
-import { inputClass, labelClass, STATUS_OPTIONS, POLICY_STATUS_OPTIONS } from "./constants";
+import { inputClass, labelClass, STATUS_OPTIONS, POLICY_STATUS_OPTIONS, nextPackVersion } from "./constants";
 
-export default function NewPackModal({ country, state, packType, stateOptions = [], onClose, onCreated, defaultPackId }) {
+// "New Version" passes `basePack` (the pack being versioned): the form starts
+// on the next free version number with that pack's metadata, instead of
+// version "1.0" with blank fields - which, with the same Pack ID, used to
+// overwrite the existing 1.0 row in place.
+export default function NewPackModal({ country, state, packType, stateOptions = [], onClose, onCreated, defaultPackId, basePack = null, existingVersions = [] }) {
   const { addToast } = useToast() || {};
+  const b = basePack || {};
   const [form, setForm] = useState({
-    packId: defaultPackId || "", jurisdictionState: state || "", version: "1.0", status: "Draft",
-    effectiveFrom: "", effectiveTo: "", taxYear: "", taxRegime: "", currency: "",
-    regulatoryAuthority: "", complianceCategory: "", complianceOwner: "", engineeringOwner: "", changeSummary: "",
-    nextReviewDate: "", sourceReferences: "",
+    packId: defaultPackId || "", jurisdictionState: b.jurisdictionState || state || "",
+    version: basePack ? nextPackVersion(b.version, existingVersions) : "1.0", status: "Draft",
+    effectiveFrom: "", effectiveTo: "", taxYear: "", taxRegime: b.taxRegime || "", currency: b.currency || "",
+    regulatoryAuthority: b.regulatoryAuthority || "", complianceCategory: b.complianceCategory || "",
+    complianceOwner: b.complianceOwner || "", engineeringOwner: b.engineeringOwner || "", changeSummary: "",
+    nextReviewDate: "", sourceReferences: b.sourceReferences || "",
   });
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
   async function save() {
-    if (!form.packId.trim() || !form.effectiveFrom) {
-      addToast?.("Pack ID and Effective From are required.", "error");
+    if (!form.packId.trim() || !form.effectiveFrom || !form.version.trim()) {
+      addToast?.("Pack ID, Version and Effective From are required.", "error");
+      return;
+    }
+    if (existingVersions.includes(form.version.trim())) {
+      addToast?.(`Version ${form.version.trim()} already exists - open it and use Edit, or choose another version.`, "error");
       return;
     }
     setSaving(true);

@@ -4,6 +4,12 @@ import {
   getCustomFields, createCustomField, createUpdateForm, sendUpdateForm,
 } from "../../../service/payrollService";
 import { STANDARD_EMPLOYEE_FIELDS } from "./EmployeeBulkEditPanel";
+
+// Fields an employee may fill in about themselves. Salary, status, dates and
+// job details are the employer's to set (Update Employees), and the server
+// refuses a form that asks for them (forms/service.py SELF_SERVICE_STANDARD_FIELDS).
+const SELF_SERVICE_KEYS = ["bankName", "bankAccountNumber", "ifscCode", "panNumber", "uan"];
+const SELF_SERVICE_FIELDS = STANDARD_EMPLOYEE_FIELDS.filter((f) => SELF_SERVICE_KEYS.includes(f.key));
 import {
   EmployeePicker, FieldChecklist, WizardError, WizardFooter, WizardSteps, sectionLabelClass, wizardInputClass,
 } from "./EmployeeWizardParts";
@@ -77,7 +83,7 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
   const skipped = selectedEmployees.filter((e) => !e.email);
 
   const fields = useMemo(() => [
-    ...STANDARD_EMPLOYEE_FIELDS.filter((f) => checkedStandard[f.key]).map((f) => toFieldConfig(f, "standard")),
+    ...SELF_SERVICE_FIELDS.filter((f) => checkedStandard[f.key]).map((f) => toFieldConfig(f, "standard")),
     ...customFields.filter((f) => checkedCustom[f.fieldKey]).map((f) => toFieldConfig(f, "custom")),
   ], [checkedStandard, checkedCustom, customFields]);
   const signature = JSON.stringify({ name: formName.trim(), fields });
@@ -248,8 +254,11 @@ export default function SendTemplateBuilder({ employees, selectedIds, onClose, o
 
           <div>
             <span className={sectionLabelClass}>Standard fields</span>
+            <p className="mb-2 text-xs text-foreground-muted">
+              Only details employees provide themselves. Salary, status, dates and job details are changed with Update Employees.
+            </p>
             <FieldChecklist
-              fields={STANDARD_EMPLOYEE_FIELDS.map((f) => ({ key: f.key, label: f.label }))}
+              fields={SELF_SERVICE_FIELDS.map((f) => ({ key: f.key, label: f.label }))}
               checked={checkedStandard}
               onToggle={toggleStandard}
             />

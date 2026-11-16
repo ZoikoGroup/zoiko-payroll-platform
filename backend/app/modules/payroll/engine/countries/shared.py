@@ -1189,6 +1189,31 @@ def evaluate_tax_formula(expression: str, income: Decimal) -> Decimal:
 
 # ── Generic bracket calculator ──────────────────────────────────────────
 
+_SLAB_IDENTITY_FIELDS = (
+    "rule_type", "min_amount", "max_amount", "rate_pct", "employer_rate_pct", "ni_category",
+    "rate_label", "tax_formula", "formula_expression", "flat_amount", "adjustment_amount",
+    "filing_status", "tax_regime", "jurisdiction_state", "jurisdiction_locality",
+)
+
+
+def _drop_identical_slabs(slabs):
+    """Keep the first of any rows identical in every field a calculation
+    reads. Band and bracket sums add each row in, so an exact copy of a row
+    would be charged twice: production audits 2026-11-14/16 found 47 copied
+    NI bands in UK pack #24 and 2 copied federal brackets in US pack #32,
+    synced one-for-one into every org. Rows that differ in any of these
+    fields are all kept."""
+    seen = set()
+    kept = []
+    for s in slabs:
+        key = tuple(getattr(s, f, None) for f in _SLAB_IDENTITY_FIELDS)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(s)
+    return kept
+
+
 def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | None = None) -> Decimal:
     """Progressive slab-based tax on annual income.
 
@@ -1288,7 +1313,9 @@ def _calculate_annual_tax(annual_income: Decimal, slabs, filing_status: str | No
         )
 
     tax = Decimal("0")
-    for slab in sorted(bracket_slabs, key=lambda s: s.min_amount):
+    # An exact copy of a bracket is summed once, not once per copy (A5: US
+    # federal pack #32 held 2 copied brackets, see _drop_identical_slabs).
+    for slab in sorted(_drop_identical_slabs(bracket_slabs), key=lambda s: s.min_amount):
         lower = slab.min_amount
         upper = slab.max_amount if slab.max_amount is not None else annual_income
         if annual_income <= lower:
