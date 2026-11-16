@@ -48,6 +48,15 @@ check("landing page shows pack status badges", landing.includes("packStatus(j.co
 check("landing page loading fix (finally callback)", landing.includes(".finally(() => setLoading(false))"));
 check("summary never invents values (counts only)", summary.includes("awaiting sign-off") && !/defaultValue|placeholder=/.test(summary));
 
+const health = read("components/jurisdiction/PackHealthPanel.jsx");
+const service = read("service/superAdminService.js");
+check("landing page shows the pack health panel", landing.includes("<PackHealthPanel />"));
+check("pack health calls the read-only endpoint", service.includes("/api/super-admin/compliance/pack-health")
+  && health.includes("getCompliancePackHealth()"));
+check("pack health lists all three problem kinds",
+  ["overlappingActive", "duplicateRows", "noActivePack"].every((k) => health.includes(k)));
+check("pack health is read-only (no write calls)", !/apiFetch\(|method:\s*"(POST|PUT|PATCH|DELETE)"/.test(health));
+
 if (failures.length) {
   console.error(`pack-overview-validation: ${failures.length} failed, ${passed} passed`);
   for (const f of failures) console.error(`  ✗ ${f}`);

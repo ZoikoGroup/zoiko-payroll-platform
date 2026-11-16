@@ -8804,6 +8804,116 @@ def get_jurisdiction_pack_overview(db: Session, pack_db_id: int) -> dict:
     }
 
 
+# Columns that do not make two canonical rows different values: identity,
+# audit stamps and display order. Every other column counts.
+_HEALTH_IGNORED_COLUMNS = {"id", "created_at", "updated_at", "created_by_id", "updated_by_id", "sort_order"}
+
+
+def _exact_copy_counts(rows, model) -> dict:
+    """{pack row id: number of extra rows that are exact copies of another row
+    of the same pack}."""
+    columns = [c.name for c in model.__table__.columns if c.name not in _HEALTH_IGNORED_COLUMNS]
+    seen, extra = set(), {}
+    for r in rows:
+        key = tuple(getattr(r, c, None) for c in columns)
+        if key in seen:
+            extra[r.jurisdiction_pack_id] = extra.get(r.jurisdiction_pack_id, 0) + 1
+        else:
+            seen.add(key)
+    return extra
+
+
+def get_compliance_pack_health(db: Session) -> dict:
+    """Read-only health check of every tax pack (P3a; the same checks as the
+    read-only production audit of 2026-11-14): per country, the Active tax
+    pack in force today and what it holds, plus three problem lists -
+    overlapping Active packs for one scope, exact-copy canonical rows (copied
+    slab rows are charged once per copy by bracket/band sums), and countries
+    with packs but no Active country-level tax pack. Reports only; changes
+    nothing."""
+    today = date.today()
+    packs = db.query(JurisdictionPack).filter(JurisdictionPack.pack_type == "tax").all()
+    rates = db.query(ContributionRate).filter(
+        ContributionRate.organization_id.is_(None), ContributionRate.jurisdiction_pack_id.isnot(None)).all()
+    slabs = db.query(TaxSlab).filter(
+        TaxSlab.organization_id.is_(None), TaxSlab.jurisdiction_pack_id.isnot(None)).all()
+
+    rate_count, slab_count, pending = {}, {}, {}
+    for r in rates:
+        rate_count[r.jurisdiction_pack_id] = rate_count.get(r.jurisdiction_pack_id, 0) + 1
+        if any(m in str(v or "").upper() for v in (r.label, r.total, r.text_value) for m in _PENDING_MARKERS):
+            pending[r.jurisdiction_pack_id] = pending.get(r.jurisdiction_pack_id, 0) + 1
+    for s_ in slabs:
+        slab_count[s_.jurisdiction_pack_id] = slab_count.get(s_.jurisdiction_pack_id, 0) + 1
+        if any(m in str(s_.rate_label or "").upper() for m in _PENDING_MARKERS):
+            pending[s_.jurisdiction_pack_id] = pending.get(s_.jurisdiction_pack_id, 0) + 1
+
+    def ref(p):
+        return {"id": p.id, "packId": p.pack_id, "version": p.version, "status": p.status,
+                "jurisdictionState": p.jurisdiction_state or None,
+                "effectiveFrom": p.effective_from, "effectiveTo": p.effective_to}
+
+    def in_force(p):
+        return (p.effective_from is None or p.effective_from <= today) and (
+            p.effective_to is None or p.effective_to >= today)
+
+    countries = {}
+    for p in packs:
+        c = countries.setdefault(p.jurisdiction_country, {
+            "country": p.jurisdiction_country, "packCount": 0, "statusCounts": {}, "activePack": None})
+        c["packCount"] += 1
+        c["statusCounts"][p.status] = c["statusCounts"].get(p.status, 0) + 1
+        if p.status == "Active" and not p.jurisdiction_state and not p.jurisdiction_locality:
+            current = c["activePack"]
+            # Prefer the version in force today; otherwise keep the first seen.
+            if current is None or (in_force(p) and not current["inForceToday"]):
+                c["activePack"] = {
+                    **ref(p), "inForceToday": in_force(p), "approved": p.approved_by_id is not None,
+                    "sourceDocumentAttached": p.source_document_id is not None,
+                    "rates": rate_count.get(p.id, 0), "slabs": slab_count.get(p.id, 0),
+                    "pendingSignOff": pending.get(p.id, 0),
+                }
+
+    # Overlapping Active packs: same country / state / locality / regime with
+    # overlapping effective dates (back-to-back periods are not overlaps).
+    lo, hi = date(1, 1, 1), date(9999, 12, 31)
+    scopes = {}
+    for p in packs:
+        if p.status == "Active":
+            key = (p.jurisdiction_country, p.jurisdiction_state or "", p.jurisdiction_locality or "", p.tax_regime or "")
+            scopes.setdefault(key, []).append(p)
+    overlaps = []
+    for (country, state, locality, regime), group in sorted(scopes.items()):
+        group.sort(key=lambda p: p.id)
+        for i, a in enumerate(group):
+            for b in group[i + 1:]:
+                if (a.effective_from or lo) <= (b.effective_to or hi) and (b.effective_from or lo) <= (a.effective_to or hi):
+                    overlaps.append({"country": country, "state": state or None, "locality": locality or None,
+                                     "taxRegime": regime or None, "packs": [ref(a), ref(b)],
+                                     "bothInForce": in_force(a) and in_force(b)})
+
+    by_id = {p.id: p for p in packs}
+    rate_copies = _exact_copy_counts(rates, ContributionRate)
+    slab_copies = _exact_copy_counts(slabs, TaxSlab)
+    duplicates = [
+        {**ref(by_id[pid]), "country": by_id[pid].jurisdiction_country,
+         "extraRateRows": rate_copies.get(pid, 0), "extraSlabRows": slab_copies.get(pid, 0)}
+        for pid in sorted(set(rate_copies) | set(slab_copies)) if pid in by_id
+    ]
+    duplicates.sort(key=lambda d: -(d["extraSlabRows"] * 1000 + d["extraRateRows"]))
+
+    country_rows = sorted(countries.values(), key=lambda c: c["country"])
+    return {
+        "generatedOn": today,
+        "countries": country_rows,
+        "issues": {
+            "overlappingActive": overlaps,
+            "duplicateRows": duplicates,
+            "noActivePack": [c["country"] for c in country_rows if c["activePack"] is None],
+        },
+    }
+
+
 def se_activation_blockers(db: Session, pack) -> list:
     """ZP-SE-ENG-001 §37/§16 — why a Sweden tax pack may NOT go Active yet
     (empty list = complete). Checks the pack's OWN canonical rows, not an

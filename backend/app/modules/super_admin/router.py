@@ -1283,6 +1283,19 @@ def upsert_compliance_policy(
 
 
 @router.get(
+    "/compliance/pack-health",
+    summary="Read-only health check of every tax pack: Active pack per country, overlaps, exact-copy rows",
+)
+def get_compliance_pack_health(
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.payroll import service as payroll_service
+
+    return payroll_service.get_compliance_pack_health(db)
+
+
+@router.get(
     "/compliance/policies/{id}/overview",
     summary="Overview summary of one pack: lifecycle, configuration counts, regions, missing metadata",
 )

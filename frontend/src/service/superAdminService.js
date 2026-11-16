@@ -31,6 +31,9 @@ export const upsertCompliancePolicy = (payload) =>
 
 // Read-only Overview summary of one pack (lifecycle, configuration counts,
 // regions, missing metadata) - every country's Overview tab.
+// Read-only health check of every tax pack (Compliance landing page).
+export const getCompliancePackHealth = () => apiFetch("/api/super-admin/compliance/pack-health");
+
 export const getCompliancePolicyOverview = (id) =>
   apiFetch(`/api/super-admin/compliance/policies/${id}/overview`);
 

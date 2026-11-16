@@ -4,6 +4,7 @@ import { Globe2, ChevronRight, Eye, FileText, ShieldCheck, Zap, Palmtree } from 
 import { getComplianceJurisdictions, getCompliancePolicies } from "../service/superAdminService";
 import { COUNTRY_CODE_TO_ROUTE } from "./JurisdictionCompliance";
 import CountryFlag from "../components/jurisdiction/CountryFlag";
+import PackHealthPanel from "../components/jurisdiction/PackHealthPanel";
 
 // Super Admin > Compliance — Jurisdiction Compliance entry point
 // -----------------------------------------------------------------
@@ -84,6 +85,8 @@ export default function CompliancePage() {
           </Link>
         </div>
       </div>
+
+      <PackHealthPanel />
 
       {loading ? (
         <p className="py-12 text-center text-sm text-foreground-disabled">Loading…</p>
