@@ -1012,3 +1012,24 @@ docs/belgium/sources/inbox/ holds README.md only — nothing to register; skippe
 Engineering is complete. What remains is not engineering: specialist content signing (G1), authority
 access and transmission certification (G3), owner decisions recorded through the decision records, and the
 release gates G1–G7 met by real evidence.
+
+## 2026-11-16 — source parse run: B1, B2, B3, B5 (ONSS 2026/3)
+
+- Fetched by GET from socialsecurity.be and archived in docs/belgium/sources/inbox/ with a `.meta.txt` each
+  (URL, HTTP 200, retrieval date): B1 contributions, B3 BSSC, B5 work bonus (HTML, 2026/3 edition) and B2 the
+  official DmfA rate files 2026 Q1-Q4 (ZIP: XML + XSD; plus the .xlsm workbooks). A1-A3 (FPS Finance, Moniteur
+  belge) NOT fetched: both sites answer automated requests with a human-verification (CAPTCHA) page.
+- `scripts/be_source_inbox.py`: manifest regenerated (11 documents). B1 / B3 / B5 and the four ZIPs ARCHIVED; the
+  .xlsm files UNVERIFIED by the owner's rule (only the extraction source is archived). B2 extracted from the ZIP
+  XML in memory (no unpacking, lxml without entities / network); cross-checked read-only against the .xlsm sheet
+  TB1 (no macro run): 0 differences in every common record, all four quarters.
+- Workbook BE_2026_AI_DRAFT.xlsx: confidence HIGH 9 → 20, NOT FOUND 71 → 63 (305 importable rows). New dated
+  proposal sheets (not imported): employer base 19.88 % + two fund contributions per quarter, the BSSC 2026/3
+  scale, the work-bonus tables (1 Jul / 1 Sep 2026). Engine gaps recorded: BSSC never computed (no key), work
+  bonus needs a category dimension and S at 100 %, no wage moderation on the 1.60 %.
+- D3 dry run on a fresh LOCAL SQLite copy (canonical seed + registered sources): 264 changes, 0 errors; import
+  written, every row still [PENDING G1], pack Draft; nothing signed, no account. Defect found (not fixed, code):
+  be_content_workbook._norm stores the code `000` as `0`.
+- BELGIUM_REVIEWER_GUIDE.md: counts before / after, sources, conflicts, the 10 examples recomputed to 'net
+  before withholding' with sourced ONSS / work bonus / BSSC / employer lines — all 10 still stop at withholding
+  (A1-A3). Tests: workbook + content + inbox 35 passed; privacy scan 0 new findings.

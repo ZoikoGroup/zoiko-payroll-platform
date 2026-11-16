@@ -1,0 +1,6 @@
+list-id: B2
+official: yes
+retrieved: 2026-11-16
+url: https://www.socialsecurity.be/site_fr/employer/applics/dmfa/documents/zip/dmfa_rate_2026_1.zip
+http-status: 200
+note: ONSS DmfA rate file 2026 Q1 (official machine-readable XML + XSD). Data EXTRACTED from this file (read in memory; not unpacked).
