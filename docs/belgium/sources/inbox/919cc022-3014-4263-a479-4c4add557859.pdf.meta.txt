@@ -1,0 +1,6 @@
+list-id: A1
+official: yes
+retrieved: 2026-11-16
+url: http://finances.belgium.be/fr > Entreprises > Personnel et Remuneration > Precompte professionnel > Calcul > 2026 > Formule-cle a partir du 1er janvier 2026 (as stated in the document; downloaded in a browser by the owner)
+http-status: n/a (manual download)
+note: Source B11. FPS Finance "Formule-cle" ESS-SR/2025-0928 for the withholding on remuneration paid from 1 January 2026 (French, 31 pages, created 2025-12-15). Companion of B10 (Annex III). n. 2 states it may be adapted during 2026 following tax reforms; it contains no amendment itself. Saved unchanged under its downloaded name.

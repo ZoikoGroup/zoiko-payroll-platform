@@ -1094,3 +1094,19 @@ release gates G1–G7 met by real evidence.
   none on the platform ONSS tables; 0 rows in every payroll_be_* table in system mode (orgs_visible = 49); no Active
   Belgian pack; no Belgian registry row. The skipped "Post-deploy privacy smoke" is the configured HP-10 condition
   (secret ZP_SMOKE_BASE_URL unset) — an open control owned by the repository admin / ZP-PRIV owner, not Belgian.
+
+## 2026-11-16 — A1 parse run: withholding from 1 January 2026 (B10 + B11)
+
+- Inbox: two documents downloaded by the owner from finances.belgium.be — B10, the official Annex III to the Royal
+  Decree of 11 December 2025 (rules for income paid from 1 Jan 2026, 44 p.), and B11, the FPS Finance Formule-clé
+  ESS-SR/2025-0928 (from 1 Jan 2026, 31 p.). Archived unchanged (sha256 b7c7d3af… / fca89350…). All 35 regular-pay
+  figures are identical in both. No 2026 amendment in either; B11 n° 2 warns the formula may be adapted during 2026.
+  A2 (from 1 Aug) and A3 (from 1 Nov) remain NOT FOUND.
+- Workbook: withholding NOT FOUND 19 -> HIGH 8 / NOT FOUND 11. be_rounding_withholding = CENT_HALF_UP (importable,
+  n° 12). Scale (n° 28, 31-34), family reductions (n° 38-41), fiscal work bonus (n° 46), exceptional / holiday pay
+  (n° 53-57) and overtime (n° 45) on the new proposal sheet — engine gap M-WHT (the engine applies one band to the
+  monthly pay; the law annualises and applies the annual scale). Period strategy and taxable basis as proposed text
+  (no vocabulary).
+- Fresh LOCAL copy: dry run 265 changes, 0 errors; import written; every row still [PENDING G1]; pack Draft.
+- The 10 worked examples now reach FULL NET PAY for July 2026 (the month every archived source applies); August 2026
+  onwards still stops at withholding.
