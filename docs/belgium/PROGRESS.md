@@ -927,3 +927,88 @@ value) → one migration on main's head cf348b09db2b.
 - Routes: 7 new Super Admin platform routes; registry: no existing route changed.
 - Tests: test_belgium_governance.py (8). Re-pins (separate commit): alembic head b7e4c2a9d5f1 / count 269, deploy
   drift sets, NZ x5, PL, ZA pending sets gain the two tables.
+
+## Block L1 — the new rollback proof (dormancy)
+
+- tests/test_belgium_dormancy_proof.py (5): full schema (21 payroll_be_* tables) + Belgium off by every setting
+  (onboarding unset, canary empty, demo off, identifier keys unset, no Active pack): every /api/payroll/belgium route
+  404 (with the Draft pack and Belgian records present); calculate_payroll for BE blocked in standard and simple
+  mode and a Belgian preview refused (a refusal type, not a crash); Super Admin console (packs, decisions, joint
+  committees, readiness, gate evidence, decision records) 200 with zero INSERT / UPDATE / DELETE; Australia (DB:
+  add_payslip_item), Poland and Malaysia (engine dispatcher; Malaysia with its tests' PCB stand-in, PCB not built)
+  identical with the Belgian tables empty and full (>= 8 tables holding rows); app startup with no Belgian setting
+  (runs tests/test_belgium_production_startup.py). Local: 5 passed.
+- CI: "Belgium rollback proof (dormancy)" as the last step of privacy-isolation in both deploy workflows (the only
+  rollback proof). DEPLOY_NOTES §4.1 names it as the guarantee; belgium_rollback_shim.py header marked HISTORICAL
+  (Malaysia's migrations build on the Belgian ones).
+- Limit: Poland / Malaysia are compared through the engine dispatcher, not a full database run (their DB runs need
+  their full content fixtures); Australia covers the shared database path.
+
+## Block L2 — payslip label keys; marker rescan (04b30d0, 1bdf227)
+
+- Item 12 closed: `BE_PAYSLIP_LABELS` (frontend bePayslipLines.js) and `BE_PAYSLIP_LABEL_KEYS` (belgium_payslip_pdf.py)
+  share one key set — `be.payslip.header`, `be.payslip.net`, `be.payslip.section.{bases,employee,employer,obligations}`;
+  the on-screen breakdown renders `data-content-key` on each label. PAYSLIP_EXPLAINER.md no longer says "proposed".
+  Pinned by tests/test_belgium_payslip_labels.py (3).
+- Rescan (TODO / FIXME / XXX / "not yet" / stub / placeholder / NotImplemented over belgium*.py, be_*.py,
+  engine BE files, components/jurisdiction/belgium/, docs/belgium/*.md): one stale comment fixed
+  (PREFLIGHT_PENDING). Every other hit is by design or classified content: DEMO placeholders (E4), HTML input
+  placeholders, structural NOT NULL placeholder columns, `[PENDING G1]` seed rows, the abstract
+  TransmissionAdapter (authority, G3 / D9), BSSC G-17 (specialist, G-06), sector agreement content (specialist),
+  and dated historical log lines later resolved (Phase 2 PG RLS — runs in CI; Phase 3A slab entry — add_slab_row
+  in 3B). **No further engineering blocks identified.**
+
+## Block L3 — source inbox
+
+docs/belgium/sources/inbox/ holds README.md only — nothing to register; skipped.
+
+## Block L4 — final state
+
+- Alembic: single head `b7e4c2a9d5f1` (`alembic heads` → one line); manifest test passes (chunk 0).
+- Route registry: a fresh generation equals the committed registry (0 added / 0 removed / 0 changed, comparing
+  without the 4 health routes of the uncommitted main.py — the same 3 known privacy-registry failures below).
+- Frontend: `npm test` all scripts pass (be-console 19, be-scaffold 9 checks); `npm run build` passes; the
+  Belgian files and every file changed in Block L lint clean. `npm run lint` over the whole repo reports 169 errors
+  in 95 files, none Belgian and none touched by Block L (pre-existing elsewhere in the repo).
+- Full backend suite, 13 chunks of 40 files (+ the test sub-directories in the last chunk), each chunk on a fresh
+  temporary SQLite (PAYROLL_DATABASE_URL from scratchpad safe_env.sh; ZP_TEST_POSTGRES_URL unset, so the
+  Postgres-gated tests skip): **10,627 collected = 10,627 executed** (per-chunk collect-only matches every chunk) —
+  **10,479 passed, 10 failed, 136 skipped, 2 xfailed.**
+- The 10 failures are all known and pre-existing: 5 test_engine_jurisdiction_db_integration (ordering),
+  1 test_hong_kong_configuration (configuration CSV), 3 privacy/test_route_registry (health routes of the
+  uncommitted main.py), and 1 timing flake, test_communications_dispatch::test_deactivate_organization_response_
+  precedes_email_send (passes 3/3 alone and on a full rerun of its chunk; its own comment notes the middleware
+  ordering race). The 5 germany_full_business ordering failures of D1 did not occur. Nothing new.
+
+### Closing summary — every phase and block
+
+| Phase / block | Final commit(s) | Delivered |
+|---|---|---|
+| Phase 0 | 114c2cd, d46478d | Implementation plan, gaps / decisions register, spec + plan errata |
+| Phase 1 | 63feb4b, 922491a | Fail-closed scaffold: BE registration, routes 404 unless enabled, calculation blocked |
+| Phase 2 | 1215a56, abd5b22 | Database foundation (migration be_foundation, RLS on every tenant table) |
+| Phase 3A | 01795d0 | Content model, BE pack reader, Super Admin governance (sign / four-eyes) |
+| Phase 3B | 0696bb4 | Governed slab rows (add / retire) and the Super Admin console |
+| Phase 4 (in Block A) | 02f4891, 720d74b | A1 identifier vault + statutory setup; A2 applicability resolver and endpoint |
+| Phase 5 (in Block A) | 800c464, 8abb230, dab42ae | A3 core engine (bases, ONSS, withholding); A4 organisation / employee screens |
+| Phase 6 (in Block B) | 8432510, 23c02ac | B0 decisions G-22..G-29 + migration; B1 sector wages, indexation, working time |
+| Phase 7 (in Block B) | 6933789 | B2 holiday pay and absence engines |
+| Phase 8 (in Block B) | ed734a1, 38e07bc | B3 run lifecycle, payslip, corrections, SEPA payment |
+| Phase 9 (in Block C) | 952284b, 1403aa5, 143175c | C0 migration; C1 Dimona / DmfA / withholding / Belcotax builders, obligations (transmission behind G3) |
+| Phase 10 (in Block C) | 77de922, 9f18e28, b97c366 | C2 parallel run, golden checks, readiness gates G1–G7, release |
+| Block A | 02f4891 … dab42ae | Phases 4–5 (above) + full-suite reconciliation |
+| Block B | 8432510 … 38e07bc | Phases 6–8 (above) |
+| Block C | 952284b … b97c366 | Phases 9–10 (above) |
+| Block D | 0299909, 1300f95, b9d270f, b2d2858 | Complete verification, hardening review, content intake workbook + bulk signing, handover |
+| Block E | 405b93d, ae49748, 5064d57, 1c8fd7a, 92ec1df | AI-drafted content workbook (unsigned), import as Draft rows, reviewer guide, DEMO pack (non-production), authority onboarding drafts |
+| Block F | 53b77a8, 1cf3a65, 46fb0f4, fa800d0, 42ac810 | Per-row four-eyes fix, source download list + inbox register, reviewer efficiency, merge plan |
+| Block G | — | Not issued (the sequence went from F5 to the main merge a1e4914, then H) |
+| Block H | a1e4914, 845dd99, 472e150, a2d31ed, e6ea0b3, d5bf560 | Main merge; Belgian payslip PDF on every render path; deploy rehearsal, production startup test, deploy notes; CI PG teardown fix; staging rehearsal |
+| Block I | a5809df, d5369cb, 609ace2, a3e4912, 9351222, e6478fe | Rollback study (shim, later superseded); scale fixes + harness; structured events + ops runbook; user guides; post-deploy setup command |
+| Block J | f11b6c2, a267d70, 970ae0d | Rollback proof in CI (later retired); snapshot v2 (pack by reference); bulk acknowledge |
+| Block K | b88340e, 6684da5, ddeb2e2, f5fe44d, 38e8ac6, 7e4de5f, 874647a | Merge with Malaysia; rollback = dormancy + fix-forward; self-audit; employee document templates; gate evidence + decision records (b7e4c2a9d5f1); 21 tables |
+| Block L | 6be331f, 04b30d0, 1bdf227 and the commit adding this entry | Dormancy rollback proof in CI; payslip label keys; marker rescan; final state |
+
+Engineering is complete. What remains is not engineering: specialist content signing (G1), authority
+access and transmission certification (G3), owner decisions recorded through the decision records, and the
+release gates G1–G7 met by real evidence.

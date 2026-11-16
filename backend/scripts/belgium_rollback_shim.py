@@ -1,5 +1,7 @@
-"""SUPERSEDED (owner decision 2026-11-16): Belgian rollback = dormancy + fix-forward; the Belgian schema is permanent
-(main's migrations build on it). Kept as a tool and for the record — see docs/belgium/DEPLOY_NOTES.md section 4.3.
+"""HISTORICAL / SUPERSEDED (owner decision 2026-11-16): a code-only revert can no longer be deployed because
+Malaysia's migrations (merge revision cf348b09db2b) are built on top of the Belgian ones, so the Belgian schema is
+permanent; the rollback is now dormancy + fix-forward, proven by tests/test_belgium_dormancy_proof.py. Kept for the
+record only — see docs/belgium/DEPLOY_NOTES.md section 4.3.
 
 Belgium (ZP-BE-ENG-001) Block I1: the schema shim for a code-only rollback.
 

@@ -1838,7 +1838,7 @@ def post_be_accumulators(db: Session, run, actor_id=None) -> int:
 
 # ── B3: run preflight, approval fingerprint, four-eyes (G-18) ───────────────
 BLOCKING_EXCEPTION_PREFIXES = ()        # every engine exception stops approval (spec §12)
-PREFLIGHT_PENDING = "PENDING"           # a placeholder that does not block (Block C items)
+PREFLIGHT_PENDING = "PENDING"           # a notice that does not block (today: the DEMO pack notice)
 
 
 class _BeItemFacts(dict):
