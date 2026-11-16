@@ -8893,6 +8893,38 @@ def _audit_refusal(db: Session, model, entity_type: str, entity_id: int, attempt
     )
 
 
+def _overlapping_active_tax_pack(db: Session, row: JurisdictionPack, target_from: date, target_to: date):
+    """Another Active tax pack for the same country / state / locality /
+    regime whose effective dates overlap [target_from, target_to].
+
+    Read-only production audit 2026-11-14 found two Active, in-force US Maine
+    packs. The earlier check missed such pairs: an Active pack with no
+    Effective From never matched `effective_from <= ...`, "" and NULL counted
+    as different states / regimes, and locality was ignored (so a city pack
+    clashed with its own state's pack while two packs for one city were never
+    compared as a pair). Blank state / locality / regime now compare equal, a
+    missing Effective From is open-ended, and locality is part of the scope."""
+    def same(column, value):
+        return sa_func.coalesce(column, "") == (value or "")
+
+    return (
+        db.query(JurisdictionPack)
+        .filter(
+            JurisdictionPack.id != row.id,
+            JurisdictionPack.pack_type == "tax",
+            JurisdictionPack.status == "Active",
+            JurisdictionPack.jurisdiction_country == row.jurisdiction_country,
+            same(JurisdictionPack.jurisdiction_state, row.jurisdiction_state),
+            same(JurisdictionPack.jurisdiction_locality, row.jurisdiction_locality),
+            same(JurisdictionPack.tax_regime, row.tax_regime),
+            or_(JurisdictionPack.effective_from.is_(None), JurisdictionPack.effective_from <= target_to),
+            or_(JurisdictionPack.effective_to.is_(None), JurisdictionPack.effective_to >= target_from),
+        )
+        .order_by(JurisdictionPack.id)
+        .first()
+    )
+
+
 def set_jurisdiction_pack_status(
     db: Session, pack_row_id: int, status: str, actor_id: Optional[int] = None,
     bypass_approver_check: bool = False, reason: Optional[str] = None,
@@ -9088,20 +9120,7 @@ def _set_jurisdiction_pack_status(
             db.query(JurisdictionPack).filter(
                 JurisdictionPack.jurisdiction_country == "HK", JurisdictionPack.pack_type == "tax",
             ).order_by(JurisdictionPack.id).with_for_update().all()
-        conflict = (
-            db.query(JurisdictionPack)
-            .filter(
-                JurisdictionPack.id != row.id,
-                JurisdictionPack.pack_type == "tax",
-                JurisdictionPack.status == "Active",
-                JurisdictionPack.jurisdiction_country == row.jurisdiction_country,
-                JurisdictionPack.jurisdiction_state == row.jurisdiction_state,
-                JurisdictionPack.tax_regime == row.tax_regime,
-                JurisdictionPack.effective_from <= target_to,
-                or_(JurisdictionPack.effective_to.is_(None), JurisdictionPack.effective_to >= target_from),
-            )
-            .first()
-        )
+        conflict = _overlapping_active_tax_pack(db, row, target_from, target_to)
         if conflict:
             raise BadRequestException(
                 f"Pack {conflict.pack_id} v{conflict.version} is already Active for this "
