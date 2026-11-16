@@ -1117,11 +1117,23 @@ def _clone_pack_rates(db: Session, source_pack_id: int, target_pack_id: int) -> 
     (e.g. both LQS windows in force at once), lost their source, and every
     Singapore CPF band lost its FULL / PHASE_IN basis (all payroll under the
     new version BLOCKED). Only the identity, the pack link and the
-    bookkeeping timestamps differ from the source row."""
+    bookkeeping timestamps differ from the source row.
+
+    A row identical in every copied value column (sort_order and who created
+    or edited it aside) to one already
+    copied is skipped (production audit 2026-11-14: UK #24 held 47 such
+    copies, US #32 two). Published packs are never edited in place, so a new
+    version is how those copies get cleared."""
     for model in (ContributionRate, TaxSlab):
         columns = [c.name for c in model.__table__.columns if c.name not in _PACK_ROW_CLONE_SKIP]
+        identity = [c for c in columns if c not in ("sort_order", "created_by_id", "updated_by_id")]
+        seen = set()
         for row in db.query(model).filter(model.jurisdiction_pack_id == source_pack_id,
-                                          model.organization_id.is_(None)).all():
+                                          model.organization_id.is_(None)).order_by(model.id).all():
+            key = tuple(getattr(row, c) for c in identity)
+            if key in seen:
+                continue
+            seen.add(key)
             db.add(model(jurisdiction_pack_id=target_pack_id, **{c: getattr(row, c) for c in columns}))
     db.commit()
 
