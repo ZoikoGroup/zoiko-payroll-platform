@@ -4469,6 +4469,98 @@
    "overridden": false
   },
   {
+   "method": "GET",
+   "path": "/api/payroll/belgium/reports/belcotax-copies/{filing_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "belcotax-copies",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_holiday_certificates",
+    "payroll_be_identifier_vault",
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/reports/holiday-certificates/{certificate_id}",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "holiday-certificates",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_holiday_certificates",
+    "payroll_be_identifier_vault",
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/payroll/belgium/reports/individual-account",
+   "data_class": "worker",
+   "action": "read",
+   "resource": "individual-account",
+   "principals": [
+    "org_admin",
+    "payroll_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_holiday_certificates",
+    "payroll_be_identifier_vault",
+    "payroll_employees",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/payroll/belgium/reports/{report_type}/generate",
+   "data_class": "worker",
+   "action": "create",
+   "resource": "generate",
+   "principals": [
+    "org_admin"
+   ],
+   "scope_level": "tenant",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [
+    "payroll_be_accumulator_entries",
+    "payroll_be_holiday_certificates",
+    "payroll_be_identifier_vault",
+    "payroll_employees",
+    "payroll_generated_reports",
+    "payslip_items"
+   ],
+   "overridden": false
+  },
+  {
    "method": "POST",
    "path": "/api/payroll/belgium/runs/{run_id}/exceptions/acknowledge",
    "data_class": "worker",
@@ -23564,6 +23656,22 @@
     "payroll_employees"
    ],
    "overridden": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/report-templates/seed",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "seed",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
   },
   {
    "method": "POST",

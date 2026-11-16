@@ -5025,6 +5025,22 @@ def belgium_configuration_update_row(kind: str, row_id: int, payload: dict = Bod
     return result
 
 
+@router.post("/compliance/belgium/report-templates/seed",
+             summary="Create the Draft Belgian employee-document templates for a year (activation stays gated)")
+def belgium_seed_report_templates(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                                  db: Session = Depends(get_db)):
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import belgium_reports
+
+    year = str((payload or {}).get("year") or "").strip()
+    if not year.isdigit():
+        raise BadRequestException("year is required (YYYY).")
+    rows = belgium_reports.be_seed_report_templates(db, year, current_user.id)
+    db.commit()
+    return {"templates": [{"id": r.id, "key": r.template_key, "type": r.report_type, "status": r.status}
+                          for r in rows]}
+
+
 @router.post("/compliance/belgium/seed-draft",
              summary="Create the Draft Belgium pack from the catalogue (only while none exists; reason; audited)")
 def belgium_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),

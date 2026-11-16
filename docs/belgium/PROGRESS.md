@@ -872,3 +872,31 @@ template engine (a dedicated Belgian PDF renderer; main's PR #158 payslip templa
 payroll_report_templates / payroll_generated_reports (plan §5) with a Belgian renderer, gated by
 template_activation_refusal. K2 / K3 need two new tables (SourceArtifact cannot carry status / rejection / decided
 value) → one migration on main's head cf348b09db2b.
+
+## Block K1 — employee document templates
+
+- Mechanism: payroll_report_templates (+ components / fields) and payroll_generated_reports (plan §5), the same as
+  the other bespoke jurisdiction generators (Mexico); NOT main's PR #158 payslip templates (they refuse Belgium) and
+  not the Block H payslip PDF (a dedicated renderer). `belgium_reports.py`:
+  - be_seed_report_templates(year): three DRAFT templates (INDIVIDUAL_ACCOUNT reusing BE-INDIVIDUAL-ACCOUNT,
+    BELCOTAX_EMPLOYEE_COPY, HOLIDAY_CERTIFICATE) with components / fields (labels = nl / fr / de content keys, D10;
+    document versions BE-INDIVIDUAL-ACCOUNT-A, BE-FICHE-COPY-A, BE-HOLIDAY-CERTIFICATE-A). An existing template is
+    never changed.
+  - Data from committed data only: individual account = approved runs' payslips (gross / net / employer
+    contributions as stored) + the committed ledger per payslip (totals by component = ledger sums; ONSS employee,
+    work bonus, withholding from the ledger); 281.10 copy = the fiche payload (employee-facing amounts, coding) +
+    dependants frozen in the year's committed payslips + lineage (ORIGINAL / CORRECTION / CANCELLATION, corrects);
+    holiday certificate = the certificate row (direction, service year, amounts, prior employer, status).
+  - Preview (JSON / PDF) now, marked "PREVIEW — TEMPLATE NOT APPROVED" (+ DEMO for demo organisations); generation
+    needs an Active template (service.require_active_report_template; activation unchanged:
+    template_activation_refusal), supersedes the previous live document, never edits; a holiday certificate is
+    issued only when APPROVED (immutable — the table's existing rule).
+- Routes: GET /belgium/reports/individual-account, /reports/belcotax-copies/{id}, /reports/holiday-certificates/{id}
+  (worker, tenant, org admin + payroll admin), POST /belgium/reports/{type}/generate (worker, org admin), POST
+  /super-admin/compliance/belgium/report-templates/seed (platform). Registry: 5 new, no existing route changed
+  (explicit dispatch so the call graph sees the data builders → worker class, not tenant_config).
+- Tests: test_belgium_reports.py (5): seeded Draft with layout + gate unchanged; individual account from committed
+  data (totals = ledger sums), required fields, NISS masked, PDF; 281.10 copy fields, dependants, lineage after a
+  correction, non-Belcotax refused; holiday certificate draft preview, issue refused until APPROVED, approved
+  immutable, stable rendering; generation refused until Active, then supersedes. Guard: layout numbers registered.
+- UI: API only in this block (no screen); the shared Report Templates screens show the seeded templates.

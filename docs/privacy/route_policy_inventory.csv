@@ -247,6 +247,10 @@ POST,/api/payroll/belgium/payment-batches/{batch_id}/reconcile,worker,create,rec
 POST,/api/payroll/belgium/payment-batches/{batch_id}/returns,worker,create,returns,org_admin,tenant,,,payroll_be_payment_items|payslip_items,no,
 POST,/api/payroll/belgium/payment-batches/{batch_id}/submit,worker,approve,submit,org_admin,tenant,,,payroll_be_payment_items|payslip_items,no,
 POST,/api/payroll/belgium/payslips/{payslip_item_id}/corrections,worker,create,corrections,org_admin,tenant,,,payslip_items,no,
+GET,/api/payroll/belgium/reports/belcotax-copies/{filing_id},worker,read,belcotax-copies,org_admin|payroll_admin,tenant,,,payroll_be_accumulator_entries|payroll_be_holiday_certificates|payroll_be_identifier_vault|payroll_employees|payslip_items,no,
+GET,/api/payroll/belgium/reports/holiday-certificates/{certificate_id},worker,read,holiday-certificates,org_admin|payroll_admin,tenant,,,payroll_be_accumulator_entries|payroll_be_holiday_certificates|payroll_be_identifier_vault|payroll_employees|payslip_items,no,
+GET,/api/payroll/belgium/reports/individual-account,worker,read,individual-account,org_admin|payroll_admin,tenant,,,payroll_be_accumulator_entries|payroll_be_holiday_certificates|payroll_be_identifier_vault|payroll_employees|payslip_items,no,
+POST,/api/payroll/belgium/reports/{report_type}/generate,worker,create,generate,org_admin,tenant,,,payroll_be_accumulator_entries|payroll_be_holiday_certificates|payroll_be_identifier_vault|payroll_employees|payroll_generated_reports|payslip_items,no,
 POST,/api/payroll/belgium/runs/{run_id}/exceptions/acknowledge,worker,create,acknowledge,org_admin,tenant,,,payslip_items,no,
 POST,/api/payroll/belgium/runs/{run_id}/exceptions/acknowledge-bulk,worker,create,acknowledge-bulk,org_admin,tenant,,,payslip_items,no,
 POST,/api/payroll/belgium/runs/{run_id}/payment-batches,worker,create,payment-batches,org_admin,tenant,,,payroll_be_payment_items|payroll_employees|payslip_items,no,
@@ -1232,6 +1236,7 @@ GET,/api/super-admin/compliance/belgium/packs/{pack_row_id}/golden-check,platfor
 GET,/api/super-admin/compliance/belgium/packs/{pack_row_id}/signing-status,platform,read,signing-status,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/belgium/packs/{pack_row_id}/slab-rows/{key},platform,create,slab-rows,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/belgium/readiness,aggregate,read,readiness,super_admin,platform,,,payroll_be_employment_classifications|payroll_be_worker_profiles|payroll_employees,yes,Belgium release gates G1-G7: counts and organisation ids only (G2 counts uncovered employment lines)
+POST,/api/super-admin/compliance/belgium/report-templates/seed,platform,create,seed,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/belgium/seed-draft,platform,create,seed-draft,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/brazil/employees,worker,read,employees,,tenant,,worker-level data requires a live JIT support grant (ZP-PRIV A/B),payroll_employees,yes,"lists Brazilian employees (names, codes) of one organization"
 GET,/api/super-admin/compliance/brazil/employees/{employee_id},worker,read,employees,,tenant,,worker-level data requires a live JIT support grant (ZP-PRIV A/B),payroll_employees,yes,"one Brazilian employee's statutory profile, dependants, alimony and VT (Phase 4)"

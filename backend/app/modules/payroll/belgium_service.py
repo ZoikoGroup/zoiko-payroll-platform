@@ -1841,13 +1841,13 @@ class _BeItemFacts(dict):
 
 
 def be_snapshot_facts(db: Session, query_filter, order_by=None, **paths) -> list:
-    """[_BeItemFacts] for the Belgian payslips matching `query_filter`: id, employee_id, notes, status, gross_pay,
+    """[_BeItemFacts] for the Belgian payslips matching `query_filter`: id, employee_id, payroll_run_id, notes, status, gross_pay,
     net_pay + each requested snapshot path (name=key or name=(key, subkey)). JSON-path extraction, so a run-wide
     reader never materialises every payslip's full snapshot (J2 memory). An absent path reads as None."""
     from app.modules.payroll.models import PayslipItem
 
     snap = PayslipItem.be_calculation_snapshot
-    base = ("id", "employee_id", "notes", "status", "gross_pay", "net_pay")
+    base = ("id", "employee_id", "payroll_run_id", "notes", "status", "gross_pay", "net_pay")
     cols = [getattr(PayslipItem, c).label(c) for c in base] + [snap[path].label(f"path_{n}") for n, path in paths.items()]
     query = db.query(*cols).filter(PayslipItem.country_code == BE, *query_filter)
     query = query.order_by(*(order_by if order_by is not None else (PayslipItem.employee_id, PayslipItem.id)))

@@ -196,6 +196,13 @@ _STRUCTURAL_NUMBERS = {
         2025: "DEMO employees' illustrative hire year", 2026: "DEMO month year", 9: "DEMO month (September)",
         30: "DEMO month end day",
     },
+    "belgium_reports.py": {
+        0: "zero / first tuple element / table origin", 1: "first day / tuple index / last cell (-1)",
+        2: "template tuple index (document version)", 3: "template tuple index (components) / spacing (mm)",
+        5: "field tuple index (required flag)", 12: "December (calendar year end)", 31: "31 December (year end)",
+        50: "source_column width / label column (mm)", 120: "value column width (mm)", 8: "table font size (pt)",
+        0.5: "table grid line width (pt)",
+    },
     "belgium_payslip_pdf.py": {
         0: "table origin cell", 1: "last table cell (-1) / spacer width", 4: "section spacing (mm)",
         9: "table font size (pt)", 0.5: "table grid line width (pt)", 45: "label column width (mm)",
