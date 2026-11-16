@@ -343,6 +343,9 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         "3880223bfaa0",
         "40efec6cf8b7", "4b296dbd4181",
         "737e7bfa2d77",
+        # 8a1f5ef9fa5d (Belgium Block C): rugvedh's Mexico CFDI lifecycle merge (4de7c091ab32)
+        # and main's Malaysia merge (cf348b09db2b) both grow from it; rejoined by d6b2e8f4a1c9.
+        "8a1f5ef9fa5d",
         # 998877665544: main's Singapore chain (c3d9e1f4a7b2) and venu's
         # 7c3e1a9d5f20 both grow from it; rejoined by merge 66072e2d80a9.
         "998877665544",
@@ -364,15 +367,18 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         # c9d8e7f6a5b4 (Italy F24 causale) both grow from it; rejoined by
         # merge f898189cb4e3.
         "cd62503afe26",
+        # cf348b09db2b: main's Belgium Block K (b7e4c2a9d5f1) and rugvedh's merge d6b2e8f4a1c9
+        # both grow from it; rejoined by merge e3f9a7c1b5d2.
+        "cf348b09db2b",
         "d4e5f6a7c8b9", "d6e7f8a9b0c1", "d7e2f4a91b53", "dde9b427b6bf",
         "f0b1c2d3e4f5", "f1b78410d568",
-        # f3a9c1d7e2b4 (payslip templates): main's Belgium chain (1d76678ef1a1) and
-        # venu's Malaysia chain (13574b996ccf) both grow from it; rejoined by merge
-        # cf348b09db2b.
+        # f3a9c1d7e2b4 (payslip templates): main's Belgium chain (1d76678ef1a1), venu's
+        # Malaysia chain (13574b996ccf) and rugvedh's Mexico merge (2defe5c4edd6) all grow
+        # from it; rejoined by merges cf348b09db2b / d6b2e8f4a1c9.
         "f3a9c1d7e2b4",
         # f5c1a8d3e9b2: main's Mexico M8 (a6d2f9c4b8e1) and the ZP-PRIV chain
         # (a7c3e91f2b60) both grow from it; rejoined by merge c3e5a7b9d1f4.
-        "f3a9c1d7e2b4", "f5c1a8d3e9b2",
+        "f5c1a8d3e9b2",
         "fbfe6d7eeb2e",
     ]
 
