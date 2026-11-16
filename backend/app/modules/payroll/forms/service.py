@@ -324,7 +324,12 @@ def submit_public_form(db: Session, token: str, values: dict) -> dict:
     allowed_keys = {f["key"] for f in _self_service_fields(form)}
     clean_values = {k: v for k, v in (values or {}).items() if k in allowed_keys}
     # A bad email / phone is refused now, while the employee can still fix it.
-    employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == send.employee_id).first()
+    # Token-based public path (no logged-in principal): scoped to the send's
+    # own organization, never a raw PayrollEmployee query.
+    from app.core.authz.scopes import organization_scoped
+
+    employee = organization_scoped(db, PayrollEmployee, send.organization_id).filter(
+        PayrollEmployee.id == send.employee_id).first()
     clean_values.update(_normalized_contact_values(form, clean_values, employee))
 
     submission = PayrollUpdateFormSubmission(
