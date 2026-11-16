@@ -53,10 +53,16 @@ NEW_TABLES = TENANT + WORKER
 SHARED = {"payslip_items": {"be_calculation_snapshot"}, "payroll_runs": {"be_approval_fingerprint"}}
 # Columns a LATER Belgium revision (Block B, 2943a0490b5b be_absence_holiday_payment)
 # adds to this revision's tables; tests/test_belgium_block_b_migration.py covers them.
-LATER = {"payroll_be_worker_profiles": {"pay_basis"},
-         "payroll_be_employment_classifications": {"contract_type", "contract_start_date", "contract_end_date"},
-         "payroll_be_employer_registrations": {"onss_special_160_status", "special_160_evidence_ref"}}
+LATER_BLOCK_B = {"payroll_be_worker_profiles": {"pay_basis"},
+                 "payroll_be_employment_classifications": {"contract_type", "contract_start_date", "contract_end_date"},
+                 "payroll_be_employer_registrations": {"onss_special_160_status", "special_160_evidence_ref"}}
+# Block M-ECWC (e9c4b7a2d6f3) adds the ContributionType facts + evidence on the employer registrations.
+M_ECWC_COLUMNS = {"payroll_be_employer_registrations": {
+    "closure_fund_sector", "closure_fund_sector_evidence_ref", "workforce_class", "workforce_class_evidence_ref",
+    "wage_moderation_status", "wage_moderation_evidence_ref"}}
+LATER = {t: LATER_BLOCK_B.get(t, set()) | M_ECWC_COLUMNS.get(t, set()) for t in {**LATER_BLOCK_B, **M_ECWC_COLUMNS}}
 LATER_REVISION = "2943a0490b5b"
+M_ECWC_REVISION = "e9c4b7a2d6f3"           # adds the employer-registration fact columns (and four platform tables)
 LATER_TABLES = ("payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches",
                 "payroll_be_payment_items", "payroll_be_component_mappings")
 # Tables the Block C revision (8a1f5ef9fa5d be_filing_parallel) creates.
@@ -193,6 +199,10 @@ def test_autogenerate_sees_no_difference_for_belgium(model_engine):
     _run(engine, "downgrade")
     _run(engine, "upgrade")
     _run_later(engine, "upgrade")                    # restores the Block B columns on these tables
+    module = _load(M_ECWC_REVISION)                  # and the Block M-ECWC employer-registration columns
+    with engine.begin() as conn:
+        with Operations.context(MigrationContext.configure(conn)):
+            module.upgrade()
 
     def touches_belgium(diff):
         flat = diff if isinstance(diff, tuple) else ()
@@ -289,7 +299,7 @@ def test_deploy_drift_filter_explains_every_be_object():
     # (tables, and the Block B columns on this revision's tables).
     assert tables == set(NEW_TABLES) | set(LATER_TABLES) | set(BLOCK_C_TABLES)
     assert {t: c for t, c in columns.items() if t in SHARED} == SHARED
-    assert {t: c for t, c in columns.items() if t not in SHARED} in ({}, LATER)
+    assert {t: c for t, c in columns.items() if t not in SHARED} in ({}, LATER_BLOCK_B)   # later blocks subtracted
 
 
 def test_revision_is_the_single_child_of_the_previous_head():

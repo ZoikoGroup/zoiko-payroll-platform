@@ -108,5 +108,5 @@ def test_app_starts_with_no_belgian_settings_and_belgium_is_dormant(tmp_path):
     assert set(out["beStatuses"].values()) == {404}, out.get("why")
     for path, (code, body) in out["console"].items():
         assert code == 200, (path, code, body)
-    assert out["bePacks"] == 0 and out["beRows"] == 0 and out["beTables"] == 21
+    assert out["bePacks"] == 0 and out["beRows"] == 0 and out["beTables"] == 25    # 19 tenant + 6 platform
     assert out["beRegistry"] in (0, None)

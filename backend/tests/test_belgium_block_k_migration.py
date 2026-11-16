@@ -103,7 +103,9 @@ def test_literal_names_manifest_single_child_and_single_head():
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
     assert children == [FILENAME]
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert script.get_heads() == [REVISION]
+    # Block M-ECWC (e9c4b7a2d6f3) is the single child of this revision and the head.
+    assert script.get_heads() == ["e9c4b7a2d6f3"]
+    assert script.get_revision("e9c4b7a2d6f3").down_revision == REVISION
 
 
 def test_the_deploy_drift_filter_explains_both_tables():
@@ -115,6 +117,8 @@ def test_the_deploy_drift_filter_explains_both_tables():
     os.chdir(BACKEND)
     try:
         tables, columns = pending_objects(PARENT)
+        later_tables, later_columns = pending_objects(REVISION)       # Block M-ECWC and after: its own tests
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES) and columns == {}
+    assert tables - later_tables == set(NEW_TABLES)
+    assert {t: c - later_columns.get(t, set()) for t, c in columns.items() if c - later_columns.get(t, set())} == {}

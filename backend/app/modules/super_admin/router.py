@@ -5110,6 +5110,111 @@ def belgium_decision_decide(decision_id: int, payload: dict = Body(...), current
     return belgium_governance.be_decision_view(db, row)
 
 
+# ── Block M-ECWC: the ONSS rate table (file attested + rows signed, each four-eyes) ──────────────────────────
+@router.get("/compliance/belgium/packs/{pack_row_id}/onss-rate-files", summary="Belgium ONSS rate files of a pack")
+def belgium_onss_rate_files_list(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                                 db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    return belgium_onss_rates.be_onss_list_rate_files(db, pack_row_id)
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/onss-rate-files",
+             summary="Register an archived quarterly ONSS rate file (every record loaded as REFERENCE)")
+def belgium_onss_rate_file_register(pack_row_id: int, payload: dict = Body(...),
+                                    current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    row = belgium_onss_rates.be_onss_register_rate_file(db, pack_row_id, payload, current_user.id)
+    db.commit()
+    return belgium_onss_rates.be_onss_rate_file_view(row)
+
+
+@router.post("/compliance/belgium/onss-rate-files/{file_id}/attest",
+             summary="Attest the archived file is the genuine ONSS publication (not the registrar)")
+def belgium_onss_rate_file_attest(file_id: int, payload: dict = Body(...),
+                                  current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    row = belgium_onss_rates.be_onss_attest_rate_file(db, file_id, (payload or {}).get("reason"), current_user.id)
+    db.commit()
+    return belgium_onss_rates.be_onss_rate_file_view(row)
+
+
+@router.post("/compliance/belgium/onss-rate-files/{file_id}/mark-live",
+             summary="Make the supported subset of a rate file signable (PENDING)")
+def belgium_onss_rate_file_mark_live(file_id: int, payload: dict = Body(...),
+                                     current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    out = belgium_onss_rates.be_onss_mark_live(db, file_id, payload, current_user.id)
+    db.commit()
+    return out
+
+
+@router.get("/compliance/belgium/onss-rate-files/{file_id}/live-rows",
+            summary="The rows and combinations of a rate file in active use (PENDING / SIGNED)")
+def belgium_onss_rate_file_live_rows(file_id: int, current_user=Depends(get_current_super_admin),
+                                     db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    return belgium_onss_rates.be_onss_live_rows(db, file_id)
+
+
+@router.post("/compliance/belgium/onss-rates/{rate_id}/sign",
+             summary="Sign one live ONSS rate row (not the registrar, not who made it live)")
+def belgium_onss_rate_sign(rate_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    row = belgium_onss_rates.be_onss_sign_rate(db, rate_id, (payload or {}).get("reason"), current_user.id)
+    db.commit()
+    return {"id": row.id, "status": row.status}
+
+
+@router.post("/compliance/belgium/onss-combinations/{combination_id}/sign",
+             summary="Sign one live ONSS code combination (not the registrar, not who made it live)")
+def belgium_onss_combination_sign(combination_id: int, payload: dict = Body(...),
+                                  current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    row = belgium_onss_rates.be_onss_sign_combination(db, combination_id, (payload or {}).get("reason"),
+                                                      current_user.id)
+    db.commit()
+    return {"id": row.id, "status": row.status}
+
+
+@router.get("/compliance/belgium/packs/{pack_row_id}/onss-type-rules",
+            summary="Belgium ONSS ContributionType rules of a pack")
+def belgium_onss_type_rules_list(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                                 db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    return belgium_onss_rates.be_onss_list_type_rules(db, pack_row_id)
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/onss-type-rules",
+             summary="Add an ONSS ContributionType rule (PENDING until another Super Admin signs it)")
+def belgium_onss_type_rule_add(pack_row_id: int, payload: dict = Body(...),
+                               current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    rule = belgium_onss_rates.be_onss_add_type_rule(db, pack_row_id, payload, current_user.id)
+    db.commit()
+    return {"id": rule.id, "status": rule.status}
+
+
+@router.post("/compliance/belgium/onss-type-rules/{rule_id}/sign",
+             summary="Sign an ONSS ContributionType rule (not its author)")
+def belgium_onss_type_rule_sign(rule_id: int, payload: dict = Body(...),
+                                current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    rule = belgium_onss_rates.be_onss_sign_type_rule(db, rule_id, (payload or {}).get("reason"), current_user.id)
+    db.commit()
+    return {"id": rule.id, "status": rule.status}
+
+
 @router.post("/compliance/belgium/seed-draft",
              summary="Create the Draft Belgium pack from the catalogue (only while none exists; reason; audited)")
 def belgium_seed_draft(payload: dict = Body(...), current_user=Depends(get_current_super_admin),

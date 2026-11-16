@@ -120,6 +120,22 @@ SCHEDULE_REGIMES = ("EFFECTIVE", "AVERAGE")
 CONTRACT_TYPES = ("INDEFINITE", "FIXED_TERM", "SPECIFIC_WORK", "REPLACEMENT", "STUDENT", "FLEXI", "OCCASIONAL",
                   "APPRENTICESHIP")
 SPECIAL_160_STATUSES = ("APPLIES", "NOT_APPLICABLE", "UNKNOWN")                                     # G-25
+# Block M-ECWC: the ONSS rate table (DmfA rate file, DmfA glossary zone 00083 "type de cotisation").
+# be_onss_employer_base_rate / be_onss_fund_contributions signed as RATE_TABLE read payroll_be_onss_rates by
+# (employer category, worker code, ContributionType, quarter); SLAB_ROWS keeps the older EC x WC band rows.
+RATE_TABLE = "RATE_TABLE"
+RATE_TABLE_KEYS = ("be_onss_employer_base_rate", "be_onss_fund_contributions")
+ONSS_CODE_KINDS = ("WORKER", "CONTRIBUTION", "UNRELATED")         # XML WorkerCode / ContributionWorkerCode / Unrelated
+# Employer facts that select a ContributionType (four-eyes, evidence required; UNKNOWN blocks).
+CLOSURE_FUND_SECTORS = ("COMMERCIAL", "NON_COMMERCIAL", "NOT_SUBJECT", "UNKNOWN")
+WORKFORCE_CLASSES = ("UNDER_10", "FROM_10_TO_19", "FROM_20", "UNKNOWN")
+WAGE_MODERATION_STATUSES = ("APPLIES", "NOT_APPLICABLE", "UNKNOWN")
+# The worker's remuneration basis for ONSS (the 108 % holiday-scheme uplift or not) — a type-rule condition.
+PAY_100, PAY_108 = "PAY_100", "PAY_108"
+ONSS_PAY_BASES = (PAY_100, PAY_108)
+TYPE_RULE_ANY = "ANY"
+TYPE_RULE_NOT_DUE = "NOT_DUE"                                     # the rule says this contribution is not due
+CONTRIBUTION_TYPE_PATTERN = re.compile(r"^[0-9]$")               # DmfA zone 00083: one digit, stored as text
 ABSENCE_KINDS = ("SICKNESS", "WORK_ACCIDENT", "OCCUPATIONAL_DISEASE", "MATERNITY", "BIRTH_LEAVE", "OTHER_LEAVE")                                                          # BE-022
 PAY_BASES = ("SALARIED", "HOURLY")                                                                   # BE-004
 # Rounding rule vocabulary (unit + mode); WHICH rule applies is G-02 / G-19.

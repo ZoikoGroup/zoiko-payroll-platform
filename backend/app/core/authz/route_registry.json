@@ -23590,6 +23590,102 @@
    "overridden": false
   },
   {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/onss-combinations/{combination_id}/sign",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "sign",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/onss-rate-files/{file_id}/attest",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "attest",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/belgium/onss-rate-files/{file_id}/live-rows",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "live-rows",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/onss-rate-files/{file_id}/mark-live",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "mark-live",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/onss-rates/{rate_id}/sign",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "sign",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/onss-type-rules/{rule_id}/sign",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "sign",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
    "method": "GET",
    "path": "/api/super-admin/compliance/belgium/packs",
    "data_class": "platform",
@@ -23707,6 +23803,70 @@
    "data_class": "platform",
    "action": "read",
    "resource": "golden-check",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/onss-rate-files",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "onss-rate-files",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/onss-rate-files",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "onss-rate-files",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/onss-type-rules",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "onss-type-rules",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "POST",
+   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/onss-type-rules",
+   "data_class": "platform",
+   "action": "create",
+   "resource": "onss-type-rules",
    "principals": [
     "super_admin"
    ],
