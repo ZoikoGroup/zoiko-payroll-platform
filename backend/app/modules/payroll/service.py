@@ -11556,16 +11556,22 @@ def _require_editable_report_template(template: "ReportTemplate", db: Optional[S
 def list_report_templates(
     db: Session, country: Optional[str] = None, state: Optional[str] = None,
     reporting_year: Optional[str] = None, report_type: Optional[str] = None,
-    status: Optional[str] = None, search: Optional[str] = None,
+    status: Optional[str] = None, search: Optional[str] = None, include_states: bool = False,
 ) -> List[ReportTemplate]:
     """Cross-jurisdiction template list — latest version per template_key,
-    same convention as list_all_jurisdiction_packs."""
+    same convention as list_all_jurisdiction_packs.
+
+    With a country and no state, only the country's national templates
+    (jurisdiction_state IS NULL) are returned — unless include_states=True,
+    which also returns every state-level template of that country (the Super
+    Admin Report Templates page; e.g. AU state payroll-tax returns, MX ISN).
+    A given state always narrows to that state only."""
     query = db.query(ReportTemplate)
     if country:
         query = query.filter(ReportTemplate.jurisdiction_country == country)
         if state:
             query = query.filter(ReportTemplate.jurisdiction_state == state)
-        else:
+        elif not include_states:
             query = query.filter(ReportTemplate.jurisdiction_state.is_(None))
     elif state:
         query = query.filter(ReportTemplate.jurisdiction_state == state)
