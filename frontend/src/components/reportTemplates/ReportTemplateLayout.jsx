@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, History, FileBarChart, ScrollText, ShieldCheck, CalendarClock } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, History, FileBarChart, ScrollText, ShieldCheck, CalendarClock, X } from "lucide-react";
 import ConfirmDialog from "../ConfirmDialog";
 import StatusPill from "../StatusPill";
 import Field from "../jurisdiction/Field";
@@ -15,6 +15,7 @@ import { STATUS_OPTIONS, STATUS_PILL_MAP } from "./constants";
 import NewReportTemplateModal from "./NewReportTemplateModal";
 import ComponentsTab from "./ComponentsTab";
 import FilingCalendarTab from "./FilingCalendarTab";
+import { filterTemplates } from "./filterTemplates";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: FileBarChart },
@@ -41,7 +42,7 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
   const [state, setStateRaw] = useState(initialState || "");
-  const [reportType, setReportType] = useState("");
+  const [filterText, setFilterText] = useState("");
   const [templates, setTemplates] = useState([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
@@ -61,13 +62,18 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
     onStateChange?.(next);
   }
 
+  // One fetch per country (and per state when one arrives from the URL):
+  // includeStates returns the country's state-level templates too (AU state
+  // payroll-tax returns, MX ISN, ...). Typing in the filter never refetches.
   const loadTemplates = useCallback(() => {
     if (!country) return;
     setLoadingTemplates(true);
-    getReportTemplates({ country, state: state || undefined, reportType: reportType || undefined })
+    getReportTemplates({ country, state: state || undefined, includeStates: true })
       .then(setTemplates)
       .finally(() => setLoadingTemplates(false));
-  }, [country, state, reportType]);
+  }, [country, state]);
+
+  const visibleTemplates = useMemo(() => filterTemplates(templates, filterText), [templates, filterText]);
 
   useEffect(() => { loadTemplates(); setSelectedId(null); setDetail(null); }, [loadTemplates]);
 
@@ -137,13 +143,20 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
 
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <input
-          className={inputClass + " w-auto min-w-[160px]"} value={state} onChange={(e) => setState(e.target.value)}
-          placeholder="State (optional)"
+          className={inputClass + " w-auto min-w-[240px]"} value={filterText} onChange={(e) => setFilterText(e.target.value)}
+          placeholder="Filter by name or report type" aria-label="Filter by name or report type"
         />
-        <input
-          className={inputClass + " w-auto min-w-[140px]"} value={reportType} onChange={(e) => setReportType(e.target.value)}
-          placeholder="Filter by Report Type"
-        />
+        {state && (
+          <span className="flex items-center gap-1 rounded-full border border-border bg-surface-muted px-2.5 py-1 text-xs font-medium text-foreground-secondary">
+            State: {state}
+            <button
+              type="button" onClick={() => setState("")} aria-label="Clear state"
+              className="rounded-full p-0.5 text-foreground-muted hover:bg-surface hover:text-foreground"
+            >
+              <X size={12} />
+            </button>
+          </span>
+        )}
         <button
           onClick={() => setShowNewTemplate(true)}
           className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-hover"
@@ -158,9 +171,11 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
             <p className="py-8 text-center text-xs text-foreground-disabled">Loading…</p>
           ) : templates.length === 0 ? (
             <p className="py-8 text-center text-xs text-foreground-disabled">No report templates for this jurisdiction yet.</p>
+          ) : visibleTemplates.length === 0 ? (
+            <p className="py-8 text-center text-xs text-foreground-disabled">{`No templates match "${filterText.trim()}"`}</p>
           ) : (
             <div className="space-y-1">
-              {templates.map((t) => (
+              {visibleTemplates.map((t) => (
                 <button
                   key={t.id} onClick={() => setSelectedId(t.id)}
                   className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left text-xs ${
@@ -169,7 +184,7 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
                 >
                   <span className="font-semibold">{t.name}</span>
                   <span className="flex items-center gap-2 text-foreground-muted">
-                    v{t.version} · {t.reportType} · FY {t.reportingYear}
+                    v{t.version} · {t.reportType}{t.jurisdictionState ? ` · ${t.jurisdictionState}` : ""} · FY {t.reportingYear}
                     <StatusPill status={STATUS_PILL_MAP[t.status] || "pending"} label={t.status} />
                   </span>
                 </button>

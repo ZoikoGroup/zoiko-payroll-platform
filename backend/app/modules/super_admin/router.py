@@ -1563,6 +1563,7 @@ def list_report_templates(
     reportType: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    includeStates: bool = Query(False, description="With a country and no state, also return its state-level templates"),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
@@ -1570,7 +1571,7 @@ def list_report_templates(
 
     return payroll_service.list_report_templates(
         db, country=country, state=state, reporting_year=reportingYear, report_type=reportType,
-        status=status, search=search,
+        status=status, search=search, include_states=includeStates,
     )
 
 
