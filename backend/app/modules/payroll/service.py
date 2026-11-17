@@ -713,6 +713,11 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
             f"Pack {existing.pack_id} v{existing.version} is a {existing.pack_type} pack — its type cannot be "
             f"changed to {data.packType!r}."
         )
+    # Edit Overview now links Source Evidence: refuse an id that is not a
+    # recorded artifact instead of failing on the foreign key at commit.
+    if data.sourceDocumentId and not db.query(SourceArtifact.id).filter(
+            SourceArtifact.id == data.sourceDocumentId).first():
+        raise BadRequestException(f"Source document #{data.sourceDocumentId} does not exist.")
     fields = dict(
         pack_id=data.packId,
         version=data.version,
@@ -8719,9 +8724,15 @@ _PACK_OVERVIEW_METADATA = (
 _PENDING_MARKERS = ("PENDING", "NOT CONFIGURED")
 
 
+_NO_SHARE_TEXT = {"N/A", "NA", "NIL", "NONE"}
+
+
 def _has_share(value) -> bool:
     text = str(value or "").strip().rstrip("%").strip()
-    if not text:
+    # "—" / "-" / "N/A": a placeholder for "no share on this side" (the
+    # Caribbean seed writes "—"), not a share. Counting it made every
+    # Jamaica row an employee AND employer row (2026-11-17).
+    if not any(ch.isalnum() for ch in text) or text.upper() in _NO_SHARE_TEXT:
         return False
     try:
         return Decimal(text) != 0
@@ -8756,8 +8767,19 @@ def get_jurisdiction_pack_overview(db: Session, pack_db_id: int) -> dict:
     def _pending(*values) -> bool:
         return any(m in str(v or "").upper() for v in values for m in _PENDING_MARKERS)
 
-    employee_side = [r for r in rates if _has_share(r.employee_share) or _has_share(r.employee_rate_pct)]
-    employer_side = [r for r in rates if _has_share(r.employer_share) or _has_share(r.employer_rate_pct)]
+    def _side(row, text, pct) -> bool:
+        # The numeric column is what the engine reads; the text column is
+        # display only, used when no number is stored. A flat-amount row with
+        # no rate (an allowance, a threshold) is a parameter even when its
+        # amount is echoed into the employee_share display text.
+        if pct is not None:
+            return _has_share(pct)
+        if row.flat_amount is not None and row.employee_rate_pct is None and row.employer_rate_pct is None:
+            return False
+        return _has_share(text)
+
+    employee_side = [r for r in rates if _side(r, r.employee_share, r.employee_rate_pct)]
+    employer_side = [r for r in rates if _side(r, r.employer_share, r.employer_rate_pct)]
     parameters = [r for r in rates if r not in employee_side and r not in employer_side]
 
     by_rule_type = {}

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Modal from "../Modal";
 import { useToast } from "../../context/ToastContext";
-import { upsertCompliancePolicy } from "../../service/superAdminService";
+import { upsertCompliancePolicy, getSourceArtifacts } from "../../service/superAdminService";
 import { inputClass, labelClass } from "./constants";
 
 // Tax packs' Overview tab was read-only — no way to fix a typo in
@@ -19,8 +19,18 @@ export default function EditOverviewModal({ pack, onClose, onSaved }) {
     complianceOwner: pack.complianceOwner || "", engineeringOwner: pack.engineeringOwner || "",
     nextReviewDate: pack.nextReviewDate || "", sourceReferences: pack.sourceReferences || "",
     changeSummary: pack.changeSummary || "", reason: "",
+    sourceDocumentId: pack.sourceDocumentId ? String(pack.sourceDocumentId) : "",
   });
   const [saving, setSaving] = useState(false);
+  // Source Evidence recorded under Super Admin > Compliance. No screen could
+  // link one to a pack, so the source-locked countries (US ...) could never
+  // pass their activation gate (2026-11-17).
+  const [sources, setSources] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    getSourceArtifacts().then((rows) => { if (!cancelled) setSources(rows || []); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
   async function save() {
@@ -36,6 +46,7 @@ export default function EditOverviewModal({ pack, onClose, onSaved }) {
         complianceOwner: form.complianceOwner || null, engineeringOwner: form.engineeringOwner || null,
         nextReviewDate: form.nextReviewDate || null, sourceReferences: form.sourceReferences || null,
         changeSummary: form.changeSummary || null, reason: form.reason || null,
+        sourceDocumentId: form.sourceDocumentId ? Number(form.sourceDocumentId) : null,
       });
       addToast?.("Overview details saved.", "success");
       onSaved(updated);
@@ -59,6 +70,17 @@ export default function EditOverviewModal({ pack, onClose, onSaved }) {
         <div><label className={labelClass}>Compliance Category</label><input className={inputClass} value={form.complianceCategory} onChange={set("complianceCategory")} /></div>
         <div><label className={labelClass}>Compliance Owner</label><input className={inputClass} value={form.complianceOwner} onChange={set("complianceOwner")} /></div>
         <div><label className={labelClass}>Engineering Owner</label><input className={inputClass} value={form.engineeringOwner} onChange={set("engineeringOwner")} /></div>
+        <div className="col-span-3">
+          <label className={labelClass}>Source document (Source Evidence)</label>
+          <select className={inputClass} value={form.sourceDocumentId} onChange={set("sourceDocumentId")}>
+            <option value="">— None linked —</option>
+            {sources.map((s) => (
+              <option key={s.id} value={String(s.id)}>
+                #{s.id} · {s.agency} · {s.formNumber ? `${s.formNumber} · ` : ""}{s.title}{s.hasFile ? "" : " (no file uploaded)"}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="col-span-3"><label className={labelClass}>Source References</label><input className={inputClass} value={form.sourceReferences} onChange={set("sourceReferences")} /></div>
         <div className="col-span-3"><label className={labelClass}>Change Summary</label><textarea className={inputClass} rows={2} value={form.changeSummary} onChange={set("changeSummary")} /></div>
         <div className="col-span-3"><label className={labelClass}>Reason for this edit (optional)</label><input className={inputClass} value={form.reason} onChange={set("reason")} placeholder="e.g. Corrected per ZP-TAX-UK-2026-27-001" /></div>
