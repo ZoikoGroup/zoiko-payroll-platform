@@ -12,7 +12,8 @@ import {
   getCanonicalContributionRates, upsertCanonicalContributionRate, deleteCanonicalContributionRate,
   getTaxConfigurationAudit,
 } from "../../service/superAdminService";
-import { STATUS_PILL_MAP, STATUS_OPTIONS, POLICY_STATUS_OPTIONS, inputClass, PACK_TABS } from "./constants";
+import { STATUS_PILL_MAP, STATUS_OPTIONS, POLICY_STATUS_OPTIONS, inputClass, PACK_TABS, pickActivePack } from "./constants";
+import PackOverviewSummary from "./PackOverviewSummary";
 import Field from "./Field";
 import RatesTab from "./RatesTab";
 import SlabsTab from "./SlabsTab";
@@ -165,13 +166,16 @@ export default function JurisdictionLayout({
   }, [country, state, packType]);
   // autoSelectPack: picked once, when the packs first arrive and nothing is
   // selected (React's "adjust state while rendering" pattern — no effect).
+  // Countries without their own rule open on the Active pack (pickActivePack).
   const [autoPicked, setAutoPicked] = useState(false);
-  if (autoSelectPack && !autoPicked && !selectedPack && packs.length > 0) {
+  const choosePack = autoSelectPack || pickActivePack;
+  if (!autoPicked && !selectedPack && packs.length > 0) {
     setAutoPicked(true);
-    setSelectedPack(autoSelectPack(packs) || null);
+    setSelectedPack(choosePack(packs) || null);
   }
 
-  useEffect(() => { loadPacks(); setSelectedPack(null); }, [loadPacks]);
+  // A new state / pack type reloads the list and picks again.
+  useEffect(() => { loadPacks(); setSelectedPack(null); setAutoPicked(false); }, [loadPacks]);
 
   const loadPackDetail = useCallback(() => {
     if (!selectedPack) return;
@@ -479,6 +483,9 @@ export default function JurisdictionLayout({
                   {overviewOverrideActive && (
                     overviewTabOverride.render({ pack: selectedPack, rates, slabs, onReload: reloadRatesAndSlabs })
                   )}
+                  {!overviewOverrideActive && (
+                    <PackOverviewSummary pack={selectedPack} refreshKey={`${rates.length}-${slabs.length}`} />
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                     <Field label="Regulatory Authority" value={selectedPack.regulatoryAuthority} />
                     <Field label="Compliance Category" value={selectedPack.complianceCategory} />
@@ -601,6 +608,8 @@ export default function JurisdictionLayout({
         <NewPackFormComponent
           country={country} state={state} packType={packType} stateOptions={stateOptions}
           defaultPackId={newVersionFromPackId}
+          basePack={newVersionFromPackId ? selectedPack : null}
+          existingVersions={newVersionFromPackId ? versions.map((v) => v.version) : []}
           onClose={() => { setShowNewPack(false); setNewVersionFromPackId(null); }}
           onCreated={(created) => {
             setShowNewPack(false);

@@ -253,7 +253,7 @@ def test_core_org_blocked_at_bwm_limit_boundary(client, core_headers):
     # (bypassing the API for speed) so the API call under test is exactly
     # the (limit+1)th, the boundary the enforcement check must catch.
     _seed_active_employees(_core_org.id, 3)
-    r = client.post("/api/payroll/employees", headers=core_headers, json={"employee_code": "E-OVER", "name": "One Too Many"})
+    r = client.post("/api/payroll/employees", headers=core_headers, json={"employee_code": "E-OVER", "name": "One Too Many", "email": "e-over@example.com"})
     assert r.status_code == 403, r.text
     assert "max_billable_worker_months" in r.text
 
@@ -262,12 +262,12 @@ def test_professional_org_allows_bwm_up_to_its_higher_cap(client, pro_headers):
     # PROFESSIONAL_FLAGS caps at 5 — pre-seed 4 so the API call under test
     # is exactly the 5th (still within the cap) and must succeed.
     _seed_active_employees(_pro_org.id, 4)
-    r = client.post("/api/payroll/employees", headers=pro_headers, json={"employee_code": "E-5", "name": "Fifth Employee"})
+    r = client.post("/api/payroll/employees", headers=pro_headers, json={"employee_code": "E-5", "name": "Fifth Employee", "email": "e-5@example.com"})
     assert r.status_code == 200, r.text
 
 
 def test_professional_org_blocked_at_its_own_bwm_boundary(client, pro_headers):
-    r = client.post("/api/payroll/employees", headers=pro_headers, json={"employee_code": "E-6", "name": "Sixth Employee"})
+    r = client.post("/api/payroll/employees", headers=pro_headers, json={"employee_code": "E-6", "name": "Sixth Employee", "email": "e-6@example.com"})
     assert r.status_code == 403, r.text
 
 

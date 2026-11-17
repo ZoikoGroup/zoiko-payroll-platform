@@ -297,7 +297,7 @@ def test_update_form_invite_email_via_real_send_form(db, organization, caplog):
 
     form = forms_service.create_form(
         db, organization.id, "New Joiner Details",
-        [{"key": "ctc", "label": "CTC", "type": "number"}],
+        [{"key": "bankName", "label": "Bank name", "type": "text"}],
     )
 
     with caplog.at_level(logging.INFO):
