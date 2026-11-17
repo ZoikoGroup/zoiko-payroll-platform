@@ -1249,6 +1249,7 @@ POST,/api/super-admin/compliance/belgium/onss-rate-files/{file_id}/mark-live,pla
 POST,/api/super-admin/compliance/belgium/onss-rates/{rate_id}/sign,platform,create,sign,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/belgium/onss-type-rules/{rule_id}/sign,platform,create,sign,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/belgium/packs,platform,read,packs,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/belgium/packs/{pack_row_id}/activation-readiness,platform,read,activation-readiness,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/belgium/packs/{pack_row_id}/authority-examples,platform,create,authority-examples,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/belgium/packs/{pack_row_id}/bulk-sign,platform,create,bulk-sign,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/belgium/packs/{pack_row_id}/configuration,platform,read,configuration,super_admin,platform,,,,no,

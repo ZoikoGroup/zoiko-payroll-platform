@@ -1,0 +1,6 @@
+list-id: A3
+official: yes
+retrieved: 2026-11-17
+url: https://www.ejustice.just.fgov.be/cgi/article.pl?language=nl&pd_search=2026-10-02&numac_search=2026007167 (Belgisch Staatsblad / Moniteur belge, official gazette site)
+http-status: n/a (browser print to PDF by the owner on 2026-11-17 08:41)
+note: Source B13. Royal Decree of 27 September 2026 amending professional withholding (KB/WIB 92 Annex III), document 2026007167, published 2 October 2026. Dutch text with bilingual (NL/FR) tables, 7 pages; printed from the official gazette page. Applies to income paid or attributed from 1 Nov 2026, except where withholding is computed under n° 80 or Part 5 of Annex III (art. 10). Saved unchanged under its downloaded name.

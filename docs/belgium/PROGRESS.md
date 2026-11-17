@@ -1094,3 +1094,41 @@ release gates G1–G7 met by real evidence.
   none on the platform ONSS tables; 0 rows in every payroll_be_* table in system mode (orgs_visible = 49); no Active
   Belgian pack; no Belgian registry row. The skipped "Post-deploy privacy smoke" is the configured HP-10 condition
   (secret ZP_SMOKE_BASE_URL unset) — an open control owned by the repository admin / ZP-PRIV owner, not Belgian.
+
+## 2026-11-16 — A1 parse run: withholding from 1 January 2026 (B10 + B11)
+
+- Inbox: two documents downloaded by the owner from finances.belgium.be — B10, the official Annex III to the Royal
+  Decree of 11 December 2025 (rules for income paid from 1 Jan 2026, 44 p.), and B11, the FPS Finance Formule-clé
+  ESS-SR/2025-0928 (from 1 Jan 2026, 31 p.). Archived unchanged (sha256 b7c7d3af… / fca89350…). All 35 regular-pay
+  figures are identical in both. No 2026 amendment in either; B11 n° 2 warns the formula may be adapted during 2026.
+  A2 (from 1 Aug) and A3 (from 1 Nov) remain NOT FOUND.
+- Workbook: withholding NOT FOUND 19 -> HIGH 8 / NOT FOUND 11. be_rounding_withholding = CENT_HALF_UP (importable,
+  n° 12). Scale (n° 28, 31-34), family reductions (n° 38-41), fiscal work bonus (n° 46), exceptional / holiday pay
+  (n° 53-57) and overtime (n° 45) on the new proposal sheet — engine gap M-WHT (the engine applies one band to the
+  monthly pay; the law annualises and applies the annual scale). Period strategy and taxable basis as proposed text
+  (no vocabulary).
+- Fresh LOCAL copy: dry run 265 changes, 0 errors; import written; every row still [PENDING G1]; pack Draft.
+- The 10 worked examples now reach FULL NET PAY for July 2026 (the month every archived source applies); August 2026
+  onwards still stops at withholding.
+
+## 2026-11-17 — A2 / A3 parse run: the 2026 amendments to Annex III (B12 + B13)
+
+- Inbox: two decrees saved by the owner from the official gazette site (ejustice.just.fgov.be; NL browser prints) —
+  B12 = A2, Royal Decree 24 Jul 2026 (numac 2026005690, published 30 Jul 2026, sha256 49b8cd3a…), B13 = A3, Royal
+  Decree 27 Sep 2026 (numac 2026007167, published 2 Oct 2026, sha256 f8947967…). Meta files written (official: yes);
+  manifest regenerated (16 documents). Saved unchanged under their downloaded names.
+- Findings: fiscal work bonus component B **63 %** from 1 Aug 2026 (A2 art. 4; component A unchanged). The scale
+  (n° 31) is **not** amended; A3 sets new values from 1 Nov 2026 (exempt amount 11,550 / 3,089.63, marital-quotient
+  cap 11,780 or 12,790, 6,179.26, children table, 648 / 636, n° 54 limits, n° 4.2 threshold). Method steps unchanged;
+  two NEW conditions in A3 (spouses' age for the cap; spouse's study-grant income). A2 art. 2 (overtime 180 h) is
+  **retroactive to 1 Jan 2026**; art. 3 from 1 Apr 2026.
+- Workbook: proposal sheet renamed 'Annex III 2026 (proposal)' with effectiveFrom / effectiveTo / status columns;
+  B10 rows dated (29 in force all year, 27 superseded from 1 Nov, 1 from 1 Aug, 1 retroactively); 35 new A2 / A3 rows
+  (29 from 1 Nov). Withholding HIGH 8 / NOT FOUND 11 -> **HIGH 9 / NOT FOUND 10** (be_wht_annex3_amendment_2026).
+  Secondary-source notes replaced by the decree text. Not archived: the FPS Finance key formulas for 1 Aug / 1 Nov.
+- The 10 July 2026 examples: **figures unchanged** (A2 art. 4 and A3 start after July); Assumption 4 now reads 180 h
+  and the 29°/1 exception. Decree-only sensitivity added (reviewer guide §3.0a).
+- Readiness report: the 'SOURCE_NOT_ARCHIVED' blocker for A2 / A3 replaced by KEY_FORMULA_NOT_ARCHIVED (owner) and
+  the new specialist questions SQ-WHT-3 (retroactive overtime limit, 29°/1) and SQ-WHT-4 (age-based cap, study grant).
+- Fresh LOCAL copy: dry run 265 changes, 0 errors; B12 / B13 registered ARCHIVED; every row still [PENDING G1]; pack
+  Draft. Registry diff 0 changed. Engine work (M-WHT / M-WORKBONUS / M-BSSC) still ON HOLD.

@@ -219,6 +219,7 @@ _STRUCTURAL_NUMBERS = {
                                50: "source form-number width", 200: "source agency width", 300: "source title width"},
     "belgium_payment_service.py": {0: "list index / zero amount", 1: "batch sequence (+1)",
                                    100: "idempotency key / column width 100", 200: "return reason column width"},
+    "belgium_activation_readiness.py": {1: "inclusive last year of the pack window (range end + 1)"},
     "belgium_onss_rates.py": {
         0: "first file / zero id fallback", 1: "at most one file per pay date (slice [:1]) / first day / quarter 1",
         2: "calendar quarter 2", 3: "months per quarter (calendar) / quarter 3",

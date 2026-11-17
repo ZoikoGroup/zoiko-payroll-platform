@@ -1,0 +1,6 @@
+list-id: A1
+official: yes
+retrieved: 2026-11-16
+url: https://finances.belgium.be (FPS Finance, Precompte professionnel > Calcul > 2026; downloaded in a browser by the owner, exact URL not recorded)
+http-status: n/a (manual download)
+note: Source B10. Official Annex III to the Royal Decree of 11 December 2025 (AR/CIR 92 art. 88): rules and calculation of professional withholding on income paid or attributed from 1 January 2026 (French, 44 pages; PDF metadata title "Bijlage van het koninklijk besluit van", keywords "Bedrijfsvoorheffing bijlage III", created 2025-12-12). Saved unchanged under its downloaded name. Does NOT contain the 24 Jul 2026 (A2) or 27 Sep 2026 (A3) amendments.

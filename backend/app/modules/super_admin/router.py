@@ -5032,6 +5032,16 @@ def belgium_configuration(pack_row_id: int, current_user=Depends(get_current_sup
     return be_super_admin.configuration(db, pack_row_id)
 
 
+@router.get("/compliance/belgium/packs/{pack_row_id}/activation-readiness",
+            summary="Belgium pack activation readiness: every blocking row / condition, why, and who clears it "
+                    "(read-only)")
+def belgium_activation_readiness_report(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                                       db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_activation_readiness
+
+    return belgium_activation_readiness.be_activation_readiness(db, pack_row_id)
+
+
 @router.get("/compliance/belgium/packs/{pack_row_id}/signing-status",
             summary="What still blocks activation of a Belgium pack (pending, empty, unsourced, editors)")
 def belgium_signing_status(pack_row_id: int, current_user=Depends(get_current_super_admin),

@@ -59,9 +59,20 @@ check("generic rates / slabs editors are hidden", () => {
   assert(/hiddenTabs: \["rates", "slabs"\]/.test(read("config/jurisdictions/belgiumComplianceConfig.jsx")), "hiddenTabs");
 });
 
-check("the console has the 13 extra tabs (plus overview + shared Organizations)", () => {
+check("the console has the 14 extra tabs (plus overview + shared Organizations)", () => {
   const keys = [...read("config/jurisdictions/belgiumComplianceConfig.jsx").matchAll(/tab\("(be-[a-z-]+)"/g)].map((m) => m[1]);
-  assert(keys.length === 13 && new Set(keys).size === 13, `tab keys: ${keys.join(", ")}`);
+  assert(keys.length === 14 && new Set(keys).size === 14, `tab keys: ${keys.join(", ")}`);
+});
+
+check("the activation readiness tab is read-only", () => {
+  const tab = read("components/jurisdiction/belgium/BEActivationReadinessTab.jsx");
+  const imports = (tab.match(/import \{([^}]*)\} from "\.\.\/\.\.\/\.\.\/service\/superAdminService"/) || [])[1] || "";
+  assert(imports.trim() === "getBeActivationReadiness", `service imports: ${imports}`);
+  assert(!/\b(apiFetch|fetch|axios)\s*\(/.test(tab), "the tab makes no direct request (only the read-only GET above)");
+  const service = read("service/superAdminService.js");
+  assert(/getBeActivationReadiness = \(packRowId\) =>\s*apiFetch\(`\$\{BE_SA\}\/packs\/\$\{packRowId\}\/activation-readiness`\)/.test(service), "GET only");
+  const router = readFileSync(resolve(BACKEND, "modules/super_admin/router.py"), "utf-8");
+  assert(router.includes('@router.get("/compliance/belgium/packs/{pack_row_id}/activation-readiness"'), "backend GET route");
 });
 
 const STATUTORY_NUMBER = /\d+(?:[.,]\d+)?\s*%|EUR\s*\d|\b\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\b|\b(?:13\.07|24\.92|108|5\.57|10\.27|2233|4000|92|38|40)\b/;
