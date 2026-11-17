@@ -42,8 +42,14 @@ check("layout re-picks after a state / pack type change", layout.includes("setAu
 check("Overview shows the pack summary when no country dashboard replaces it",
   /!overviewOverrideActive && \(\s*<PackOverviewSummary/.test(layout));
 check("New Version passes the base pack and used versions", layout.includes("basePack={") && layout.includes("existingVersions={"));
-check("New Version refuses an existing version", modal.includes("existingVersions.includes(form.version.trim())"));
+check("New Version refuses an existing version", modal.includes("existingVersions.includes(version.trim())"));
 check("New Version pre-fills the next version", modal.includes("nextPackVersion(b.version, existingVersions)"));
+check("New Version re-picks the next free version when the version list arrives late",
+  /basePack && !versionEdited\s*\?\s*\(nextPackVersion\(b\.version, existingVersions\)/.test(modal)
+  && modal.includes("setVersionEdited(true)") && modal.includes("value={version}")
+  && modal.includes("existingVersions.includes(version.trim())"));
+check("next version skips every existing version (1.0 with 1.0 and 1.1 existing -> 1.2)",
+  c.nextPackVersion("1.0", ["1.0", "1.1"]) === "1.2");
 check("landing page shows pack status badges", landing.includes("packStatus(j.code)"));
 check("landing page loading fix (finally callback)", landing.includes(".finally(() => setLoading(false))"));
 check("summary never invents values (counts only)", summary.includes("awaiting sign-off") && !/defaultValue|placeholder=/.test(summary));

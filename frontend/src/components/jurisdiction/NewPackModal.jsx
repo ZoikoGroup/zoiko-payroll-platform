@@ -20,22 +20,35 @@ export default function NewPackModal({ country, state, packType, stateOptions = 
     nextReviewDate: "", sourceReferences: b.sourceReferences || "",
   });
   const [saving, setSaving] = useState(false);
-  const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  const [versionEdited, setVersionEdited] = useState(false);
+  const set = (field) => (e) => {
+    if (field === "version") setVersionEdited(true);
+    setForm((f) => ({ ...f, [field]: e.target.value }));
+  };
+
+  // The version list loads in the background; if New Version was opened
+  // before it arrived, a suggestion fixed at open time ignored versions that
+  // already exist (UK 2026-11-17: offered 1.1 while 1.1 existed). Until the
+  // user types their own, the suggestion is worked out on every render from
+  // the current list.
+  const version = basePack && !versionEdited
+    ? (nextPackVersion(b.version, existingVersions) || form.version)
+    : form.version;
 
   async function save() {
-    if (!form.packId.trim() || !form.effectiveFrom || !form.version.trim()) {
+    if (!form.packId.trim() || !form.effectiveFrom || !version.trim()) {
       addToast?.("Pack ID, Version and Effective From are required.", "error");
       return;
     }
-    if (existingVersions.includes(form.version.trim())) {
-      addToast?.(`Version ${form.version.trim()} already exists - open it and use Edit, or choose another version.`, "error");
+    if (existingVersions.includes(version.trim())) {
+      addToast?.(`Version ${version.trim()} already exists - open it and use Edit, or choose another version.`, "error");
       return;
     }
     setSaving(true);
     try {
       const created = await upsertCompliancePolicy({
         packId: form.packId, jurisdictionCountry: country, jurisdictionState: form.jurisdictionState || null,
-        packType, version: form.version, status: form.status,
+        packType, version: version.trim(), status: form.status,
         effectiveFrom: form.effectiveFrom, effectiveTo: form.effectiveTo || null,
         taxYear: form.taxYear || null, taxRegime: form.taxRegime || null, currency: form.currency || null,
         regulatoryAuthority: form.regulatoryAuthority || null, complianceCategory: form.complianceCategory || null,
@@ -71,7 +84,7 @@ export default function NewPackModal({ country, state, packType, stateOptions = 
             <input className={inputClass} value={form.jurisdictionState} onChange={set("jurisdictionState")} placeholder="e.g. Maharashtra" />
           )}
         </div>
-        <div><label className={labelClass}>Version</label><input className={inputClass} value={form.version} onChange={set("version")} /></div>
+        <div><label className={labelClass}>Version</label><input className={inputClass} value={version} onChange={set("version")} /></div>
         <div><label className={labelClass}>Status</label><select className={inputClass} value={form.status} onChange={set("status")}>{(packType === "policy" ? POLICY_STATUS_OPTIONS : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
         <div><label className={labelClass}>Tax Year</label><input className={inputClass} value={form.taxYear} onChange={set("taxYear")} placeholder="2026-27" /></div>
         <div><label className={labelClass}>Effective From</label><input type="date" className={inputClass} value={form.effectiveFrom} onChange={set("effectiveFrom")} /></div>
