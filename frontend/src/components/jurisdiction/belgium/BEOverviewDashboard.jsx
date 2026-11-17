@@ -16,7 +16,7 @@ import BEGateEvidencePanel from "./BEGateEvidencePanel";
 // offers the governed "create the Draft pack" action. No "ready" status is ever
 // shown while a gate is NOT MET.
 
-function SeedDraftPanel({ onDone }) {
+export function SeedDraftPanel({ onDone }) {
   const [reason, setReason] = useState("");
   const [state, setState] = useState({ busy: false, error: null });
   const submit = async (e) => {

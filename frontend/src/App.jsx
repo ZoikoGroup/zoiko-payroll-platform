@@ -56,6 +56,8 @@ import {
   PRReportTemplatesPage,
   IEReportTemplatesPage, SEReportTemplatesPage, HKReportTemplatesPage,
   CHReportTemplatesPage,
+  BEReportTemplatesPage, FRReportTemplatesPage, ITReportTemplatesPage, JPReportTemplatesPage, MYReportTemplatesPage,
+  NZReportTemplatesPage, PLReportTemplatesPage, SAReportTemplatesPage, ZAReportTemplatesPage,
 } from "./pages/ReportTemplates";
 import FundingPaymentsPage from "./pages/SuperAdmin/FundingPaymentsPage";
 import ReportsPage from "./pages/ReportsPage";
@@ -368,6 +370,24 @@ export default function App() {
       <Route path="/super-admin/report-templates/sweden/:jurisdiction" element={<SuperAdminShell><SEReportTemplatesPage /></SuperAdminShell>} />
       <Route path="/super-admin/report-templates/switzerland" element={<SuperAdminShell><CHReportTemplatesPage /></SuperAdminShell>} />
       <Route path="/super-admin/report-templates/switzerland/:jurisdiction" element={<SuperAdminShell><CHReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/belgium" element={<SuperAdminShell><BEReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/belgium/:jurisdiction" element={<SuperAdminShell><BEReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/france" element={<SuperAdminShell><FRReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/france/:jurisdiction" element={<SuperAdminShell><FRReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/italy" element={<SuperAdminShell><ITReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/italy/:jurisdiction" element={<SuperAdminShell><ITReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/japan" element={<SuperAdminShell><JPReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/japan/:jurisdiction" element={<SuperAdminShell><JPReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/malaysia" element={<SuperAdminShell><MYReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/malaysia/:jurisdiction" element={<SuperAdminShell><MYReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/new-zealand" element={<SuperAdminShell><NZReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/new-zealand/:jurisdiction" element={<SuperAdminShell><NZReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/poland" element={<SuperAdminShell><PLReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/poland/:jurisdiction" element={<SuperAdminShell><PLReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/saudi-arabia" element={<SuperAdminShell><SAReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/saudi-arabia/:jurisdiction" element={<SuperAdminShell><SAReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/south-africa" element={<SuperAdminShell><ZAReportTemplatesPage /></SuperAdminShell>} />
+      <Route path="/super-admin/report-templates/south-africa/:jurisdiction" element={<SuperAdminShell><ZAReportTemplatesPage /></SuperAdminShell>} />
         <Route
           path="/super-admin/finance"
           element={

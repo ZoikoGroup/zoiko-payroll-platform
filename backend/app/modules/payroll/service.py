@@ -10279,6 +10279,216 @@ _PAYSLIP_ITEM_JSON_FIELD_CATALOG["MX"] = {
        for part, name in (("gross", "Gross"), ("isr_exempt", "ISR Exempt"), ("isr_taxable", "ISR Taxable"))},
 }
 
+# BE / FR / IT / JP / NZ / PL / SA (report templates for the previously "Coming
+# soon" jurisdictions). Every path below is a key the country's engine result
+# dict / *_payslip_snapshot() actually writes, and every full path fits
+# report_template_component_fields.source_column (String(50)) — longer paths
+# are deliberately NOT offered (e.g. BE be_onss_employer.WAGE_MODERATION, IT
+# localTax.terminationWithheld, NZ obligations.ksEmployerGross, FR per-family
+# contributions[family=…] lines). Amounts are decimal strings in every one of
+# these snapshots; _report_json_number converts them. Employer-side amounts
+# are labelled "(Employer)" and must never be placed in a deduction component.
+
+# Belgium (ZP-BE-ENG-001): engine/countries/belgium.py be_result. be_employee_total
+# is the employee ONSS net of the social work bonus (withholding excluded). The
+# ONSS fund lines (be_funds) are keyed by pack-defined fund codes, so no fixed
+# path exists for them; be_employer_total includes them.
+_BE_SNAP = "be_calculation_snapshot."
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["BE"] = {
+    _BE_SNAP + "be_withholding": ("Withholding Tax (Bedrijfsvoorheffing / Précompte)", "currency", True),
+    _BE_SNAP + "be_withholding_regular": ("Withholding Tax — Regular Pay", "currency", True),
+    _BE_SNAP + "be_fiscal_work_bonus": ("Fiscal Work Bonus", "currency", True),
+    _BE_SNAP + "be_onss_employee": ("ONSS (Employee, before work bonus)", "currency", True),
+    _BE_SNAP + "be_social_work_bonus": ("Social Work Bonus", "currency", True),
+    _BE_SNAP + "be_employee_total": ("ONSS (Employee, net of work bonus)", "currency", True),
+    _BE_SNAP + "be_onss_employer.BASE": ("ONSS Basic Contribution (Employer)", "currency", True),
+    _BE_SNAP + "be_pension_special": ("Special Pension Contribution (Employer)", "currency", True),
+    _BE_SNAP + "be_employer_total": ("Total Employer ONSS Cost (Employer)", "currency", True),
+    _BE_SNAP + "be_net": ("Net Pay", "currency", True),
+    _BE_SNAP + "bases.ONSS_EMPLOYEE": ("ONSS Employee Base", "currency", True),
+    _BE_SNAP + "bases.ONSS_EMPLOYER": ("ONSS Employer Base", "currency", True),
+    _BE_SNAP + "bases.ONSS_MANUAL_108": ("ONSS Manual-Worker Base (108 %)", "currency", True),
+    _BE_SNAP + "bases.WITHHOLDING_REGULAR": ("Withholding Base — Regular Pay", "currency", True),
+    _BE_SNAP + "bases.HOLIDAY_BASE": ("Holiday Pay Base", "currency", True),
+    _BE_SNAP + "bases.SECTOR_MIN_WAGE": ("Sector Minimum-Wage Base", "currency", True),
+    _BE_SNAP + "employmentLine": ("Employment Line", "text", False),
+    _BE_SNAP + "documentVersion": ("Payslip Document Version", "text", False),
+    _BE_SNAP + "be_wage_floor.required": ("Sector Wage Floor (required)", "currency", False),
+    _BE_SNAP + "be_wage_floor.paid": ("Wage Paid Against Floor", "currency", False),
+    _BE_SNAP + "be_absence.employerDays": ("Guaranteed-Salary Days (Employer)", "text", False),
+    _BE_SNAP + "be_absence.employerDue": ("Guaranteed Salary Due", "currency", True),
+}
+
+# France (ZP-FR-ENG-001): service._fr_payslip_snapshot. employee_total INCLUDES
+# the PAS withheld (engine: employee social total + PAS). The per-family
+# contribution lines live in a list whose keyed-selector paths exceed 50 chars.
+_FR_SNAP = "fr_calculation_snapshot."
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["FR"] = {
+    _FR_SNAP + "net_social": ("Net Social", "currency", True),
+    _FR_SNAP + "net_imposable": ("Net Imposable (taxable net)", "currency", True),
+    _FR_SNAP + "net_a_payer": ("Net à Payer", "currency", True),
+    _FR_SNAP + "employee_total": ("Total Employee Contributions incl. PAS", "currency", True),
+    _FR_SNAP + "employer_total": ("Total Employer Contributions after RGDU (Employer)", "currency", True),
+    _FR_SNAP + "pas.withheld": ("PAS Withheld (Prélèvement à la source)", "currency", True),
+    _FR_SNAP + "pas.rate_type": ("PAS Rate Type", "text", False),
+    _FR_SNAP + "pas.rate_pct": ("PAS Rate %", "text", False),
+    _FR_SNAP + "bases.gross": ("Gross Pay (brut)", "currency", True),
+    _FR_SNAP + "bases.vieillesse_capped": ("Base — Old-Age Capped", "currency", True),
+    _FR_SNAP + "bases.vieillesse_uncapped": ("Base — Old-Age Uncapped", "currency", True),
+    _FR_SNAP + "bases.chomage_ags_4x_pass": ("Base — Unemployment / AGS (4× PASS)", "currency", True),
+    _FR_SNAP + "bases.agirc_t1": ("Base — Agirc-Arrco T1", "currency", True),
+    _FR_SNAP + "bases.agirc_t2": ("Base — Agirc-Arrco T2", "currency", True),
+    _FR_SNAP + "bases.cet": ("Base — CET", "currency", True),
+    _FR_SNAP + "bases.apec": ("Base — APEC", "currency", True),
+    _FR_SNAP + "bases.csg_crds": ("Base — CSG / CRDS", "currency", True),
+    _FR_SNAP + "bases.fnal": ("Base — FNAL", "currency", True),
+    _FR_SNAP + "bases.cfp": ("Base — CFP", "currency", True),
+    _FR_SNAP + "bases.pas": ("Base — PAS", "currency", True),
+}
+
+# Italy (ZP-IT-ENG-001): italy_service.it_payslip_snapshot. INPS employer and the
+# TFR accrual are employer cost, never deductions.
+_IT_SNAP = "it_calculation_snapshot."
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["IT"] = {
+    _IT_SNAP + "inps.employee": ("INPS (Employee)", "currency", True),
+    _IT_SNAP + "inps.employer": ("INPS (Employer)", "currency", True),
+    _IT_SNAP + "inps.base": ("INPS Contributory Base (imponibile)", "currency", True),
+    _IT_SNAP + "inps.additional1pct": ("INPS Additional 1 % IVS (Employee)", "currency", True),
+    _IT_SNAP + "inps.minimumApplied": ("INPS Minimum Base Applied", "text", False),
+    _IT_SNAP + "irpef.withheld": ("IRPEF Withheld", "currency", True),
+    _IT_SNAP + "irpef.refund": ("IRPEF Refunded", "currency", True),
+    _IT_SNAP + "irpef.annualNet": ("IRPEF Annual Net (projection)", "currency", False),
+    _IT_SNAP + "irpef.detrazione": ("Employment Tax Credit (detrazione)", "currency", True),
+    _IT_SNAP + "irpef.additionalDeduction": ("Tax-Wedge Additional Deduction", "currency", True),
+    _IT_SNAP + "wedge.taxFreeSum": ("Tax-Wedge Tax-Free Sum", "currency", True),
+    _IT_SNAP + "wedge.recoveredNow": ("Tax-Wedge Recovered This Period", "currency", True),
+    _IT_SNAP + "localTax.regionalSaldo": ("Regional Surtax (saldo) Withheld", "currency", True),
+    _IT_SNAP + "localTax.municipalSaldo": ("Municipal Surtax (saldo) Withheld", "currency", True),
+    _IT_SNAP + "localTax.municipalAcconto": ("Municipal Surtax (acconto) Withheld", "currency", True),
+    _IT_SNAP + "tfr.accrual": ("TFR Gross Accrual (Employer)", "currency", True),
+    _IT_SNAP + "tfr.inpsOffset": ("TFR INPS 0.50 % Offset", "currency", True),
+    _IT_SNAP + "tfr.net": ("TFR Net Accrual (Employer)", "currency", True),
+    _IT_SNAP + "tfr.destination": ("TFR Destination", "text", False),
+    _IT_SNAP + "benefits.fringeTaxable": ("Fringe Benefits Taxable", "currency", True),
+    _IT_SNAP + "benefits.mealTaxable": ("Meal Vouchers Taxable", "currency", True),
+    _IT_SNAP + "conguaglio": ("Year-End Adjustment (conguaglio)", "text", False),
+}
+
+# Japan (ZP-JP-ENG-001): engine/countries/japan.py jp_result (+ totalsAll).
+# jp_employee_total = social insurance + employment insurance + resident tax
+# (withholding income tax is jp_wht_total). Correction payslips carry the full
+# corrected jp_result here — only their scalar columns are deltas.
+_JP_SNAP = "jp_calculation_snapshot."
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["JP"] = {
+    _JP_SNAP + "jp_payment_kind": ("Payment Kind", "text", False),
+    _JP_SNAP + "jp_wht": ("Withholding Income Tax (regular pay)", "currency", True),
+    _JP_SNAP + "jp_wht_base": ("Withholding Base (after social insurance)", "currency", True),
+    _JP_SNAP + "jp_wht_branch": ("Withholding Table Column (甲 / 乙 / 丙)", "text", False),
+    _JP_SNAP + "jp_wht_total": ("Total Withholding Income Tax", "currency", True),
+    _JP_SNAP + "jp_declaration_class": ("Dependant Declaration Class", "text", False),
+    _JP_SNAP + "jp_dependants": ("Dependants", "text", False),
+    _JP_SNAP + "jp_epi_employee": ("Employees' Pension (Employee)", "currency", True),
+    _JP_SNAP + "jp_epi_employer": ("Employees' Pension (Employer)", "currency", True),
+    _JP_SNAP + "jp_health_employee": ("Health Insurance (Employee)", "currency", True),
+    _JP_SNAP + "jp_health_employer": ("Health Insurance (Employer)", "currency", True),
+    _JP_SNAP + "jp_care_employee": ("Long-Term Care Insurance (Employee)", "currency", True),
+    _JP_SNAP + "jp_care_employer": ("Long-Term Care Insurance (Employer)", "currency", True),
+    _JP_SNAP + "jp_child_support_employee": ("Child-Support Contribution (Employee)", "currency", True),
+    _JP_SNAP + "jp_child_support_employer": ("Child-Support Contribution (Employer)", "currency", True),
+    _JP_SNAP + "jp_si_employee_total": ("Social Insurance Total (Employee)", "currency", True),
+    _JP_SNAP + "jp_si_employer_total": ("Social Insurance Total (Employer)", "currency", True),
+    _JP_SNAP + "jp_ei_employee": ("Employment Insurance (Employee)", "currency", True),
+    _JP_SNAP + "jp_ei_employer": ("Employment Insurance (Employer)", "currency", True),
+    _JP_SNAP + "jp_ei_base": ("Employment Insurance Wage Base", "currency", True),
+    _JP_SNAP + "jp_smr_health": ("Standard Monthly Remuneration — Health", "currency", False),
+    _JP_SNAP + "jp_smr_pension": ("Standard Monthly Remuneration — Pension", "currency", False),
+    _JP_SNAP + "jp_resident_tax": ("Resident Tax (special collection)", "currency", True),
+    _JP_SNAP + "jp_bonus.jp_bonus": ("Bonus Amount", "currency", True),
+    _JP_SNAP + "jp_bonus.jp_bonus_wht": ("Bonus Withholding Income Tax", "currency", True),
+    _JP_SNAP + "jp_yea_difference": ("Year-End Adjustment Difference", "currency", True),
+    _JP_SNAP + "jp_employee_total": ("Total Employee SI / EI / Resident Tax", "currency", True),
+    _JP_SNAP + "jp_employer_total": ("Total Employer SI / EI (Employer)", "currency", True),
+}
+
+# New Zealand (ZP-NZ-ENG-001): engine/countries/new_zealand.py nz_result.
+# obligations.payeTotal = PAYE + ACC earners' levy (the IR "PAYE" figure);
+# employeeTotal = student loan + KiwiSaver employee + child support.
+_NZ_SNAP = "nz_calculation_snapshot."
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["NZ"] = {
+    _NZ_SNAP + "paymentKind": ("Payment Kind", "text", False),
+    _NZ_SNAP + "taxCode": ("Tax Code", "text", False),
+    _NZ_SNAP + "incomeClass": ("Income Class", "text", False),
+    _NZ_SNAP + "frequency": ("Pay Frequency", "text", False),
+    _NZ_SNAP + "bases.PAYE": ("PAYE Gross Earnings", "currency", True),
+    _NZ_SNAP + "bases.ACC": ("ACC Liable Base", "currency", True),
+    _NZ_SNAP + "bases.KIWISAVER": ("KiwiSaver Gross Earnings", "currency", True),
+    _NZ_SNAP + "bases.STUDENT_LOAN": ("Student-Loan Base", "currency", True),
+    _NZ_SNAP + "bases.MIN_WAGE": ("Minimum-Wage Base", "currency", True),
+    _NZ_SNAP + "bases.HOLIDAY_GROSS": ("Holidays Act Gross", "currency", True),
+    _NZ_SNAP + "obligations.paye": ("PAYE (excl. ACC levy)", "currency", True),
+    _NZ_SNAP + "obligations.payeRegular": ("PAYE — Regular Pay", "currency", True),
+    _NZ_SNAP + "obligations.payeExtra": ("PAYE — Extra Pay", "currency", True),
+    _NZ_SNAP + "obligations.accLevy": ("ACC Earners' Levy", "currency", True),
+    _NZ_SNAP + "obligations.payeTotal": ("PAYE incl. ACC Earners' Levy", "currency", True),
+    _NZ_SNAP + "obligations.studentLoan": ("Student-Loan Deduction", "currency", True),
+    _NZ_SNAP + "obligations.ksEmployee": ("KiwiSaver (Employee)", "currency", True),
+    _NZ_SNAP + "obligations.esct": ("ESCT on Employer KiwiSaver (Employer)", "currency", True),
+    _NZ_SNAP + "obligations.ksEmployerNet": ("KiwiSaver Net of ESCT (Employer)", "currency", True),
+    _NZ_SNAP + "obligations.childSupport": ("Child-Support Deduction", "currency", True),
+    _NZ_SNAP + "employeeTotal": ("Total Employee Deductions excl. PAYE", "currency", True),
+    _NZ_SNAP + "netPay": ("Net Pay", "currency", True),
+    _NZ_SNAP + "kiwisaver.status": ("KiwiSaver Status", "text", False),
+    _NZ_SNAP + "kiwisaver.employeeRate": ("KiwiSaver Employee Rate %", "text", False),
+    _NZ_SNAP + "kiwisaver.employerRate": ("KiwiSaver Employer Rate %", "text", False),
+    _NZ_SNAP + "acc.liable": ("ACC Liable Earnings This Period", "currency", True),
+    _NZ_SNAP + "minimumWage.status": ("Minimum-Wage Check", "text", False),
+}
+
+# Poland (ZP-PL-ENG-001): engine/countries/poland.py pl_result. pl_employee_total
+# = employee ZUS + health + PPK employee (PIT excluded); pl_funds keys are
+# present only for the funds that apply.
+_PL_SNAP = "pl_calculation_snapshot."
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["PL"] = {
+    _PL_SNAP + "pl_pit_advance": ("PIT Advance (zaliczka)", "currency", True),
+    _PL_SNAP + "pl_pit_base": ("PIT Base", "currency", True),
+    _PL_SNAP + "pl_zus_employee.EMERYTALNE": ("ZUS Pension (Employee)", "currency", True),
+    _PL_SNAP + "pl_zus_employee.RENTOWE": ("ZUS Disability (Employee)", "currency", True),
+    _PL_SNAP + "pl_zus_employee.CHOROBOWE": ("ZUS Sickness (Employee)", "currency", True),
+    _PL_SNAP + "pl_zus_employer.EMERYTALNE": ("ZUS Pension (Employer)", "currency", True),
+    _PL_SNAP + "pl_zus_employer.RENTOWE": ("ZUS Disability (Employer)", "currency", True),
+    _PL_SNAP + "pl_zus_employer.WYPADKOWE": ("ZUS Accident (Employer)", "currency", True),
+    _PL_SNAP + "pl_health": ("Health Insurance (zdrowotne)", "currency", True),
+    _PL_SNAP + "pl_health_base": ("Health Insurance Base", "currency", True),
+    _PL_SNAP + "pl_ppk_employee.BASIC": ("PPK Basic (Employee)", "currency", True),
+    _PL_SNAP + "pl_ppk_employee.ADDITIONAL": ("PPK Additional (Employee)", "currency", True),
+    _PL_SNAP + "pl_ppk_employer.BASIC": ("PPK Basic (Employer)", "currency", True),
+    _PL_SNAP + "pl_ppk_employer.ADDITIONAL": ("PPK Additional (Employer)", "currency", True),
+    _PL_SNAP + "pl_funds.FP_FS": ("Labour Fund / Solidarity Fund (Employer)", "currency", True),
+    _PL_SNAP + "pl_funds.FGSP": ("FGŚP (Employer)", "currency", True),
+    _PL_SNAP + "pl_funds.FEP": ("Bridging Pension Fund FEP (Employer)", "currency", True),
+    _PL_SNAP + "pl_employee_total": ("Total Employee ZUS / Health / PPK", "currency", True),
+    _PL_SNAP + "pl_employer_total": ("Total Employer ZUS / Funds / PPK (Employer)", "currency", True),
+    _PL_SNAP + "pl_net": ("Net Pay", "currency", True),
+}
+
+# Saudi Arabia (ZP-SA-ENG-001): engine/countries/saudi_arabia.py sa_result. The
+# per-branch GOSI amounts are also scalar PayslipItem columns (employee_pension,
+# employer_pension, social_security, employer_social_security,
+# employer_occupational_hazard) which correction payslips carry as DELTAS — the
+# snapshot carries the full corrected result — so reports read those columns
+# for amounts and only the descriptive / wage figures from here.
+_SA_SNAP = "sa_calculation_snapshot."
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["SA"] = {
+    _SA_SNAP + "sa_worker_class": ("GOSI Worker Class", "text", False),
+    _SA_SNAP + "sa_cohort": ("GOSI Cohort", "text", False),
+    _SA_SNAP + "sa_pension_regime": ("Pension Regime", "text", False),
+    _SA_SNAP + "sa_contributory_wage": ("GOSI Contributory Wage", "currency", True),
+    _SA_SNAP + "sa_contribution_month": ("GOSI Contribution Month", "text", False),
+    _SA_SNAP + "sa_employee_total": ("Total GOSI (Employee)", "currency", True),
+    _SA_SNAP + "sa_employer_total": ("Total GOSI (Employer)", "currency", True),
+    _SA_SNAP + "sa_other_deductions_total": ("Labour-Law Deductions", "currency", True),
+}
+
 _PAYROLL_RUN_FIELD_CATALOG = {
     "run_code": ("Run Code", "text", False),
     "period_label": ("Period", "text", False),

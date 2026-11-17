@@ -31,6 +31,19 @@ export { default as HKReportTemplatesPage } from "./HKReportTemplatesPage";
 export { default as SEReportTemplatesPage } from "./SEReportTemplatesPage";
 // Switzerland (ZP-CH-PAYROLL-001) — per-employee Lohnausweis + ELM envelopes.
 export { default as CHReportTemplatesPage } from "./CHReportTemplatesPage";
+// BE / FR / IT / JP / MY / NZ / PL / SA / ZA — previously "Coming soon". Same
+// thin wrapper; their templates are seeded Draft by
+// scripts/seed_statutory_report_templates.py and activate only through each
+// jurisdiction's template_activation_refusal gate.
+export { default as BEReportTemplatesPage } from "./BEReportTemplatesPage";
+export { default as FRReportTemplatesPage } from "./FRReportTemplatesPage";
+export { default as ITReportTemplatesPage } from "./ITReportTemplatesPage";
+export { default as JPReportTemplatesPage } from "./JPReportTemplatesPage";
+export { default as MYReportTemplatesPage } from "./MYReportTemplatesPage";
+export { default as NZReportTemplatesPage } from "./NZReportTemplatesPage";
+export { default as PLReportTemplatesPage } from "./PLReportTemplatesPage";
+export { default as SAReportTemplatesPage } from "./SAReportTemplatesPage";
+export { default as ZAReportTemplatesPage } from "./ZAReportTemplatesPage";
 
 // Phase 2: UK and USA added. Phase 8: CA added (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY now has a real "CA" entry rather than
@@ -65,4 +78,13 @@ export const COUNTRY_CODE_TO_ROUTE = {
   NL: "netherlands",
   MX: "mexico",
   BR: "brazil",
+  BE: "belgium",
+  FR: "france",
+  IT: "italy",
+  JP: "japan",
+  MY: "malaysia",
+  NZ: "new-zealand",
+  PL: "poland",
+  SA: "saudi-arabia",
+  ZA: "south-africa",
 };
