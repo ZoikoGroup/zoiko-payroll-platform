@@ -1132,3 +1132,29 @@ release gates G1–G7 met by real evidence.
   the new specialist questions SQ-WHT-3 (retroactive overtime limit, 29°/1) and SQ-WHT-4 (age-based cap, study grant).
 - Fresh LOCAL copy: dry run 265 changes, 0 errors; B12 / B13 registered ARCHIVED; every row still [PENDING G1]; pack
   Draft. Registry diff 0 changed. Engine work (M-WHT / M-WORKBONUS / M-BSSC) still ON HOLD.
+
+## 2026-11-17 — Phase closing: production deploy of PR #168 verified
+
+Belgium deploy PR #168 (merge 2e45e202) confirmed green and verified dormant in production, 2026-11-17. Checks:
+(1) Super Admin console loads correctly, shows expected empty state — no Belgian pack exists; (2) system-mode
+row-count query confirms 0 rows across all checked payroll_be_* tables, verified under genuine full visibility
+(orgs_visible=49); (3) no stray/misspelled Belgian pack exists under any country/pack_id variant. Privacy smoke step
+skip confirmed as the known HP-10 gap, unrelated to this change.
+
+Evidence:
+- GitHub Actions on 2e45e202: "Build Zoiko Payroll Frontend" 44014178210 success (04:03 UTC); "Deploy Zoiko Payroll
+  Backend" 44014178197 success (04:39 UTC) — test, privacy-isolation (incl. Belgium PostgreSQL RLS round trip and
+  rollback/dormancy proof) and deploy jobs green; single Alembic head e9c4b7a2d6f3 (no migration in this PR).
+- Console (owner, production): /super-admin/compliance/belgium is BECompliancePage — the shared JurisdictionLayout
+  with the Belgium tabs, which appear only once a pack is selected; with no BE pack the page correctly shows "No tax
+  packs for this jurisdiction yet". The live bundle /assets/index-Dal7WkNG.js contains the Belgium console
+  (including "Activation readiness" and be-readiness-verdict).
+- Pack query (owner, production): 0 rows in payroll_jurisdiction_packs matching pack_id 'BE-%' or jurisdiction_country
+  'BE%' / 'Belg%'. Nothing seeds a Belgian pack in production (seed_belgium_canonical_packs refuses non-local
+  databases); creating the real Draft pack there is a governed owner decision, not part of this phase.
+- Privacy smoke: step "Post-deploy privacy smoke" skipped because HAS_SMOKE is false (secret ZP_SMOKE_BASE_URL unset,
+  backend-deploy.yml lines 106 / 202), identical to the previous deploy (e3c2c722, run 43872507564); workflow file
+  unchanged since 6be331fc. Open control HP-10, owned by the repository admin / ZP-PRIV owner.
+- Still open after this phase: specialist answers SQ-WHT-1..4 (all blocking, G1); FPS Finance key formulas for
+  1 Aug / 1 Nov 2026; golden source G-34; engine items M-WHT / M-WORKBONUS / M-BSSC on hold until the specialist and
+  Venu respond.
