@@ -191,7 +191,7 @@ the Overview lists their state.
 
 ## 4. Blocking questions for the specialist — professional withholding (added 2026-11-16)
 
-Both block the withholding engine (M-WHT) and the signing of the withholding rows at gate G1. Answer each as a
+All block the withholding engine (M-WHT) and the signing of the withholding rows at gate G1. Answer each as a
 decision record (Super Admin > Belgium > Decision records; proposer ≠ decider).
 
 ### SQ-WHT-1 — Is the BSSC deducted before or after calculating the withholding base?
@@ -225,3 +225,36 @@ decision record (Super Admin > Belgium > Decision records; proposer ≠ decider)
 - **What it changes:** the split of the month's withholding between the regular scale and the exceptional rate, and
   so the total withholding in every mixed month (worked example 10).
 
+### SQ-WHT-3 — Overtime: the retroactive 180 h limit and the new exception (added 2026-11-17)
+
+- **The text.** A2 (B12, Royal Decree 24 Jul 2026, published 30 Jul 2026) art. 2 replaces Annex III n° 45.2: the
+  overtime reduction applies to the premium base of the first **180 h** a year for all sectors (B10: 130 h; 360 h
+  hotel; 280 h road / rail works), **with effect from 1 Jan 2026** (art. 7). Art. 3 adds art. 38 § 1, first
+  paragraph, **29°/1** CIR 92 to the n° 45.3 exception (no reduction), with effect from 1 Apr 2026.
+- **The questions:**
+  - **(a)** Payslips paid between 1 Jan and 30 Jul 2026 applied B10's 130 h. Must the employer regularise
+    hours 131-180 already worked (e.g. on the next payslip, or only through the annual tax assessment), or does
+    the retroactive limit only matter for hours counted after publication?
+  - **(b)** What overtime falls under art. 38 § 1 29°/1 CIR 92 (the CIR 92 text is not in our sources), and how is
+    it identified on the payslip so the reduction is not applied?
+- **What it changes:** whether the engine counts the yearly hours from 1 Jan with 180 h, and whether it needs a
+  regularisation line; whether an overtime component needs a 29°/1 flag.
+- **Please cite** the provision or FPS Finance guidance.
+
+### SQ-WHT-4 — Marital quotient and 'single' status from 1 Nov 2026 (added 2026-11-17)
+
+- **The text.** A3 (B13, Royal Decree 27 Sep 2026, pay from 1 Nov 2026) art. 3: the income imputed to the spouse is
+  capped at **12,790 when both spouses have reached 66 on 1 Jan 2027**, otherwise — *"ook wanneer de schuldenaar van
+  de bedrijfsvoorheffing niet over de nodige informatie beschikt"* — at **11,780**. Art. 1: a married employee is
+  treated as single when the spouse has more than 11,550 a year of treaty-exempt income or of a **study grant** that
+  builds social-security rights but is not taxed.
+- **The questions:**
+  - **(a)** Which document may the employer rely on for the spouses' ages and the study-grant income (the employee's
+    declaration, as for the other family data)? Is the employer obliged to ask, or only to apply the lower cap when
+    the information is missing?
+  - **(b)** From which date does a declared change take effect (n° 5: the situation on 1 January, with the n° 5.2
+    exceptions)?
+- **What it changes:** two new household fields (spouse date of birth or an 'both 66 on 1 Jan 2027' flag; spouse
+  study-grant income above the threshold), a default when missing, and the ZP-PRIV note on household data. The
+  marital-quotient withholding can RISE from 1 Nov (reviewer guide §3.0a: Example 3 +18.90).
+- **Please cite** the provision or FPS Finance guidance.

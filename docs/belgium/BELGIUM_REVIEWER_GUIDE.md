@@ -24,10 +24,10 @@ Per section (Scalar + Slab key rows):
 
 | Section | Before | After |
 |---------|--------|-------|
-| Withholding | NOT FOUND 19 | after the A1 run (2026-11-16, B10 + B11): **HIGH 8, NOT FOUND 11** — be_rounding_withholding CENT_HALF_UP importable; scale, family reductions, exceptional / holiday pay and overtime on the 'Annex III 2026-01 (proposal)' sheet (engine gap M-WHT); period strategy and taxable basis as proposed text (no vocabulary yet); A2 / A3 still NOT FOUND |
+| Withholding | NOT FOUND 19 | after the A1 run (2026-11-16, B10 + B11): **HIGH 8, NOT FOUND 11** — be_rounding_withholding CENT_HALF_UP importable; scale, family reductions, exceptional / holiday pay and overtime on the 'Annex III 2026 (proposal)' sheet (engine gap M-WHT); period strategy and taxable basis as proposed text (no vocabulary yet). After the A2 / A3 run (2026-11-17, B12 + B13): **HIGH 9, NOT FOUND 10** — be_wht_annex3_amendment_2026 sourced; dated rows (1 Jan / 1 Aug / 1 Nov) on the 'Annex III 2026 (proposal)' sheet |
 | ONSS | HIGH 4, MEDIUM 1, LOW 2, NOT FOUND 11 | HIGH 11, MEDIUM 2, NOT FOUND 5 |
 | BSSC | NOT FOUND 1 | HIGH 1 (scale on its proposal sheet; not importable — engine gap) |
-| Work bonus | NOT FOUND 4 | HIGH 2 (social bonus tables, B5; fiscal work bonus 33.14 % A + 52.54 % B from 1 Jan 2026, B10 n° 46 — both on proposal sheets, engine gaps), NOT FOUND 2 |
+| Work bonus | NOT FOUND 4 | HIGH 2 (social bonus tables, B5; fiscal work bonus 33.14 % A + 52.54 % B from 1 Jan 2026, B10 n° 46, component B 63 % from 1 Aug 2026, A2 art. 4 — both on proposal sheets, engine gaps), NOT FOUND 2 |
 | Holiday | MEDIUM 4, NOT FOUND 7 | HIGH 2, MEDIUM 2, NOT FOUND 7 |
 | Absence | MEDIUM 8, LOW 3, NOT FOUND 3, blank 1 | unchanged (no absence document in this run) |
 
@@ -48,6 +48,8 @@ no vocabulary (be_onss_employee_base_rule, be_onss_manual_base_categories, be_on
 
 | B10 (A1) | 6482239b-fcca-4596-96eb-b9749bc296ea.pdf | ZP-BE-SRC-b7c7d3af3469 | ARCHIVED — Annex III to the Royal Decree of 11 Dec 2025, withholding on income paid from 1 Jan 2026 (official, 44 p.) |
 | B11 (A1) | 919cc022-3014-4263-a479-4c4add557859.pdf | ZP-BE-SRC-fca893502b97 | ARCHIVED — FPS Finance Formule-clé ESS-SR/2025-0928, from 1 Jan 2026 (official, 31 p.); all 35 regular-pay figures identical to B10 |
+| B12 (A2) | Belgisch StaatsbladA2.pdf | ZP-BE-SRC-49b8cd3adf38 | ARCHIVED 2026-11-17 — Royal Decree 24 Jul 2026 (numac 2026005690, published 30 Jul 2026); NL, browser print of the official gazette page, 4 p. |
+| B13 (A3) | Belgisch StaatsbladA3.pdf | ZP-BE-SRC-f894796781f3 | ARCHIVED 2026-11-17 — Royal Decree 27 Sep 2026 (numac 2026007167, published 2 Oct 2026; pay from 1 Nov 2026); NL with bilingual tables, 7 p. |
 
 In a shared environment a Super Admin registers these archived files BEFORE importing the workbook (the
 workbook's 'Draft sources' sheet otherwise creates UNVERIFIED placeholders under the same references, which can
@@ -55,8 +57,8 @@ never be used to sign).
 
 ## 1a. Review in this order (highest payroll impact first) — Block F4
 
-1. **Withholding (Annex III)** — every be_wht_* row and the withholding rounding: all NOT FOUND; needs DOWNLOAD_LIST
-   A1-A5 (three 2026 versions: 1 Jan, 1 Aug, 1 Nov). Without it no net pay exists.
+1. **Withholding (Annex III)** — every be_wht_* row and the withholding rounding: the three 2026 versions are sourced
+   (1 Jan B10 / B11, 1 Aug A2 = B12, 1 Nov A3 = B13) on the 'Annex III 2026 (proposal)' sheet; engine gap M-WHT.
 2. **ONSS** — the HIGH rows (13.07 %, 8 % manual uplift, 1.60 % / 1.69 %, 8.86 %), the employer EC x WC bands (Band
    proposals sheet; B2 rate file), wage moderation (B4), fund contributions.
 3. **BSSC** — the special social security contribution scale (B3).
@@ -69,7 +71,7 @@ never be used to sign).
 
 Sources to collect: `docs/belgium/sources/DOWNLOAD_LIST.md` (30 documents); save them unchanged in
 `docs/belgium/sources/inbox/` and ask for the parse run (scripts/be_source_inbox.py + reviewed extraction).
-Inbox at the last run (2026-11-16): 11 files (B1, B2 x 8, B3, B5); A1-A3 still missing (FPS Finance and the Moniteur belge answer automated requests with a human-verification check — download them in a browser).
+Inbox at the last run (2026-11-17): 16 files (B1, B2 x 8, B3, B5, B9, B10, B11, B12 = A2, B13 = A3); the FPS Finance key formulas for pay from 1 Aug / 1 Nov 2026 and A4 / A5 still missing (FPS Finance and the Moniteur belge answer automated requests with a human-verification check — download them in a browser).
 
 ## 2. Check these first
 
@@ -85,14 +87,14 @@ Inbox at the last run (2026-11-16): 11 files (B1, B2 x 8, B3, B5); A1-A3 still m
 | `be_wht_nonresident_rule` | Annex III non-resident rules (FPS Finance). |
 | `be_wht_taxable_basis_rule` | Annex III + G-26 allocation. |
 | `be_wht_period_strategy` | Annex III period strategy (FPS Finance). |
-| `be_wht_annex3_regular_scale` | Annex III 2026 formule-cle: three versions in 2026 (Jan, 1 Aug, 1 Nov per AR 27 Sep 2026); download the official key formula from FPS Finance (financien.belgium.be). |
-| `be_wht_annex3_amendment_2026` | AR 24 Jul 2026 / AR 27 Sep 2026 amendments (Moniteur belge). |
+| `be_wht_annex3_regular_scale` | **SOURCED — B10 / B11 (1 Jan), A3 = B13 (1 Nov):** dated rows on the 'Annex III 2026 (proposal)' sheet (HIGH); scale unchanged all year; engine gap M-WHT. Key formulas for 1 Aug / 1 Nov not archived. |
+| `be_wht_annex3_amendment_2026` | **SOURCED 2026-11-17 — A2 = B12, A3 = B13** (HIGH; see 2.3). |
 | `be_wht_family_reductions` | Annex III family reductions (FPS Finance). |
-| `be_wht_fiscal_work_bonus` | Annex III fiscal work bonus (63% for very low wages since 1 Aug 2026 per a secondary source; formula needed from FPS Finance). |
+| `be_wht_fiscal_work_bonus` | **SOURCED — B10 (to 31 Jul) and A2 art. 4 (from 1 Aug: component B 63 %, CONFIRMED):** proposal sheet; engine gaps M-WHT / M-WORKBONUS. |
 | `be_wht_exceptional_rule` | Annex III exceptional-remuneration scale (FPS Finance). |
 | `be_wht_holiday_pay_rule` | Annex III holiday-pay withholding (FPS Finance). |
 | `be_wht_arrears_rule` | Annex III arrears rule (FPS Finance). |
-| `be_wht_overtime_rule` | Annex III overtime reduction (180 hours per a secondary source; formula from FPS Finance). |
+| `be_wht_overtime_rule` | **SOURCED — B10 n° 45 + A2 arts 2-3:** 180 h from 1 Jan 2026 (retroactive), wider exception from 1 Apr 2026; SQ-WHT-3 open. |
 | `be_onss_employee_base_rule` | **SOURCED 2026-11-16 — see section 1 / 2.3:** B1 states the rule (quarterly gross; 108 % for manual workers) — HIGH proposed text, still needs a vocabulary to import. |
 | `be_onss_manual_base_categories` | **SOURCED 2026-11-16 — see section 1 / 2.3:** B1 states it (manual + assimilated under the private-sector holiday scheme; artists) — HIGH proposed text, needs a vocabulary. |
 | `be_onss_rate_file_quarter` | **SOURCED 2026-11-16 — see section 1 / 2.3:** B2: 2026-10-01 (Q4 file; Q1-Q3 archived, identical rates for EC 000 x WC 015 / 495) — HIGH. |
@@ -171,9 +173,24 @@ audited on its own, by a Super Admin who did not edit it (four-eyes unchanged).
 - BSSC (B3): the page gives quarterly brackets with percentages of the monthly pay; the guide reads the quarterly amount as 3x the monthly one (the page's monthly-practice figures 14.44 x 3 = 43.32 and 51.64 x 3 = 154.92 confirm it; brackets join within EUR 0.03). Household status (individual / joint with or without a working spouse) must be recorded per worker. **Engine gap:** no catalogue key holds a scale; the engine never computes BSSC (D7).
 - `be_onss_supported_employer_categories`: importer defect **FIXED 2026-11-16** — codes were stored without leading zeros (`000` → `0`). Text columns now keep their exact characters, a numeric cell for a code list is refused (format the cell as Text), and a re-import repairs a mangled value. Verified on a local copy: stored `000`.
 
-- **Withholding (A1, B10 / B11): valid from 1 Jan 2026 ONLY.** Neither document contains a 2026 amendment; B11
-  n° 2 says the formula *"may be adapted during 2026 following tax reforms"*. A2 (Royal Decree 24 Jul 2026, from
-  1 Aug) and A3 (27 Sep 2026, from 1 Nov) are still NOT FOUND — pay from August 2026 cannot be computed yet.
+- **Withholding (A1, B10 / B11) from 1 Jan 2026; amended by A2 (B12) and A3 (B13) — parse run 2026-11-17.**
+  - *Fiscal work bonus:* the rumoured **63 % is confirmed — for component B only** (A2 art. 4, n° 46.2.2, from
+    1 Aug 2026); component A stays 33.14 %.
+  - *Scale / bands:* **the scale (n° 31) is not amended by either decree**; professional expenses (n° 28), the
+    n° 53 exceptional rates and the n° 55 reductions are unchanged too. A3 sets **new values** (not date
+    extensions) from 1 Nov 2026: exempt amount 11,550 (its tax 3,089.63, was 2,987.98), marital-quotient cap
+    11,780 / 12,790 (was 13,790), 6,179.26 (was 5,975.96), a new children table (1: 684; 2-8 LOWER than B10, e.g.
+    1,644 vs 1,656; + 3,780 per child above 8), 648 / 636 for the other family charges (was 624), the n° 54
+    exemption limits, and the 'single' threshold of n° 4.2 (11,550, was 13,790). Arithmetic checks pass
+    (11,550 × 26.75 % = 3,089.63; 2 × 3,089.63 = 6,179.26; caps ÷ 30 % = the printed reach amounts).
+  - *Method:* the five steps are unchanged. A2 changes one percentage and the overtime hour limits. A3 adds **two new
+    conditions**: the marital-quotient cap depends on **both spouses having reached 66 on 1 Jan 2027** (the lower
+    cap applies when the payer lacks the information), and a spouse's **study-grant income** above 11,550 makes the
+    employee 'single' (n° 4.2). Both are new household inputs (SQ-WHT-4; the ZP-PRIV note must cover them).
+  - *Retroactivity:* A2 art. 2 (overtime 180 h) has effect **from 1 Jan 2026** although published on 30 Jul 2026;
+    art. 3 from 1 Apr 2026 (SQ-WHT-3). A3 is not retroactive (pay from 1 Nov 2026; not for n° 80 / Part 5 income).
+  - *Not archived:* the FPS Finance key formulas for pay from 1 Aug / 1 Nov 2026 — the A2 / A3 rows rest on the
+    decree text alone (B11 gave the 1 Jan rows an independent cross-check).
 - **Engine gap M-WHT:** withholding.py applies one band to the monthly taxable pay; Annex III annualises, deducts
   flat-rate professional expenses, applies the annual scale, subtracts the exempt-amount tax (or the marital quotient)
   and the annual family reductions, divides by 12, then applies the other reductions (overtime, fiscal work bonus
@@ -188,8 +205,8 @@ audited on its own, by a Super Admin who did not edit it (four-eyes unchanged).
 
 **Scope:** all 10 reach full net pay for **July 2026**, the one month in which every archived source applies: Annex III
 and the Formule-clé from 1 Jan 2026 (B10 / B11, before the 1 Aug amendment A2), the work-bonus table 'juillet et août
-2026' (B5), the Q3 2026 ONSS rates (B1 / B2) and the BSSC scale (B3). Pay from August 2026 still stops at withholding
-(A2 / A3 not sourced).
+2026' (B5), the Q3 2026 ONSS rates (B1 / B2) and the BSSC scale (B3). A2 / A3 are now sourced (B12 / B13):
+the July figures do not change — see 3.0a.
 
 ### 3.0 Assumptions — each one changes the figures if it is wrong
 
@@ -214,9 +231,47 @@ withholding falls: Example 1 162.32 → 157.38, Example 2 742.98 → 728.79, Exa
 1,250.80 → 1,223.70 (net + 5 to + 33 EUR a month). **Needs the Belgian specialist's confirmation.**
 
 **⚑ ASSUMPTION 4 — the overtime in Examples 8 and 9 is eligible legal overtime** (a legal premium under art. 29 of
-the Labour Act of 16 March 1971, within the first 130 h of the year; B10 n° 45: reduction of 57.75 % of the social
-gross base of the premium hours). *If wrong* (not eligible, or beyond the yearly hour limit), there is no reduction:
+the Labour Act of 16 March 1971, within the first **180 h** of the year — A2 art. 2, with effect from 1 Jan 2026, replacing
+B10's 130 h — and not overtime under art. 38 § 1 29°/1 or 30° CIR 92 (A2 art. 3, from 1 Apr 2026); B10 n° 45: reduction of
+57.75 % of the social gross base of the premium hours). *If wrong* (not eligible, or beyond the yearly hour limit), there is no reduction:
 the withholding rises by 79.97 (Example 8) and 47.70 (Example 9).
+
+### 3.0a The 2026 amendments A2 / A3 and these July examples (checked 2026-11-17)
+
+**The July 2026 figures above do not change.** A2 (B12, Royal Decree 24 Jul 2026) and A3 (B13, Royal Decree 27 Sep
+2026) were read article by article against B10 / B11:
+
+| Decree article | In force | Touches the July examples? |
+|---|---|---|
+| A2 art. 4 — fiscal work bonus component B 52.54 % → **63 %** | 1 Aug 2026 | **No** (after July). Examples 1 and 5 would get a larger reduction from August. |
+| A2 art. 2 — overtime limit **180 h** for all sectors (B10: 130 h) | **retroactive to 1 Jan 2026** | **Assumption 4's wording only** (130 → 180 h). 6 h and 4 h are within either limit, so Examples 8 / 9 are unchanged — unless the worker already had 130-180 h of overtime in 2026, where A2 now GIVES the reduction B10 refused. |
+| A2 art. 3 — no reduction for overtime under art. 38 § 1 29°/1 CIR 92 too (B10: 30° only) | 1 Apr 2026 | **Assumption 4 extended**: the overtime must not qualify under 29°/1 or 30° (what 29°/1 covers is not in our sources — SQ-WHT-3). |
+| A2 arts 1, 5, 6 (maintenance payments, leefloon, young sportspeople) | various | No — not employee pay in scope. |
+| A3 arts 1-9 (exempt amount, marital quotient, family reductions, n° 54) | 1 Nov 2026 | **No** (after July). |
+
+Decree-only effect on the SAME payslips (July inputs kept: Q3 ONSS, the July-August work-bonus table, BSSC; a real
+August / November payslip also changes with the 1 Sep work-bonus table and the Q4 rates):
+
+| Example | Withholding July (B10) | A2 rules (from 1 Aug) | A2 + A3 rules (from 1 Nov) |
+|---|---:|---:|---:|
+| 1 | 162.32 | 144.33 (−17.99) | 135.86 (−26.46) |
+| 2 | 742.98 | 742.98 | 734.51 (−8.47) |
+| 3 | 1,920.76 | 1,920.76 | 1,912.29 (−8.47) |
+| 4 | 604.98 | 604.98 | 597.51 (−7.47) |
+| 5 | 151.67 | 132.24 (−19.43) | 123.77 (−27.90) |
+| 6 | 560.80 | 560.80 | 552.33 (−8.47) |
+| 7 | 1,250.80 | 1,250.80 | 1,237.33 (−13.47) |
+| 8 | 749.96 | 749.96 | 741.49 (−8.47) |
+| 9 | 579.06 | 579.06 | 570.58 (−8.48) |
+| 10 (regular part) | 742.98 | 742.98 | 734.51 (−8.47) |
+
+The −8.47 is the higher exempt amount (3,089.63 − 2,987.98 = 101.65 a year / 12). Example 4 gains less (2 children:
+1,644 from 1 Nov instead of 1,656). Example 10's holiday-pay withholding is unchanged (n° 53 not amended).
+
+Assumption 1 variant (marital quotient) from 1 Nov is **not** a uniform fall: the cap drops from 13,790 to 11,780
+(12,790 only if BOTH spouses are 66 on 1 Jan 2027): Example 2 341.14 → 324.20, Example 3 1,378.20 → 1,397.10
+(**+18.90**), Example 7 755.88 → 769.78 (+13.90); Example 1 stays 0.00. With both spouses 66: 324.20 / 1,379.09 /
+751.77.
 
 Other conventions (not assumptions about the law): full-time complete month; employer category 000, worker codes
 495 / 015; employer with fewer than 10 workers (no 1.60 %); BSSC for individual taxation (B3); rounding cent half-up at
@@ -399,7 +454,7 @@ every step (B10 n° 12); double holiday pay ONSS share from the LOW earning-clas
 | Scale tax | B10 n° 31 on 35736.92 | 12947.13 | B10 n° 31 (HIGH) |
 | Base tax (single / spouse with income) | 12947.13 - 2,987.98 | 9959.15 | B10 n° 32 (HIGH) |
 | Monthly withholding before other reductions | 9959.15 / 12 | 829.93 | B10 n° 42 / B11 n° 16 (HIGH) |
-| Overtime reduction | 57.75% x 138.48 (hourly base of the premium hours) | -79.97 | B10 n° 45 (HIGH; assumes eligible legal overtime within 130 h) |
+| Overtime reduction | 57.75% x 138.48 (hourly base of the premium hours) | -79.97 | B10 n° 45 (HIGH; assumes eligible legal overtime within 180 h, A2 art. 2) |
 | **Professional withholding (regular)** | never negative (B11 n° 21) | **749.96** | — |
 | Special social security contribution | individual taxation, m = 4007.72: 82.05/3 + 3.38% x (4007.72 - 3737.00) | 36.50 | B3 (HIGH; quarterly / 3, interpretation flagged) |
 | **NET PAY** | gross - ONSS after bonus - withholding - BSSC | **2697.45** | full net (July 2026) |
@@ -422,7 +477,7 @@ every step (B10 n° 12); double holiday pay ONSS share from the LOW earning-clas
 | Scale tax | B10 n° 31 on 30673.40 | 10509.04 | B10 n° 31 (HIGH) |
 | Base tax (single / spouse with income) | 10509.04 - 2,987.98 | 7521.06 | B10 n° 32 (HIGH) |
 | Monthly withholding before other reductions | 7521.06 / 12 | 626.76 | B10 n° 42 / B11 n° 16 (HIGH) |
-| Overtime reduction | 57.75% x 82.60 (hourly base of the premium hours) | -47.70 | B10 n° 45 (HIGH; assumes eligible legal overtime within 130 h) |
+| Overtime reduction | 57.75% x 82.60 (hourly base of the premium hours) | -47.70 | B10 n° 45 (HIGH; assumes eligible legal overtime within 180 h, A2 art. 2) |
 | **Professional withholding (regular)** | never negative (B11 n° 21) | **579.06** | — |
 | Special social security contribution | individual taxation, m = 3850.42: 82.05/3 + 3.38% x (3850.42 - 3737.00) | 31.18 | B3 (HIGH; quarterly / 3, interpretation flagged) |
 | **NET PAY** | gross - ONSS after bonus - withholding - BSSC | **2451.71** | full net (July 2026) |

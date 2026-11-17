@@ -71,12 +71,22 @@ OPEN_QUESTIONS = {
     "be_onss_employer_base_rate": ("Employer base rate conflict", "the nominal private-sector rate (spec) vs the "
                                                                   "2026/3 rate-file rate for category 000 (reviewer "
                                                                   "guide): which category applies."),
+    "be_wht_overtime_rule": ("SQ-WHT-3", "The A2 decree (B12) raises the yearly overtime hour limit with effect from "
+                                         "1 Jan 2026, published only on 30 Jul 2026: are payslips paid before "
+                                         "publication regularised, and which overtime falls under the new "
+                                         "art. 38 exception (from 1 Apr 2026)?"),
+    "be_wht_annex3_regular_scale": ("SQ-WHT-4", "From 1 Nov 2026 (A3 / B13) the marital-quotient cap depends on both "
+                                                "spouses' age on 1 Jan 2027 (lower cap when the payer lacks it) and a "
+                                                "spouse's study-grant income can make the employee 'single': new "
+                                                "household inputs (ZP-PRIV)."),
 }
-# Content that depends on 2026 amendments not yet archived (DOWNLOAD_LIST A2 / A3).
-AMENDMENTS_MISSING = {
-    "be_wht_annex3_amendment_2026": "A2 (Royal Decree 24 Jul 2026, from 1 Aug) and A3 (27 Sep 2026, from 1 Nov)",
-    "be_wht_fiscal_work_bonus": "A2 (change from 1 Aug 2026)",
-    "be_wht_overtime_rule": "A2 (change from 1 Aug 2026)",
+# Amended 2026 content whose decree is archived (A2 = B12, A3 = B13) but whose FPS Finance key formula — the
+# independent cross-check B11 gave for the 1 January rows — is not in the inbox yet.
+KEY_FORMULA_MISSING = {
+    "be_wht_annex3_amendment_2026": "the key formulas for pay from 1 Aug and from 1 Nov 2026",
+    "be_wht_annex3_regular_scale": "the key formula for pay from 1 Nov 2026",
+    "be_wht_family_reductions": "the key formula for pay from 1 Nov 2026",
+    "be_wht_fiscal_work_bonus": "the key formula for pay from 1 Aug 2026",
 }
 
 
@@ -137,9 +147,10 @@ def _row_report(content, key, kind, group, row, slabs, sources) -> dict:
     if key in OPEN_QUESTIONS:
         ref, detail = OPEN_QUESTIONS[key]
         payroll.append({"code": ref, "by": SPECIALIST, "detail": detail})
-    if key in AMENDMENTS_MISSING:
-        payroll.append({"code": "SOURCE_NOT_ARCHIVED", "by": OWNER,
-                        "detail": f"{AMENDMENTS_MISSING[key]} not yet in the source inbox."})
+    if key in KEY_FORMULA_MISSING:
+        payroll.append({"code": "KEY_FORMULA_NOT_ARCHIVED", "by": OWNER,
+                        "detail": f"FPS Finance {KEY_FORMULA_MISSING[key]} not in the source inbox: the amended values "
+                                  "rest on the decree text alone, without the cross-check the 1 January rows have."})
     return {"key": key, "group": group, "kind": kind, "rowId": getattr(row, "id", None),
             "label": (getattr(row, "label", None) or next(label for *_rest, label in (content.KEYS[key],))),
             "textValue": getattr(row, "text_value", None), "blocks": blocks,

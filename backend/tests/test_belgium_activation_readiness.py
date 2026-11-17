@@ -66,7 +66,10 @@ def test_a_fresh_draft_pack_reports_every_row_and_the_gate_verdict(db, seeded):
     assert "EMPTY" in by_key["be_onss_employee_rate"]["blocks"]                       # every reason, not the first
     assert [p["code"] for p in by_key["be_bssc_pending"]["payrollBlockers"]][:1] == ["M-BSSC"]
     assert any(p["code"] == "NO_VOCABULARY" for p in by_key["be_wht_period_strategy"]["payrollBlockers"])
-    assert any(p["code"] == "SOURCE_NOT_ARCHIVED" for p in by_key["be_wht_annex3_amendment_2026"]["payrollBlockers"])
+    assert any(p["code"] == "KEY_FORMULA_NOT_ARCHIVED" for p in by_key["be_wht_annex3_amendment_2026"]["payrollBlockers"])
+    assert any(p["code"] == "SQ-WHT-3" for p in by_key["be_wht_overtime_rule"]["payrollBlockers"])
+    assert any(p["code"] == "SQ-WHT-4" for p in by_key["be_wht_annex3_regular_scale"]["payrollBlockers"])
+    assert not any(p["code"] == "SOURCE_NOT_ARCHIVED" for r in report["rows"] for p in r["payrollBlockers"])
     assert {q["state"] for q in report["afterActivation"]["rateFiles"]} == {"NO_FILE"}
     assert [q["quarter"] for q in report["afterActivation"]["rateFiles"]] == ["20261", "20262", "20263", "20264"]
     assert {d["state"] for d in report["afterActivation"]["decisions"]} == {"OPEN"}
