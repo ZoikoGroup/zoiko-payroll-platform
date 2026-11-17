@@ -139,7 +139,9 @@ def test_literal_names_manifest_single_child_and_single_head():
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
     assert children == [FILENAME]
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert script.get_heads() == [REVISION]
+    # a4c7e1f9b3d8 (report-field source_column VARCHAR(100)) is its single child and the head.
+    assert script.get_heads() == ["a4c7e1f9b3d8"]
+    assert script.get_revision("a4c7e1f9b3d8").down_revision == REVISION
 
 
 def test_the_deploy_drift_filter_explains_every_new_table_and_column():

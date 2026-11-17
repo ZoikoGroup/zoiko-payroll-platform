@@ -307,7 +307,8 @@ def test_alembic_heads_is_single_head():
     # 3880223bfaa0, re-parented (never applied) onto e7ec6c1933b4.
     # rugvedh's Mexico + Malaysia merge (d6b2e8f4a1c9) and main's Belgium Block K
     # (b7e4c2a9d5f1, on merge cf348b09db2b) are joined by the final no-op merge e3f9a7c1b5d2.
-    assert heads == ["e9c4b7a2d6f3"]   # Belgium Block M-ECWC on merge e3f9a7c1b5d2
+    # a4c7e1f9b3d8 (2026-11-17) widens report-field source_column to VARCHAR(100) on e9c4b7a2d6f3.
+    assert heads == ["a4c7e1f9b3d8"]   # report-field source_column VARCHAR(100) on Belgium Block M-ECWC
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -319,7 +320,8 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["e9c4b7a2d6f3"]   # Belgium Block M-ECWC on merge e3f9a7c1b5d2
+    assert list(script.get_heads()) == ["a4c7e1f9b3d8"]   # report-field source_column VARCHAR(100) on Belgium Block M-ECWC
+    assert script.get_revision("a4c7e1f9b3d8").down_revision == "e9c4b7a2d6f3"
     assert script.get_revision("e9c4b7a2d6f3").down_revision == "e3f9a7c1b5d2"   # Belgium Block M-ECWC on the merge
 
 
@@ -387,8 +389,9 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 275   # rugvedh's 272 (Mexico lifecycle + Belgium + Malaysia + merges)
+    assert len(revs) == 276   # rugvedh's 272 (Mexico lifecycle + Belgium + Malaysia + merges)
                               # + Belgium Block K b7e4c2a9d5f1 + merge e3f9a7c1b5d2 + Belgium M-ECWC e9c4b7a2d6f3
+                              # + report-field source_column widening a4c7e1f9b3d8
 
 
 def test_germany_head_chain_wiring_is_intact():

@@ -4,7 +4,9 @@ seeded).
 
 Pins:
   * every PAYSLIP_ITEM_JSON path the new seeds use is a catalogued path, every
-    aggregated field is aggregatable, every source_column fits String(50);
+    aggregated field is aggregatable, every source_column fits String(100)
+    (migration a4c7e1f9b3d8; models.py says the same), and so does every
+    field path any seed in this repository writes (Mexico included);
   * only _DEFAULT_REPORT_COMPONENTS keys; employer-side amounts never in a
     deductions / tax / contributions component;
   * run summaries are SUM_RUN, certificate previews SUM_YTD; JP / SA previews
@@ -22,6 +24,7 @@ import pytest
 NEW = ("BE", "FR", "IT", "JP", "MY", "NZ", "PL", "SA")
 CATALOGUED_HERE = ("BE", "FR", "IT", "JP", "NZ", "PL", "SA")          # MY was already catalogued
 EMPLOYEE_SIDE = ("deductions", "tax", "contributions")
+SOURCE_COLUMN_MAX = 100          # payroll_report_template_component_fields.source_column
 
 
 def _seed_module():
@@ -66,7 +69,7 @@ def test_catalog_paths_are_well_formed(country):
     prefix = f"{country.lower()}_calculation_snapshot."
     for path, spec in catalog.items():
         assert path.startswith(prefix), path
-        assert len(path) <= 50, (path, len(path))
+        assert len(path) <= SOURCE_COLUMN_MAX, (path, len(path))
         label, field_type, aggregatable = spec
         assert field_type in ("currency", "text"), path
         assert not (field_type == "text" and aggregatable), path
@@ -97,8 +100,8 @@ def test_every_seeded_field_is_catalogued_aggregatable_and_fits():
             problems.append((key, field_key, "path of another country", column))
         if aggregation and not catalog[column][2]:
             problems.append((key, field_key, "aggregated but not aggregatable", column))
-        if len(column) > 50:
-            problems.append((key, field_key, "source_column > 50", column))
+        if len(column) > SOURCE_COLUMN_MAX:
+            problems.append((key, field_key, f"source_column > {SOURCE_COLUMN_MAX}", column))
         if component_key not in default_components:
             problems.append((key, component_key, "component not in _DEFAULT_REPORT_COMPONENTS", None))
         if t["report_type"].upper() in service._REPORT_COMPONENTS_BY_TYPE:
@@ -207,13 +210,25 @@ def test_activation_gates_are_unchanged(db):
 CONDITIONAL = {
     "be_calculation_snapshot.bases.ONSS_MANUAL_108",
     "jp_calculation_snapshot.jp_bonus.jp_bonus", "jp_calculation_snapshot.jp_bonus.jp_bonus_wht",
+    "jp_calculation_snapshot.jp_bonus.jp_bonus_si_employee_total",
+    "jp_calculation_snapshot.jp_bonus.jp_bonus_si_employer_total",
+    "jp_calculation_snapshot.jp_bonus.jp_bonus_ei_employee",
+    "jp_calculation_snapshot.jp_bonus.jp_bonus_ei_employer",
     "pl_calculation_snapshot.pl_funds.FP_FS", "pl_calculation_snapshot.pl_funds.FGSP",
     "pl_calculation_snapshot.pl_funds.FEP",
 }
 
 
 def _walk(blob, path):
-    """(present, value) — mirrors service._resolve_field_value's dotted walk."""
+    """(present, value) — mirrors service._resolve_field_value's dotted walk,
+    including its keyed-list selector ("contributions[family=x].ee")."""
+    if "[" in path:
+        from app.modules.payroll import service
+
+        segments = [s for s in path.split(".") if s]
+        if not service._report_json_walk(blob, segments):
+            return False, None
+        return True, service._report_json_path_value(blob, segments)
     for segment in path.split("."):
         if blob is None:
             return True, None                     # a conditional parent the engine left empty
@@ -316,3 +331,70 @@ def test_seeded_amounts_resolve_to_numbers_in_a_real_result(country, monkeypatch
         if value is not None and service._report_json_number(value, "currency") is None:
             bad.append((key, field[4], value))
     assert bad == []
+
+
+# ── source_column width: schema, model and every seed in the repository ─────
+def test_model_and_migration_declare_source_column_100():
+    import importlib.util
+    import pathlib
+
+    from app.modules.payroll.models import ReportTemplateComponentField
+
+    assert ReportTemplateComponentField.__table__.c.source_column.type.length == SOURCE_COLUMN_MAX
+    path = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions" /         "a4c7e1f9b3d8_widen_report_field_source_column_100.py"
+    spec = importlib.util.spec_from_file_location("_widen_source_column", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    assert (migration.revision, migration.down_revision, migration.WIDE) == (
+        "a4c7e1f9b3d8", "e9c4b7a2d6f3", SOURCE_COLUMN_MAX)
+
+
+def test_belgian_document_templates_fit_without_truncation():
+    """be_seed_report_templates slices source_column to the column width; no
+    definition may rely on that slice (it would silently cut a path)."""
+    from app.modules.payroll import belgium_reports
+
+    long = [(key, field[0], len(field[4]))
+            for key, _name, _version, components in belgium_reports.TEMPLATES.values()
+            for component in components for field in component[2] if len(field[4]) > SOURCE_COLUMN_MAX]
+    assert long == []
+
+
+def test_every_seed_path_in_the_repository_fits(db, monkeypatch):
+    """Runs the whole seed script (every country, Mexico included) against the
+    test database, recording every field definition it hands to _seed_template,
+    then checks those and every field row actually written."""
+    from app.modules.payroll.models import ReportTemplate, ReportTemplateComponent, ReportTemplateComponentField
+
+    seed = _seed_module()
+    recorded = []
+    original = seed._seed_template
+
+    def recording(db_, **kwargs):
+        for _component_key, _label, fields in kwargs["components"]:
+            recorded.extend((kwargs["country"], kwargs["template_key"], f[0], f[4]) for f in fields)
+        return original(db_, **kwargs)
+
+    class _Session:
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(seed, "_seed_template", recording)
+    monkeypatch.setattr(seed, "SessionLocal", _Session)
+    seed.run()
+
+    countries = {c for c, *_ in recorded}
+    assert {"MX", "BE", "FR", "IT", "JP", "MY", "NZ", "PL", "SA", "ZA"} <= countries
+    assert any(c == "MX" for c, *_ in recorded)
+    too_long = [r for r in recorded if len(r[3]) > SOURCE_COLUMN_MAX]
+    assert too_long == []
+    stored = [(t.template_key, f.field_key, f.source_column)
+              for f, t in db.query(ReportTemplateComponentField, ReportTemplate)
+              .join(ReportTemplateComponent, ReportTemplateComponentField.component_id == ReportTemplateComponent.id)
+              .join(ReportTemplate, ReportTemplateComponent.report_template_id == ReportTemplate.id)]
+    assert stored and [r for r in stored if len(r[2]) > SOURCE_COLUMN_MAX] == []
+    mexico = [r for r in stored if r[0].startswith("MX")]
+    assert mexico, "no Mexico template fields were seeded"

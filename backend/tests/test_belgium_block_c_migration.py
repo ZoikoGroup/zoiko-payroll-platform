@@ -145,7 +145,8 @@ def test_revision_is_the_single_child_and_the_single_head():
     # This revision is no longer the head itself: merge cf348b09db2b joins it with Malaysia's
     # head (f793f6074257), Belgium Block K (b7e4c2a9d5f1) sits on that merge, merge 4de7c091ab32
     # joins it with Mexico's CFDI lifecycle, and merges d6b2e8f4a1c9 / e3f9a7c1b5d2 rejoin them all.
-    assert list(script.get_heads()) == ["e9c4b7a2d6f3"]   # Belgium Block M-ECWC on merge e3f9a7c1b5d2
+    assert list(script.get_heads()) == ["a4c7e1f9b3d8"]   # report-field source_column VARCHAR(100) on Belgium Block M-ECWC
+    assert script.get_revision("a4c7e1f9b3d8").down_revision == "e9c4b7a2d6f3"
     assert script.get_revision("e9c4b7a2d6f3").down_revision == "e3f9a7c1b5d2"   # Belgium Block M-ECWC on the merge
     merge = script.get_revision("cf348b09db2b")
     assert set(merge.down_revision) == {REVISION, "f793f6074257"}
