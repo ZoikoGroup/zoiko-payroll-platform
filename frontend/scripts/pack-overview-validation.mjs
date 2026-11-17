@@ -54,6 +54,10 @@ check("landing page shows pack status badges", landing.includes("packStatus(j.co
 check("landing page loading fix (finally callback)", landing.includes(".finally(() => setLoading(false))"));
 check("summary reloads after an Edit Overview save (pack updatedAt)",
   summary.includes("pack?.updatedAt, refreshKey]"));
+const editOverview = read("components/jurisdiction/EditOverviewModal.jsx");
+check("Edit Overview links a Source Evidence document to the pack",
+  editOverview.includes("getSourceArtifacts()") && editOverview.includes("value={form.sourceDocumentId}")
+  && /sourceDocumentId: form\.sourceDocumentId \? Number\(form\.sourceDocumentId\) : null/.test(editOverview));
 check("summary never invents values (counts only)", summary.includes("awaiting sign-off") && !/defaultValue|placeholder=/.test(summary));
 
 const health = read("components/jurisdiction/PackHealthPanel.jsx");
