@@ -21,7 +21,7 @@ from app.modules.payroll.models import (
     FormSendStatus, FormSubmissionStatus,
 )
 from app.modules.payroll.service import FIELD_MAP, log_activity, ActivityStatus
-from app.core.exceptions import NotFoundException
+from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.communications.service import dispatch_email, idempotency_key
 from app.services import email_service
 from app.services.email_service import send_update_form_invite_email
@@ -85,8 +85,40 @@ def delete_custom_field(db: Session, organization_id: int, field_id: int) -> Non
 
 # ── Form templates ───────────────────────────────────────────────────────
 
+# Standard employee fields an employee may fill in about themselves on a
+# public (Send Template) form. Everything else in FIELD_MAP - salary
+# (ctc/basic/hra), status, date of joining, department, designation,
+# employment type, country - is the employer's to set, so a public form may
+# neither ask for it nor change it. Custom fields are the organisation's own
+# questions and stay allowed.
+SELF_SERVICE_STANDARD_FIELDS = frozenset({
+    "name", "email", "phone", "bankName", "bankAccountNumber", "ifscCode", "panNumber", "uan",
+})
+
+
+def _is_self_service(field: dict) -> bool:
+    """False only for a standard field the employer owns (a FIELD_MAP field
+    outside SELF_SERVICE_STANDARD_FIELDS). A key that is no employee field at
+    all is left as before - it is never applied to the record."""
+    key = field.get("key")
+    return field.get("source") == "custom" or key in SELF_SERVICE_STANDARD_FIELDS or key not in FIELD_MAP
+
+
+def _self_service_fields(form: PayrollUpdateForm) -> list:
+    """The form's fields an employee may see and answer. A template saved
+    before this rule existed may still list an employer-owned field; it is
+    left out of the public form and never applied."""
+    return [f for f in (form.fields_config or []) if _is_self_service(f)]
+
+
 def create_form(db: Session, organization_id: int, name: str, fields: list, actor_id: int = None) -> PayrollUpdateForm:
     fields_dump = [f.model_dump() if hasattr(f, "model_dump") else f for f in fields]
+    refused = [f.get("label") or f.get("key") for f in fields_dump if not _is_self_service(f)]
+    if refused:
+        raise BadRequestException(
+            "A form sent to employees can't ask for fields the employer sets: " + ", ".join(refused)
+            + ". Change these on the employee record (Update Employees) instead."
+        )
     form = PayrollUpdateForm(organization_id=organization_id, name=name, fields_config=fields_dump, created_by=actor_id)
     db.add(form)
     db.commit()
@@ -235,8 +267,9 @@ def get_public_form(db: Session, token: str) -> dict:
     form = db.query(PayrollUpdateForm).filter(PayrollUpdateForm.id == send.form_id).first()
     employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == send.employee_id).first()
 
+    fields = _self_service_fields(form)
     current_values = {}
-    for f in (form.fields_config or []):
+    for f in fields:
         key = f["key"]
         if f.get("source") == "custom":
             current_values[key] = (employee.custom_fields or {}).get(key)
@@ -246,10 +279,33 @@ def get_public_form(db: Session, token: str) -> dict:
     return {
         "formName": form.name,
         "employeeName": employee.name,
-        "fields": form.fields_config,
+        "fields": fields,
         "currentValues": current_values,
         "status": send.status,
     }
+
+
+_CONTACT_KEYS = ("email", "phone")
+
+
+def _normalized_contact_values(form: PayrollUpdateForm, values: dict, employee: PayrollEmployee) -> dict:
+    """The form's standard email / phone answers, validated and normalised
+    with the same server rules as every other employee write path (400 on a
+    bad value). An answer equal to what is already stored is left alone."""
+    from app.modules.payroll.service import _validate_employee_contact
+
+    contact = {}
+    for f in (form.fields_config or []):
+        key = f.get("key")
+        if f.get("source") == "custom" or key not in _CONTACT_KEYS:
+            continue
+        value = (values or {}).get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        contact[key] = value
+    if contact:
+        _validate_employee_contact(contact, getattr(employee, "country_code", None), current=employee)
+    return contact
 
 
 def submit_public_form(db: Session, token: str, values: dict) -> dict:
@@ -265,8 +321,16 @@ def submit_public_form(db: Session, token: str, values: dict) -> dict:
         raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail="This link has expired.")
 
     form = db.query(PayrollUpdateForm).filter(PayrollUpdateForm.id == send.form_id).first()
-    allowed_keys = {f["key"] for f in (form.fields_config or [])}
+    allowed_keys = {f["key"] for f in _self_service_fields(form)}
     clean_values = {k: v for k, v in (values or {}).items() if k in allowed_keys}
+    # A bad email / phone is refused now, while the employee can still fix it.
+    # Token-based public path (no logged-in principal): scoped to the send's
+    # own organization, never a raw PayrollEmployee query.
+    from app.core.authz.scopes import organization_scoped
+
+    employee = organization_scoped(db, PayrollEmployee, send.organization_id).filter(
+        PayrollEmployee.id == send.employee_id).first()
+    clean_values.update(_normalized_contact_values(form, clean_values, employee))
 
     submission = PayrollUpdateFormSubmission(
         organization_id=send.organization_id, send_id=send.id,
@@ -322,7 +386,7 @@ def list_submissions(db: Session, organization_id: int, status: str = None) -> L
 
 
 def _apply_submission(employee: PayrollEmployee, form: PayrollUpdateForm, data: dict) -> None:
-    for f in (form.fields_config or []):
+    for f in _self_service_fields(form):
         key = f["key"]
         if key not in data:
             continue
@@ -361,7 +425,19 @@ def review_submission(db: Session, organization_id: int, submission_id: int, app
     employee = db.query(PayrollEmployee).filter(PayrollEmployee.id == send.employee_id).first()
 
     if approve:
-        _apply_submission(employee, form, submission.submitted_data or {})
+        # Approval applied email / phone with no checks at all; they now go
+        # through the same validation + duplicate-email check as an edit.
+        from app.modules.payroll.service import check_duplicate_employee_identifiers
+
+        data = dict(submission.submitted_data or {})
+        contact = _normalized_contact_values(form, data, employee)
+        if contact.get("email"):
+            check_duplicate_employee_identifiers(
+                db, organization_id, contact["email"], employee.country_code, None, {},
+                exclude_employee_id=employee.id,
+            )
+        data.update(contact)
+        _apply_submission(employee, form, data)
         submission.status = FormSubmissionStatus.APPROVED.value
     else:
         submission.status = FormSubmissionStatus.REJECTED.value

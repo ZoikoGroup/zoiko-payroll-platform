@@ -20,7 +20,7 @@ from app.modules.payroll.engine.countries.shared import (
     _param_text, resolve_periods_per_year, resolve_direct_period_threshold,
     telescope_period_amount,
     _UK_NO_INDEPENDENT_PA_TAPER_ENABLED_COUNTRIES, _UK_K_CODE_50PCT_CAP_ENABLED_COUNTRIES,
-    _UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES, _UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES,
+    _UK_NI_CATEGORY_BANDS_ENABLED_COUNTRIES, _UK_NI_DIRECT_PERIOD_CALC_ENABLED_COUNTRIES, _drop_identical_slabs,
     _UK_STUDENT_LOAN_ROUND_DOWN_ENABLED_COUNTRIES, _UK_AUTO_ENROLMENT_ASSESSMENT_ENABLED_COUNTRIES,
 )
 
@@ -310,7 +310,7 @@ def _resolve_ni_bands(slabs, ni_category: str | None):
         s for s in slabs
         if getattr(s, "rule_type", None) == "NI_BAND" and getattr(s, "ni_category", None) == ni_category
     ]
-    return sorted(bands, key=lambda s: s.min_amount)
+    return sorted(_drop_identical_slabs(bands), key=lambda s: s.min_amount)
 
 
 # Real, published per-period NI_BAND variants (ZP-TAX-UK-2026-27-001
@@ -359,7 +359,7 @@ def _resolve_ni_bands_by_frequency(slabs, ni_category: str | None, pay_frequency
         s for s in slabs
         if getattr(s, "rule_type", None) == rule_type and getattr(s, "ni_category", None) == ni_category
     ]
-    return sorted(bands, key=lambda s: s.min_amount)
+    return sorted(_drop_identical_slabs(bands), key=lambda s: s.min_amount)
 
 
 def _calculate_ni_from_bands(annual_gross: Decimal, bands: list) -> tuple[Decimal, Decimal]:
@@ -465,8 +465,11 @@ def calculate(ctx: PayrollContext) -> dict:
 
     # NI_BAND rows (if any) live in the same TaxSlab list as income-tax
     # brackets — filtered out before either consumer sees the other's rows.
-    income_slabs = [s for s in ctx.slabs if getattr(s, "rule_type", None) not in _UK_NI_BAND_RULE_TYPES]
-    state_income_slabs = [s for s in ctx.state_slabs if getattr(s, "rule_type", None) not in _UK_NI_BAND_RULE_TYPES]
+    # Exact copies of an income-tax bracket are dropped too (see _drop_identical_slabs).
+    income_slabs = _drop_identical_slabs(
+        [s for s in ctx.slabs if getattr(s, "rule_type", None) not in _UK_NI_BAND_RULE_TYPES])
+    state_income_slabs = _drop_identical_slabs(
+        [s for s in ctx.state_slabs if getattr(s, "rule_type", None) not in _UK_NI_BAND_RULE_TYPES])
 
     # Directors NIC (§9.2: "Do not process a director as an ordinary
     # employee solely because the same percentage rates apply") — takes

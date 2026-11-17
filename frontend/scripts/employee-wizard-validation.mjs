@@ -87,6 +87,12 @@ check("the form is sent only to selected employees who have an email", () =>
 check("Send Template cannot continue without a recipient", () => send.includes("nextDisabled={recipients.length === 0}"));
 check("existing org-wide custom fields and Add field are kept", () =>
   send.includes("getCustomFields()") && send.includes("createCustomField("));
+check("Send Template offers only self-service standard fields (no salary, status, dates, job details)", () => {
+  const keys = (send.match(/SELF_SERVICE_KEYS = \[([^\]]*)\]/) || [])[1] || "";
+  return ["bankName", "bankAccountNumber", "ifscCode", "panNumber", "uan"].every((k) => keys.includes(`"${k}"`))
+    && ["ctc", "status", "dateOfJoining", "department", "designation", "employmentType"].every((k) => !keys.includes(`"${k}"`))
+    && !/STANDARD_EMPLOYEE_FIELDS\.(map|filter)\(\(f\) => (checkedStandard|\(\{)/.test(send);
+});
 check("delivery outcomes (sent / not delivered / failed) are still shown", () =>
   ["sent", "not_delivered", "failed"].every((s) => send.includes(`resultList("${s}")`)));
 
