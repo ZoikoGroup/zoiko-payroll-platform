@@ -249,6 +249,13 @@ the withholding rises by 79.97 (Example 8) and 47.70 (Example 9).
 | A2 arts 1, 5, 6 (maintenance payments, leefloon, young sportspeople) | various | No — not employee pay in scope. |
 | A3 arts 1-9 (exempt amount, marital quotient, family reductions, n° 54) | 1 Nov 2026 | **No** (after July). |
 
+**Overtime check, stated explicitly (Examples 8 and 9).** The overtime hours were checked against BOTH yearly limits:
+Example 8 has 6 h and Example 9 has 4 h, each the only overtime of the year in the example's inputs. Both are within
+the **old 130 h limit** (B10 n° 45.2, as published) AND within the **new 180 h limit** (A2 art. 2, retroactive to
+1 Jan 2026). The overtime reduction (−79.97 and −47.70) is therefore due in full under either limit, and the July
+figures are the same whichever limit is taken to have applied in July 2026. The retroactive change could only matter
+for a worker whose cumulative 2026 overtime before or in July passed 130 h (SQ-WHT-3) — not the case in these examples.
+
 Decree-only effect on the SAME payslips (July inputs kept: Q3 ONSS, the July-August work-bonus table, BSSC; a real
 August / November payslip also changes with the 1 Sep work-bonus table and the Q4 rates):
 

@@ -191,8 +191,17 @@ the Overview lists their state.
 
 ## 4. Blocking questions for the specialist — professional withholding (added 2026-11-16)
 
-All block the withholding engine (M-WHT) and the signing of the withholding rows at gate G1. Answer each as a
-decision record (Super Admin > Belgium > Decision records; proposer ≠ decider).
+**All four questions — SQ-WHT-1, SQ-WHT-2, SQ-WHT-3, SQ-WHT-4 — have the SAME priority: blocking.** Each blocks the
+withholding engine (M-WHT) and the signing of the withholding rows at gate G1; none is secondary, and the later
+numbering only reflects when the source was read (SQ-WHT-3 / 4 came from the A2 / A3 decrees on 2026-11-17). Answer
+each as a decision record (Super Admin > Belgium > Decision records; proposer ≠ decider).
+
+| Question | Priority | Blocks |
+|---|---|---|
+| SQ-WHT-1 — BSSC and the withholding base | BLOCKING (G1) | the withholding base of every payslip |
+| SQ-WHT-2 — G-26 ONSS split regular / exceptional | BLOCKING (G1) | every month with regular + exceptional pay |
+| SQ-WHT-3 — retroactive 180 h overtime limit; 29°/1 exception | BLOCKING (G1) | **operational:** whether any January-July 2026 payroll run (B10's 130 h) needs a retroactive correction, and how the yearly overtime hours are counted from 1 Jan |
+| SQ-WHT-4 — age-based marital-quotient cap; study-grant spouse | BLOCKING (G1) | every married employee's withholding from 1 Nov 2026; new household inputs (ZP-PRIV) |
 
 ### SQ-WHT-1 — Is the BSSC deducted before or after calculating the withholding base?
 
@@ -227,6 +236,10 @@ decision record (Super Admin > Belgium > Decision records; proposer ≠ decider)
 
 ### SQ-WHT-3 — Overtime: the retroactive 180 h limit and the new exception (added 2026-11-17)
 
+- **Priority: BLOCKING, same tier as SQ-WHT-1 / SQ-WHT-2.** This is an operational question, not only a data one:
+  until it is answered nobody can say whether a January-July 2026 payroll run that applied B10's 130 h limit needs a
+  retroactive correction (hours 131-180 already worked before publication on 30 Jul 2026).
+
 - **The text.** A2 (B12, Royal Decree 24 Jul 2026, published 30 Jul 2026) art. 2 replaces Annex III n° 45.2: the
   overtime reduction applies to the premium base of the first **180 h** a year for all sectors (B10: 130 h; 360 h
   hotel; 280 h road / rail works), **with effect from 1 Jan 2026** (art. 7). Art. 3 adds art. 38 § 1, first
@@ -242,6 +255,8 @@ decision record (Super Admin > Belgium > Decision records; proposer ≠ decider)
 - **Please cite** the provision or FPS Finance guidance.
 
 ### SQ-WHT-4 — Marital quotient and 'single' status from 1 Nov 2026 (added 2026-11-17)
+
+- **Priority: BLOCKING, same tier as SQ-WHT-1 / SQ-WHT-2** (every married employee's withholding from 1 Nov 2026).
 
 - **The text.** A3 (B13, Royal Decree 27 Sep 2026, pay from 1 Nov 2026) art. 3: the income imputed to the spouse is
   capped at **12,790 when both spouses have reached 66 on 1 Jan 2027**, otherwise — *"ook wanneer de schuldenaar van
