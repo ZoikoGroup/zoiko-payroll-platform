@@ -52,6 +52,8 @@ check("next version skips every existing version (1.0 with 1.0 and 1.1 existing 
   c.nextPackVersion("1.0", ["1.0", "1.1"]) === "1.2");
 check("landing page shows pack status badges", landing.includes("packStatus(j.code)"));
 check("landing page loading fix (finally callback)", landing.includes(".finally(() => setLoading(false))"));
+check("summary reloads after an Edit Overview save (pack updatedAt)",
+  summary.includes("pack?.updatedAt, refreshKey]"));
 check("summary never invents values (counts only)", summary.includes("awaiting sign-off") && !/defaultValue|placeholder=/.test(summary));
 
 const health = read("components/jurisdiction/PackHealthPanel.jsx");
