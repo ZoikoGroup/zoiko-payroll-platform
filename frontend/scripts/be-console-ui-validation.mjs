@@ -75,6 +75,16 @@ check("the activation readiness tab is read-only", () => {
   assert(router.includes('@router.get("/compliance/belgium/packs/{pack_row_id}/activation-readiness"'), "backend GET route");
 });
 
+check("with no Belgian pack the page offers the governed seed, not only the generic form", () => {
+  const page = read("pages/JurisdictionCompliance/BECompliancePage.jsx");
+  assert(/import \{ SeedDraftPanel \} from "\.\.\/\.\.\/components\/jurisdiction\/belgium\/BEOverviewDashboard"/.test(page),
+    "BECompliancePage imports the governed SeedDraftPanel");
+  assert(/listBePacks\(\)/.test(page) && /packs\.length === 0/.test(page), "shown only when the Belgium pack list is empty");
+  assert(/export function SeedDraftPanel/.test(read("components/jurisdiction/belgium/BEOverviewDashboard.jsx")), "panel exported");
+  const service = read("service/superAdminService.js");
+  assert(/seedBeDraftPack = \(reason\) => apiFetch\(`\$\{BE_SA\}\/seed-draft`, \{ method: "POST"/.test(service), "seed-draft POST");
+});
+
 const STATUTORY_NUMBER = /\d+(?:[.,]\d+)?\s*%|EUR\s*\d|\b\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\b|\b(?:13\.07|24\.92|108|5\.57|10\.27|2233|4000|92|38|40)\b/;
 check("no hard-coded statutory number in Belgium UI files", () => {
   for (const file of uiFiles) {
