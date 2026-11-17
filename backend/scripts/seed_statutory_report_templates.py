@@ -1589,6 +1589,8 @@ def run():
         seed_mexico(db)
         seed_netherlands(db)
         seed_south_africa(db)
+        for seed_country in SEED_COMING_SOON_COUNTRIES:
+            seed_country(db)
         # ------------------------------------------------------------------
         # Ireland (ZP-IE-ENG-001) — Revenue Online System (ROS) templates.
         # ------------------------------------------------------------------
@@ -2562,6 +2564,415 @@ def seed_south_africa(db):
             description=t["description"], regulatory_authority="SARS",
             source_references="ZP-ZA-ENG-001 v1.0 §9 / §12"))
     return seeded
+
+
+# ── BE / FR / IT / JP / MY / NZ / PL / SA (previously "Coming soon") ────────
+# Register, run-summary and year-to-date preview templates over each country's
+# frozen <cc>_calculation_snapshot (service._PAYSLIP_ITEM_JSON_FIELD_CATALOG).
+# None of them is the authority return or certificate itself — each is a
+# reconciliation aid for it. The report types are not in
+# service._REPORT_COMPONENTS_BY_TYPE, so only the _DEFAULT_REPORT_COMPONENTS
+# keys are used. Employer-side amounts sit only in "employer_contributions";
+# "deductions" / "tax" / "contributions" carry employee amounts only.
+# Activation stays with each country's template_activation_refusal hook.
+#
+# Japan and Saudi Arabia correction payslips store the FULL corrected result in
+# their snapshot (only the scalar columns are deltas), so their year-to-date
+# templates read the scalar PayslipItem columns, never the snapshot.
+#
+# Field tuples: (field_key, label, field_type, data_source_kind, source_column, aggregation).
+
+def _json(snap):
+    def make(field_key, label, path, field_type="currency", aggregation=None):
+        return (field_key, label, field_type, "PAYSLIP_ITEM_JSON", snap + path, aggregation)
+    return make
+
+
+def _col(field_key, label, column, aggregation=None):
+    return (field_key, label, "currency", "PAYSLIP_ITEM", column, aggregation)
+
+
+def _sum_ytd(fields):
+    return [(key, f"{label} (YTD)", ftype, kind, col, "SUM_YTD") for (key, label, ftype, kind, col, _agg) in fields]
+
+
+def _employer(tax_label):
+    return ("employer_info", "Employer", [
+        ("employer_name", "Employer", "text", "EMPLOYER_PROFILE", "name", None),
+        ("employer_tax_no", tax_label, "text", "EMPLOYER_PROFILE", "tax_no", None),
+        ("period_label", "Period", "text", "PAYROLL_RUN", "period_label", None),
+        ("pay_date", "Pay Date", "date", "PAYROLL_RUN", "pay_date", None),
+    ])
+
+
+_EMPLOYEE = ("employee_info", "Employee", [
+    ("employee_name", "Employee Name", "text", "PAYSLIP_ITEM", "employee_name", None),
+])
+_GROSS = _col("gross_pay", "Gross Pay", "gross_pay")
+
+
+def _register(cc, country_name, employer_tax_label, earnings, deductions, employer_cost):
+    return {f"{cc}-PAYROLL-REGISTER": dict(
+        name=f"{country_name} payroll register", report_type=f"{cc}_PAYROLL_REGISTER", scope="AGGREGATE",
+        description="Per-employee register for one run: gross pay, the employee's statutory deductions and the "
+                    "employer's statutory cost (never an employee deduction).",
+        components=[_employer(employer_tax_label), _EMPLOYEE,
+                    ("earnings", "Earnings", [_GROSS] + earnings),
+                    ("deductions", "Employee Statutory Deductions", deductions),
+                    ("employer_contributions", "Employer Statutory Cost", employer_cost)])}
+
+
+def _run_summary(cc, key, name, report_type, description, employer_tax_label, earnings=(), tax=(),
+                 contributions=(), employer_cost=()):
+    components = [_employer(employer_tax_label)]
+    for component_key, label, fields in (("earnings", "Earnings and Bases", [_GROSS] + list(earnings)),
+                                         ("tax", "Income Tax Withheld", list(tax)),
+                                         ("contributions", "Employee Contributions", list(contributions)),
+                                         ("employer_contributions", "Employer Contributions", list(employer_cost))):
+        if fields:
+            components.append((component_key, label, _sum_run(fields)))
+    return {f"{cc}-{key}": dict(name=name, report_type=report_type, scope="AGGREGATE",
+                                description=description, components=components)}
+
+
+def _ytd_preview(cc, key, name, report_type, description, employer_tax_label, earnings=(), tax=(),
+                 contributions=(), employer_cost=()):
+    components = [_employer(employer_tax_label), _EMPLOYEE]
+    for component_key, label, fields in (("earnings", "Earnings (YTD)", [_GROSS] + list(earnings)),
+                                         ("tax", "Income Tax Withheld (YTD)", list(tax)),
+                                         ("contributions", "Employee Contributions (YTD)", list(contributions)),
+                                         ("employer_contributions", "Employer Contributions (YTD)",
+                                          list(employer_cost))):
+        if fields:
+            components.append((component_key, label, _sum_ytd(fields)))
+    return {f"{cc}-{key}": dict(name=name, report_type=report_type, scope="PER_EMPLOYEE",
+                                description=description, components=components)}
+
+
+def _seed_country(db, country, year, authority, source, templates):
+    seeded = []
+    for key, t in templates.items():
+        seeded.append(_seed_template(
+            db, template_key=key, name=t["name"], report_type=t["report_type"], country=country,
+            reporting_year=year, document_scope=t["scope"], components=t["components"],
+            description=t["description"], regulatory_authority=authority, source_references=source))
+    return seeded
+
+
+# Belgium ─────────────────────────────────────────────────────────────────────
+_be = _json("be_calculation_snapshot.")
+
+
+def _be_templates():
+    tax_label = "ONSS Employer Number / KBO-BCE"
+    withholding = _be("withholding", "Withholding Tax", "be_withholding")
+    onss_employee = _be("onss_employee", "ONSS (Employee, net of work bonus)", "be_employee_total")
+    employer_cost = [_be("onss_employer_basic", "ONSS Basic Contribution (Employer)", "be_onss_employer.BASE"),
+                     _be("pension_special", "Special Pension Contribution (Employer)", "be_pension_special"),
+                     _be("employer_total", "Total Employer ONSS Cost (Employer)", "be_employer_total")]
+    return {
+        **_register("BE", "Belgium", tax_label,
+                    earnings=[_be("onss_base", "ONSS Employee Base", "bases.ONSS_EMPLOYEE"),
+                              _be("withholding_base", "Withholding Base — Regular Pay", "bases.WITHHOLDING_REGULAR")],
+                    deductions=[withholding, onss_employee, _be("net_pay", "Net Pay", "be_net")],
+                    employer_cost=employer_cost),
+        **_run_summary("BE", "DMFA-274-SUMMARY", "Belgium DmfA / 274 run summary", "BE_DMFA_274_SUMMARY",
+                       "Run totals to reconcile against the quarterly DmfA (ONSS) and the 274 withholding-tax "
+                       "return. NOT the declarations themselves — those stay with the certified filing path (G3).",
+                       tax_label,
+                       earnings=[_be("onss_employer_base", "ONSS Employer Base", "bases.ONSS_EMPLOYER")],
+                       tax=[withholding, _be("fiscal_work_bonus", "Fiscal Work Bonus", "be_fiscal_work_bonus")],
+                       contributions=[onss_employee,
+                                      _be("social_work_bonus", "Social Work Bonus", "be_social_work_bonus")],
+                       employer_cost=employer_cost),
+    }
+
+
+def seed_belgium(db):
+    from app.modules.payroll import belgium_reports
+
+    print("Seeding Belgium report templates (ZP-BE-ENG-001, Draft)...")
+    seeded = _seed_country(db, "BE", "2026", "ONSS / SPF Finances", "ZP-BE-ENG-001 v1.0", _be_templates())
+    # The three Belgian employee documents (individual account etc.) — Draft,
+    # created only when missing; be_seed_report_templates flushes, never commits.
+    seeded += belgium_reports.be_seed_report_templates(db, "2026")
+    db.commit()
+    return seeded
+
+
+# France ──────────────────────────────────────────────────────────────────────
+_fr = _json("fr_calculation_snapshot.")
+
+
+def _fr_templates():
+    tax_label = "SIRET / SIREN"
+    pas = _fr("pas_withheld", "PAS Withheld", "pas.withheld")
+    employee_total = _fr("employee_total", "Employee Contributions incl. PAS", "employee_total")
+    employer_total = _fr("employer_total", "Employer Contributions after RGDU (Employer)", "employer_total")
+    return {
+        **_register("FR", "France", tax_label,
+                    earnings=[_fr("net_imposable", "Net Imposable", "net_imposable")],
+                    deductions=[pas, employee_total, _fr("net_social", "Net Social", "net_social"),
+                                _fr("net_a_payer", "Net à Payer", "net_a_payer")],
+                    employer_cost=[employer_total]),
+        **_run_summary("FR", "DSN-SUMMARY", "France DSN run summary", "FR_DSN_SUMMARY",
+                       "Run totals of the contribution bases, PAS and employee / employer contributions to "
+                       "reconcile against the monthly DSN. NOT the DSN itself.",
+                       tax_label,
+                       earnings=[_fr("base_vieillesse_capped", "Base — Old-Age Capped", "bases.vieillesse_capped"),
+                                 _fr("base_chomage", "Base — Unemployment / AGS", "bases.chomage_ags_4x_pass"),
+                                 _fr("base_csg_crds", "Base — CSG / CRDS", "bases.csg_crds"),
+                                 _fr("base_pas", "Base — PAS", "bases.pas")],
+                       tax=[pas], contributions=[employee_total], employer_cost=[employer_total]),
+        **_ytd_preview("FR", "NET-IMPOSABLE-YTD", "France net imposable year-to-date", "FR_NET_IMPOSABLE_YTD",
+                       "Per-employee year-to-date net imposable and PAS withheld — the cumulative figures the "
+                       "payslip and the annual income-tax pre-fill rely on.",
+                       tax_label,
+                       earnings=[_fr("net_imposable", "Net Imposable", "net_imposable")], tax=[pas]),
+    }
+
+
+def seed_france(db):
+    print("Seeding France report templates (ZP-FR-ENG-001, Draft)...")
+    return _seed_country(db, "FR", "2026", "URSSAF / DGFiP", "ZP-FR-ENG-001 v1.0", _fr_templates())
+
+
+# Italy ───────────────────────────────────────────────────────────────────────
+_it = _json("it_calculation_snapshot.")
+
+
+def _it_templates():
+    tax_label = "Codice Fiscale / Partita IVA"
+    irpef = _it("irpef_withheld", "IRPEF Withheld", "irpef.withheld")
+    local_tax = [_it("regional_surtax", "Regional Surtax (saldo)", "localTax.regionalSaldo"),
+                 _it("municipal_surtax_saldo", "Municipal Surtax (saldo)", "localTax.municipalSaldo"),
+                 _it("municipal_surtax_acconto", "Municipal Surtax (acconto)", "localTax.municipalAcconto")]
+    inps_employee = _it("inps_employee", "INPS (Employee)", "inps.employee")
+    inps_base = _it("inps_base", "INPS Contributory Base", "inps.base")
+    return {
+        **_register("IT", "Italy", tax_label, earnings=[inps_base],
+                    deductions=[inps_employee, irpef] + local_tax,
+                    employer_cost=[_it("inps_employer", "INPS (Employer)", "inps.employer"),
+                                   _it("tfr_accrual", "TFR Gross Accrual (Employer)", "tfr.accrual")]),
+        **_run_summary("IT", "F24-SUMMARY", "Italy F24 run summary", "IT_F24_SUMMARY",
+                       "Run totals of IRPEF, regional / municipal surtax and INPS to reconcile against the F24 "
+                       "payment. NOT the F24 itself.",
+                       tax_label, earnings=[inps_base],
+                       tax=[irpef, _it("irpef_refund", "IRPEF Refunded", "irpef.refund")] + local_tax,
+                       contributions=[inps_employee],
+                       employer_cost=[_it("inps_employer", "INPS (Employer)", "inps.employer")]),
+        **_ytd_preview("IT", "CU-PREVIEW", "Italy Certificazione Unica preview", "IT_CU_PREVIEW",
+                       "Per-employee year-to-date figures for the Certificazione Unica — internal labels only, "
+                       "not the CU form layout.",
+                       tax_label,
+                       tax=[irpef, _it("detrazione", "Employment Tax Credit (detrazione)", "irpef.detrazione")]
+                       + local_tax,
+                       contributions=[inps_employee]),
+    }
+
+
+def seed_italy(db):
+    print("Seeding Italy report templates (ZP-IT-ENG-001, Draft)...")
+    return _seed_country(db, "IT", "2026", "INPS / Agenzia delle Entrate", "ZP-IT-ENG-001 v1.0", _it_templates())
+
+
+# Japan ───────────────────────────────────────────────────────────────────────
+_jp = _json("jp_calculation_snapshot.")
+
+
+def _jp_templates():
+    tax_label = "Corporate Number / Withholding Agent No."
+    wht = _jp("wht_total", "Withholding Income Tax", "jp_wht_total")
+    resident = _jp("resident_tax", "Resident Tax (special collection)", "jp_resident_tax")
+    si_employee = [_jp("health_employee", "Health Insurance (Employee)", "jp_health_employee"),
+                   _jp("care_employee", "Long-Term Care Insurance (Employee)", "jp_care_employee"),
+                   _jp("epi_employee", "Employees' Pension (Employee)", "jp_epi_employee"),
+                   _jp("child_support_employee", "Child-Support Contribution (Employee)",
+                       "jp_child_support_employee"),
+                   _jp("ei_employee", "Employment Insurance (Employee)", "jp_ei_employee")]
+    si_employer = [_jp("health_employer", "Health Insurance (Employer)", "jp_health_employer"),
+                   _jp("care_employer", "Long-Term Care Insurance (Employer)", "jp_care_employer"),
+                   _jp("epi_employer", "Employees' Pension (Employer)", "jp_epi_employer"),
+                   _jp("child_support_employer", "Child-Support Contribution (Employer)",
+                       "jp_child_support_employer"),
+                   _jp("ei_employer", "Employment Insurance (Employer)", "jp_ei_employer")]
+    return {
+        **_register("JP", "Japan", tax_label,
+                    earnings=[_jp("ei_base", "Employment Insurance Wage Base", "jp_ei_base")],
+                    deductions=[wht] + si_employee + [resident],
+                    employer_cost=si_employer + [_jp("employer_total", "Total Employer SI / EI (Employer)",
+                                                     "jp_employer_total")]),
+        **_run_summary("JP", "WHT-SI-SUMMARY", "Japan withholding and social insurance run summary",
+                       "JP_WHT_SI_SUMMARY",
+                       "Run totals of withholding income tax, resident tax and social / employment insurance to "
+                       "reconcile against the monthly withholding remittance and the social-insurance notice.",
+                       tax_label, tax=[wht, resident],
+                       contributions=[_jp("si_employee_total", "Social Insurance (Employee)", "jp_si_employee_total"),
+                                      _jp("ei_employee", "Employment Insurance (Employee)", "jp_ei_employee")],
+                       employer_cost=[_jp("si_employer_total", "Social Insurance (Employer)", "jp_si_employer_total"),
+                                      _jp("ei_employer", "Employment Insurance (Employer)", "jp_ei_employer")]),
+        # Scalar columns only: a JP correction payslip's snapshot holds the full
+        # corrected result, its gross_pay / tds columns hold the delta.
+        **_ytd_preview("JP", "GENSEN-PREVIEW", "Japan Gensen Choshuhyo preview", "JP_GENSEN_PREVIEW",
+                       "Per-employee year-to-date payment and withholding income tax for the Gensen Choshuhyo "
+                       "(withholding slip) — internal labels only, not the NTA form layout.",
+                       tax_label, tax=[_col("tds", "Withholding Income Tax", "tds")]),
+    }
+
+
+def seed_japan(db):
+    print("Seeding Japan report templates (ZP-JP-ENG-001, Draft)...")
+    return _seed_country(db, "JP", "2026", "National Tax Agency / Japan Pension Service", "ZP-JP-ENG-001 v1.0",
+                         _jp_templates())
+
+
+# Malaysia ────────────────────────────────────────────────────────────────────
+_my = _json("my_calculation_snapshot.")
+
+
+def _my_templates():
+    tax_label = "Employer No. (E) / EPF / SOCSO"
+    pcb = _my("pcb", "PCB / MTD", "my_pcb")
+    employee = [_my("epf_employee", "EPF (Employee)", "my_epf.employee"),
+                _my("socso_employee", "SOCSO (Employee)", "my_socso.employee"),
+                _my("eis_employee", "EIS (Employee)", "my_eis.employee")]
+    employer = [_my("epf_employer", "EPF (Employer)", "my_epf.employer"),
+                _my("socso_employer", "SOCSO (Employer)", "my_socso.employer"),
+                _my("eis_employer", "EIS (Employer)", "my_eis.employer"),
+                _my("hrd", "HRD Levy (Employer)", "my_hrd")]
+    return {
+        **_register("MY", "Malaysia", tax_label,
+                    earnings=[_my("epf_wage", "EPF Wage", "trace.bases.EPF.base")],
+                    deductions=[pcb] + employee, employer_cost=employer),
+        **_run_summary("MY", "STATUTORY-SUMMARY", "Malaysia PCB / EPF / SOCSO / EIS run summary",
+                       "MY_STATUTORY_SUMMARY",
+                       "Run totals of PCB and each contribution scheme, reported separately, to reconcile against "
+                       "the e-PCB, EPF, PERKESO (SOCSO + EIS) and HRD remittances.",
+                       tax_label,
+                       earnings=[_my("epf_wage", "EPF Wage", "trace.bases.EPF.base"),
+                                 _my("socso_wage", "SOCSO Wage", "trace.bases.SOCSO.base"),
+                                 _my("eis_wage", "EIS Wage", "trace.bases.EIS.base")],
+                       tax=[pcb], contributions=employee, employer_cost=employer),
+        **_ytd_preview("MY", "EA-PREVIEW", "Malaysia EA form preview", "MY_EA_PREVIEW",
+                       "Per-employee year-to-date remuneration, PCB and employee contributions for the EA form — "
+                       "internal labels only, not the LHDN form layout.",
+                       tax_label, tax=[pcb], contributions=employee),
+    }
+
+
+def seed_malaysia(db):
+    print("Seeding Malaysia report templates (ZP-MY-ENG-001, Draft)...")
+    return _seed_country(db, "MY", "2026", "LHDN / KWSP / PERKESO", "ZP-MY-ENG-001 v1.0", _my_templates())
+
+
+# New Zealand ─────────────────────────────────────────────────────────────────
+# Reporting year "2027" = the IR tax year 1 Apr 2026 – 31 Mar 2027 (same
+# tax-year-end convention as ZA_TEMPLATE_YEAR).
+_nz = _json("nz_calculation_snapshot.")
+
+
+def _nz_templates():
+    tax_label = "IRD Number (Employer)"
+    paye = _nz("paye_total", "PAYE incl. ACC Earners' Levy", "obligations.payeTotal")
+    employee = [_nz("student_loan", "Student-Loan Deduction", "obligations.studentLoan"),
+                _nz("ks_employee", "KiwiSaver (Employee)", "obligations.ksEmployee"),
+                _nz("child_support", "Child-Support Deduction", "obligations.childSupport")]
+    employer = [_nz("ks_employer_net", "KiwiSaver Net of ESCT (Employer)", "obligations.ksEmployerNet"),
+                _nz("esct", "ESCT on Employer KiwiSaver (Employer)", "obligations.esct")]
+    return {
+        **_register("NZ", "New Zealand", tax_label,
+                    earnings=[_nz("paye_gross", "PAYE Gross Earnings", "bases.PAYE")],
+                    deductions=[paye] + employee, employer_cost=employer),
+        **_run_summary("NZ", "EI-SUMMARY", "New Zealand Employment Information run summary", "NZ_EI_SUMMARY",
+                       "Run totals to reconcile against the payday-filing Employment Information. NOT the "
+                       "filing itself — that stays with the certified payday-filing path (G3).",
+                       tax_label, earnings=[_nz("paye_gross", "PAYE Gross Earnings", "bases.PAYE")],
+                       tax=[paye], contributions=employee, employer_cost=employer),
+    }
+
+
+def seed_new_zealand(db):
+    print("Seeding New Zealand report templates (ZP-NZ-ENG-001, Draft)...")
+    return _seed_country(db, "NZ", "2027", "Inland Revenue", "ZP-NZ-ENG-001 v1.0", _nz_templates())
+
+
+# Poland ──────────────────────────────────────────────────────────────────────
+_pl = _json("pl_calculation_snapshot.")
+
+
+def _pl_templates():
+    tax_label = "NIP / REGON"
+    pit = _pl("pit_advance", "PIT Advance (zaliczka)", "pl_pit_advance")
+    zus_employee = [_pl("zus_pension_employee", "ZUS Pension (Employee)", "pl_zus_employee.EMERYTALNE"),
+                    _pl("zus_disability_employee", "ZUS Disability (Employee)", "pl_zus_employee.RENTOWE"),
+                    _pl("zus_sickness_employee", "ZUS Sickness (Employee)", "pl_zus_employee.CHOROBOWE"),
+                    _pl("health", "Health Insurance (zdrowotne)", "pl_health")]
+    ppk_employee = [_pl("ppk_basic_employee", "PPK Basic (Employee)", "pl_ppk_employee.BASIC"),
+                    _pl("ppk_additional_employee", "PPK Additional (Employee)", "pl_ppk_employee.ADDITIONAL")]
+    zus_employer = [_pl("zus_pension_employer", "ZUS Pension (Employer)", "pl_zus_employer.EMERYTALNE"),
+                    _pl("zus_disability_employer", "ZUS Disability (Employer)", "pl_zus_employer.RENTOWE"),
+                    _pl("zus_accident_employer", "ZUS Accident (Employer)", "pl_zus_employer.WYPADKOWE"),
+                    _pl("fp_fs", "Labour Fund / Solidarity Fund (Employer)", "pl_funds.FP_FS"),
+                    _pl("fgsp", "FGŚP (Employer)", "pl_funds.FGSP"),
+                    _pl("fep", "Bridging Pension Fund FEP (Employer)", "pl_funds.FEP")]
+    ppk_employer = [_pl("ppk_basic_employer", "PPK Basic (Employer)", "pl_ppk_employer.BASIC"),
+                    _pl("ppk_additional_employer", "PPK Additional (Employer)", "pl_ppk_employer.ADDITIONAL")]
+    return {
+        **_register("PL", "Poland", tax_label,
+                    earnings=[_pl("pit_base", "PIT Base", "pl_pit_base")],
+                    deductions=[pit] + zus_employee + ppk_employee,
+                    employer_cost=zus_employer + ppk_employer),
+        **_run_summary("PL", "ZUS-DRA-SUMMARY", "Poland ZUS DRA run summary", "PL_ZUS_DRA_SUMMARY",
+                       "Run totals of employee and employer ZUS, health insurance and the FP / FS, FGŚP and FEP "
+                       "funds to reconcile against the monthly ZUS DRA. NOT the declaration itself.",
+                       tax_label, contributions=zus_employee, employer_cost=zus_employer),
+        **_ytd_preview("PL", "PIT11-PREVIEW", "Poland PIT-11 preview", "PL_PIT11_PREVIEW",
+                       "Per-employee year-to-date revenue, PIT advances, ZUS and health insurance for the PIT-11 — "
+                       "internal labels only, not the official form layout.",
+                       tax_label, tax=[pit], contributions=zus_employee),
+    }
+
+
+def seed_poland(db):
+    print("Seeding Poland report templates (ZP-PL-ENG-001, Draft)...")
+    return _seed_country(db, "PL", "2026", "ZUS / KAS", "ZP-PL-ENG-001 v1.0", _pl_templates())
+
+
+# Saudi Arabia ────────────────────────────────────────────────────────────────
+# GOSI amounts from the scalar PayslipItem columns (correction payslips carry
+# deltas there; their snapshot carries the full corrected result).
+_sa = _json("sa_calculation_snapshot.")
+
+
+def _sa_templates():
+    tax_label = "GOSI Establishment No. / CR"
+    wage = _sa("contributory_wage", "GOSI Contributory Wage", "sa_contributory_wage")
+    employee = [_col("annuities_employee", "GOSI Annuities (Employee)", "employee_pension"),
+                _col("saned_employee", "SANED Unemployment Insurance (Employee)", "social_security")]
+    employer = [_col("annuities_employer", "GOSI Annuities (Employer)", "employer_pension"),
+                _col("saned_employer", "SANED Unemployment Insurance (Employer)", "employer_social_security"),
+                _col("occupational_hazard", "Occupational Hazards (Employer)", "employer_occupational_hazard")]
+    return {
+        **_register("SA", "Saudi Arabia", tax_label, earnings=[wage], deductions=employee, employer_cost=employer),
+        **_run_summary("SA", "GOSI-SUMMARY", "Saudi Arabia GOSI run summary", "SA_GOSI_SUMMARY",
+                       "Run totals of the contributory wage and each GOSI branch (employee and employer shares) to "
+                       "reconcile against the monthly GOSI invoice.",
+                       tax_label, earnings=[wage], contributions=employee, employer_cost=employer),
+        **_ytd_preview("SA", "GOSI-STATEMENT", "Saudi Arabia GOSI contribution statement", "SA_GOSI_STATEMENT",
+                       "Per-employee year-to-date GOSI contributions by branch, employee and employer shares "
+                       "shown separately.",
+                       tax_label, contributions=employee, employer_cost=employer),
+    }
+
+
+def seed_saudi_arabia(db):
+    print("Seeding Saudi Arabia report templates (ZP-SA-ENG-001, Draft)...")
+    return _seed_country(db, "SA", "2026", "GOSI", "ZP-SA-ENG-001 v1.0", _sa_templates())
+
+
+SEED_COMING_SOON_COUNTRIES = (seed_belgium, seed_france, seed_italy, seed_japan, seed_malaysia, seed_new_zealand,
+                              seed_poland, seed_saudi_arabia)
+
 
 if __name__ == "__main__":
     run()
