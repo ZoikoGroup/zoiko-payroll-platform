@@ -171,7 +171,7 @@ def be_seed_report_templates(db: Session, reporting_year: str, actor_id=None) ->
                 for forder, (fkey, flabel, ftype, kind, column, required) in enumerate(fields):
                     db.add(m.ReportTemplateComponentField(
                         component_id=component.id, field_key=fkey, label=flabel, field_type=ftype,
-                        data_source_kind=kind, source_column=column[:50], is_required=required, sort_order=forder))
+                        data_source_kind=kind, source_column=column[:100], is_required=required, sort_order=forder))
             db.flush()
         out.append(template)
     return out

@@ -3541,7 +3541,7 @@ class ReportTemplateComponentField(Base):
     field_type = Column(String(20), nullable=False)     # percentage | currency | date | boolean | enum | text | tax-bracket-table
 
     data_source_kind = Column(String(20), nullable=False)   # PAYSLIP_ITEM | PAYROLL_RUN | EMPLOYER_PROFILE
-    source_column     = Column(String(50), nullable=False)
+    source_column     = Column(String(100), nullable=False)   # widened by a4c7e1f9b3d8 (prod was already 100)
     aggregation        = Column(String(20), nullable=True)   # NULL | SUM_RUN | SUM_YTD — only meaningful for numeric PAYSLIP_ITEM columns
 
     enum_values  = Column(JSON, nullable=True)   # only used when field_type == "enum"

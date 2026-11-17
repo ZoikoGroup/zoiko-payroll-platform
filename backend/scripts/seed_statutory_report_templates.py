@@ -2611,12 +2611,13 @@ _EMPLOYEE = ("employee_info", "Employee", [
 _GROSS = _col("gross_pay", "Gross Pay", "gross_pay")
 
 
-def _register(cc, country_name, employer_tax_label, earnings, deductions, employer_cost):
+def _register(cc, country_name, employer_tax_label, earnings, deductions, employer_cost, employee_extra=()):
+    employee = (_EMPLOYEE[0], _EMPLOYEE[1], _EMPLOYEE[2] + list(employee_extra))
     return {f"{cc}-PAYROLL-REGISTER": dict(
         name=f"{country_name} payroll register", report_type=f"{cc}_PAYROLL_REGISTER", scope="AGGREGATE",
         description="Per-employee register for one run: gross pay, the employee's statutory deductions and the "
                     "employer's statutory cost (never an employee deduction).",
-        components=[_employer(employer_tax_label), _EMPLOYEE,
+        components=[_employer(employer_tax_label), employee,
                     ("earnings", "Earnings", [_GROSS] + earnings),
                     ("deductions", "Employee Statutory Deductions", deductions),
                     ("employer_contributions", "Employer Statutory Cost", employer_cost)])}
@@ -2667,20 +2668,29 @@ def _be_templates():
     tax_label = "ONSS Employer Number / KBO-BCE"
     withholding = _be("withholding", "Withholding Tax", "be_withholding")
     onss_employee = _be("onss_employee", "ONSS (Employee, net of work bonus)", "be_employee_total")
+    exceptional_base = _be("withholding_base_exceptional", "Withholding Base — Exceptional Pay",
+                           "bases.WITHHOLDING_EXCEPTIONAL")
     employer_cost = [_be("onss_employer_basic", "ONSS Basic Contribution (Employer)", "be_onss_employer.BASE"),
+                     _be("onss_wage_moderation", "ONSS Wage-Moderation Contribution (Employer)",
+                         "be_onss_employer.WAGE_MODERATION"),
+                     _be("onss_special_160", "ONSS Special Contribution 1.60 % (Employer)",
+                         "be_onss_employer.SPECIAL_160"),
                      _be("pension_special", "Special Pension Contribution (Employer)", "be_pension_special"),
                      _be("employer_total", "Total Employer ONSS Cost (Employer)", "be_employer_total")]
     return {
         **_register("BE", "Belgium", tax_label,
                     earnings=[_be("onss_base", "ONSS Employee Base", "bases.ONSS_EMPLOYEE"),
-                              _be("withholding_base", "Withholding Base — Regular Pay", "bases.WITHHOLDING_REGULAR")],
+                              _be("withholding_base", "Withholding Base — Regular Pay", "bases.WITHHOLDING_REGULAR"),
+                              exceptional_base,
+                              _be("overtime_hours", "Overtime Hours", "be_working_time.overtimeHours", "text")],
                     deductions=[withholding, onss_employee, _be("net_pay", "Net Pay", "be_net")],
                     employer_cost=employer_cost),
         **_run_summary("BE", "DMFA-274-SUMMARY", "Belgium DmfA / 274 run summary", "BE_DMFA_274_SUMMARY",
                        "Run totals to reconcile against the quarterly DmfA (ONSS) and the 274 withholding-tax "
                        "return. NOT the declarations themselves — those stay with the certified filing path (G3).",
                        tax_label,
-                       earnings=[_be("onss_employer_base", "ONSS Employer Base", "bases.ONSS_EMPLOYER")],
+                       earnings=[_be("onss_employer_base", "ONSS Employer Base", "bases.ONSS_EMPLOYER"),
+                                 exceptional_base],
                        tax=[withholding, _be("fiscal_work_bonus", "Fiscal Work Bonus", "be_fiscal_work_bonus")],
                        contributions=[onss_employee,
                                       _be("social_work_bonus", "Social Work Bonus", "be_social_work_bonus")],
@@ -2704,6 +2714,19 @@ def seed_belgium(db):
 _fr = _json("fr_calculation_snapshot.")
 
 
+def _fr_family_lines(side):
+    """One field per contribution family the engine can make non-zero on that
+    side (service._FR_EMPLOYEE_FAMILIES / _FR_EMPLOYER_FAMILIES). Employer lines
+    are before the RGDU relief, so they do not add up to employer_total."""
+    from app.modules.payroll import service
+
+    if side == "ee":
+        return [_fr(f"fr_ee_{f}", f"{label} (Employee)", f"contributions[family={f}].ee")
+                for f, label in service._FR_EMPLOYEE_FAMILIES]
+    return [_fr(f"fr_er_{f}", f"{label} before RGDU (Employer)", f"contributions[family={f}].er")
+            for f, label in service._FR_EMPLOYER_FAMILIES]
+
+
 def _fr_templates():
     tax_label = "SIRET / SIREN"
     pas = _fr("pas_withheld", "PAS Withheld", "pas.withheld")
@@ -2723,7 +2746,8 @@ def _fr_templates():
                                  _fr("base_chomage", "Base — Unemployment / AGS", "bases.chomage_ags_4x_pass"),
                                  _fr("base_csg_crds", "Base — CSG / CRDS", "bases.csg_crds"),
                                  _fr("base_pas", "Base — PAS", "bases.pas")],
-                       tax=[pas], contributions=[employee_total], employer_cost=[employer_total]),
+                       tax=[pas], contributions=[employee_total] + _fr_family_lines("ee"),
+                       employer_cost=[employer_total] + _fr_family_lines("er")),
         **_ytd_preview("FR", "NET-IMPOSABLE-YTD", "France net imposable year-to-date", "FR_NET_IMPOSABLE_YTD",
                        "Per-employee year-to-date net imposable and PAS withheld — the cumulative figures the "
                        "payslip and the annual income-tax pre-fill rely on.",
@@ -2746,7 +2770,8 @@ def _it_templates():
     irpef = _it("irpef_withheld", "IRPEF Withheld", "irpef.withheld")
     local_tax = [_it("regional_surtax", "Regional Surtax (saldo)", "localTax.regionalSaldo"),
                  _it("municipal_surtax_saldo", "Municipal Surtax (saldo)", "localTax.municipalSaldo"),
-                 _it("municipal_surtax_acconto", "Municipal Surtax (acconto)", "localTax.municipalAcconto")]
+                 _it("municipal_surtax_acconto", "Municipal Surtax (acconto)", "localTax.municipalAcconto"),
+                 _it("termination_surtax", "Local Surtax Withheld at Termination", "localTax.terminationWithheld")]
     inps_employee = _it("inps_employee", "INPS (Employee)", "inps.employee")
     inps_base = _it("inps_base", "INPS Contributory Base", "inps.base")
     return {
@@ -2796,21 +2821,35 @@ def _jp_templates():
                    _jp("child_support_employer", "Child-Support Contribution (Employer)",
                        "jp_child_support_employer"),
                    _jp("ei_employer", "Employment Insurance (Employer)", "jp_ei_employer")]
+    # Present only on a payslip that carries a bonus (jp_bonus is null otherwise).
+    bonus_employee = [_jp("bonus_si_employee", "Bonus Social Insurance (Employee)",
+                          "jp_bonus.jp_bonus_si_employee_total"),
+                      _jp("bonus_ei_employee", "Bonus Employment Insurance (Employee)", "jp_bonus.jp_bonus_ei_employee")]
+    bonus_employer = [_jp("bonus_si_employer", "Bonus Social Insurance (Employer)",
+                          "jp_bonus.jp_bonus_si_employer_total"),
+                      _jp("bonus_ei_employer", "Bonus Employment Insurance (Employer)", "jp_bonus.jp_bonus_ei_employer")]
     return {
         **_register("JP", "Japan", tax_label,
                     earnings=[_jp("ei_base", "Employment Insurance Wage Base", "jp_ei_base")],
-                    deductions=[wht] + si_employee + [resident],
-                    employer_cost=si_employer + [_jp("employer_total", "Total Employer SI / EI (Employer)",
-                                                     "jp_employer_total")]),
+                    deductions=[wht] + si_employee + [resident] + bonus_employee,
+                    employer_cost=si_employer + bonus_employer
+                    + [_jp("employer_total", "Total Employer SI / EI (Employer)", "jp_employer_total")],
+                    employee_extra=[
+                        _jp("resident_tax_municipality", "Resident Tax Municipality Code",
+                            "jp_resident_tax_notice.municipality", "text"),
+                        _jp("resident_tax_notice_year", "Resident Tax Notice Year",
+                            "jp_resident_tax_notice.noticeYear", "text")]),
         **_run_summary("JP", "WHT-SI-SUMMARY", "Japan withholding and social insurance run summary",
                        "JP_WHT_SI_SUMMARY",
                        "Run totals of withholding income tax, resident tax and social / employment insurance to "
                        "reconcile against the monthly withholding remittance and the social-insurance notice.",
                        tax_label, tax=[wht, resident],
                        contributions=[_jp("si_employee_total", "Social Insurance (Employee)", "jp_si_employee_total"),
-                                      _jp("ei_employee", "Employment Insurance (Employee)", "jp_ei_employee")],
+                                      _jp("ei_employee", "Employment Insurance (Employee)", "jp_ei_employee")]
+                       + bonus_employee,
                        employer_cost=[_jp("si_employer_total", "Social Insurance (Employer)", "jp_si_employer_total"),
-                                      _jp("ei_employer", "Employment Insurance (Employer)", "jp_ei_employer")]),
+                                      _jp("ei_employer", "Employment Insurance (Employer)", "jp_ei_employer")]
+                       + bonus_employer),
         # Scalar columns only: a JP correction payslip's snapshot holds the full
         # corrected result, its gross_pay / tds columns hold the delta.
         **_ytd_preview("JP", "GENSEN-PREVIEW", "Japan Gensen Choshuhyo preview", "JP_GENSEN_PREVIEW",
@@ -2879,15 +2918,24 @@ def _nz_templates():
                 _nz("child_support", "Child-Support Deduction", "obligations.childSupport")]
     employer = [_nz("ks_employer_net", "KiwiSaver Net of ESCT (Employer)", "obligations.ksEmployerNet"),
                 _nz("esct", "ESCT on Employer KiwiSaver (Employer)", "obligations.esct")]
+    # Breakdowns of a total already listed: shown beside it, never added to it.
+    student_loan_split = [
+        _nz("student_loan_standard", "Student Loan — of which Standard", "obligations.studentLoanStandard"),
+        _nz("student_loan_extra", "Student Loan — of which Extra (SLE)", "obligations.studentLoanExtra"),
+        _nz("student_loan_extra_pay", "Student Loan — of which on Extra Pay", "obligations.studentLoanExtraPay")]
+    ks_employer_gross = _nz("ks_employer_gross", "KiwiSaver Gross = Net + ESCT (Employer)",
+                            "obligations.ksEmployerGross")
     return {
         **_register("NZ", "New Zealand", tax_label,
                     earnings=[_nz("paye_gross", "PAYE Gross Earnings", "bases.PAYE")],
-                    deductions=[paye] + employee, employer_cost=employer),
+                    deductions=[paye] + employee + student_loan_split,
+                    employer_cost=[ks_employer_gross] + employer),
         **_run_summary("NZ", "EI-SUMMARY", "New Zealand Employment Information run summary", "NZ_EI_SUMMARY",
                        "Run totals to reconcile against the payday-filing Employment Information. NOT the "
                        "filing itself — that stays with the certified payday-filing path (G3).",
                        tax_label, earnings=[_nz("paye_gross", "PAYE Gross Earnings", "bases.PAYE")],
-                       tax=[paye], contributions=employee, employer_cost=employer),
+                       tax=[paye], contributions=employee + student_loan_split,
+                       employer_cost=[ks_employer_gross] + employer),
     }
 
 
@@ -2953,7 +3001,10 @@ def _sa_templates():
                 _col("saned_employer", "SANED Unemployment Insurance (Employer)", "employer_social_security"),
                 _col("occupational_hazard", "Occupational Hazards (Employer)", "employer_occupational_hazard")]
     return {
-        **_register("SA", "Saudi Arabia", tax_label, earnings=[wage], deductions=employee, employer_cost=employer),
+        **_register("SA", "Saudi Arabia", tax_label,
+                    earnings=[wage, _sa("contributory_wage_source", "Contributory Wage Source",
+                                        "sa_contributory_wage_source", "text")],
+                    deductions=employee, employer_cost=employer),
         **_run_summary("SA", "GOSI-SUMMARY", "Saudi Arabia GOSI run summary", "SA_GOSI_SUMMARY",
                        "Run totals of the contributory wage and each GOSI branch (employee and employer shares) to "
                        "reconcile against the monthly GOSI invoice.",
