@@ -1174,6 +1174,9 @@ export const getBeSummary = () => apiFetch("/api/super-admin/compliance/jurisdic
 export const listBePacks = () => apiFetch(`${BE_SA}/packs`);
 export const getBeConfiguration = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/configuration`);
 export const getBeSigningStatus = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/signing-status`);
+// Read-only: every row / condition blocking activation, why, and who clears it.
+export const getBeActivationReadiness = (packRowId) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/activation-readiness`);
 export const updateBeRow = (kind, rowId, payload) =>
   apiFetch(`${BE_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
 export const getBeDecisions = () => apiFetch(`${BE_SA}/decisions`);
