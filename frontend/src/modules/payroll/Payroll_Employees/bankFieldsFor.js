@@ -21,7 +21,7 @@
 
 import { COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
 
-export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR", "CH", "SA", "BE", "ZA", "PL", "MY"];
+export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR", "CH", "SA", "BE", "AE", "ZA", "PL", "MY"];
 
 // Mirrors backend bank_routing.py's PAYMENT_MODE_LABEL.
 const PAYMENT_MODE_LABEL = {
@@ -42,6 +42,7 @@ const PAYMENT_MODE_LABEL = {
   PL: "Elixir / SEPA",
   MY: "IBG / DuitNow",
   BE: "SEPA",
+  AE: "WPS",
   BB: "EFT",
   KY: "EFT",
   DO: "EFT",
@@ -74,6 +75,7 @@ const BTF_ROUTING_LABEL = {
   PL: "IBAN",
   MY: "SWIFT / Account",
   BE: "IBAN",
+  AE: "IBAN",
   BB: "Bank/Branch Code",
   KY: "Bank/Branch Code",
   DO: "Bank/Branch Code",
@@ -108,6 +110,8 @@ const BANKING_COMPLIANCE_KEYS = {
   MY: ["swift_bic", "bank_account"],
   // Belgium: IBAN only; NISS/INSZ is vault-only (Phase 4).
   BE: ["iban"],
+  // United Arab Emirates: IBAN only until the UAE employee record (Phase 5).
+  AE: ["iban"],
   BB: ["bank_branch_code"],
   KY: ["bank_branch_code"],
   DO: ["bank_branch_code"],

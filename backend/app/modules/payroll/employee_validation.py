@@ -2153,6 +2153,85 @@ class BEEmployeeValidation(EmployeeValidationStrategy):
                     "Belgian IBAN must be BE followed by 14 digits with a valid check digit.")
 
 
+class AEEmployeeValidation(EmployeeValidationStrategy):
+    """United Arab Emirates (ZP-AE-ENG-001, docs/uae). The facts the UAE
+    calculator routes on, held in compliance_fields and edited in the normal
+    employee screens. Statutory VALUES (rates, caps, day counts) are never here:
+    they live in the AE jurisdiction pack.
+
+    Combination rules (AE-021, AE-025, AE-031, AE-053): a GCC home country
+    exactly for GCC nationals; a GPSSA / ADPF scheme only for UAE nationals and
+    the GCC extension only for GCC nationals; a pension contribution salary
+    whenever a scheme applies (AE-019: from the authority record, never
+    guessed); end-of-service type only for expatriates, with the savings
+    enrolment date and Basic Wage at enrolment when on the savings scheme.
+    Unpaid absence days are derived from the payslip's attendance input, never
+    typed into the employee record.
+    """
+
+    country_code = "AE"
+    NATIONALITY_CATEGORIES = ("EXPATRIATE", "UAE_NATIONAL", "GCC_NATIONAL")
+    GCC_COUNTRIES = ("SA", "KW", "OM", "BH", "QA")
+    PENSION_SCHEMES = ("GPSSA_LAW_7_1999", "GPSSA_LAW_57_2023", "ADPF_IN_SERVICE", "ADPF_NEW_MEMBER",
+                       "GCC_EXTENSION", "NONE")
+    _UAE_SCHEMES = ("GPSSA_LAW_7_1999", "GPSSA_LAW_57_2023", "ADPF_IN_SERVICE", "ADPF_NEW_MEMBER")
+    _AMOUNT = re.compile(r"^\d{1,9}(\.\d{1,2})?$")
+    _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    FIELD_SPECS = {
+        "nationality_category": {"required": True, "upper": True, "choices": list(NATIONALITY_CATEGORIES)},
+        "gcc_country": {"required": False, "upper": True, "choices": list(GCC_COUNTRIES)},
+        "pension_scheme": {"required": False, "upper": True, "choices": list(PENSION_SCHEMES)},
+        "pension_contribution_salary": {"required": False, "pattern": _AMOUNT, "strip_chars": ", ",
+                                        "error": "pension_contribution_salary must be an amount in AED."},
+        "government_support_eligible": {"required": False, "upper": True, "choices": ["YES", "NO"]},
+        "eos_regime": {"required": False, "upper": True, "choices": ["TRADITIONAL", "SAVINGS_SCHEME"]},
+        "savings_enrollment_date": {"required": False, "pattern": _DATE,
+                                    "error": "savings_enrollment_date must be YYYY-MM-DD."},
+        "savings_enrollment_basic_wage": {"required": False, "pattern": _AMOUNT, "strip_chars": ", ",
+                                          "error": "savings_enrollment_basic_wage must be an amount in AED."},
+        "work_pattern": {"required": False, "upper": True, "choices": ["FULL_TIME", "PART_TIME"]},
+        "emirates_id": {"required": False, "strip_chars": "- ", "pattern": re.compile(r"^784\d{12}$"),
+                        "error": "Emirates ID must be 15 digits starting with 784."},
+        "iban": {"required": False, "upper": True, "strip_chars": " "},
+    }
+    SENSITIVE_FIELDS = ("emirates_id",)
+    duplicate_field = "emirates_id"
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        errors = []
+        nationality = cleaned.get("nationality_category")
+        scheme = cleaned.get("pension_scheme")
+        if nationality == "GCC_NATIONAL":
+            if not cleaned.get("gcc_country"):
+                errors.append("gcc_country is required for a GCC national.")
+            if scheme not in (None, "GCC_EXTENSION"):
+                errors.append("A GCC national's pension_scheme is GCC_EXTENSION.")
+        elif cleaned.get("gcc_country"):
+            errors.append("gcc_country applies only to GCC nationals.")
+        if nationality == "UAE_NATIONAL" and scheme not in cls._UAE_SCHEMES:
+            errors.append("A UAE national needs a GPSSA or ADPF pension_scheme.")
+        if nationality == "EXPATRIATE" and scheme not in (None, "NONE"):
+            errors.append("An expatriate has no pension_scheme (end-of-service benefit applies instead).")
+        if scheme not in (None, "NONE") and not cleaned.get("pension_contribution_salary"):
+            errors.append("pension_contribution_salary is required when a pension scheme applies.")
+        if cleaned.get("government_support_eligible") and scheme not in ("GPSSA_LAW_7_1999", "GPSSA_LAW_57_2023"):
+            errors.append("government_support_eligible applies only to GPSSA schemes.")
+        regime = cleaned.get("eos_regime")
+        if nationality == "EXPATRIATE" and not regime:
+            errors.append("eos_regime (TRADITIONAL or SAVINGS_SCHEME) is required for an expatriate.")
+        if nationality in ("UAE_NATIONAL", "GCC_NATIONAL") and regime:
+            errors.append("eos_regime applies only to expatriates (nationals are covered by their pension scheme).")
+        if regime == "SAVINGS_SCHEME" and not (cleaned.get("savings_enrollment_date")
+                                               and cleaned.get("savings_enrollment_basic_wage")):
+            errors.append("savings_enrollment_date and savings_enrollment_basic_wage are required on the savings scheme.")
+        iban = cleaned.get("iban")
+        if iban and (not re.fullmatch(r"AE\d{21}", iban) or not iban_checksum_ok(iban)):
+            errors.append("UAE IBAN must be AE followed by 21 digits with a valid check digit.")
+        if errors:
+            raise BadRequestException("; ".join(errors))
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -2177,6 +2256,8 @@ _STRATEGIES = {
     "CH": CHEmployeeValidation,
     "SA": SAEmployeeValidation,
     "NL": NLEmployeeValidation,
+    # United Arab Emirates (ZP-AE-ENG-001): an ordinary country, no dormancy.
+    "AE": AEEmployeeValidation,
 }
 
 class NZEmployeeValidation(EmployeeValidationStrategy):

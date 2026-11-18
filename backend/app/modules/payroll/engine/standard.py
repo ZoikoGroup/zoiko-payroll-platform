@@ -84,6 +84,7 @@ from app.modules.payroll.engine.countries import new_zealand as _new_zealand
 from app.modules.payroll.engine.countries import poland as _poland
 from app.modules.payroll.engine.countries import malaysia as _malaysia
 from app.modules.payroll.engine.countries import belgium as _belgium
+from app.modules.payroll.engine.countries import uae as _uae
 
 # ── Backward-compatible re-exports ──────────────────────────────────────
 # Every name below existed directly in this file before the engine/
@@ -167,6 +168,7 @@ _calc_new_zealand = _new_zealand.calculate
 _calc_poland = _poland.calculate
 _calc_malaysia = _malaysia.calculate
 _calc_belgium = _belgium.calculate
+_calc_uae = _uae.calculate
 
 
 _COUNTRY_CALC = {
@@ -259,6 +261,9 @@ _COUNTRY_CALC = {
     # Belgium (ZP-BE-ENG-001): fail-closed orchestrator over
     # engine/jurisdictions/belgium/* (Blocks A-B); never the generic calculator.
     "BE": _calc_belgium,
+    # United Arab Emirates (ZP-AE-ENG-001): pack-driven pension, end-of-service
+    # and overtime calculator; never the generic calculator.
+    "AE": _calc_uae,
 }
 
 
@@ -501,6 +506,8 @@ class StandardStrategy(PayrollStrategy):
             qc_hsf_ytd_remuneration_after=deductions.get("qc_hsf_ytd_remuneration_after"),
             employer_qc_labour_standards=deductions.get("employer_qc_labour_standards", Decimal("0")),
             employer_payroll_tax=deductions.get("employer_payroll_tax", Decimal("0")),
+            # United Arab Emirates (ZP-AE-ENG-001): the calculation breakdown.
+            ae_result=deductions.get("ae_result"),
             au_state_payroll_tax_ytd_remuneration_after=deductions.get("au_state_payroll_tax_ytd_remuneration_after"),
             au_statutory_deductions_total=deductions.get("au_statutory_deductions_total", Decimal("0")),
             au_statutory_deductions_detail=deductions.get("au_statutory_deductions_detail", []),

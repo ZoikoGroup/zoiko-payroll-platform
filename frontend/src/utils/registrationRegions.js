@@ -38,6 +38,10 @@ export const REGISTRATION_COUNTRIES = [
   "Brazil", "Hong Kong", "Italy", "Netherlands", "Saudi Arabia", "Singapore", "Switzerland",
   // Owner decision 2026-11-11 — Mexico, same gate bypass (mirrors backend).
   "Mexico",
+  // United Arab Emirates (ZP-AE-ENG-001) — registration opens like Jamaica:
+  // once an Active AE canonical pack with rates exists. DIFC / ADGM are
+  // selectable as regions but the calculator blocks them with a named reason.
+  "United Arab Emirates",
 ];
 
 const STATES_BY_COUNTRY = {
@@ -65,7 +69,7 @@ const STATES_BY_COUNTRY = {
   "United Kingdom": ["England", "Scotland", "Wales", "Northern Ireland"],
   "United Arab Emirates": [
     "Abu Dhabi", "Dubai", "Sharjah", "Ajman", "Umm Al-Quwain",
-    "Ras Al Khaimah", "Fujairah",
+    "Ras Al Khaimah", "Fujairah", "Dubai – DIFC", "Abu Dhabi – ADGM",
   ],
   "Australia": [
     "New South Wales", "Victoria", "Queensland", "Western Australia",
