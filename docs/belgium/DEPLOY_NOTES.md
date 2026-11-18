@@ -183,9 +183,20 @@ decides to start content work:
    → reason → **Create the Draft pack**. This one does not register the sources separately; the pack seed does.
 2. **Verify:** the setup's own output (§3.5 `PLANNED`, §3.6 no Active pack). Re-running it is safe and reports
    "nothing to do".
-3. **Import the AI-drafted content, unsigned.** Console → Belgium → **Signing status** tab → "Content workbook (specialist intake)" → choose
-   `docs/belgium/content/BE_2026_AI_DRAFT.xlsx` → **Dry run** → review the report → **Confirm import**. Rows
-   arrive UNSIGNED with their sources. Signing is the Belgian specialist's job (four-eyes, per row,
+   Needs migration `c3e8a1d5f7b2` (payroll_tax_slabs.tax_regime VARCHAR(40)): before it, the seed fails on
+   PostgreSQL with a 500 and rolls back (2026-11-18 production defect; nothing is written).
+3. **Import the AI-drafted content, unsigned.** `BE_2026_AI_DRAFT.xlsx` holds the row ids of the LOCAL pack it was
+   exported from, so importing it as-is into the production pack fails ("rowId is not a row of this pack"). First:
+   1. Console → Belgium → **Signing status** → "Content workbook (specialist intake)" → **Export** the production
+      pack's own workbook;
+   2. offline (no database): `python -m scripts.be_rebase_content_workbook docs/belgium/content/BE_2026_AI_DRAFT.xlsx
+      <the export> <rebased.xlsx>` — replaces only the row ids, matched by key / component + obligation; refuses on
+      any unmatched row;
+   3. same panel → choose `<rebased.xlsx>` → **Dry run** (expected: 265 changes, 0 errors) → review → **Confirm
+      import**.
+
+   Rehearsed 2026-11-18 on PostgreSQL 17 at production-like ids (seed, export, rebase, dry run 265 / 0, import,
+   every row still PENDING, readiness 83 / 83 blocking). Rows arrive UNSIGNED with their sources. Signing is the Belgian specialist's job (four-eyes, per row,
    `BELGIUM_REVIEWER_GUIDE.md`). Nothing becomes Active.
 
 Never on production: `scripts/seed_belgium_demo.py`, `BE_DEMO_PACKS_ENABLED` or `BE_DEMO_ORG_IDS`. The demo is

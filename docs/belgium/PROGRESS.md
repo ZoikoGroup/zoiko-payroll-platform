@@ -1158,3 +1158,26 @@ Evidence:
 - Still open after this phase: specialist answers SQ-WHT-1..4 (all blocking, G1); FPS Finance key formulas for
   1 Aug / 1 Nov 2026; golden source G-34; engine items M-WHT / M-WORKBONUS / M-BSSC on hold until the specialist and
   Venu respond.
+
+## 2026-11-18 — Production 500 on "Create the Draft pack" fixed (migration c3e8a1d5f7b2) + workbook rebase
+
+- Defect: in production, Super Admin > Belgium > **Create the Draft pack** returned 500. The seed writes the 180
+  earning-class rows with the obligation code in payroll_tax_slabs.tax_regime (VARCHAR(20)); WITHHOLDING_EXCEPTIONAL is
+  23 characters, so PostgreSQL raised StringDataRightTruncation and the whole seed rolled back (nothing written).
+  SQLite ignores VARCHAR length and the CI PostgreSQL job never ran the seed, so no test saw it. Reproduced locally on
+  PostgreSQL 17 with the real `be_super_admin.seed_draft`.
+- Fix: migration `c3e8a1d5f7b2` on `a4c7e1f9b3d8` widens tax_regime to VARCHAR(40) (PostgreSQL only, idempotent;
+  downgrade refuses to truncate); model String(40). Single head c3e8a1d5f7b2, 277 revisions; main has no newer
+  migration.
+- Tests: tests/test_belgium_seed_postgres.py — every string the seed writes fits its DECLARED column (SQLite, catches
+  the whole class; proven to fail at width 20), and on PostgreSQL (added to the CI "Belgium migrations on PostgreSQL"
+  step in both deploy workflows): the 500 reproduced at width 20, migration + replay, the real seed completes (180
+  earning-class rows, all PENDING), a second seed refused, downgrade refuses while 23-character rows exist.
+- Second blocker found by rehearsing the next step: BE_2026_AI_DRAFT.xlsx carries LOCAL row ids, so it cannot be
+  imported into the production pack as-is (156 errors). New offline tool scripts/be_rebase_content_workbook.py moves
+  the ids onto the production pack's own export by natural key (tests/test_belgium_rebase_workbook.py).
+  DEPLOY_NOTES §5 step 3 updated.
+- Full rehearsal on PostgreSQL at production-like ids (sequences at 70000): seed Draft v1.0 + PLANNED; 12 archived
+  sources registered; rebase 77 + 6 + 180 ids; dry run 265 changes / 0 errors; import written; every row still
+  [PENDING G1]; pack Draft; activation readiness 83 / 83 rows blocking. Registry diff 0. Nothing signed or activated;
+  nothing touched in production.
