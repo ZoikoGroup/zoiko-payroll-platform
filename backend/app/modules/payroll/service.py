@@ -11629,6 +11629,10 @@ def get_report_template_detail(db: Session, template_id: int) -> dict:
         "effective_from": template.effective_from, "effective_to": template.effective_to,
         "change_summary": template.change_summary, "source_references": template.source_references,
         "reconciliation_tolerance": template.reconciliation_tolerance, "approved_by_id": template.approved_by_id,
+        # 2026-11-18: these two were missing, so ReportTemplateResponse filled its
+        # defaults — every template's detail said "Aggregate document" and "None
+        # linked" whatever the row held (display only: generation reads the row).
+        "document_scope": template.document_scope, "source_document_id": template.source_document_id,
         "created_by_id": template.created_by_id, "updated_by_id": template.updated_by_id,
         "content_editor_id": template.content_editor_id,
         "previous_version_id": template.previous_version_id, "created_at": template.created_at,
