@@ -650,3 +650,26 @@ Screenshots inspected.
 | Super Admin | A Versions tab for packs and a Template versions panel. A Super Admin can create **Draft** copies of a Mexico pack or template; nothing goes live without the existing four-eyes approval and activation gates |
 | Activation | Unchanged (the gate was split, not changed) |
 | Other jurisdictions | None |
+
+## Report-template page layout (2026-11-18, a72d28c1 + follow-up)
+
+Super Admin → Report templates → Mexico now uses the **shared list + detail layout** like every other country. The two panels that were stacked under the page (X3b "Mexico template library" and "Template versions") are shown in context instead. Presentation only: no backend, gate, payslip-proof or maker-checker change.
+
+| Was (stacked under the page) | Now |
+|---|---|
+| Library table (every template) | Toolbar **Library** toggle, collapsed by default |
+| Built by / gates / field check per template | **Overview** status block of the selected template (from the library data for its template_key) |
+| Template versions (every template), New version | **Versions & gates** tab: the selected template's versions only, with **Open** (another version's detail) and **New version** |
+| Compare (any two templates) | Inside **Versions & gates**, limited to the selected template's versions. The compare route itself is unchanged |
+| Sandbox preview | **Preview** tab, pre-selected to the open template; explains why it does not apply to a dedicated generator or the CFDI receipt |
+
+The built-in **Versions** tab is hidden on Mexico only (`hiddenDetailTabs`); "Versions & gates" replaces it.
+
+**The evidence above predates this layout.** `RESULTS-X3.md` and `RESULTS-TEMPLATE-VERSIONS.md`, and their screenshots, show the stacked panels. They are kept as recorded. The harnesses (`acceptance_x3.py`, `acceptance_template_versions.py`, helpers in `mx_report_templates_ui.py`) now select a template and open the right tab first. A re-run on a fresh `setup_db.py` database is in `final-mile-evidence/layout-recheck-2026-11-18/`: **X3 9/9, template versions 8/8**.
+
+Three harness changes beyond navigation:
+- **Login user agent:** the harness logs in with the browser's user agent (`HARNESS_UA`). Super Admin refresh tokens are bound to the client that logged in (auth service `NEW_DEVICE`), so the first activity refresh signed the browser out.
+- **x3-3:** compares MX-PAYROLL-REGISTER v1.0 with a Draft copy, made through the existing new-version route, instead of two different templates.
+- **x3-4:** accepts either a block at `MX_ROUNDING_RULE_MISSING` or a calculated, watermarked result. Since ff91303d (D-01 transcribed, `mx_rounding_rule = HALF_UP:0.01` in MX-PAYROLL-2026 v1.1), a preview without candidates calculates. This changed before the layout work and is unrelated to it.
+
+`MX_HARNESS_OUT=<dir>` writes results and screenshots elsewhere, instead of over the recorded evidence.

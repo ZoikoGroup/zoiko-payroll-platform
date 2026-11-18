@@ -16,6 +16,7 @@ import NewReportTemplateModal from "./NewReportTemplateModal";
 import ComponentsTab from "./ComponentsTab";
 import FilingCalendarTab from "./FilingCalendarTab";
 import { filterTemplates } from "./filterTemplates";
+import { buildDetailTabs } from "./detailTabs";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: FileBarChart },
@@ -47,13 +48,16 @@ const EDITABLE_STATUSES = ["Draft", "Review", "Approved"];
 //                       Overview tab for the selected template.
 //   pageTools           [{ key, label, icon, render(ctx) }] — page-level views
 //                       behind a toolbar toggle, collapsed by default.
+//   hiddenDetailTabs    [key] — built-in detail tabs to hide (e.g. a page
+//                       whose extra tab supersedes "versions"). "overview" is
+//                       always shown: it is the tab a selection opens on.
 // ctx = { reloadDetail, reloadTemplates, selectTemplate(id) }. Extensions are
 // presentation only: every lifecycle rule stays server-side.
 const NO_EXTRAS = [];
 
 export default function ReportTemplateLayout({
   country, countryName, initialState = "", onStateChange, embedded = false,
-  extraDetailTabs = NO_EXTRAS, renderOverviewExtra = null, pageTools = NO_EXTRAS,
+  extraDetailTabs = NO_EXTRAS, renderOverviewExtra = null, pageTools = NO_EXTRAS, hiddenDetailTabs = NO_EXTRAS,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -74,7 +78,8 @@ export default function ReportTemplateLayout({
   const [deletingTemplate, setDeletingTemplate] = useState(null);
   const [openTool, setOpenTool] = useState(null);
 
-  const tabs = useMemo(() => [...TABS, ...extraDetailTabs], [extraDetailTabs]);
+  const tabs = useMemo(() => buildDetailTabs(TABS, hiddenDetailTabs, extraDetailTabs), [extraDetailTabs, hiddenDetailTabs]);
+  const isShown = (key) => tabs.some((t) => t.key === key);
 
   function setState(next) {
     setStateRaw(next);
@@ -314,18 +319,18 @@ export default function ReportTemplateLayout({
                 </div>
               )}
 
-              {tab === "components" && (
+              {tab === "components" && isShown("components") && (
                 <ComponentsTab
                   template={detail} components={detail.components || []} availableComponents={availableComponents}
                   availableDataFields={availableDataFields} editable={editable} onChanged={loadDetail}
                 />
               )}
 
-              {tab === "filing-calendar" && (
+              {tab === "filing-calendar" && isShown("filing-calendar") && (
                 <FilingCalendarTab template={detail} editable={editable} />
               )}
 
-              {tab === "versions" && (
+              {tab === "versions" && isShown("versions") && (
                 <div className="space-y-2">
                   {versions.map((v) => (
                     <button
@@ -344,7 +349,7 @@ export default function ReportTemplateLayout({
                 </div>
               )}
 
-              {tab === "audit" && (
+              {tab === "audit" && isShown("audit") && (
                 <div className="space-y-2">
                   {audit.length === 0 ? (
                     <p className="py-6 text-center text-xs text-foreground-disabled">No audit history yet.</p>

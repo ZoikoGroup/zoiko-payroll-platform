@@ -2,6 +2,7 @@ import { useState } from "react";
 import { getMxTemplateVersions, newMxTemplateVersion } from "../../../service/superAdminService";
 import { Messages, Table, btn, btnPrimary, card, input, useLoad } from "./mxShared";
 import { MXTemplateCompare } from "./MXTemplateLibraryPanel";
+import { findVersionsGroup } from "./mxTemplateLookup";
 
 // Mexico report-template versions — the "Versions & gates" detail tab for the
 // SELECTED template (rendered through ReportTemplateLayout's extraDetailTabs):
@@ -18,7 +19,7 @@ export default function MXTemplateVersionsPanel({ detail, ctx }) {
   const [notice, setNotice] = useState(null);
   const [created, setCreated] = useState(null);
   const [actionError, setActionError] = useState(null);
-  const group = (data || []).find((g) => g.templateKey === detail.templateKey);
+  const group = findVersionsGroup(data, detail);
 
   async function submit(e, v) {
     e.preventDefault();
@@ -63,7 +64,14 @@ export default function MXTemplateVersionsPanel({ detail, ctx }) {
                 render: (v) => (v.activationRefusal ? <span className="text-warning">{v.activationRefusal}</span> : <span className="text-success">would pass</span>) },
               { key: "changeSummary", label: "Change", render: (v) => v.changeSummary || "—" },
               { key: "act", label: "", render: (v) => (
-                <button type="button" className={btn} onClick={() => setOpen(open === v.id ? null : v.id)}>New version</button>
+                <span className="flex gap-1">
+                  {/* The built-in "Versions" tab is hidden on Mexico, so opening
+                      another version's detail (edit / approve / status) is here. */}
+                  {v.id !== detail.id && ctx?.selectTemplate && (
+                    <button type="button" className={btn} aria-label={`Open v${v.version}`} onClick={() => ctx.selectTemplate(v.id)}>Open</button>
+                  )}
+                  <button type="button" className={btn} onClick={() => setOpen(open === v.id ? null : v.id)}>New version</button>
+                </span>
               ) },
             ]} />
             {group.versions.filter((v) => v.id === open).map((v) => (

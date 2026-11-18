@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { compareMxReportTemplates, getMxTemplateCoverage, getMxTemplateVersions, previewMxTemplateInSandbox } from "../../../service/superAdminService";
 import { Messages, Table, btn, btnPrimary, card, input, useLoad } from "./mxShared";
+import { findCoverageRow, findVersionEntry } from "./mxTemplateLookup";
 
 // Mexico report-template library tools (final mile X3b): every template's
 // build kind and field check, a version diff, and a preview of a
@@ -40,8 +41,10 @@ export default function MXTemplateLibraryPanel() {
 export function MXTemplateStatusBlock({ detail }) {
   const [rows, error] = useLoad(() => getMxTemplateCoverage(), [detail]);
   const [groups, vError] = useLoad(() => getMxTemplateVersions(), [detail]);
-  const row = (rows || []).find((r) => r.id === detail.id);
-  const ver = (groups || []).flatMap((g) => g.versions).find((v) => v.id === detail.id);
+  // "Built by", gates and field check come from the server's library data for
+  // this template_key (never assumed from the report type on the client).
+  const row = findCoverageRow(rows, detail);
+  const ver = findVersionEntry(groups, detail);
   const loading = rows === null || groups === null;
   return (
     <div className="rounded-lg border border-border-light bg-surface-muted p-3 text-xs" data-testid="mx-template-status">
@@ -113,10 +116,10 @@ export function MXTemplateCompare({ options, defaultTo = "" }) {
 // template when it is a snapshot-field template; otherwise says why preview
 // does not apply (the server refuses it for dedicated generators too).
 export function MXTemplatePreviewTab({ detail }) {
-  const [rows, error] = useLoad(() => getMxTemplateCoverage(), [detail.id]);
+  const [rows, error] = useLoad(() => getMxTemplateCoverage(), [detail]);
   if (error) return <Messages error={error} />;
   if (rows === null) return <p className="text-xs text-foreground-muted">Loading…</p>;
-  const row = rows.find((r) => r.id === detail.id);
+  const row = findCoverageRow(rows, detail);
   if (!row || row.kind !== "TEMPLATE_ENGINE") {
     const why = !row ? "This template is not in the Mexico library."
       : row.kind === "RECEIPT" ? "The CFDI receipt is rendered from the stamped CFDI, not from payslip fields — it has no sandbox preview."
@@ -128,7 +131,7 @@ export function MXTemplatePreviewTab({ detail }) {
       </div>
     );
   }
-  return <MXTemplatePreview key={detail.id} engine={rows.filter((r) => r.kind === "TEMPLATE_ENGINE")} templateId={detail.id} />;
+  return <MXTemplatePreview key={detail.id} engine={rows.filter((r) => r.kind === "TEMPLATE_ENGINE")} templateId={row.id} />;
 }
 
 function MXTemplatePreview({ engine, templateId }) {

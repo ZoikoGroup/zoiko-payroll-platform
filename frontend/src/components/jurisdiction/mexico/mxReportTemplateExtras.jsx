@@ -23,4 +23,9 @@ export const MX_PAGE_TOOLS = [
   { key: "mx-library", label: "Library", icon: Library, render: () => <MXTemplateLibraryPanel /> },
 ];
 
+// The built-in "Versions" tab is hidden on Mexico: "Versions & gates" lists the
+// same versions (plus hash, gate answer, New version, Compare) and opens any
+// of them via "Open".
+export const MX_HIDDEN_DETAIL_TABS = ["versions"];
+
 export const renderMxOverview = (detail) => <MXTemplateStatusBlock detail={detail} />;
