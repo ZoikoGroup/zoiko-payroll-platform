@@ -10551,6 +10551,35 @@ _PAYSLIP_ITEM_JSON_FIELD_CATALOG["SA"] = {
     _SA_SNAP + "sa_other_deductions_total": ("Labour-Law Deductions", "currency", True),
 }
 
+# United Arab Emirates (ZP-AE-ENG-001): engine/countries/uae.py `ae_result`.
+# Amounts are stored as fixed-point strings. The employee pension, the employer
+# cash pension and the end-of-service cost are also the scalar columns
+# employee_pension / employer_pension / employer_payroll_tax. Government support
+# is the state-funded part of the employer share (employer gross - support =
+# employer cash); it is never an employee deduction.
+_AE_SNAP = "ae_calculation_snapshot."
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["AE"] = {
+    _AE_SNAP + "inputs.nationality_category": ("Nationality Category", "text", False),
+    _AE_SNAP + "inputs.pension_scheme": ("Pension Scheme", "text", False),
+    _AE_SNAP + "inputs.eos_regime": ("End-of-Service Regime", "text", False),
+    _AE_SNAP + "inputs.work_pattern": ("Work Pattern", "text", False),
+    _AE_SNAP + "wages.basic_wage": ("Basic Wage", "currency", True),
+    _AE_SNAP + "wages.total_wage": ("Total Wage", "currency", True),
+    _AE_SNAP + "wages.unpaid_leave_deduction": ("Unpaid Leave Deduction", "currency", True),
+    _AE_SNAP + "pension.salary_used": ("Pension Contribution Salary (after cap)", "currency", True),
+    _AE_SNAP + "pension.employee": ("Pension (Employee)", "currency", True),
+    _AE_SNAP + "pension.employer_gross": ("Pension Gross Share (Employer)", "currency", True),
+    _AE_SNAP + "pension.government_support": ("Government Pension Support (Employer)", "currency", True),
+    _AE_SNAP + "pension.employer_cash": ("Pension Cash after Government Support (Employer)", "currency", True),
+    _AE_SNAP + "end_of_service.service_years": ("Completed Service (years)", "text", False),
+    _AE_SNAP + "end_of_service.entitlement_days": ("Gratuity Entitlement (days)", "text", False),
+    _AE_SNAP + "end_of_service.unpaid_absence_days": ("Unpaid Absence Excluded (days)", "text", False),
+    _AE_SNAP + "end_of_service.entitlement": ("Gratuity Entitlement to Date (Employer)", "currency", True),
+    _AE_SNAP + "end_of_service.accrual": ("Gratuity Accrual this Period (Employer)", "currency", True),
+    _AE_SNAP + "end_of_service.subscription": ("Savings Scheme Subscription (Employer)", "currency", True),
+    _AE_SNAP + "end_of_service.employer_amount": ("End-of-Service Cost (Employer)", "currency", True),
+}
+
 _PAYROLL_RUN_FIELD_CATALOG = {
     "run_code": ("Run Code", "text", False),
     "period_label": ("Period", "text", False),
@@ -10790,6 +10819,11 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     # employee/employer pension slots, SANED (unemployment) reuses the
     # social-security slots, and the employer-only Occupational Hazards branch
     # has its own employer_occupational_hazard column.
+    # United Arab Emirates (ZP-AE-ENG-001): no income tax column; pension and
+    # end-of-service figures also in catalog "AE" above.
+    "AE": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "basic_salary", "gross_pay", "employee_pension", "total_deductions",
+           "employer_pension", "employer_payroll_tax", "net_pay"],
     "SA": ["employee_name", "department", "designation", "bank_name", "bank_account",
            "gross_pay", "employee_pension", "social_security", "total_deductions",
            "employer_pension", "employer_social_security", "employer_occupational_hazard", "net_pay"],
@@ -10809,6 +10843,11 @@ _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 # changes which PayslipItem column is read, only the label shown in the
 # Report Template field picker.
 _PAYSLIP_FIELD_LABEL_OVERRIDES = {
+    "AE": {
+        "employee_pension": "Pension (Employee)",
+        "employer_pension": "Pension Cash after Government Support (Employer)",
+        "employer_payroll_tax": "End-of-Service Cost (Employer)",
+    },
     "MY": {
         "tds": "PCB / MTD",
         "employer_pension": "EPF (Employer)",

@@ -3021,8 +3021,73 @@ def seed_saudi_arabia(db):
     return _seed_country(db, "SA", "2026", "GOSI", "ZP-SA-ENG-001 v1.0", _sa_templates())
 
 
+# United Arab Emirates ───────────────────────────────────────────────────────
+# engine/countries/uae.py `ae_result`. No income tax. The employee pension, the
+# employer cash pension and the end-of-service cost are read from the scalar
+# columns; the pension gross share, government support and gratuity figures
+# only exist in the snapshot.
+_ae = _json("ae_calculation_snapshot.")
+
+
+def _ae_templates():
+    tax_label = "MOHRE Establishment ID"
+    contribution_salary = _ae("pension_salary", "Pension Contribution Salary (after cap)", "pension.salary_used")
+    employee = [_col("pension_employee", "Pension (Employee)", "employee_pension")]
+    pension_employer = [
+        _ae("pension_employer_gross", "Pension Gross Share (Employer)", "pension.employer_gross"),
+        _ae("government_support", "Government Pension Support (Employer)", "pension.government_support"),
+        _col("pension_employer_cash", "Pension Cash after Government Support (Employer)", "employer_pension"),
+    ]
+    end_of_service = _col("end_of_service", "End-of-Service Cost (Employer)", "employer_payroll_tax")
+    gratuity_liability = {"AE-GRATUITY-LIABILITY": dict(
+        name="United Arab Emirates gratuity liability", report_type="AE_GRATUITY_LIABILITY", scope="AGGREGATE",
+        description="Per-employee end-of-service position for one run: completed service, entitlement to date, "
+                    "this period's accrual (traditional gratuity) or savings-scheme subscription. Employer cost, "
+                    "never an employee deduction.",
+        components=[
+            _employer(tax_label),
+            (_EMPLOYEE[0], _EMPLOYEE[1], _EMPLOYEE[2] + [
+                _ae("eos_regime", "End-of-Service Regime", "inputs.eos_regime", "text"),
+                _ae("service_years", "Completed Service (years)", "end_of_service.service_years", "text"),
+                _ae("entitlement_days", "Gratuity Entitlement (days)", "end_of_service.entitlement_days", "text"),
+                _ae("unpaid_absence_days", "Unpaid Absence Excluded (days)", "end_of_service.unpaid_absence_days",
+                    "text"),
+            ]),
+            ("earnings", "Wage Bases", [_ae("basic_wage", "Basic Wage", "wages.basic_wage"),
+                                        _ae("total_wage", "Total Wage", "wages.total_wage")]),
+            ("employer_contributions", "End-of-Service (Employer)", [
+                _ae("gratuity_entitlement", "Gratuity Entitlement to Date (Employer)", "end_of_service.entitlement"),
+                _ae("gratuity_accrual", "Gratuity Accrual this Period (Employer)", "end_of_service.accrual"),
+                _ae("savings_subscription", "Savings Scheme Subscription (Employer)", "end_of_service.subscription"),
+                end_of_service,
+            ]),
+        ])}
+    return {
+        **_register("AE", "United Arab Emirates", tax_label,
+                    earnings=[_ae("basic_wage", "Basic Wage", "wages.basic_wage"),
+                              _ae("total_wage", "Total Wage", "wages.total_wage"), contribution_salary],
+                    deductions=employee + [_ae("unpaid_leave", "Unpaid Leave Deduction",
+                                               "wages.unpaid_leave_deduction")],
+                    employer_cost=pension_employer + [end_of_service],
+                    employee_extra=[_ae("nationality", "Nationality Category", "inputs.nationality_category", "text"),
+                                    _ae("pension_scheme", "Pension Scheme", "inputs.pension_scheme", "text")]),
+        **_run_summary("AE", "PENSION-SUMMARY", "United Arab Emirates pension contribution summary",
+                       "AE_PENSION_SUMMARY",
+                       "Run totals of the pension contribution salary and the employee, employer, government-support "
+                       "and employer-cash shares (GPSSA / ADPF) to reconcile against the monthly pension payment.",
+                       tax_label, earnings=[contribution_salary], contributions=employee,
+                       employer_cost=pension_employer),
+        **gratuity_liability,
+    }
+
+
+def seed_united_arab_emirates(db):
+    print("Seeding United Arab Emirates report templates (ZP-AE-ENG-001, Draft)...")
+    return _seed_country(db, "AE", "2026", "MOHRE / GPSSA / ADPF", "ZP-AE-ENG-001 v1.0", _ae_templates())
+
+
 SEED_COMING_SOON_COUNTRIES = (seed_belgium, seed_france, seed_italy, seed_japan, seed_malaysia, seed_new_zealand,
-                              seed_poland, seed_saudi_arabia)
+                              seed_poland, seed_saudi_arabia, seed_united_arab_emirates)
 
 
 if __name__ == "__main__":
