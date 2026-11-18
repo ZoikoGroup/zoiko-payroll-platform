@@ -2055,6 +2055,10 @@ class PayslipItem(Base):
     # notifications …) no longer loads every Belgian snapshot; Belgian readers
     # load the paths they need (belgium_service.be_snapshot_facts) or undefer.
     be_calculation_snapshot = deferred(Column(JSON, nullable=True))
+    # United Arab Emirates (ZP-AE-ENG-001): the calculation breakdown (inputs,
+    # pension / gratuity / savings / overtime lines and the pack values used);
+    # NULL for non-AE payslips (ad01fc67ce44). Never an Emirates ID.
+    ae_calculation_snapshot = Column(JSON, nullable=True)
     # Payslip templates (f3a9c1d7e2b4): the organisation's published template
     # version this payslip is shown with, frozen when its run is approved so a
     # later template change never alters an issued payslip. NULL = the

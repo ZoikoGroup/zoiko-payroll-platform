@@ -1630,7 +1630,7 @@ def check_jurisdiction_readiness(
 # Mexico (ZP-MX-ENG-001): MX-003 — only the signed, effective-dated canonical
 # pack; an org-synced copy would drop the row-level dates that separate the
 # January and February UMA rows (MX-004).
-_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE", "AE")
 # Countries whose payroll refuses an AMBIGUOUS resolution: more than one Active
 # canonical tax pack covering the payroll date (activation already forbids the
 # overlap; this keeps a corrupted / manually edited database from silently
@@ -26816,6 +26816,9 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # IE-045 (no reconstructing a historical result from current content)
         # is only satisfiable because the RPN actually applied is frozen here.
         "ie_calculation_snapshot": _ie_payslip_snapshot(result),
+        # United Arab Emirates (ZP-AE-ENG-001): the breakdown (pension, gratuity /
+        # savings, pack values used) so payslip, run and reports show one figure.
+        "ae_calculation_snapshot": result.ae_result,
         "it_calculation_snapshot": _italy_service.it_payslip_snapshot(result),
         "ch_calculation_snapshot": _switzerland_service.ch_payslip_snapshot(result, frozen=switzerland_frozen),
         # Saudi Arabia (ZP-SA-ENG-001): the frozen GOSI picture (worker class,

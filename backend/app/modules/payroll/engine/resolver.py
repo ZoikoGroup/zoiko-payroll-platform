@@ -197,6 +197,16 @@ def calculate_payroll(
             "Belgium payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "AE" and key == "simple":
+        # United Arab Emirates (ZP-AE-ENG-001): simple mode would silently skip
+        # the pension contributions and gratuity accrual. Fail-closed: countries/uae.py.
+        from app.modules.payroll.engine.countries.uae import AECalculationBlockedError
+
+        raise AECalculationBlockedError(
+            "AE_SIMPLE_MODE_UNSUPPORTED",
+            "United Arab Emirates payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)
@@ -467,6 +477,12 @@ def build_context_from_employee(
         period_end=period_end,
         date_of_joining=getattr(employee, "date_of_joining", None),
         date_of_leaving=getattr(employee, "date_of_leaving", None),
+        # United Arab Emirates (ZP-AE-ENG-001): the routing facts the UAE
+        # calculator reads (nationality, pension scheme, end-of-service regime,
+        # ...) straight from the employee's own fields. None for other countries.
+        ae_facts=({**(getattr(employee, "compliance_fields", None) or {}),
+                   "work_state": getattr(employee, "work_state", None)}
+                  if (country or "").upper() == "AE" else None),
         employment_type=getattr(employee, "employment_type", None),
         # Singapore CPF cohort facts — dedicated columns fed from
         # compliance_fields via SGEmployeeValidation.FIELD_COLUMN_MAP.
