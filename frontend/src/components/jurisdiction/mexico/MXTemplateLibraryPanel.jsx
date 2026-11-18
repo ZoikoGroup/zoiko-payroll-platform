@@ -1,7 +1,10 @@
 import { useState } from "react";
-import { compareMxReportTemplates, getMxTemplateCoverage, getMxTemplateVersions, previewMxTemplateInSandbox } from "../../../service/superAdminService";
+import { compareMxReportTemplates, getMxReadiness, getMxTemplateCoverage, getMxTemplateVersions, previewMxTemplateInSandbox } from "../../../service/superAdminService";
 import { Messages, Table, btn, btnPrimary, card, input, useLoad } from "./mxShared";
 import { findCoverageRow, findVersionEntry } from "./mxTemplateLookup";
+import { approverNote, componentsNotice, gateLines } from "./mxTemplateNotices";
+
+const TONE = { ok: "text-success", warning: "text-warning", info: "text-foreground", muted: "text-foreground-muted" };
 
 // Mexico report-template library tools (final mile X3b): every template's
 // build kind and field check, a version diff, and a preview of a
@@ -41,11 +44,16 @@ export default function MXTemplateLibraryPanel() {
 export function MXTemplateStatusBlock({ detail }) {
   const [rows, error] = useLoad(() => getMxTemplateCoverage(), [detail]);
   const [groups, vError] = useLoad(() => getMxTemplateVersions(), [detail]);
+  // Gate areas and states (G2 IMSS / SUA: OPEN). Optional: without it the
+  // block still names the gates.
+  const [readiness] = useLoad(() => getMxReadiness(), []);
   // "Built by", gates and field check come from the server's library data for
   // this template_key (never assumed from the report type on the client).
   const row = findCoverageRow(rows, detail);
   const ver = findVersionEntry(groups, detail);
   const loading = rows === null || groups === null;
+  const approver = approverNote(detail);
+  const gates = gateLines(row?.gates, readiness?.gates);
   return (
     <div className="rounded-lg border border-border-light bg-surface-muted p-3 text-xs" data-testid="mx-template-status">
       <p className="mb-2 font-semibold text-foreground">Mexico template status</p>
@@ -58,14 +66,51 @@ export function MXTemplateStatusBlock({ detail }) {
           <div><p className="text-foreground-muted">Gates</p><p className="font-medium text-foreground">{row.gates.length ? row.gates.join(", ") : "—"}</p></div>
           <div><p className="text-foreground-muted">Fields</p><p className="font-medium text-foreground">{row.fields}</p></div>
           <div className="sm:col-span-3"><p className="text-foreground-muted">Field check</p><p className="font-medium text-foreground">{row.fieldProof}</p></div>
+          <div className="sm:col-span-3" data-testid="mx-template-approver">
+            <p className="text-foreground-muted">Approver</p>
+            <p className={`font-medium ${TONE[approver.tone]}`}>{approver.text}</p>
+          </div>
           <div className="sm:col-span-3">
             <p className="text-foreground-muted">Activation gate (platform data)</p>
             {!ver ? <p className="text-foreground-muted">—</p> : ver.activationRefusal
               ? <p className="font-medium text-warning">{ver.activationRefusal}</p>
               : <p className="font-medium text-success">would pass on platform data (the payslip field proof still runs at activation)</p>}
+            {gates.length > 0 && (
+              <ul className="mt-1 space-y-0.5" data-testid="mx-template-gate-states">
+                {gates.map((g) => (
+                  <li key={g.gate} className="text-foreground-secondary">
+                    <span className="font-semibold">{g.gate}</span>{g.label ? ` ${g.label}` : ""}:{" "}
+                    <span className={g.signed ? "text-success" : "text-warning"}>{g.state || "state not loaded"}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {gates.some((g) => !g.signed) && (
+              <p className="mt-1 text-foreground-muted">
+                A gate is signed only by its reviewed evidence (Mexico → Readiness &amp; gates). Until every gate this report rests on
+                is signed, activation is refused by design: Mexico stays dormant. Nothing on this page can override it.
+              </p>
+            )}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Top of the Components tab: what the selected template is built from and, for a
+// snapshot-field template with no fields, why and how it gets them.
+export function MXTemplateComponentsNotice({ detail }) {
+  const [rows, error] = useLoad(() => getMxTemplateCoverage(), [detail]);
+  if (error) return <Messages error={error} />;
+  if (rows === null) return <p className="text-xs text-foreground-muted">Loading…</p>;
+  const notice = componentsNotice(findCoverageRow(rows, detail), detail);
+  if (!notice) return null;
+  const border = notice.tone === "warning" ? "border-warning/40 bg-warning/10" : "border-border-light bg-surface-muted";
+  return (
+    <div className={`rounded-lg border p-3 text-xs ${border}`} data-testid="mx-template-components-notice" data-tone={notice.tone}>
+      <p className={`font-semibold ${TONE[notice.tone]}`}>{notice.title}</p>
+      <p className="mt-1 text-foreground-secondary">{notice.body}</p>
     </div>
   );
 }

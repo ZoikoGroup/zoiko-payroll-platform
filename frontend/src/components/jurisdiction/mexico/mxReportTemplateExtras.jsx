@@ -1,11 +1,15 @@
 import { Eye, Library, ShieldCheck } from "lucide-react";
-import MXTemplateLibraryPanel, { MXTemplatePreviewTab, MXTemplateStatusBlock } from "./MXTemplateLibraryPanel";
+import MXTemplateLibraryPanel, { MXTemplateComponentsNotice, MXTemplatePreviewTab, MXTemplateStatusBlock } from "./MXTemplateLibraryPanel";
 import MXTemplateVersionsPanel from "./MXTemplateVersionsPanel";
 
 // Mexico's extras for the shared ReportTemplateLayout, passed through its
 // generic extension props by MXReportTemplatesPage (presentation only — every
 // activation gate, payslip-proof check and maker-checker rule is server-side):
-//   - Overview: built by, gates, field check and activation-gate answer;
+//   - Overview: built by, gates (with their state), field check, approver and
+//     activation-gate answer;
+//   - Components: what the template is built from — a dedicated generator / the
+//     CFDI receipt take no components; a snapshot-field template with no fields
+//     says why activation refuses it and how it gets its fields;
 //   - "Versions & gates": the selected template's versions, content hash, gate
 //     answer, "New version" (Draft copy — the rollback path) and Compare;
 //   - "Preview": the sandbox preview for a snapshot-field template;
@@ -29,3 +33,5 @@ export const MX_PAGE_TOOLS = [
 export const MX_HIDDEN_DETAIL_TABS = ["versions"];
 
 export const renderMxOverview = (detail) => <MXTemplateStatusBlock detail={detail} />;
+
+export const renderMxComponents = (detail) => <MXTemplateComponentsNotice detail={detail} />;

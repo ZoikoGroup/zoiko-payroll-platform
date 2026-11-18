@@ -1,6 +1,8 @@
 import { useParams, useNavigate } from "react-router-dom";
 import ReportTemplateLayout from "../../components/reportTemplates/ReportTemplateLayout";
-import { MX_DETAIL_TABS, MX_HIDDEN_DETAIL_TABS, MX_PAGE_TOOLS, renderMxOverview } from "../../components/jurisdiction/mexico/mxReportTemplateExtras";
+import {
+  MX_DETAIL_TABS, MX_HIDDEN_DETAIL_TABS, MX_PAGE_TOOLS, renderMxComponents, renderMxOverview,
+} from "../../components/jurisdiction/mexico/mxReportTemplateExtras";
 
 // Mexico — the same thin wrapper as every other jurisdiction. Mexico's extras
 // (template status on Overview, "Versions & gates", "Preview" and a page-level
@@ -23,6 +25,7 @@ export default function MXReportTemplatesPage() {
       renderOverviewExtra={renderMxOverview}
       pageTools={MX_PAGE_TOOLS}
       hiddenDetailTabs={MX_HIDDEN_DETAIL_TABS}
+      renderComponentsExtra={renderMxComponents}
     />
   );
 }
