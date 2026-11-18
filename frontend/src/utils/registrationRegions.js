@@ -36,6 +36,8 @@ export const REGISTRATION_COUNTRIES = [
   // Owner decision 2026-10-29 — every configured payroll country is offered
   // at registration (mirrors backend REGISTRATION_COUNTRIES).
   "Brazil", "Hong Kong", "Italy", "Netherlands", "Saudi Arabia", "Singapore", "Switzerland",
+  // Owner decision 2026-11-11 — Mexico, same gate bypass (mirrors backend).
+  "Mexico",
   // United Arab Emirates (ZP-AE-ENG-001) — registration opens like Jamaica:
   // once an Active AE canonical pack with rates exists. DIFC / ADGM are
   // selectable as regions but the calculator blocks them with a named reason.

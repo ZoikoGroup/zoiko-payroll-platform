@@ -106,6 +106,16 @@ check("the Belgium console page is wired (Phase 3B)", () => {
   assert(/BE: "belgium"/.test(read("pages/JurisdictionCompliance/index.js")), "BE compliance slug");
 });
 
+// Block J3: bulk acknowledge — select all / multi-select + one action, one batched request; the one-by-one control stays.
+check("run preflight offers bulk acknowledge (one batched request) and keeps the single control", () => {
+  const panel = read("modules/payroll/PayRollRuns/BERunPreflightPanel.jsx");
+  const service = read("service/payrollService.js");
+  assert(/exceptions\/acknowledge-bulk/.test(service) && /acknowledgeBeRunExceptions/.test(service), "bulk service");
+  assert(/Select all exceptions/.test(panel) && /Acknowledge selected/.test(panel), "bulk controls");
+  assert(/acknowledgeBeRunExceptions\(runId/.test(panel), "bulk call");
+  assert(/acknowledgeBeRunException\(runId/.test(panel), "single acknowledge kept");
+});
+
 if (failures.length) {
   console.error(`Belgium UI validation: ${failures.length} failure(s), ${passed} passed`);
   failures.forEach((f) => console.error(`  ✗ ${f}`));

@@ -88,7 +88,14 @@ jobs:
       # round trip with row-level security on this PostgreSQL. Last step: the round
       # trip drops and recreates the disposable schema.
       - name: Belgium migrations on PostgreSQL (RLS round trip)
-        run: python -m pytest -q -p no:cacheprovider tests/test_belgium_migrations.py tests/test_belgium_block_b_migration.py tests/test_belgium_block_c_migration.py
+        run: python -m pytest -q -p no:cacheprovider tests/test_belgium_migrations.py tests/test_belgium_block_b_migration.py tests/test_belgium_block_c_migration.py tests/test_belgium_seed_postgres.py
+        working-directory: backend
+      # Belgium (ZP-BE-ENG-001 Block L1): the rollback guarantee. Rollback = dormancy + fix-forward
+      # (the Belgian schema is permanent). With the full schema and Belgium switched off: every
+      # Belgian route 404s, the calculation is blocked, the Super Admin console writes nothing,
+      # other countries are unaffected and the app starts with no Belgian setting.
+      - name: Belgium rollback proof (dormancy)
+        run: python -m pytest -q -p no:cacheprovider tests/test_belgium_dormancy_proof.py
         working-directory: backend
 
   deploy:

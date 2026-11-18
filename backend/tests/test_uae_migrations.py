@@ -23,7 +23,7 @@ from sqlalchemy.pool import StaticPool
 BACKEND = Path(__file__).resolve().parents[1]
 VERSIONS = BACKEND / "alembic" / "versions"
 REVISION = "ad01fc67ce44"
-PARENT = "cf348b09db2b"
+PARENT = "c3e8a1d5f7b2"
 FILENAME = f"{REVISION}_ae_foundation.py"
 COLUMN = "ae_calculation_snapshot"
 

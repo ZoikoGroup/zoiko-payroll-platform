@@ -96,6 +96,18 @@ COMPONENT_UNMAPPED = "BE_COMPONENT_UNMAPPED"            # G-28: platform pay wit
 REDUCTION_UNSUPPORTED = "BE_REDUCTION_UNSUPPORTED"      # G-27: a reduction applies but is not built
 BENEFIT_IN_KIND_UNSUPPORTED = "BE_BENEFIT_IN_KIND_UNSUPPORTED"  # G-27: company car / BIK valuation not built
 
+# ── Block M-ECWC: the ONSS rate table (all blocks) ──────────────────────────
+ONSS_RATE_TABLE_MISSING = "BE_ONSS_RATE_TABLE_MISSING"        # no rate file for the pay date's quarter
+ONSS_RATE_FILE_UNATTESTED = "BE_ONSS_RATE_FILE_UNATTESTED"    # the quarterly file is not attested authentic
+ONSS_RATE_UNSIGNED = "BE_ONSS_RATE_UNSIGNED"                  # a rate row / combination / type rule is not signed
+ONSS_RATE_ROW_MISSING = "BE_ONSS_RATE_ROW_MISSING"            # no live row for (category, code, type)
+ONSS_RATE_FLAT_UNSUPPORTED = "BE_ONSS_RATE_FLAT_UNSUPPORTED"  # flat amount / quarterly minimum not calculated
+ONSS_RATE_PERSONAL_UNSUPPORTED = "BE_ONSS_RATE_PERSONAL_UNSUPPORTED"  # a combined code with a personal share
+ONSS_FACT_MISSING = "BE_ONSS_FACT_MISSING"                    # an employer fact (or its evidence) is not recorded
+ONSS_TYPE_UNRESOLVED = "BE_ONSS_TYPE_UNRESOLVED"              # no signed type rule matches the facts
+ONSS_TYPE_AMBIGUOUS = "BE_ONSS_TYPE_AMBIGUOUS"                # several signed rules give different types
+ONSS_RATE_MARKERS_MIXED = "BE_ONSS_RATE_MARKERS_MIXED"        # base and funds not both on the rate table
+
 # ── Block B1: wages and working time (exceptions unless noted) ──────────────
 SECTOR_MINIMUM_UNVERIFIED = "BE_SECTOR_MINIMUM_UNVERIFIED"
 SCALE_ROW_MISSING = "BE_SCALE_ROW_MISSING"

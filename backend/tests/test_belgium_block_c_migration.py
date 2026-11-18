@@ -118,9 +118,10 @@ def test_deploy_drift_filter_explains_every_object():
     os.chdir(BACKEND)
     try:
         tables, columns = pending_objects(PARENT)
-        # Malaysia's chain (13574b996ccf ... f793f6074257) joins Belgium's at merge
-        # cf348b09db2b, so its objects are pending from here too. They are explained by
-        # the Malaysia migration tests; from Belgium's head only Malaysia is pending.
+        # Malaysia's chain (13574b996ccf ... f793f6074257, merge cf348b09db2b) and the
+        # Mexico CFDI lifecycle (merge 4de7c091ab32) join Belgium's after its head, so
+        # their objects are pending from here too. They are explained by their own
+        # migration tests; from Belgium's head only those two branches are pending.
         my_tables, my_columns = pending_objects("8a1f5ef9fa5d")
         tables = tables - my_tables
         columns = {t: c - my_columns.get(t, set()) for t, c in columns.items()}
@@ -128,7 +129,7 @@ def test_deploy_drift_filter_explains_every_object():
     finally:
         os.chdir(here)
     assert tables == set(NEW_TABLES)
-    assert columns == {}
+    assert all(t.startswith("payroll_mx_") for t in columns)
 
 
 def test_revision_is_the_single_child_and_the_single_head():
@@ -141,12 +142,19 @@ def test_revision_is_the_single_child_and_the_single_head():
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
     assert children == [FILENAME]
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    # Since the 2026-11-14 main -> venu merge this revision is no longer the head itself:
-    # merge cf348b09db2b joins it with Malaysia's head (f793f6074257) and is the single head.
-    # + UAE P2 (ad01fc67ce44) is now the single head, on top of cf348b09db2b.
-    assert list(script.get_heads()) == ["ad01fc67ce44"]
+    # This revision is no longer the head itself: merge cf348b09db2b joins it with Malaysia's
+    # head (f793f6074257), Belgium Block K (b7e4c2a9d5f1) sits on that merge, merge 4de7c091ab32
+    # joins it with Mexico's CFDI lifecycle, and merges d6b2e8f4a1c9 / e3f9a7c1b5d2 rejoin them all.
+    assert list(script.get_heads()) == ["ad01fc67ce44"]   # UAE breakdown column on c3e8a1d5f7b2
+    assert script.get_revision("ad01fc67ce44").down_revision == "c3e8a1d5f7b2"
+    assert script.get_revision("c3e8a1d5f7b2").down_revision == "a4c7e1f9b3d8"
+    assert script.get_revision("a4c7e1f9b3d8").down_revision == "e9c4b7a2d6f3"
+    assert script.get_revision("e9c4b7a2d6f3").down_revision == "e3f9a7c1b5d2"   # Belgium Block M-ECWC on the merge
     merge = script.get_revision("cf348b09db2b")
     assert set(merge.down_revision) == {REVISION, "f793f6074257"}
+    assert script.get_revision("b7e4c2a9d5f1").down_revision == "cf348b09db2b"
+    assert set(script.get_revision("d6b2e8f4a1c9").down_revision) == {"4de7c091ab32", "cf348b09db2b"}
+    assert set(script.get_revision("e3f9a7c1b5d2").down_revision) == {"d6b2e8f4a1c9", "b7e4c2a9d5f1"}
 
 
 def test_names_are_literal_and_the_migration_is_in_the_manifest():

@@ -1,0 +1,6 @@
+list-id: A2
+official: yes
+retrieved: 2026-11-17
+url: https://www.ejustice.just.fgov.be/cgi/article.pl?language=nl&pd_search=2026-07-30&numac_search=2026005690 (Belgisch Staatsblad / Moniteur belge, official gazette site)
+http-status: n/a (browser print to PDF by the owner on 2026-11-17 08:40)
+note: Source B12. Royal Decree of 24 July 2026 amending the application rules of professional withholding (KB/WIB 92 Annex III), document 2026005690, published 30 July 2026. Dutch text only, 4 pages; printed from the official gazette page (page header/footer of the browser print kept). Entry into force differs per article (art. 7): art. 1 on publication; arts 2, 5 and 6 2° retroactive from 1 Jan 2026; art. 3 from 1 Apr 2026; arts 4 and 6 1° from 1 Aug 2026. Saved unchanged under its downloaded name.

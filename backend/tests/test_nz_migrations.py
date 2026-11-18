@@ -21,6 +21,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "0e697c2388bf"
@@ -199,7 +200,7 @@ def test_deploy_drift_filter_explains_every_nz_object():
     finally:
         os.chdir(here)
     # P5 (ac08988ecd3a) and P6 (c6ea8c6c35ce) are pending on the same chain.
-    assert tables - set(NEW_TABLES) == {"payroll_nz_employments", "payroll_nz_public_holiday_decisions",
+    assert tables - set(NEW_TABLES) - MX_LIFECYCLE_TABLES == {"payroll_nz_employments", "payroll_nz_public_holiday_decisions",
                                         "payroll_nz_leave_entitlements", "payroll_nz_gross_earnings_ledger",
                                         "payroll_nz_leave_events", "payroll_nz_final_pay_cases",
                                         "payroll_nz_leave_pay_calculations", "payroll_nz_cash_up_requests",
@@ -230,7 +231,7 @@ def test_deploy_drift_filter_explains_every_nz_object():
                                         "payroll_be_worker_profiles", "payroll_be_work_schedules",
                                         "payroll_be_employment_classifications", "payroll_be_declarations",
                                         "payroll_be_accumulator_entries",  # + Belgium P2 (1d76678ef1a1)
-                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
+                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_be_gate_evidence", "payroll_be_decisions", "payroll_be_onss_rate_files", "payroll_be_onss_rates", "payroll_be_onss_code_combinations", "payroll_be_onss_type_rules", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
     assert set(NEW_TABLES) <= tables
     for table, names in SHARED.items():
         assert names <= columns[table], table

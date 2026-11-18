@@ -35,6 +35,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # the enforced path, which is still supported via MFA_ENFORCEMENT=enforce;
 # tests/privacy/test_mfa_sessions.py covers the default (off) path.
 os.environ.setdefault("MFA_ENFORCEMENT", "enforce")
+# Mexico's kill switch is off by default (config.py); tests that need it on set it
+# themselves. Pinned here so a developer's backend/.env (e.g. a local
+# MX_TENANT_ONBOARDING_ENABLED=true) never changes what the suite sees.
+os.environ.setdefault("MX_TENANT_ONBOARDING_ENABLED", "false")
 
 import pytest
 from sqlalchemy import event as _sa_event

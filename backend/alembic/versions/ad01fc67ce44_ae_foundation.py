@@ -1,7 +1,7 @@
 """ae_foundation: United Arab Emirates payslip calculation breakdown column
 
 Revision ID: ad01fc67ce44
-Revises: cf348b09db2b
+Revises: c3e8a1d5f7b2
 Create Date: 2026-11-18
 
 ZP-AE-ENG-001 (docs/uae). Additive only, one nullable column:
@@ -25,7 +25,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "ad01fc67ce44"
-down_revision: Union[str, Sequence[str], None] = "cf348b09db2b"
+down_revision: Union[str, Sequence[str], None] = "c3e8a1d5f7b2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

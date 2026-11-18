@@ -75,6 +75,11 @@ def _transition(db: Session, doc, to: str, event_type: str, actor_id=None, detai
         raise MXRefuse("MX_CFDI_ILLEGAL_TRANSITION", f"a CFDI document cannot go from {frm} to {to}",
                       doc.organization_id)
     doc.status = to
+    # CFDI lifecycle L1: the authority's answer to a cancellation, as a recorded outcome
+    if to == "CANCELLED":
+        doc.cancel_outcome = "CANCEL_ACCEPTED"
+    elif event_type == "CANCEL_REJECTED":
+        doc.cancel_outcome = "CANCEL_REJECTED"
     if to == "UNKNOWN":
         doc.unknown_since = _now()
     elif frm == "UNKNOWN":
@@ -138,6 +143,12 @@ def preflight(db: Session, run) -> dict:
     release = _active_release(db)
     if release is None:
         reasons.append(("MX_CFDI_NO_ACTIVE_SCHEMA_RELEASE", "no Active CFDI 4.0 / Nómina 1.2 schema release (Phase 2)"))
+    else:
+        from app.modules.payroll import mexico_cfdi_lifecycle
+
+        stale = mexico_cfdi_lifecycle.catalog_stale_reason(release, run.pay_date)
+        if stale:
+            reasons.append(("MX_CFDI_CATALOG_STALE", stale))
     items = mexico_run_service._mx_items(db, run)
     for item in items:
         snap = item.mx_calculation_snapshot or {}
@@ -183,9 +194,14 @@ def _generate_one(db: Session, run, item, release, actor_id, replaces=None):
 
     from app.modules.payroll import mexico_dormancy, mexico_pilot_service
 
+    from app.modules.payroll import mexico_cfdi_lifecycle
+
     m = _models()
     version, _root, _cred = _employer_for(db, item, run.pay_date)
     mexico_pilot_service.refuse_non_sandbox_pac(db, run.organization_id, version.pac_environment)   # Phase 10e
+    stale = mexico_cfdi_lifecycle.catalog_stale_reason(release, run.pay_date)                       # lifecycle L5
+    if stale:
+        raise MXRefuse("MX_CFDI_CATALOG_STALE", stale, run.organization_id)
     pilot = mexico_dormancy.is_pilot_organization(db, run.organization_id)
     refusal = object_storage.durable_storage_refusal("Mexico CFDI XML storage")
     if refusal:
@@ -215,6 +231,7 @@ def _generate_one(db: Session, run, item, release, actor_id, replaces=None):
         pac_environment=version.pac_environment, sat_certificate_number=None, idempotency_key=key,
         replaces_document_id=getattr(replaces, "id", None), replaces_uuid=getattr(replaces, "uuid", None),
         created_by_id=actor_id)
+    mexico_cfdi_lifecycle.stamp_envelope_columns(db, doc, run, item, version, _root, _cred, replaces)   # L2 / L4
     db.add(doc)
     db.flush()
     _event(db, doc, "GENERATED", actor_id, {"folio": folio, "schemaReleaseId": release.id, "pilot": pilot}, None,

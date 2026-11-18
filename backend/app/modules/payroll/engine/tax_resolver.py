@@ -376,6 +376,12 @@ def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str]
     be_refusal = entering_belgium_refusal(old_country, new_country, organization_id)
     if be_refusal:
         return be_refusal
+    # Belgium canary (owner decision 2026-11-16): an organisation on BE_CANARY_ORG_IDS may enter a PLANNED
+    # Belgium to prepare its setup before the gates; see belgium_dormancy.be_canary_may_enter_planned.
+    from app.modules.payroll.belgium_dormancy import be_canary_may_enter_planned
+
+    if be_canary_may_enter_planned(db, new_country, organization_id) and             get_jurisdiction_code(new_country) != get_jurisdiction_code(old_country):
+        return None
 
     new_code = get_jurisdiction_code(new_country)
     if new_code not in _REGISTRY_ROW_REQUIRED_COUNTRIES or new_code == get_jurisdiction_code(old_country):

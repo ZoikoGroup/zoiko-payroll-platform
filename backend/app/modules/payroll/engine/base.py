@@ -1078,6 +1078,7 @@ class PayrollContext:
     be_daily_rate: Decimal = None             # B2: daily rate for employer absence pay checks
     be_identifier_masked: str = None          # B3: masked NISS / BIS for the payslip (no digit, BE-040)
     be_pension_premium: Decimal = None        # employer occupational-pension premium (special contribution base)
+    be_onss_rate_table: dict = None           # M-ECWC: one quarter of the ONSS rate table (live rows, type rules)
     be_exceptional_reference: Decimal = None  # annual reference remuneration for exceptional withholding
     be_ytd: dict = None                       # {accumulator: sum before this pay date}
     be_pack_version: str = None               # pack id / version recorded in the trace (BE-010)

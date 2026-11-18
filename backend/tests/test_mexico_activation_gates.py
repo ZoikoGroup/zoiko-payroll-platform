@@ -263,7 +263,9 @@ def test_the_real_seeded_packs_are_refused_today(db):
     assert (slabs, rates) == (sum(s[0] == "SLAB" for s in expected_rows), sum(s[0] == "RATE" for s in expected_rows))
     assert slabs > 55 and rates > 10                                  # Batch 2 rows are seeded too
     assert db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == cdmx.id).count() == 1
-    expected = {national.id: {"content": False, "evidence": True, "sources_verified": False, "g1_review": False,
+    # D-01 transcribed (2026-11-11, mx_rounding_rule): the national content is now complete and exact; the
+    # pack is still refused — its archive-copy sources, the human G1 review and the golden vectors.
+    expected = {national.id: {"content": True, "evidence": True, "sources_verified": False, "g1_review": False,
                               "golden": False},
                 # W1-2: the CDMX rate rests on S22, VERIFIED by a logged direct download, so content,
                 # evidence and sources pass; the human G1 review and the golden vectors still refuse it
@@ -277,6 +279,54 @@ def test_the_real_seeded_packs_are_refused_today(db):
     # Batch 1 rests on archive copies: activation needs each one VERIFIED
     checks = {c["key"]: c for c in mexico_service.activation_checks(db, national, actor_id=ACTIVATOR)}
     assert "not VERIFIED" in checks["sources_verified"]["detail"]
+
+
+def test_v1_1_seed_adds_the_rounding_rule_as_a_new_draft_version(db):
+    """scripts/seed_mexico_canonical_packs_v1_1: a v1.0 seeded before D-01 was
+    transcribed fails the content check ("lacks ... mx_rounding_rule"); v1.1 is
+    a new Draft version beside it — exact content, linked to v1.0, which is
+    left untouched — and re-running it while Draft rewrites the same rows."""
+    from app.modules.payroll import mexico_service
+    from app.modules.payroll.models import ContributionRate, JurisdictionPack
+    from scripts.seed_mexico_canonical_packs import load_manifest, seed_mexico
+    from scripts.seed_mexico_canonical_packs_v1_1 import seed_mexico_v1_1
+
+    v10 = seed_mexico(db, manifest=load_manifest())["national"]
+    # v1.0 as it is in a database seeded before 2026-11-11: no rounding row
+    db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == v10.id,
+                                      ContributionRate.component_key == "mx_rounding_rule").delete()
+    db.commit()
+    v10_rows = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == v10.id).count()
+
+    out = seed_mexico_v1_1(db, manifest=load_manifest())
+    db.commit()
+    v11 = out["pack"]
+    assert (v11.pack_id, v11.version, v11.status, v11.previous_version_id) == (v10.pack_id, "1.1", "Draft", v10.id)
+    assert out["rounding"] == "HALF_UP:0.01" and out["ceav_ref"] == "GENERAL" and out["rates"] == v10_rows + 1
+    (row,) = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == v11.id,
+                                               ContributionRate.component_key == "mx_rounding_rule").all()
+    assert row.text_value == "HALF_UP:0.01"
+
+    def check(pack, key):
+        return {c["key"]: c for c in mexico_service.activation_checks(db, pack, actor_id=ACTIVATOR)}[key]
+
+    assert check(v11, "content")["met"] is True
+    assert check(v10, "content")["met"] is False
+    assert check(v11, "sources_verified")["met"] is False          # archive copies: still not approvable
+    assert db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == v10.id).count() == v10_rows
+
+    again = seed_mexico_v1_1(db, manifest=load_manifest())
+    db.commit()
+    assert again["pack"].id == v11.id and (again["rates"], again["slabs"]) == (out["rates"], out["slabs"])
+    assert db.query(JurisdictionPack).filter(JurisdictionPack.pack_id == v10.pack_id).count() == 2
+
+
+def test_v1_1_seed_refuses_without_v1_0(db):
+    from scripts.seed_mexico_canonical_packs import load_manifest
+    from scripts.seed_mexico_canonical_packs_v1_1 import seed_mexico_v1_1
+
+    with pytest.raises(SystemExit, match="run scripts/seed_mexico_canonical_packs.py first"):
+        seed_mexico_v1_1(db, manifest=load_manifest())
 
 
 def test_there_is_no_mexico_hotfix_path(db, ready_pack):

@@ -19,6 +19,7 @@ import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy.pool import StaticPool
+from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 REVISION = "447f57564983"
@@ -89,7 +90,7 @@ NZ_TABLES = {"payroll_nz_employer_profiles", "payroll_nz_ird_vault", "payroll_nz
                                         "payroll_be_worker_profiles", "payroll_be_work_schedules",
                                         "payroll_be_employment_classifications", "payroll_be_declarations",
                                         "payroll_be_accumulator_entries",  # + Belgium P2 (1d76678ef1a1)
-                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
+                                        "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_be_gate_evidence", "payroll_be_decisions", "payroll_be_onss_rate_files", "payroll_be_onss_rates", "payroll_be_onss_code_combinations", "payroll_be_onss_type_rules", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
 
 
 def _load(prefix):
@@ -257,7 +258,7 @@ def test_deploy_drift_filter_explains_every_za_object():
     google_tables = {"google_pending"}
     google_columns = {"auth_provider", "google_id", "avatar_url"}
     assert tables == (set(NEW_TABLES) | set(P8_TABLES) | set(P9_TABLES) | set(P10_TABLES)
-                      | mexico_m20 | {"organization_jurisdictions"} | JP_TABLES | NZ_TABLES | google_tables)
+                      | mexico_m20 | {"organization_jurisdictions"} | JP_TABLES | NZ_TABLES | google_tables | MX_LIFECYCLE_TABLES)
     assert columns["users"] == google_columns
     for table, names in P9_COLUMNS.items():
         assert columns[table] == names, table

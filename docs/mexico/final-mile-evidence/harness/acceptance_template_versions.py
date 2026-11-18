@@ -1,9 +1,16 @@
 """Mexico report-template versions in the real UI (Super Admin → Report templates
 → Mexico): every template's versions with the platform part of the activation
 gate, "New version" as a Draft copy of the chosen version, and the compare tool
-showing the copy identical. Harness: setup_db.py + serve.py."""
+showing the copy identical. Harness: setup_db.py + serve.py.
+
+Since a72d28c1 the page uses the shared list + detail layout: the versions panel
+is the "Versions & gates" tab of the SELECTED template (only that template's
+versions, Compare limited to them) and the built-in "Versions" tab is hidden on
+Mexico. The checks select MX-PAYROLL-REGISTER and open that tab first."""
 import json
+import os
 import re
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -11,7 +18,10 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 HERE = Path(__file__).resolve().parent
-OUT = HERE.parent
+sys.path.insert(0, str(HERE))
+from mx_report_templates_ui import HARNESS_UA, current_version, open_tab, open_template  # noqa: E402
+# MX_HARNESS_OUT: write results / screenshots elsewhere (a re-check) instead of over the release evidence.
+OUT = Path(os.environ.get("MX_HARNESS_OUT") or HERE.parent)
 APP, API = "http://127.0.0.1:4173", "http://127.0.0.1:8000"
 PASSWORD = "BrowserCheck!2026"
 SA_A, NL = "sa-a@mxfm.example.com", "admin@nlfm.example.com"
@@ -21,7 +31,7 @@ results, errors, responses, _tokens = [], [], [], {}
 def token(email):
     if email not in _tokens:
         req = urllib.request.Request(f"{API}/api/auth/login", method="POST",
-                                     headers={"Content-Type": "application/json"},
+                                     headers={"Content-Type": "application/json", "User-Agent": HARNESS_UA},
                                      data=json.dumps({"email": email, "password": PASSWORD}).encode())
         _tokens[email] = json.load(urllib.request.urlopen(req))
     return _tokens[email]
@@ -34,7 +44,7 @@ def check(name, ok, detail=""):
 
 def new_page(browser, who):
     tok = token(who)
-    ctx = browser.new_context(viewport={"width": 1440, "height": 1000})
+    ctx = browser.new_context(viewport={"width": 1440, "height": 1000}, user_agent=HARNESS_UA)
     ctx.add_init_script(
         f"localStorage.setItem('zoiko_payroll_access', {json.dumps(tok['access_token'])});"
         f"localStorage.setItem('zoiko_payroll_refresh', {json.dumps(tok['refresh_token'])});"
@@ -59,16 +69,29 @@ def tid(page, name):
     return page.locator(f'[data-testid="{name}"]')
 
 
+def detail_tabs(page):
+    return [t.strip() for t in page.locator("div.border-b.border-border.overflow-x-auto > button").all_inner_texts()]
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch(channel="chrome", headless=True)
     a = new_page(browser, SA_A)
     a.goto(APP + "/super-admin/report-templates/mexico", wait_until="load")
     settle(a, 2500)
+    check("t-0 nothing is stacked under the page before a template is selected",
+          tid(a, "mx-template-versions").count() == 0 and tid(a, "mx-template-library").count() == 0, "")
+    open_template(a, "MX-PAYROLL-REGISTER", "1.0")
+    tabs = detail_tabs(a)
+    check("t-5 Mexico shows one versions tab ('Versions & gates'; built-in 'Versions' hidden)",
+          "Versions & gates" in tabs and "Versions" not in tabs and "Preview" in tabs, str(tabs))
+    open_tab(a, "Versions & gates")
     panel = tid(a, "mx-template-versions")
     reg = tid(a, "mx-template-versions-MX-PAYROLL-REGISTER")
     text = reg.inner_text() if reg.count() else ""
-    check("t-1 every Mexico template is listed with its versions and the platform gate answer",
-          panel.count() == 1 and "v1.0" in text and "not SIGNED" in text and "payslip field proof" in text, text[:300])
+    others = [k for k in ("MX-EMPLOYER-COST", "MX-JOURNAL", "MX-ANNUAL-ISR-ADJ") if k in panel.inner_text()]
+    check("t-1 the selected template's versions are listed with the platform gate answer (and no other template)",
+          panel.count() == 1 and "v1.0" in text and "not SIGNED" in text and "payslip field proof" in text and not others,
+          f"{text[:300]} others={others}")
     reg.screenshot(path=str(OUT / "t_01_template_versions.jpg"), type="jpeg", quality=60)
     reg.get_by_role("button", name="New version").first.click()
     reg.get_by_label("Template new version number").fill("1.1")
@@ -82,6 +105,8 @@ with sync_playwright() as p:
                                                                    type="jpeg", quality=60)
     a.reload(wait_until="load")
     settle(a, 2500)
+    open_template(a, "MX-PAYROLL-REGISTER", "1.1")
+    open_tab(a, "Versions & gates")
     cmp = tid(a, "mx-template-compare")
     opts = cmp.get_by_label("Compare from").locator("option").all_inner_texts()
     v10 = next(o for o in opts if o.startswith("MX-PAYROLL-REGISTER v1.0"))
@@ -92,8 +117,13 @@ with sync_playwright() as p:
     settle(a)
     diff = tid(a, "mx-template-diff").inner_text()
     check("t-3 compare shows the copy has the same fields (only its version metadata differs)",
-          "Added 0" in diff and "removed 0" in diff and "changed 0" in diff, diff[:300])
+          "Added 0" in diff and "removed 0" in diff and "changed 0" in diff
+          and all(o.startswith("MX-PAYROLL-REGISTER v") for o in opts if not o.startswith("—")), f"{diff[:300]} {opts}")
     cmp.screenshot(path=str(OUT / "t_03_template_compare.jpg"), type="jpeg", quality=60)
+    tid(a, "mx-template-versions-MX-PAYROLL-REGISTER").get_by_role("button", name="Open v1.0", exact=True).click()
+    settle(a)
+    check("t-6 'Open' on an older version opens its detail (replaces the hidden built-in Versions tab)",
+          current_version(a) == "1.0", str(current_version(a)))
     browser.close()
 
 req = urllib.request.Request(f"{API}/api/super-admin/compliance/mexico/report-templates/versions",

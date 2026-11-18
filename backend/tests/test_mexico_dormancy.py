@@ -92,6 +92,12 @@ ORG_ROUTES = [  # every route on mexico_org_router, one call each (ids need not 
     ("GET", "/parallel/imports"), ("POST", "/parallel/imports"), ("GET", "/parallel/imports/1"),
     ("POST", "/parallel/imports/1/withdraw"), ("POST", "/parallel/differences/1/explain"),
     ("POST", "/parallel/differences/1/accept"),
+    # Recibo de nómina v2.0 — payslip view, duplicate, pay history
+    ("GET", "/payslips/1/recibo"), ("GET", "/payslips/1/recibo/duplicate"),
+    ("GET", "/employees/1/pay-history?start=2026-01-01&end=2026-12-31"),
+    # CFDI lifecycle L2-L4 — envelope, stamped XML, publish, delivery, access log, lifecycle
+    ("GET", "/cfdi/documents/1/envelope"), ("GET", "/cfdi/documents/1/xml"), ("POST", "/cfdi/documents/1/publish"),
+    ("POST", "/cfdi/documents/1/delivery"), ("GET", "/cfdi/documents/1/access-log"), ("GET", "/payslips/1/lifecycle"),
 ]
 
 
@@ -288,11 +294,14 @@ def test_an_org_already_mexican_keeps_its_jurisdiction(db):
 
 # ── sign-up and employees keep refusing Mexico (pinned) ───────────────────
 
-def test_signup_paths_refuse_mexico(db):
+def test_signup_paths_refuse_mexico_while_dormant(db):
+    """Mexico is listed at registration (owner decision 2026-11-11), but a
+    sign-up is still refused while it is dormant (no Active pack, kill switch
+    off, registry not AVAILABLE) — listing a country never opens it."""
     from app.core.jurisdiction import REGISTRATION_COUNTRIES
     from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
 
-    assert "Mexico" not in REGISTRATION_COUNTRIES and "MX" not in REGISTRATION_COUNTRIES
+    assert "Mexico" in REGISTRATION_COUNTRIES and "MX" not in REGISTRATION_COUNTRIES
     assert get_jurisdiction_onboarding_block_reason(db, "Mexico") is not None
 
 

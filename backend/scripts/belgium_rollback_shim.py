@@ -1,4 +1,9 @@
-"""Belgium (ZP-BE-ENG-001) Block I1: the schema shim for a code-only rollback.
+"""HISTORICAL / SUPERSEDED (owner decision 2026-11-16): a code-only revert can no longer be deployed because
+Malaysia's migrations (merge revision cf348b09db2b) are built on top of the Belgian ones, so the Belgian schema is
+permanent; the rollback is now dormancy + fix-forward, proven by tests/test_belgium_dormancy_proof.py. Kept for the
+record only — see docs/belgium/DEPLOY_NOTES.md section 4.3.
+
+Belgium (ZP-BE-ENG-001) Block I1: the schema shim for a code-only rollback.
 
 `git revert -m 1 <Belgium merge>` alone cannot be deployed while the database keeps the Belgian schema: the
 reverted tree no longer knows alembic revision 8a1f5ef9fa5d (`alembic upgrade head` fails), and

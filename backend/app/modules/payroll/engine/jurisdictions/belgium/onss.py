@@ -23,7 +23,8 @@ from decimal import Decimal
 
 from app.modules.payroll.engine.countries import belgium_content as content
 from app.modules.payroll.engine.jurisdictions.belgium import errors as E
-from app.modules.payroll.engine.jurisdictions.belgium.pack import ZERO, BePack, dec, field
+from app.modules.payroll.engine.jurisdictions.belgium import onss_table
+from app.modules.payroll.engine.jurisdictions.belgium.pack import ZERO, BePack, dec, field, upper
 
 _PERCENT = Decimal("100")              # rate_pct values are percentages (structural unit)
 # G-27: reductions the release does not calculate. The key's signed marker says
@@ -53,7 +54,18 @@ def _share(amount: Decimal, pct: Decimal) -> Decimal:
     return amount * pct / _PERCENT
 
 
-def compute(pack: BePack, bases: dict, decision: dict, pension_premium) -> dict:
+def _on_rate_table(pack: BePack) -> bool:
+    """Block M-ECWC: True when the employer base and the funds are signed RATE_TABLE (the ONSS rate table), False
+    when both are SLAB_ROWS (the EC x WC band rows). A mix blocks."""
+    base = upper(field(pack.row("be_onss_employer_base_rate"), "text_value"))
+    funds = upper(field(pack.row("be_onss_fund_contributions"), "text_value"))
+    if (base == content.RATE_TABLE) != (funds == content.RATE_TABLE):
+        pack.block(E.ONSS_RATE_MARKERS_MIXED, "be_onss_employer_base_rate",
+                   "be_onss_employer_base_rate and be_onss_fund_contributions must both read the rate table")
+    return base == content.RATE_TABLE
+
+
+def compute(pack: BePack, bases: dict, decision: dict, pension_premium, rate_table=None, employer_facts=None) -> dict:
     rnd = pack.rounder("be_rounding_onss")
     worker, employer = decision["worker"], decision["employer"]
     manual = worker["onssManualBase"] is True
@@ -80,19 +92,26 @@ def compute(pack: BePack, bases: dict, decision: dict, pension_premium) -> dict:
     ec, wc = employer["employerCategory"], worker["workerCode"]
     raw_employer_base = bases["ONSS_MANUAL_108"] if manual else bases["ONSS_EMPLOYER"]
     employer_base = rnd(raw_employer_base * factor) if manual else raw_employer_base
-    base_rows = pack.band("be_onss_employer_base_rate", EC=ec, WC=wc)
-    base_row = pack.band_for("be_onss_employer_base_rate", base_rows, employer_base)
-    lines = {"BASE": rnd(pack.band_value("be_onss_employer_base_rate", base_row, employer_base))}
-    lines["WAGE_MODERATION"] = rnd(_share(employer_base, pack.pct("be_onss_wage_moderation", "employer")))
     special_rule = employer.get("special160Status")          # G-25: recorded per employer, four-eyes
-    lines["SPECIAL_160"] = (rnd(_share(employer_base, pack.pct("be_onss_special_160", "employer")))
-                            if special_rule == "APPLIES" else ZERO)
+    table_result = None
+    if _on_rate_table(pack):
+        # M-ECWC: base, wage moderation and every combined contribution (incl. the 1.60 % and its moderation)
+        # come from the signed rows of the attested quarterly ONSS rate file, typed by the signed type rules.
+        table_result = onss_table.be_onss_table_compute(pack, rate_table, decision, employer_facts, employer_base, rnd)
+        lines, funds = table_result["lines"], table_result["funds"]
+    else:
+        base_rows = pack.band("be_onss_employer_base_rate", EC=ec, WC=wc)
+        base_row = pack.band_for("be_onss_employer_base_rate", base_rows, employer_base)
+        lines = {"BASE": rnd(pack.band_value("be_onss_employer_base_rate", base_row, employer_base))}
+        lines["WAGE_MODERATION"] = rnd(_share(employer_base, pack.pct("be_onss_wage_moderation", "employer")))
+        lines["SPECIAL_160"] = (rnd(_share(employer_base, pack.pct("be_onss_special_160", "employer")))
+                                if special_rule == "APPLIES" else ZERO)
+        funds = {}
+        for row in pack.band("be_onss_fund_contributions", EC=ec, WC=wc):
+            name = str(field(row, "tax_formula") or "FUND").strip().upper()
+            funds[name] = funds.get(name, ZERO) + rnd(pack.band_value("be_onss_fund_contributions", row,
+                                                                      employer_base))
     reductions = _reductions(pack)
-    funds = {}
-    for row in pack.band("be_onss_fund_contributions", EC=ec, WC=wc):
-        name = str(field(row, "tax_formula") or "FUND").strip().upper()
-        funds[name] = funds.get(name, ZERO) + rnd(pack.band_value("be_onss_fund_contributions", row,
-                                                                  employer_base))
     premium = dec(pension_premium)
     pension = (rnd(_share(premium, pack.pct("be_onss_pension_special", "employer"))) if premium > ZERO else ZERO)
     employer_esi = sum(lines.values(), ZERO) + sum(funds.values(), ZERO)
@@ -115,6 +134,10 @@ def compute(pack: BePack, bases: dict, decision: dict, pension_premium) -> dict:
              "pensionSpecial": str(pension), "special160Rule": special_rule,
              "reductions": reductions,
              "obligationDeltas": {k: str(v) for k, v in obligations.items()}}
+    if table_result is not None:
+        trace["rateTable"] = {"quarter": table_result["quarter"], "fileId": table_result["fileId"],
+                              "rateRowIds": table_result["used"], "contributionTypes": table_result["types"],
+                              "facts": table_result["facts"]}
     return {"employeeBase": employee_base, "employeeContribution": contribution, "socialWorkBonus": bonus,
             "employeeNet": employee_net, "employerBase": employer_base, "employerLines": lines, "funds": funds,
             "pensionSpecial": pension, "employerEsi": employer_esi, "obligationDeltas": obligations,

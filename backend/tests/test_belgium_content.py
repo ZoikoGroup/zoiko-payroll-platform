@@ -196,6 +196,20 @@ _STRUCTURAL_NUMBERS = {
         2025: "DEMO employees' illustrative hire year", 2026: "DEMO month year", 9: "DEMO month (September)",
         30: "DEMO month end day",
     },
+    "belgium_governance.py": {
+        0: "first tuple element / first sheet row", 1: "tuple index / header row", 2: "sheet column (proposal)",
+        3: "sheet column (sources) / register cell (state text) / minimum register cells",
+        4: "repository root (parents index)", 300: "reference / question / reason column width",
+        500: "note column width", 4000: "proposal / sources / decided value text width",
+    },
+    "belgium_reports.py": {
+        0: "zero / first tuple element / table origin", 1: "first day / tuple index / last cell (-1)",
+        2: "template tuple index (document version)", 3: "template tuple index (components) / spacing (mm)",
+        5: "field tuple index (required flag)", 12: "December (calendar year end)", 31: "31 December (year end)",
+        50: "label column (mm)", 100: "source_column width (VARCHAR(100), migration a4c7e1f9b3d8)",
+        120: "value column width (mm)", 8: "table font size (pt)",
+        0.5: "table grid line width (pt)",
+    },
     "belgium_payslip_pdf.py": {
         0: "table origin cell", 1: "last table cell (-1) / spacer width", 4: "section spacing (mm)",
         9: "table font size (pt)", 0.5: "table grid line width (pt)", 45: "label column width (mm)",
@@ -206,6 +220,14 @@ _STRUCTURAL_NUMBERS = {
                                50: "source form-number width", 200: "source agency width", 300: "source title width"},
     "belgium_payment_service.py": {0: "list index / zero amount", 1: "batch sequence (+1)",
                                    100: "idempotency key / column width 100", 200: "return reason column width"},
+    "belgium_activation_readiness.py": {1: "inclusive last year of the pack window (range end + 1)"},
+    "belgium_onss_rates.py": {
+        0: "first file / zero id fallback", 1: "at most one file per pay date (slice [:1]) / first day / quarter 1",
+        2: "calendar quarter 2", 3: "months per quarter (calendar) / quarter 3",
+        4: "YYYY width of the <Quarter> header / quarter 4",
+        10: "ISO date string slice [:10]", 20: "malformed-number excerpt in a refusal",
+        300: "reason / note column width (String(300))",
+    },
     "be_identifiers.py": {
         1: "regex group index; key versions start at 1", 2: "two hex characters per key byte",
         4: "base64 padding block", 12: "AES-GCM nonce length in bytes", 32: "AES-256 key length in bytes",
@@ -213,6 +235,10 @@ _STRUCTURAL_NUMBERS = {
 }
 # Strings that look numeric but are not statutory values.
 _STRUCTURAL_STRINGS = {
+    ("belgium_observability.py", r"^BE_[A-Z0-9_]{2,60}(:[a-z0-9_.\-]{1,60})?$"):
+        "log event code shape (code + optional content key), not a value",
+    ("belgium_observability.py", "^[A-Z0-9_]{2,20}$"): "log event form-code shape, not a value",
+    ("belgium_observability.py", "^[A-Z_]{2,30}$"): "log event state shape, not a value",
     ("belgium_payslip_pdf.py", "0.00"): "a zero amount line is not printed (payslip layout, not a value)",
     ("engine/jurisdictions/belgium/pack.py", "0.01"): "EUR cent unit (the signed rounding rule picks it)",
     ("engine/countries/belgium_content.py", "^[A-Z0-9]{1,10}$"):

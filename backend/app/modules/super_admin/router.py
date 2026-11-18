@@ -1590,6 +1590,7 @@ def list_report_templates(
     reportType: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    includeStates: bool = Query(False, description="With a country and no state, also return its state-level templates"),
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
@@ -1597,7 +1598,7 @@ def list_report_templates(
 
     return payroll_service.list_report_templates(
         db, country=country, state=state, reporting_year=reportingYear, report_type=reportType,
-        status=status, search=search,
+        status=status, search=search, include_states=includeStates,
     )
 
 
@@ -5032,6 +5033,16 @@ def belgium_configuration(pack_row_id: int, current_user=Depends(get_current_sup
     return be_super_admin.configuration(db, pack_row_id)
 
 
+@router.get("/compliance/belgium/packs/{pack_row_id}/activation-readiness",
+            summary="Belgium pack activation readiness: every blocking row / condition, why, and who clears it "
+                    "(read-only)")
+def belgium_activation_readiness_report(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                                       db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_activation_readiness
+
+    return belgium_activation_readiness.be_activation_readiness(db, pack_row_id)
+
+
 @router.get("/compliance/belgium/packs/{pack_row_id}/signing-status",
             summary="What still blocks activation of a Belgium pack (pending, empty, unsourced, editors)")
 def belgium_signing_status(pack_row_id: int, current_user=Depends(get_current_super_admin),
@@ -5050,6 +5061,196 @@ def belgium_configuration_update_row(kind: str, row_id: int, payload: dict = Bod
     result = be_super_admin.update_row(db, kind, row_id, payload, current_user.id)
     db.commit()
     return result
+
+
+@router.post("/compliance/belgium/report-templates/seed",
+             summary="Create the Draft Belgian employee-document templates for a year (activation stays gated)")
+def belgium_seed_report_templates(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                                  db: Session = Depends(get_db)):
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll import belgium_reports
+
+    year = str((payload or {}).get("year") or "").strip()
+    if not year.isdigit():
+        raise BadRequestException("year is required (YYYY).")
+    rows = belgium_reports.be_seed_report_templates(db, year, current_user.id)
+    db.commit()
+    return {"templates": [{"id": r.id, "key": r.template_key, "type": r.report_type, "status": r.status}
+                          for r in rows]}
+
+
+# ── Block K2: release-gate evidence (four-eyes; never marks a gate met by itself) ──
+@router.get("/compliance/belgium/gate-evidence", summary="Belgium gate evidence per gate (required tags + history)")
+def belgium_gate_evidence_list(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    return belgium_governance.be_list_gate_evidence(db)
+
+
+@router.post("/compliance/belgium/gate-evidence", summary="Record evidence for a Belgian release gate (PENDING)")
+def belgium_gate_evidence_record(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                                 db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    row = belgium_governance.be_record_gate_evidence(db, payload, current_user.id)
+    db.commit()
+    return belgium_governance.be_gate_evidence_view(row)
+
+
+@router.post("/compliance/belgium/gate-evidence/{evidence_id}/decide",
+             summary="Accept or reject gate evidence (a Super Admin other than the recorder)")
+def belgium_gate_evidence_decide(evidence_id: int, payload: dict = Body(...),
+                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    row = belgium_governance.be_decide_gate_evidence(db, evidence_id, (payload or {}).get("outcome"),
+                                                     (payload or {}).get("reason"), current_user.id)
+    db.commit()
+    return belgium_governance.be_gate_evidence_view(row)
+
+
+# ── Block K3: owner / specialist decision records (proposer != decider; superseded, never overwritten) ──
+@router.get("/compliance/belgium/decision-records", summary="Belgium decision records per gap (current + history)")
+def belgium_decision_records(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    return belgium_governance.be_list_decisions(db)
+
+
+@router.post("/compliance/belgium/decision-records", summary="Propose a decision for a Belgian gap (PROPOSED)")
+def belgium_decision_propose(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                             db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    row = belgium_governance.be_propose_decision(db, payload, current_user.id)
+    db.commit()
+    return belgium_governance.be_decision_view(db, row)
+
+
+@router.post("/compliance/belgium/decision-records/import-proposals",
+             summary="Create PROPOSED records from the drafted decision proposals (nothing is decided)")
+def belgium_decision_import(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    rows = belgium_governance.be_import_decision_proposals(db, current_user.id)
+    db.commit()
+    return {"created": [r.gap_key for r in rows]}
+
+
+@router.post("/compliance/belgium/decision-records/{decision_id}/decide",
+             summary="Decide a proposal (a Super Admin other than the proposer; supersedes the previous decision)")
+def belgium_decision_decide(decision_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_governance
+
+    row = belgium_governance.be_decide(db, decision_id, payload, current_user.id)
+    db.commit()
+    return belgium_governance.be_decision_view(db, row)
+
+
+# ── Block M-ECWC: the ONSS rate table (file attested + rows signed, each four-eyes) ──────────────────────────
+@router.get("/compliance/belgium/packs/{pack_row_id}/onss-rate-files", summary="Belgium ONSS rate files of a pack")
+def belgium_onss_rate_files_list(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                                 db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    return belgium_onss_rates.be_onss_list_rate_files(db, pack_row_id)
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/onss-rate-files",
+             summary="Register an archived quarterly ONSS rate file (every record loaded as REFERENCE)")
+def belgium_onss_rate_file_register(pack_row_id: int, payload: dict = Body(...),
+                                    current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    row = belgium_onss_rates.be_onss_register_rate_file(db, pack_row_id, payload, current_user.id)
+    db.commit()
+    return belgium_onss_rates.be_onss_rate_file_view(row)
+
+
+@router.post("/compliance/belgium/onss-rate-files/{file_id}/attest",
+             summary="Attest the archived file is the genuine ONSS publication (not the registrar)")
+def belgium_onss_rate_file_attest(file_id: int, payload: dict = Body(...),
+                                  current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    row = belgium_onss_rates.be_onss_attest_rate_file(db, file_id, (payload or {}).get("reason"), current_user.id)
+    db.commit()
+    return belgium_onss_rates.be_onss_rate_file_view(row)
+
+
+@router.post("/compliance/belgium/onss-rate-files/{file_id}/mark-live",
+             summary="Make the supported subset of a rate file signable (PENDING)")
+def belgium_onss_rate_file_mark_live(file_id: int, payload: dict = Body(...),
+                                     current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    out = belgium_onss_rates.be_onss_mark_live(db, file_id, payload, current_user.id)
+    db.commit()
+    return out
+
+
+@router.get("/compliance/belgium/onss-rate-files/{file_id}/live-rows",
+            summary="The rows and combinations of a rate file in active use (PENDING / SIGNED)")
+def belgium_onss_rate_file_live_rows(file_id: int, current_user=Depends(get_current_super_admin),
+                                     db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    return belgium_onss_rates.be_onss_live_rows(db, file_id)
+
+
+@router.post("/compliance/belgium/onss-rates/{rate_id}/sign",
+             summary="Sign one live ONSS rate row (not the registrar, not who made it live)")
+def belgium_onss_rate_sign(rate_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                           db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    row = belgium_onss_rates.be_onss_sign_rate(db, rate_id, (payload or {}).get("reason"), current_user.id)
+    db.commit()
+    return {"id": row.id, "status": row.status}
+
+
+@router.post("/compliance/belgium/onss-combinations/{combination_id}/sign",
+             summary="Sign one live ONSS code combination (not the registrar, not who made it live)")
+def belgium_onss_combination_sign(combination_id: int, payload: dict = Body(...),
+                                  current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    row = belgium_onss_rates.be_onss_sign_combination(db, combination_id, (payload or {}).get("reason"),
+                                                      current_user.id)
+    db.commit()
+    return {"id": row.id, "status": row.status}
+
+
+@router.get("/compliance/belgium/packs/{pack_row_id}/onss-type-rules",
+            summary="Belgium ONSS ContributionType rules of a pack")
+def belgium_onss_type_rules_list(pack_row_id: int, current_user=Depends(get_current_super_admin),
+                                 db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    return belgium_onss_rates.be_onss_list_type_rules(db, pack_row_id)
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/onss-type-rules",
+             summary="Add an ONSS ContributionType rule (PENDING until another Super Admin signs it)")
+def belgium_onss_type_rule_add(pack_row_id: int, payload: dict = Body(...),
+                               current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    rule = belgium_onss_rates.be_onss_add_type_rule(db, pack_row_id, payload, current_user.id)
+    db.commit()
+    return {"id": rule.id, "status": rule.status}
+
+
+@router.post("/compliance/belgium/onss-type-rules/{rule_id}/sign",
+             summary="Sign an ONSS ContributionType rule (not its author)")
+def belgium_onss_type_rule_sign(rule_id: int, payload: dict = Body(...),
+                                current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_onss_rates
+
+    rule = belgium_onss_rates.be_onss_sign_type_rule(db, rule_id, (payload or {}).get("reason"), current_user.id)
+    db.commit()
+    return {"id": rule.id, "status": rule.status}
 
 
 @router.post("/compliance/belgium/seed-draft",

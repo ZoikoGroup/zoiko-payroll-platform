@@ -1,7 +1,8 @@
 import {
-  BadgeCheck, Building2, CalendarDays, Clock, FileCheck2, Gauge, HeartPulse, Landmark, ListChecks,
+  BadgeCheck, Building2, CalendarDays, ClipboardList, Clock, FileCheck2, Gauge, HeartPulse, Landmark, ListChecks,
   Palmtree, Scale, Settings2, Users,
 } from "lucide-react";
+import BEActivationReadinessTab from "../../components/jurisdiction/belgium/BEActivationReadinessTab";
 import BEPackRowsTab from "../../components/jurisdiction/belgium/BEPackRowsTab";
 import BEEarningClassTab from "../../components/jurisdiction/belgium/BEEarningClassTab";
 import BEJointCommitteesTab from "../../components/jurisdiction/belgium/BEJointCommitteesTab";
@@ -52,7 +53,9 @@ export function belgiumExtraTabs() {
     tab("be-earning", "Earning classification", ListChecks, "be-public-holidays", ({ pack }) => <BEEarningClassTab pack={pack} />),
     tab("be-joint-committees", "Joint Committees", Scale, "be-earning", () => <BEJointCommitteesTab />),
     tab("be-signing", "Signing status", Gauge, "be-joint-committees", ({ pack }) => <BESigningStatusTab pack={pack} />),
-    tab("be-decisions", "Owner decisions", BadgeCheck, "be-signing", () => <BEOwnerDecisionsTab />),
+    tab("be-activation", "Activation readiness", ClipboardList, "be-signing",
+      ({ pack }) => <BEActivationReadinessTab pack={pack} />),
+    tab("be-decisions", "Owner decisions", BadgeCheck, "be-activation", () => <BEOwnerDecisionsTab />),
     tab("be-sources", "Sources", FileCheck2, "be-decisions", ({ pack }) => <BESourcesTab pack={pack} />),
   ];
 }

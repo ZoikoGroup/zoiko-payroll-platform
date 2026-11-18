@@ -75,6 +75,10 @@ REGISTRATION_COUNTRIES = [
     "Saudi Arabia",
     "Singapore",
     "Switzerland",
+    # Mexico — owner decision 2026-11-11, same gate bypass as above: packs
+    # Active and the registry AVAILABLE on the configured database. Onboarding
+    # still also needs MX_TENANT_ONBOARDING_ENABLED (mexico_dormancy).
+    "Mexico",
     # United Arab Emirates (ZP-AE-ENG-001, docs/uae). Registration opens only
     # once an Active AE canonical pack with rates exists (same as Jamaica).
     "United Arab Emirates",

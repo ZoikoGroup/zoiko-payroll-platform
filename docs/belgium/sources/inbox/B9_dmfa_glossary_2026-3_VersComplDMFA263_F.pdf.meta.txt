@@ -1,0 +1,6 @@
+list-id: B9
+official: yes
+retrieved: 2026-11-16
+url: https://www.socialsecurity.be/portail/glossaires/dmfa.nsf/ConsultFrImprPDF/373470249E00C0ADC1258E13002A91B8/$FILE/VersComplDMFA263_F.pdf
+http-status: 200
+note: ONSS DmfA glossary, complete version 2026/3 (official, linked from TechLib > glossaires DmfA > ImprPDF). Zone 00083 "type de cotisation" p.38; Annex 3 (allowed ContributionType values per contribution worker code) from p.292. Saved unchanged.

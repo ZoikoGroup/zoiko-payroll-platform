@@ -1182,6 +1182,9 @@ export const getBeSummary = () => apiFetch("/api/super-admin/compliance/jurisdic
 export const listBePacks = () => apiFetch(`${BE_SA}/packs`);
 export const getBeConfiguration = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/configuration`);
 export const getBeSigningStatus = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/signing-status`);
+// Read-only: every row / condition blocking activation, why, and who clears it.
+export const getBeActivationReadiness = (packRowId) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/activation-readiness`);
 export const updateBeRow = (kind, rowId, payload) =>
   apiFetch(`${BE_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
 export const getBeDecisions = () => apiFetch(`${BE_SA}/decisions`);
@@ -1199,6 +1202,18 @@ export const getBeGoldenCheck = (packRowId) => apiFetch(`${BE_SA}/packs/${packRo
 export const runBeGoldenCertification = (packRowId) =>
   apiFetch(`${BE_SA}/packs/${packRowId}/golden-certification`, { method: "POST", body: {} });
 export const getBeReadiness = () => apiFetch(`${BE_SA}/readiness`);
+// Block K2: release-gate evidence (recorded by one Super Admin, accepted / rejected by another).
+export const listBeGateEvidence = () => apiFetch(`${BE_SA}/gate-evidence`);
+export const recordBeGateEvidence = (payload) => apiFetch(`${BE_SA}/gate-evidence`, { method: "POST", body: payload });
+export const decideBeGateEvidence = (evidenceId, outcome, reason) =>
+  apiFetch(`${BE_SA}/gate-evidence/${evidenceId}/decide`, { method: "POST", body: { outcome, reason } });
+// Block K3: decision records (proposer != decider; a later decision supersedes).
+export const listBeDecisionRecords = () => apiFetch(`${BE_SA}/decision-records`);
+export const proposeBeDecision = (payload) => apiFetch(`${BE_SA}/decision-records`, { method: "POST", body: payload });
+export const importBeDecisionProposals = () =>
+  apiFetch(`${BE_SA}/decision-records/import-proposals`, { method: "POST", body: {} });
+export const decideBeDecision = (decisionId, decidedValue, reason) =>
+  apiFetch(`${BE_SA}/decision-records/${decisionId}/decide`, { method: "POST", body: { decidedValue, reason } });
 // Block D3: content intake workbook (XLSX) and bulk signing. The import is a
 // dry run unless dryRun is false; it never signs and only targets Draft packs.
 async function beFetchRaw(path, init = {}) {

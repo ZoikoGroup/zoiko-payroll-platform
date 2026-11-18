@@ -15,6 +15,17 @@ const OBLIGATION_LABELS = {
   HOLIDAY_FUND_ANNUAL_DEBIT: ["Holiday fund annual debit — holiday", "be.payslip.obligation.holiday_fund_annual"],
 };
 
+// Block L2: the payslip header, section titles and net-pay label with their content keys (nl / fr / de, D10) —
+// the same [English, key] shape as every line below; the backend PDF uses the same keys (belgium_payslip_pdf).
+export const BE_PAYSLIP_LABELS = {
+  header: ["Belgian payslip", "be.payslip.header"],
+  bases: ["Bases", "be.payslip.section.bases"],
+  employee: ["Employee", "be.payslip.section.employee"],
+  employer: ["Employer (not deducted)", "be.payslip.section.employer"],
+  obligations: ["Obligations (paid to funds)", "be.payslip.section.obligations"],
+  net: ["Net pay", "be.payslip.net"],
+};
+
 const nonZero = ([, , amount]) => amount !== undefined && amount !== null && Number(amount) !== 0;
 
 export function beEmployeeLines(snapshot) {
