@@ -38,7 +38,23 @@ const EDITABLE_STATUSES = ["Draft", "Review", "Approved"];
 // `embedded` (Singapore final closure): rendered inside another page (the
 // Singapore compliance Report Templates tab) — the page header / Back button
 // are left to the host; behaviour is otherwise identical.
-export default function ReportTemplateLayout({ country, countryName, initialState = "", onStateChange, embedded = false }) {
+//
+// Optional, generic extension points (a country page passes nothing and the
+// layout renders exactly as before):
+//   extraDetailTabs     [{ key, label, icon, render(detail, ctx) }] — tabs
+//                       appended after the built-in detail tabs.
+//   renderOverviewExtra (detail, ctx) => node — a block shown at the top of the
+//                       Overview tab for the selected template.
+//   pageTools           [{ key, label, icon, render(ctx) }] — page-level views
+//                       behind a toolbar toggle, collapsed by default.
+// ctx = { reloadDetail, reloadTemplates, selectTemplate(id) }. Extensions are
+// presentation only: every lifecycle rule stays server-side.
+const NO_EXTRAS = [];
+
+export default function ReportTemplateLayout({
+  country, countryName, initialState = "", onStateChange, embedded = false,
+  extraDetailTabs = NO_EXTRAS, renderOverviewExtra = null, pageTools = NO_EXTRAS,
+}) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
   const [state, setStateRaw] = useState(initialState || "");
@@ -56,6 +72,9 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
 
   const [showNewTemplate, setShowNewTemplate] = useState(false);
   const [deletingTemplate, setDeletingTemplate] = useState(null);
+  const [openTool, setOpenTool] = useState(null);
+
+  const tabs = useMemo(() => [...TABS, ...extraDetailTabs], [extraDetailTabs]);
 
   function setState(next) {
     setStateRaw(next);
@@ -126,6 +145,9 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
   }
 
   const editable = Boolean(detail && EDITABLE_STATUSES.includes(detail.status));
+  const ctx = { reloadDetail: loadDetail, reloadTemplates: loadTemplates, selectTemplate: setSelectedId };
+  const activeTool = pageTools.find((t) => t.key === openTool);
+  const activeExtraTab = extraDetailTabs.find((t) => t.key === tab);
 
   return (
     <div>
@@ -157,13 +179,39 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
             </button>
           </span>
         )}
-        <button
-          onClick={() => setShowNewTemplate(true)}
-          className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-hover"
-        >
-          <Plus size={14} /> New Report
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {pageTools.map((t) => (
+            <button
+              key={t.key} type="button" aria-expanded={openTool === t.key} data-testid={`page-tool-${t.key}`}
+              onClick={() => setOpenTool(openTool === t.key ? null : t.key)}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold ${
+                openTool === t.key ? "border-primary bg-primary/10 text-primary" : "border-border text-foreground-secondary hover:bg-surface-muted"
+              }`}
+            >
+              {t.icon && <t.icon size={14} />} {t.label}
+            </button>
+          ))}
+          <button
+            onClick={() => setShowNewTemplate(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-hover"
+          >
+            <Plus size={14} /> New Report
+          </button>
+        </div>
       </div>
+
+      {activeTool && (
+        <div className="mb-5 rounded-xl border border-border bg-surface p-4" data-testid={`page-tool-panel-${activeTool.key}`}>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">{activeTool.label}</h3>
+            <button type="button" onClick={() => setOpenTool(null)} aria-label={`Close ${activeTool.label}`}
+                    className="rounded-full p-1 text-foreground-muted hover:bg-surface-muted hover:text-foreground">
+              <X size={14} />
+            </button>
+          </div>
+          {activeTool.render(ctx)}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
         <div className="rounded-xl border border-border bg-surface p-2">
@@ -235,17 +283,21 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
               </div>
 
               <div className="mb-4 flex items-center gap-1 border-b border-border overflow-x-auto">
-                {TABS.map((t) => (
+                {tabs.map((t) => (
                   <button
                     key={t.key} onClick={() => setTab(t.key)}
                     className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium ${
                       tab === t.key ? "border-primary text-primary" : "border-transparent text-foreground-muted hover:text-foreground"
                     }`}
                   >
-                    <t.icon size={13} /> {t.label}
+                    {t.icon && <t.icon size={13} />} {t.label}
                   </button>
                 ))}
               </div>
+
+              {tab === "overview" && renderOverviewExtra && (
+                <div className="mb-4">{renderOverviewExtra(detail, ctx)}</div>
+              )}
 
               {tab === "overview" && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -325,6 +377,8 @@ export default function ReportTemplateLayout({ country, countryName, initialStat
                   })}
                 </div>
               )}
+
+              {activeExtraTab && activeExtraTab.render(detail, ctx)}
             </>
           )}
         </div>
