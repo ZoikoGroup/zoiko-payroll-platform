@@ -75,6 +75,9 @@ REGISTRATION_COUNTRIES = [
     "Saudi Arabia",
     "Singapore",
     "Switzerland",
+    # United Arab Emirates (ZP-AE-ENG-001, docs/uae). Registration opens only
+    # once an Active AE canonical pack with rates exists (same as Jamaica).
+    "United Arab Emirates",
 ]
 
 # Keyed by the 2-letter code the rest of the payroll module uses
@@ -748,6 +751,19 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^[0-9][0-9 /-]{4,15}$", "example": "1234567-89", "primary": False},
         ],
     },
+    # United Arab Emirates (ZP-AE-ENG-001, docs/uae). Patterns are deliberately
+    # permissive: the spec gives no MoHRE / GPSSA number format. The examples
+    # only illustrate the input shape; they are not real numbers.
+    "AE": {
+        "label": "MOHRE establishment ID",
+        "currency": "AED",
+        "fields": [
+            {"key": "mohre_establishment_id", "label": "MOHRE establishment ID",
+             "pattern": r"^[A-Za-z0-9][A-Za-z0-9 /-]{2,19}$", "example": "1234567", "primary": True},
+            {"key": "gpssa_employer_number", "label": "GPSSA employer registration number",
+             "pattern": r"^[A-Za-z0-9][A-Za-z0-9 /-]{2,19}$", "example": "123456", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -841,6 +857,17 @@ COUNTRY_NAME_TO_CODE = {
     "royaume de belgique": "BE",
     "koninkrijk belgië": "BE",
     "bel": "BE",
+    # United Arab Emirates (docs/uae, Phase 1). Without these, "United Arab
+    # Emirates" truncates to "UN" in payroll.service._normalize_country. The bare
+    # "ae" is deliberately NOT an alias; "AE" resolves through
+    # JURISDICTION_TAX_SCHEMAS like every other code.
+    "united arab emirates": "AE",
+    "the united arab emirates": "AE",
+    "uae": "AE",
+    "u.a.e.": "AE",
+    "u.a.e": "AE",
+    "the uae": "AE",
+    "emirates": "AE",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -874,6 +901,7 @@ CODE_TO_COUNTRY_NAME = {
     "PL": "Poland",
     "MY": "Malaysia",
     "BE": "Belgium",
+    "AE": "United Arab Emirates",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

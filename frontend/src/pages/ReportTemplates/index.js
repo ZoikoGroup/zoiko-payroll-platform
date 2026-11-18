@@ -31,6 +31,7 @@ export { default as HKReportTemplatesPage } from "./HKReportTemplatesPage";
 export { default as SEReportTemplatesPage } from "./SEReportTemplatesPage";
 // Switzerland (ZP-CH-PAYROLL-001) — per-employee Lohnausweis + ELM envelopes.
 export { default as CHReportTemplatesPage } from "./CHReportTemplatesPage";
+export { default as AEReportTemplatesPage } from "./AEReportTemplatesPage";
 
 // Phase 2: UK and USA added. Phase 8: CA added (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY now has a real "CA" entry rather than
@@ -65,4 +66,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   NL: "netherlands",
   MX: "mexico",
   BR: "brazil",
+  AE: "united-arab-emirates",
 };

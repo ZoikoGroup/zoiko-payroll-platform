@@ -143,7 +143,8 @@ def test_revision_is_the_single_child_and_the_single_head():
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
     # Since the 2026-11-14 main -> venu merge this revision is no longer the head itself:
     # merge cf348b09db2b joins it with Malaysia's head (f793f6074257) and is the single head.
-    assert list(script.get_heads()) == ["cf348b09db2b"]
+    # + UAE P2 (ad01fc67ce44) is now the single head, on top of cf348b09db2b.
+    assert list(script.get_heads()) == ["ad01fc67ce44"]
     merge = script.get_revision("cf348b09db2b")
     assert set(merge.down_revision) == {REVISION, "f793f6074257"}
 

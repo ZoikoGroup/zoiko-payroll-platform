@@ -309,7 +309,7 @@ def test_alembic_heads_is_single_head():
     # Two chains grow from it: Belgium on main (1d76678ef1a1 -> 2943a0490b5b -> 8a1f5ef9fa5d,
     # PR #161) and Malaysia on venu (13574b996ccf -> 5f314f975ac3 -> efdc07f97eb5 -> f793f6074257).
     # cf348b09db2b (2026-11-14 main -> venu merge) joins both heads without editing either chain.
-    assert heads == ["cf348b09db2b"]
+    assert heads == ["ad01fc67ce44"]   # + UAE P2 (ad01fc67ce44) on top of cf348b09db2b
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -321,7 +321,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["cf348b09db2b"]
+    assert list(script.get_heads()) == ["ad01fc67ce44"]   # UAE P2 on top of cf348b09db2b
 
 
 def test_alembic_branchpoints_are_only_the_known_existing_ones():
@@ -378,7 +378,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 268   # 260 + Malaysia 13574b996ccf, 5f314f975ac3, efdc07f97eb5, f793f6074257
+    assert len(revs) == 269   # + UAE ad01fc67ce44; 260 + Malaysia 13574b996ccf, 5f314f975ac3, efdc07f97eb5, f793f6074257
                               # + Belgium 1d76678ef1a1, 2943a0490b5b, 8a1f5ef9fa5d + merge cf348b09db2b
 
 

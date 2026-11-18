@@ -31,9 +31,10 @@ export { default as SEStatutoryPage } from "./SEStatutoryPage";
 // for France; QST tariff files / scheme catalog / canton wage floors for
 // Switzerland), so StatutoryRates must NOT render a France or Switzerland
 // card pointing at a route that doesn't exist. Filtering keeps every shared
-// name identical and leaves only those two out.
+// name identical and leaves only those three out (AE has no separate Statutory
+// Rates page: every UAE statutory value is edited in its Compliance pack).
 import { COUNTRY_CODE_TO_ROUTE as COMPLIANCE_COUNTRY_CODE_TO_ROUTE } from "../JurisdictionCompliance";
 
 export const COUNTRY_CODE_TO_ROUTE = Object.fromEntries(
-  Object.entries(COMPLIANCE_COUNTRY_CODE_TO_ROUTE).filter(([code]) => !["FR", "CH"].includes(code)),
+  Object.entries(COMPLIANCE_COUNTRY_CODE_TO_ROUTE).filter(([code]) => !["FR", "CH", "AE"].includes(code)),
 );

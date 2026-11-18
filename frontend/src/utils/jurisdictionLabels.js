@@ -62,7 +62,9 @@ const INCOME_TAX_LABELS = {
 // has no monthly income-tax withholding: its statutory payroll liability is
 // GOSI (pension/SANED/occupational hazard), never a `tds` line
 // (ZP-SA-ENG-001 — the engine NEVER returns a `tds` key and tds stays 0.00).
-const NO_PAYROLL_INCOME_TAX = new Set(["HK", "SA"]);
+// United Arab Emirates (docs/uae): no income tax on employment income; the
+// statutory payroll lines are pension contributions and gratuity accrual.
+const NO_PAYROLL_INCOME_TAX = new Set(["HK", "SA", "AE"]);
 
 // South Africa (ZP-ZA-ENG-001) maps onto the generic fields exactly as
 // countries/south_africa.py returns them: PAYE -> tds, employee UIF -> esi,

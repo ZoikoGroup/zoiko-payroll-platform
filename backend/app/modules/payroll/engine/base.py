@@ -541,6 +541,10 @@ class PayrollContext:
     # IR21 trigger, LQS full-/part-time). None for callers that don't set them.
     date_of_joining: date = None
     date_of_leaving: date = None
+    # United Arab Emirates (ZP-AE-ENG-001): the employee's UAE routing facts
+    # (AEEmployeeValidation compliance_fields + work_state), set by
+    # resolver.build_context_from_employee for AE employees only. None elsewhere.
+    ae_facts: dict = None
     employment_type: str = None
 
     # Guyana PAYE statutory credit (GY-010) — this employee's remaining
@@ -1857,6 +1861,10 @@ class PayrollResult:
     # Belgium (ZP-BE-ENG-001): the whole BE dict once the engine exists
     # (Phase 5). None for every other country. No NISS/INSZ is ever placed here.
     be_result: dict = None
+    # United Arab Emirates (ZP-AE-ENG-001): the calculation breakdown
+    # countries/uae.py returns (JSON-safe), stored on
+    # payslip_items.ae_calculation_snapshot. None for every other country.
+    ae_result: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
     # The whole dict countries/brazil.py returns under 'br_result' key (spec,

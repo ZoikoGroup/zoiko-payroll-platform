@@ -2052,6 +2052,10 @@ class PayslipItem(Base):
     # withholding / holiday / sector bases, BE-007) + trace, replayed exactly as
     # computed; NULL for non-BE payslips (1d76678ef1a1). Never a NISS.
     be_calculation_snapshot = Column(JSON, nullable=True)
+    # United Arab Emirates (ZP-AE-ENG-001): the calculation breakdown (inputs,
+    # pension / gratuity / savings / overtime lines and the pack values used);
+    # NULL for non-AE payslips (ad01fc67ce44). Never an Emirates ID.
+    ae_calculation_snapshot = Column(JSON, nullable=True)
     # Payslip templates (f3a9c1d7e2b4): the organisation's published template
     # version this payslip is shown with, frozen when its run is approved so a
     # later template change never alters an issued payslip. NULL = the

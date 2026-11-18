@@ -148,6 +148,16 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "onss_employer_number", label: "ONSS/RSZ employer number", pattern: "^[0-9][0-9 /-]{4,15}$", example: "1234567-89", primary: false },
     ],
   },
+  // United Arab Emirates (ZP-AE-ENG-001) — mirrors backend
+  // core/jurisdiction.py JURISDICTION_TAX_SCHEMAS.AE exactly. Registration is
+  // ordinary: it opens once an Active AE canonical pack with rates exists.
+  AE: {
+    label: "MOHRE establishment ID",
+    fields: [
+      { key: "mohre_establishment_id", label: "MOHRE establishment ID", pattern: "^[A-Za-z0-9][A-Za-z0-9 /-]{2,19}$", example: "1234567", primary: true },
+      { key: "gpssa_employer_number", label: "GPSSA employer registration number", pattern: "^[A-Za-z0-9][A-Za-z0-9 /-]{2,19}$", example: "123456", primary: false },
+    ],
+  },
 };
 
 const COUNTRY_NAME_TO_CODE = {
@@ -193,6 +203,15 @@ const COUNTRY_NAME_TO_CODE = {
   "royaume de belgique": "BE",
   "koninkrijk belgië": "BE",
   bel: "BE",
+  // United Arab Emirates — never the bare "ae"; the code "AE" itself resolves
+  // through JURISDICTION_TAX_SCHEMAS above.
+  "united arab emirates": "AE",
+  "the united arab emirates": "AE",
+  uae: "AE",
+  "u.a.e.": "AE",
+  "u.a.e": "AE",
+  "the uae": "AE",
+  emirates: "AE",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -210,6 +229,7 @@ const CODE_TO_COUNTRY_NAME = {
   PL: "Poland",
   MY: "Malaysia",
   BE: "Belgium",
+  AE: "United Arab Emirates",
 };
 
 export function getJurisdictionCode(country) {

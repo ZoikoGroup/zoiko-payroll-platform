@@ -80,6 +80,10 @@ export const COUNTRIES = [
   // (Phase 4) and is never an employee field; worker category, Joint Committee
   // and every statutory fact live on the Belgian worker profile, never here.
   { code: "BE", name: "Belgium" },
+  // United Arab Emirates (docs/uae Phase 1) — mirrors employee_validation.py's
+  // AEEmployeeValidation: the UAE IBAN only. The Emirates ID, nationality
+  // category and pension fund arrive with the UAE employee record (Phase 5).
+  { code: "AE", name: "United Arab Emirates" },
 ];
 
 // ISO 13616 IBAN check digits (mirrors employee_validation.py's
@@ -571,6 +575,51 @@ export const COUNTRY_FIELD_SPECS = {
     // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.BE).
     { key: "iban", label: "IBAN", type: "text", placeholder: "BE + 14 digits", upper: true, strip: " ", pattern: /^BE\d{14}$/, check: ibanPassesMod97, error: "Belgian IBAN must be BE followed by 14 digits with a valid check digit." },
   ],
+  // United Arab Emirates — mirrors backend AEEmployeeValidation exactly.
+  // Statutory values live in the AE pack; these are the routing facts only.
+  AE: [
+    { key: "nationality_category", label: "Nationality category", type: "select", required: true, upper: true,
+      choices: ["EXPATRIATE", "UAE_NATIONAL", "GCC_NATIONAL"],
+      aliases: { expat: "EXPATRIATE", emirati: "UAE_NATIONAL", national: "UAE_NATIONAL", gcc: "GCC_NATIONAL" },
+      error: "Nationality category must be EXPATRIATE, UAE_NATIONAL or GCC_NATIONAL." },
+    { key: "gcc_country", label: "GCC home country", type: "select", upper: true, choices: ["SA", "KW", "OM", "BH", "QA"],
+      showWhen: (cf) => cf?.nationality_category === "GCC_NATIONAL",
+      error: "GCC home country must be SA, KW, OM, BH or QA." },
+    { key: "pension_scheme", label: "Pension scheme", type: "select", upper: true,
+      choices: ["GPSSA_LAW_7_1999", "GPSSA_LAW_57_2023", "ADPF_IN_SERVICE", "ADPF_NEW_MEMBER", "GCC_EXTENSION", "NONE"],
+      showWhen: (cf) => cf?.nationality_category === "UAE_NATIONAL" || cf?.nationality_category === "GCC_NATIONAL",
+      // No bare "gpssa" / "adpf" shorthand: the cohort is authority-driven and
+      // must be chosen explicitly (AE-017, AE-022), never guessed.
+      aliases: { "law 7": "GPSSA_LAW_7_1999", "law 57": "GPSSA_LAW_57_2023", none: "NONE", "n-a": "NONE" },
+      error: "Pension scheme must be a GPSSA, ADPF, GCC_EXTENSION or NONE value." },
+    { key: "pension_contribution_salary", label: "Pension contribution salary (AED)", type: "text",
+      placeholder: "15000.00", strip: ", ", pattern: /^\d{1,9}(\.\d{1,2})?$/,
+      showWhen: (cf) => Boolean(cf?.pension_scheme) && cf.pension_scheme !== "NONE",
+      error: "Pension contribution salary must be an amount in AED (up to 2 decimals)." },
+    { key: "government_support_eligible", label: "Government support eligible", type: "select", upper: true,
+      choices: ["YES", "NO"],
+      showWhen: (cf) => ["GPSSA_LAW_7_1999", "GPSSA_LAW_57_2023"].includes(cf?.pension_scheme),
+      error: "Government support eligible must be YES or NO." },
+    { key: "eos_regime", label: "End-of-service regime", type: "select", upper: true,
+      choices: ["TRADITIONAL", "SAVINGS_SCHEME"],
+      showWhen: (cf) => cf?.nationality_category === "EXPATRIATE",
+      aliases: { traditional: "TRADITIONAL", savings: "SAVINGS_SCHEME" },
+      error: "End-of-service regime must be TRADITIONAL or SAVINGS_SCHEME." },
+    { key: "savings_enrollment_date", label: "Savings scheme enrollment date", type: "date",
+      showWhen: (cf) => cf?.eos_regime === "SAVINGS_SCHEME",
+      error: "Savings enrollment date must be YYYY-MM-DD." },
+    { key: "savings_enrollment_basic_wage", label: "Basic Wage at enrollment (AED)", type: "text",
+      placeholder: "10000.00", strip: ", ", pattern: /^\d{1,9}(\.\d{1,2})?$/,
+      showWhen: (cf) => cf?.eos_regime === "SAVINGS_SCHEME",
+      error: "Basic Wage at enrollment must be an amount in AED (up to 2 decimals)." },
+    { key: "work_pattern", label: "Work pattern", type: "select", upper: true, choices: ["FULL_TIME", "PART_TIME"],
+      aliases: { full: "FULL_TIME", part: "PART_TIME" },
+      error: "Work pattern must be FULL_TIME or PART_TIME." },
+    { key: "emirates_id", label: "Emirates ID", type: "text", placeholder: "784199012345671", strip: "- ",
+      pattern: /^784\d{12}$/, error: "Emirates ID must be 15 digits starting with 784." },
+    // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.AE).
+    { key: "iban", label: "IBAN", type: "text", placeholder: "AE + 21 digits", upper: true, strip: " ", pattern: /^AE\d{21}$/, check: ibanPassesMod97, error: "UAE IBAN must be AE followed by 21 digits with a valid check digit." },
+  ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).
   HK: [
@@ -664,6 +713,44 @@ export function normalizeComplianceFields(countryCode, complianceFields) {
   return out;
 }
 
+export function validateComplianceCombinations(countryCode, complianceFields) {
+  if (countryCode !== "AE") return [];
+  const v = normalizeComplianceFields("AE", complianceFields);
+  const errors = [];
+  const nationality = v.nationality_category;
+  const scheme = v.pension_scheme;
+  const uaeSchemes = ["GPSSA_LAW_7_1999", "GPSSA_LAW_57_2023", "ADPF_IN_SERVICE", "ADPF_NEW_MEMBER"];
+  const gpssaSchemes = ["GPSSA_LAW_7_1999", "GPSSA_LAW_57_2023"];
+  if (nationality === "GCC_NATIONAL") {
+    if (!v.gcc_country) errors.push("gcc_country is required for a GCC national.");
+    if (scheme && scheme !== "GCC_EXTENSION") errors.push("A GCC national's pension_scheme is GCC_EXTENSION.");
+  } else if (v.gcc_country) {
+    errors.push("gcc_country applies only to GCC nationals.");
+  }
+  if (nationality === "UAE_NATIONAL" && !uaeSchemes.includes(scheme)) {
+    errors.push("A UAE national needs a GPSSA or ADPF pension_scheme.");
+  }
+  if (nationality === "EXPATRIATE" && scheme && scheme !== "NONE") {
+    errors.push("An expatriate has no pension_scheme (end-of-service benefit applies instead).");
+  }
+  if (scheme && scheme !== "NONE" && !v.pension_contribution_salary) {
+    errors.push("pension_contribution_salary is required when a pension scheme applies.");
+  }
+  if (v.government_support_eligible && !gpssaSchemes.includes(scheme)) {
+    errors.push("government_support_eligible applies only to GPSSA schemes.");
+  }
+  if (nationality === "EXPATRIATE" && !v.eos_regime) {
+    errors.push("eos_regime (TRADITIONAL or SAVINGS_SCHEME) is required for an expatriate.");
+  }
+  if (["UAE_NATIONAL", "GCC_NATIONAL"].includes(nationality) && v.eos_regime) {
+    errors.push("eos_regime applies only to expatriates (nationals are covered by their pension scheme).");
+  }
+  if (v.eos_regime === "SAVINGS_SCHEME" && !(v.savings_enrollment_date && v.savings_enrollment_basic_wage)) {
+    errors.push("savings_enrollment_date and savings_enrollment_basic_wage are required on the savings scheme.");
+  }
+  return errors;
+}
+
 export function validateComplianceFields(countryCode, complianceFields) {
   const countryName = COUNTRIES.find((c) => c.code === countryCode)?.name || countryCode;
   const errors = [];
@@ -687,5 +774,6 @@ export function validateComplianceFields(countryCode, complianceFields) {
       errors.push(`${spec.error} (got "${raw}")`);
     }
   }
+  errors.push(...validateComplianceCombinations(countryCode, complianceFields));
   return errors;
 }
