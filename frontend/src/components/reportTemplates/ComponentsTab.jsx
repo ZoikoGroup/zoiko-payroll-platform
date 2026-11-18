@@ -25,6 +25,9 @@ export default function ComponentsTab({ template, components, availableComponent
 
   const addedKeys = new Set(components.map((c) => c.componentKey));
   const addableOptions = availableComponents.filter((c) => !addedKeys.has(c.key));
+  // An empty catalog means the report type takes no components at all (e.g. a
+  // Mexico report built by a dedicated generator): nothing to add, so no picker.
+  const hasCatalog = availableComponents.length > 0;
 
   async function handleAddComponent() {
     const option = availableComponents.find((c) => c.key === addingKey);
@@ -68,7 +71,7 @@ export default function ComponentsTab({ template, components, availableComponent
 
   return (
     <div className="space-y-4">
-      {editable && (
+      {editable && hasCatalog && (
         <div className="flex items-center gap-2">
           <select className={inputClass + " w-auto min-w-[220px]"} value={addingKey} onChange={(e) => setAddingKey(e.target.value)}>
             <option value="">Add a component…</option>
@@ -84,7 +87,9 @@ export default function ComponentsTab({ template, components, availableComponent
       )}
 
       {components.length === 0 ? (
-        <p className="py-8 text-center text-xs text-foreground-disabled">No components configured yet.</p>
+        <p className="py-8 text-center text-xs text-foreground-disabled">
+          {hasCatalog ? "No components configured yet." : "This report type takes no components."}
+        </p>
       ) : (
         components.map((component) => (
           <div key={component.id} className="rounded-lg border border-border-light p-3">

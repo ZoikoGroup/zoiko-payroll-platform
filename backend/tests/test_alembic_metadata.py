@@ -309,8 +309,10 @@ def test_alembic_heads_is_single_head():
     # (b7e4c2a9d5f1, on merge cf348b09db2b) are joined by the final no-op merge e3f9a7c1b5d2.
     # a4c7e1f9b3d8 (2026-11-17) widens report-field source_column to VARCHAR(100) on e9c4b7a2d6f3.
     # c3e8a1d5f7b2 (2026-11-18) widens payroll_tax_slabs.tax_regime to VARCHAR(40) on a4c7e1f9b3d8 (Belgian seed).
-    # UAE (ZP-AE-ENG-001) ad01fc67ce44 adds payslip_items.ae_calculation_snapshot on c3e8a1d5f7b2.
-    assert heads == ["ad01fc67ce44"]   # UAE breakdown column on tax_slabs.tax_regime VARCHAR(40)
+    # d7a3f1c9e5b2 (2026-11-18) adds payroll_report_templates.content_editor_id on c3e8a1d5f7b2 (four-eyes).
+    # UAE (ZP-AE-ENG-001) ad01fc67ce44 adds payslip_items.ae_calculation_snapshot on c3e8a1d5f7b2 too;
+    # the no-op merge 2855a70a9ed6 joins the two and is the single head.
+    assert heads == ["2855a70a9ed6"]
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -322,7 +324,9 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["ad01fc67ce44"]   # UAE breakdown column on c3e8a1d5f7b2
+    assert list(script.get_heads()) == ["2855a70a9ed6"]   # merge: UAE column + report-template editor
+    assert set(script.get_revision("2855a70a9ed6").down_revision) == {"ad01fc67ce44", "d7a3f1c9e5b2"}
+    assert script.get_revision("d7a3f1c9e5b2").down_revision == "c3e8a1d5f7b2"
     assert script.get_revision("ad01fc67ce44").down_revision == "c3e8a1d5f7b2"
     assert script.get_revision("c3e8a1d5f7b2").down_revision == "a4c7e1f9b3d8"
     assert script.get_revision("a4c7e1f9b3d8").down_revision == "e9c4b7a2d6f3"
@@ -367,6 +371,10 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         # Country entitlement and main's M9 both branch from the prior merge;
         # d4c8f1a7b2e9 reunites them.
         "c3e5a7b9d1f4",
+        # c3e8a1d5f7b2 (tax_slabs.tax_regime VARCHAR(40)): the UAE breakdown column (ad01fc67ce44)
+        # and the report-template content editor (d7a3f1c9e5b2) both grow from it; rejoined by
+        # merge 2855a70a9ed6.
+        "c3e8a1d5f7b2",
         # c7d2e9a4f1b6: Mexico's final mile (d3f8b2a6c1e9) and South Africa's
         # 447f57564983 both grow from it; rejoined by merge 92c67cab49fc.
         "c7d2e9a4f1b6",
@@ -393,10 +401,11 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 278   # + UAE ad01fc67ce44; rugvedh's 272 (Mexico lifecycle + Belgium + Malaysia + merges)
+    assert len(revs) == 280   # + UAE ad01fc67ce44 + merge 2855a70a9ed6; rugvedh's 272 (Mexico lifecycle + Belgium + Malaysia + merges)
                               # + Belgium Block K b7e4c2a9d5f1 + merge e3f9a7c1b5d2 + Belgium M-ECWC e9c4b7a2d6f3
                               # + report-field source_column widening a4c7e1f9b3d8
                               # + tax_slabs.tax_regime widening c3e8a1d5f7b2
+                              # + report-template content editor d7a3f1c9e5b2
 
 
 def test_germany_head_chain_wiring_is_intact():
