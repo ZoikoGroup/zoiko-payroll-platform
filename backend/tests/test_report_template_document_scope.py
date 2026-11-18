@@ -215,3 +215,19 @@ def test_scope_fix_skips_a_template_with_a_later_version_and_refuses_a_non_super
     db.commit()
     assert _run_script(db, "--actor-email", admin.email, "--apply") == 2
     assert "is not an active Super Admin" in capsys.readouterr().out
+
+
+def test_scope_fix_dry_run_works_before_the_migration_and_apply_waits_for_it(db, capsys, monkeypatch):
+    """Before migration d7a3f1c9e5b2 the column is missing: the dry run still
+    reports (it never reads the column); --apply refuses until it is applied."""
+    from scripts import fix_report_template_scope as fix
+
+    a, b, runner = (_user(db, f"scope-premig-{n}@example.com") for n in ("a", "b", "runner"))
+    _published_preview(db, "FR-PREMIG-YTD", "AGGREGATE", a, b)
+    monkeypatch.setattr(fix, "content_editor_column_present", lambda _db: False)
+    assert _run_script(db, "--actor-email", runner.email) == 0
+    out = capsys.readouterr().out
+    assert "migration d7a3f1c9e5b2 not applied yet" in out and "FR-PREMIG-YTD v1.0" in out
+    assert _run_script(db, "--actor-email", runner.email, "--apply") == 3
+    assert "Refused: this database has not run migration d7a3f1c9e5b2" in capsys.readouterr().out
+    assert set(_rows(db, "FR-PREMIG-YTD")) == {"1.0"}

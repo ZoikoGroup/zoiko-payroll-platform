@@ -129,8 +129,7 @@ def test_revision_is_the_single_child_of_the_previous_head():
     assert (module.revision, module.down_revision) == (REVISION, PARENT)
     children = [p.name for p in VERSIONS.glob("*.py")
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
-    # The report-template content editor (d7a3f1c9e5b2) also grows from PARENT on main;
-    # merge 2855a70a9ed6 rejoins the two.
+    # d7a3f1c9e5b2 (report-template content editor) also grows from PARENT; merge b5f3e8a1c6d9 joins them.
     assert sorted(children) == sorted([FILENAME, "d7a3f1c9e5b2_report_template_content_editor.py"])
 
 
@@ -139,8 +138,8 @@ def test_single_head():
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert list(script.get_heads()) == ["2855a70a9ed6"]   # merge: this revision + d7a3f1c9e5b2
-    assert set(script.get_revision("2855a70a9ed6").down_revision) == {REVISION, "d7a3f1c9e5b2"}
+    assert list(script.get_heads()) == ["b5f3e8a1c6d9"]   # merge of REVISION + d7a3f1c9e5b2
+    assert set(script.get_revision("b5f3e8a1c6d9").down_revision) == {REVISION, "d7a3f1c9e5b2"}
 
 
 def test_migration_is_listed_in_the_manifest():
