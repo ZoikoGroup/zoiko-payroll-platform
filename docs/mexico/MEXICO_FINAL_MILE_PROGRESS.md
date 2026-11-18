@@ -673,3 +673,34 @@ Three harness changes beyond navigation:
 - **x3-4:** accepts either a block at `MX_ROUNDING_RULE_MISSING` or a calculated, watermarked result. Since ff91303d (D-01 transcribed, `mx_rounding_rule = HALF_UP:0.01` in MX-PAYROLL-2026 v1.1), a preview without candidates calculates. This changed before the layout work and is unrelated to it.
 
 `MX_HARNESS_OUT=<dir>` writes results and screenshots elsewhere, instead of over the recorded evidence.
+
+### Report templates: Components tab, gate states and audit wording (2026-11-18)
+
+**What Super Admin saw.**
+- MX-AGUINALDO showed "No components configured yet".
+- Dedicated-generator templates (IDSE, SUA, ...) offered an "Add a component" dropdown filled with the generic list (Earnings, Tax, YTD).
+- The activation-gate line only read "release gate(s) ... not SIGNED".
+- MX-AGUINALDO's audit showed:
+  - a refused Draft → Active move as three phantom changes (`status: Draft → —`, `attempted: — → Active`, `result: — → REFUSED`);
+  - `approvedById: — → —`.
+
+**Cause of the empty template.** MX-AGUINALDO v1.0 was seeded on 2026-10-23 as an early "Draft shell", then moved Draft → Approved on 2026-10-28 with no approver recorded. `seed_statutory_report_templates._seed_template` refreshes only templates still in Draft (Phase 5.6), so later seed runs skipped it and it never received its W4-1 field set. The seed itself does define those fields.
+
+**Changes.** No gate, payslip-proof or maker-checker rule changed.
+- **Backend:** `service.get_available_report_components` returns an empty list for `MX_DEDICATED_GENERATOR_REPORT_TYPES`, so a component can no longer be added to a dedicated-generator or receipt template. Snapshot-field types keep their own lists, and other countries are unchanged. Covered by `tests/test_mexico_report_template_components.py`.
+- **Shared layout:**
+  - new optional prop `renderComponentsExtra`;
+  - `ComponentsTab` hides the add-component dropdown when the list of allowed components is empty;
+  - the Audit tab no longer lists a key that is empty on both sides, and shows a refusal as one line ("Refused: Draft → Active"). The audit wording applies to every country.
+- **Mexico:**
+  - Components tab notice: a dedicated generator or the receipt has no components; a snapshot-field template shows its field count; an empty snapshot-field template explains that activation refuses it and how to refill it.
+  - Overview: each gate's area and state (e.g. "G1 ISR / CFDI: OPEN"), plus an approver line that flags "Approved with no approver recorded".
+
+**To refill MX-AGUINALDO in production** (an operational step, not part of this change):
+1. Set MX-AGUINALDO's status from Approved back to Draft (an allowed transition).
+2. Re-run the Mexico part of `scripts/seed_statutory_report_templates.py`. Deploys do not run it.
+
+**Verification.**
+- Validation script `frontend/scripts/mx-report-template-layout-validation.mjs`: 54/54.
+- Backend Mexico report-template tests: 192 passed.
+- Real-browser check on the scratch harness database, after recreating the production state of MX-AGUINALDO: 9/9.

@@ -59,6 +59,7 @@ const layoutCode = layout.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*|\{\/\*)/
 await check("layout has no Mexico-specific code", () => !/\bMX\b|Mexico|mexico|getMx/.test(layoutCode));
 await check("layout extension props default to nothing", () =>
   /extraDetailTabs = NO_EXTRAS, renderOverviewExtra = null, pageTools = NO_EXTRAS, hiddenDetailTabs = NO_EXTRAS/.test(layout));
+await check("layout renderComponentsExtra defaults to nothing", () => /\n\s*renderComponentsExtra = null,\n\}\) \{/.test(layout));
 await check("built-in tabs unchanged, extras appended after them", () =>
   /const TABS = \[\s*\{ key: "overview"[\s\S]*?\{ key: "audit", label: "Audit", icon: ScrollText \},\s*\];/.test(layout)
   && layout.includes("buildDetailTabs(TABS, hiddenDetailTabs, extraDetailTabs)"));
@@ -68,11 +69,11 @@ await check("page tools collapsed by default", () => layout.includes("const [ope
 await check("MX page is a thin wrapper (one ReportTemplateLayout, no stacked panels)", () =>
   (mxPage.match(/<ReportTemplateLayout/g) || []).length === 1 && !mxPage.includes("<>")
   && !/<MXTemplateLibraryPanel\s*\/>\s*\n?\s*(\{|<\/|<div)/.test(mxPage.split("export default")[1]));
-await check("MX page passes the three extension props", () =>
+await check("MX page passes the extension props", () =>
   ["extraDetailTabs={MX_DETAIL_TABS}", "renderOverviewExtra={renderMxOverview}", "pageTools={MX_PAGE_TOOLS}",
-   "hiddenDetailTabs={MX_HIDDEN_DETAIL_TABS}"].every((s) => mxPage.includes(s)));
-await check("MX status block / Preview / Versions read the library by template_key (no client-side kind)", () =>
-  (libSrc.match(/findCoverageRow\(rows, detail\)/g) || []).length === 2 && verSrc.includes("findVersionsGroup(data, detail)")
+   "hiddenDetailTabs={MX_HIDDEN_DETAIL_TABS}", "renderComponentsExtra={renderMxComponents}"].every((s) => mxPage.includes(s)));
+await check("MX status block / Components / Preview / Versions read the library by template_key (no client-side kind)", () =>
+  (libSrc.match(/findCoverageRow\(rows, detail\)/g) || []).length === 3 && verSrc.includes("findVersionsGroup(data, detail)")
   && !/reportType|report_type|MX_REPORT_SPECS|MX_ANNUAL/.test(libSrc + verSrc));
 await check("MX page keeps the state route (CDMX ISN under /mexico/CDMX)", () =>
   mxPage.includes("`/super-admin/report-templates/mexico/${encodeURIComponent(state)}`"));
@@ -83,7 +84,7 @@ for (const [fn, src] of [["getMxTemplateCoverage", libSrc], ["compareMxReportTem
 const pages = readdirSync(resolve(SRC, "pages/ReportTemplates")).filter((f) => f.endsWith("ReportTemplatesPage.jsx"));
 await check("no other country page passes the extension props", () => {
   const offenders = pages.filter((f) => f !== "MXReportTemplatesPage.jsx")
-    .filter((f) => /extraDetailTabs|renderOverviewExtra|pageTools|hiddenDetailTabs/.test(read(`pages/ReportTemplates/${f}`)));
+    .filter((f) => /extraDetailTabs|renderOverviewExtra|pageTools|hiddenDetailTabs|renderComponentsExtra/.test(read(`pages/ReportTemplates/${f}`)));
   if (offenders.length) throw new Error(offenders.join(", "));
 });
 
@@ -112,6 +113,52 @@ await check("tabs: Mexico hides Versions and appends its tabs", () =>
     === "overview,components,filing-calendar,audit,mx-versions-gates,mx-preview");
 await check("tabs: overview can never be hidden", () => keys(buildDetailTabs(BUILT_IN, ["overview"])).startsWith("overview,"));
 
+const N = await import(pathToFileURL(resolve(SRC, "components/jurisdiction/mexico/mxTemplateNotices.js")).href);
+const { describeAuditEntry } = await import(pathToFileURL(resolve(SRC, "components/reportTemplates/auditView.js")).href);
+const engine0 = { templateKey: "MX-AGUINALDO", kind: "TEMPLATE_ENGINE", fields: 0, fieldProof: "no fields", status: "Approved" };
+await check("components notice: a dedicated generator / the receipt take no components", () =>
+  N.componentsNotice({ templateKey: "MX-IDSE-MOVEMENTS", kind: "DEDICATED" }, {}).title.startsWith("Built by a dedicated generator")
+  && N.componentsNotice({ kind: "RECEIPT" }, {}).title === "CFDI receipt: no components"
+  && N.componentsNotice(null, {}) === null);
+await check("components notice: snapshot fields present → count and field check", () => {
+  const n = N.componentsNotice({ kind: "TEMPLATE_ENGINE", fields: 11, fieldProof: "all 6 catalogued" }, { status: "Published" });
+  return n.tone === "ok" && n.title === "Snapshot fields: 11 fields" && n.body.includes("all 6 catalogued");
+});
+await check("components notice: an Approved empty shell says the seed skipped it and how to refill it", () => {
+  const n = N.componentsNotice(engine0, { status: "Approved" });
+  return n.tone === "warning" && n.title.includes("the template has no fields")
+    && n.body.includes("only refreshes a Draft template") && n.body.includes("Set the status back to Draft (allowed from Approved)");
+});
+await check("components notice: Draft → re-run the seed; released → new version", () =>
+  N.componentsNotice(engine0, { status: "Draft" }).body.includes("Re-run the seed")
+  && N.componentsNotice(engine0, { status: "Published" }).body.includes("make a new version"));
+await check("approver: Approved with no approver recorded is called out (maker-checker)", () =>
+  N.approverNote({ status: "Approved", approvedById: null }).text.startsWith("Status is Approved, but no approver is recorded")
+  && N.approverNote({ status: "Draft", approvedById: 7 }).text === "Approved by user #7"
+  && N.approverNote({ status: "Draft" }).text === "No approver recorded");
+await check("gate lines: area and state from readiness; unknown when not loaded", () => {
+  const g = N.gateLines(["G1", "G5"], [{ gate: "G1", label: "ISR / CFDI", state: "OPEN" }, { gate: "G5", label: "Labor", state: "SIGNED" }]);
+  const none = N.gateLines(["G2"], null);
+  return g[0].label === "ISR / CFDI" && !g[0].signed && g[1].signed && none[0].state === null;
+});
+// The exact entries Super Admin saw on MX-AGUINALDO (2026-10-28).
+const refusedEntry = { action: "refused", oldValue: { status: "Draft" }, newValue: { attempted: "Active", result: "REFUSED" },
+                       reason: "MX-AGUINALDO v1.0 cannot move from Draft to Active (allowed: Review, Approved)." };
+const statusEntry = { action: "status_change", oldValue: { status: "Draft" },
+                      newValue: { status: "Approved", templateKey: "MX-AGUINALDO", approvedById: null } };
+await check("audit: a refusal reads as one line, not three phantom changes", () => {
+  const d = describeAuditEntry(refusedEntry);
+  return d.summary === "Refused: Draft → Active" && d.rows.length === 0;
+});
+await check("audit: a key empty on both sides is not listed (approvedById: — → —)", () => {
+  const d = describeAuditEntry(statusEntry);
+  return d.summary === null && d.rows.map((r) => r.key).join() === "status,templateKey" && d.rows[0].to === "Approved";
+});
+await check("audit: ordinary changes (any country) are still listed", () => {
+  const d = describeAuditEntry({ action: "update", oldValue: { name: "A", n: 1 }, newValue: { name: "B", n: 1, x: { y: 1 } } });
+  return d.rows.map((r) => `${r.key}:${r.from}>${r.to}`).join("|") === 'name:A>B|x:—>{"y":1}';
+});
+
 // ── RENDERED ────────────────────────────────────────────────────────────────
 const SERVICE = resolve(SRC, "service/superAdminService.js");
 const NL_SHARED = resolve(SRC, "components/jurisdiction/netherlands/nlShared.jsx");
@@ -126,19 +173,22 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import FR from ${JSON.stringify(resolve(SRC, "pages/ReportTemplates/FRReportTemplatesPage.jsx"))};
 import MX from ${JSON.stringify(resolve(SRC, "pages/ReportTemplates/MXReportTemplatesPage.jsx"))};
-import { MX_DETAIL_TABS, MX_HIDDEN_DETAIL_TABS, MX_PAGE_TOOLS, renderMxOverview } from ${JSON.stringify(resolve(SRC, "components/jurisdiction/mexico/mxReportTemplateExtras.jsx"))};
+import { MX_DETAIL_TABS, MX_HIDDEN_DETAIL_TABS, MX_PAGE_TOOLS, renderMxComponents, renderMxOverview } from ${JSON.stringify(resolve(SRC, "components/jurisdiction/mexico/mxReportTemplateExtras.jsx"))};
+import ComponentsTab from ${JSON.stringify(resolve(SRC, "components/reportTemplates/ComponentsTab.jsx"))};
 const wrap = (C) => renderToStaticMarkup(h(MemoryRouter, null, h(C)));
 export const render = (node) => renderToStaticMarkup(node);
 export const pageFR = () => wrap(FR);
 export const pageMX = () => wrap(MX);
-export { MX_DETAIL_TABS, MX_HIDDEN_DETAIL_TABS, MX_PAGE_TOOLS, renderMxOverview };
+export const componentsTab = (props) => renderToStaticMarkup(h(ComponentsTab, props));
+export { MX_DETAIL_TABS, MX_HIDDEN_DETAIL_TABS, MX_PAGE_TOOLS, renderMxComponents, renderMxOverview };
 `;
 // Fixtures follow mexico_report_service's response shapes.
 const stubService = `
 ${serviceNames.map((n) => `export const ${n} = () => new Promise(() => {});`).join("\n")
-  .replace(/export const (getMxTemplateCoverage|getMxTemplateVersions) = [^\n]*\n?/g, "")}
+  .replace(/export const (getMxTemplateCoverage|getMxTemplateVersions|getMxReadiness) = [^\n]*\n?/g, "")}
 export const getMxTemplateCoverage = () => globalThis.__MX_FIX.coverage;
 export const getMxTemplateVersions = () => globalThis.__MX_FIX.versions;
+export const getMxReadiness = () => globalThis.__MX_FIX.readiness;
 `;
 const stubNl = `
 export * from ${JSON.stringify(NL_SHARED)};
@@ -182,10 +232,19 @@ const IDSE = { id: 61, templateKey: "MX-IDSE-MOVEMENTS", name: "IDSE affiliation
 const RCPT = { id: 51, templateKey: "MX-CFDI-NOMINA-RECEIPT", name: "CFDI 4.0 + Nómina 1.2 payroll receipt", version: "1.0", status: "Draft",
                reportType: "MX_CFDI_RECEIPT" };
 const REG = { id: 11, templateKey: "MX-PAYROLL-REGISTER", name: "Mexico payroll register", version: "1.0", status: "Draft", reportType: "MX_REGISTER" };
+// The early empty shell moved to Approved with no approver (seen in Super Admin, 2026-10-28).
+const AGU = { id: 71, templateKey: "MX-AGUINALDO", name: "Aguinaldo statement", version: "1.0", status: "Approved", reportType: "MX_AGUINALDO",
+              approvedById: null };
 const NA_DEDICATED = "not applicable — built from service views";
 const GATE_G1 = "release gate(s) G1 not SIGNED (and the payslip field proof at activation)";
+const GATE_AGU = "release gate(s) G1, G5 not SIGNED; pack MX-PAYROLL-2026 is not Active; the template has no fields "
+  + "(and the payslip field proof at activation)";
 globalThis.__MX_FIX = {
+  readiness: { gates: [{ gate: "G1", label: "ISR / CFDI", state: "OPEN" }, { gate: "G2", label: "IMSS / SUA", state: "OPEN" },
+                       { gate: "G5", label: "Labor", state: "OPEN" }] },
   coverage: [
+    { id: 71, templateKey: AGU.templateKey, version: "1.0", status: "Approved", kind: "TEMPLATE_ENGINE", fields: 0, gates: ["G1", "G5"],
+      fieldProof: "no fields" },
     { id: 11, templateKey: REG.templateKey, version: "1.0", status: "Draft", kind: "TEMPLATE_ENGINE", fields: 14, gates: ["G1", "G2", "G3"],
       fieldProof: "all 9 snapshot path(s) catalogued; proven on a committed payslip at activation" },
     { id: 41, templateKey: ISR.templateKey, version: "1.0", status: "Published", kind: "TEMPLATE_ENGINE", fields: 11, gates: ["G1"],
@@ -196,6 +255,8 @@ globalThis.__MX_FIX = {
     { id: 61, templateKey: IDSE.templateKey, version: "1.0", status: "Draft", kind: "DEDICATED", fields: 0, gates: ["G2"], fieldProof: NA_DEDICATED },
   ],
   versions: [
+    { templateKey: AGU.templateKey, name: AGU.name, kind: "TEMPLATE_ENGINE", versions: [
+      { id: 71, version: "1.0", status: "Approved", fields: 0, contentHash: "ffffffffffffffff", activationRefusal: GATE_AGU, changeSummary: null }] },
     { templateKey: REG.templateKey, name: REG.name, kind: "TEMPLATE_ENGINE", versions: [
       { id: 11, version: "1.0", status: "Draft", fields: 14, contentHash: "aaaaaaaaaaaaaaaa", activationRefusal: GATE_G1, changeSummary: null }] },
     { templateKey: ISR.templateKey, name: ISR.name, kind: "TEMPLATE_ENGINE", versions: [
@@ -268,6 +329,38 @@ await check("Preview explains why it does not apply to a dedicated generator", (
 const previewRcpt = R.render(tab("mx-preview").render(RCPT, ctx));
 await check("Preview explains why it does not apply to the CFDI receipt", () => {
   has(previewRcpt, "mx-template-preview-na"); has(previewRcpt, "CFDI receipt is rendered from the stamped CFDI");
+});
+await check("Overview block: each gate with its area and state, and why activation is refused", () => {
+  has(overview, 'data-testid="mx-template-gate-states"'); has(overview, "ISR / CFDI");
+  has(overview, "A gate is signed only by its reviewed evidence"); has(overview, "Nothing on this page can override it");
+});
+const overviewAgu = R.render(R.renderMxOverview(AGU, ctx));
+await check("Overview block: Approved with no approver recorded is called out", () => {
+  has(overviewAgu, "mx-template-approver"); has(overviewAgu, "Status is Approved, but no approver is recorded");
+  has(overviewAgu, "the template has no fields"); has(overviewAgu, "Labor");
+});
+const compIdse = R.render(R.renderMxComponents(IDSE, ctx));
+await check("Components: a dedicated generator explains it has no components", () => {
+  has(compIdse, "mx-template-components-notice"); has(compIdse, "Built by a dedicated generator: no components");
+  has(compIdse, "MX-IDSE-MOVEMENTS is produced by Mexico");
+});
+const compAgu = R.render(R.renderMxComponents(AGU, ctx));
+await check("Components: the Approved empty Aguinaldo shell says why and how to refill it", () => {
+  has(compAgu, 'data-tone="warning"'); has(compAgu, "No fields yet"); has(compAgu, "Set the status back to Draft");
+  has(compAgu, "seed_statutory_report_templates.py");
+});
+const compIsr = R.render(R.renderMxComponents(ISR, ctx));
+await check("Components: MX-ANNUAL-ISR-ADJ shows its 11 snapshot fields", () => {
+  has(compIsr, "Snapshot fields: 11 fields"); lacks(compIsr, "No fields yet");
+});
+const tabProps = { template: IDSE, components: [], availableDataFields: [], editable: true, onChanged() {} };
+await check("ComponentsTab: an empty catalog offers no picker and says the type takes none", () => {
+  const html = R.componentsTab({ ...tabProps, availableComponents: [] });
+  lacks(html, "Add a component"); lacks(html, "Add Component"); has(html, "This report type takes no components.");
+});
+await check("ComponentsTab: a catalog still offers its own components (other countries unchanged)", () => {
+  const html = R.componentsTab({ ...tabProps, availableComponents: [{ key: "aguinaldo", label: "Aguinaldo" }] });
+  has(html, "Add a component"); has(html, ">Aguinaldo</option>"); has(html, "No components configured yet.");
 });
 const library = R.render(R.MX_PAGE_TOOLS[0].render(ctx));
 await check("Library view lists every template with gates and field check", () => {

@@ -17,6 +17,7 @@ import ComponentsTab from "./ComponentsTab";
 import FilingCalendarTab from "./FilingCalendarTab";
 import { filterTemplates } from "./filterTemplates";
 import { buildDetailTabs } from "./detailTabs";
+import { describeAuditEntry } from "./auditView";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: FileBarChart },
@@ -51,13 +52,16 @@ const EDITABLE_STATUSES = ["Draft", "Review", "Approved"];
 //   hiddenDetailTabs    [key] — built-in detail tabs to hide (e.g. a page
 //                       whose extra tab supersedes "versions"). "overview" is
 //                       always shown: it is the tab a selection opens on.
-// ctx = { reloadDetail, reloadTemplates, selectTemplate(id) }. Extensions are
+//   renderComponentsExtra (detail, ctx) => node — a block shown at the top of
+//                       the Components tab (e.g. why a report type has none).
+// ctx ={ reloadDetail, reloadTemplates, selectTemplate(id) }. Extensions are
 // presentation only: every lifecycle rule stays server-side.
 const NO_EXTRAS = [];
 
 export default function ReportTemplateLayout({
   country, countryName, initialState = "", onStateChange, embedded = false,
   extraDetailTabs = NO_EXTRAS, renderOverviewExtra = null, pageTools = NO_EXTRAS, hiddenDetailTabs = NO_EXTRAS,
+  renderComponentsExtra = null,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -319,6 +323,10 @@ export default function ReportTemplateLayout({
                 </div>
               )}
 
+              {tab === "components" && isShown("components") && renderComponentsExtra && (
+                <div className="mb-4">{renderComponentsExtra(detail, ctx)}</div>
+              )}
+
               {tab === "components" && isShown("components") && (
                 <ComponentsTab
                   template={detail} components={detail.components || []} availableComponents={availableComponents}
@@ -354,8 +362,7 @@ export default function ReportTemplateLayout({
                   {audit.length === 0 ? (
                     <p className="py-6 text-center text-xs text-foreground-disabled">No audit history yet.</p>
                   ) : audit.map((a) => {
-                    const changedKeys = Object.keys({ ...(a.oldValue || {}), ...(a.newValue || {}) })
-                      .filter((k) => JSON.stringify(a.oldValue?.[k]) !== JSON.stringify(a.newValue?.[k]));
+                    const { summary, rows } = describeAuditEntry(a);
                     return (
                       <div key={a.id} className="rounded-lg border border-border-light p-2 text-xs">
                         <div className="flex items-center justify-between">
@@ -364,15 +371,16 @@ export default function ReportTemplateLayout({
                           </span>
                           <span className="text-foreground-disabled">{new Date(a.createdAt).toLocaleString()}</span>
                         </div>
+                        {summary && <p className="mt-1 font-semibold text-error" data-testid="audit-refused">{summary}</p>}
                         {a.reason && <p className="mt-1 text-foreground-secondary">{a.reason}</p>}
-                        {changedKeys.length > 0 && (
+                        {rows.length > 0 && (
                           <div className="mt-1.5 space-y-0.5 border-t border-border-light pt-1.5">
-                            {changedKeys.map((k) => (
-                              <div key={k} className="flex items-center gap-1.5 font-mono text-[11px]">
-                                <span className="text-foreground-disabled">{k}:</span>
-                                <span className="text-error line-through">{a.oldValue?.[k] ?? "—"}</span>
+                            {rows.map((r) => (
+                              <div key={r.key} className="flex items-center gap-1.5 font-mono text-[11px]">
+                                <span className="text-foreground-disabled">{r.key}:</span>
+                                <span className="text-error line-through">{r.from}</span>
                                 <span className="text-foreground-disabled">→</span>
-                                <span className="text-success">{a.newValue?.[k] ?? "—"}</span>
+                                <span className="text-success">{r.to}</span>
                               </div>
                             ))}
                           </div>

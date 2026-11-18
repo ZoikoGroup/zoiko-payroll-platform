@@ -11511,6 +11511,10 @@ def get_available_report_components(report_type: str) -> List[dict]:
     """The enumerable component catalog for a given report type — Super
     Admin can only add components from this list, never a free-typed or
     unrelated one."""
+    if (report_type or "").upper() in MX_DEDICATED_GENERATOR_REPORT_TYPES:
+        # Mexico (2026-11-18): built by a dedicated generator / from the stamped CFDI, never from components —
+        # an empty catalog, not the generic default list (which offered Earnings / Tax / YTD on IDSE, SUA, ...).
+        return []
     options = _REPORT_COMPONENTS_BY_TYPE.get((report_type or "").upper(), _DEFAULT_REPORT_COMPONENTS)
     return [{"key": key, "label": label} for key, label in options]
 
