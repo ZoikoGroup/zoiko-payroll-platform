@@ -25,7 +25,8 @@ import argparse
 import re
 import sys
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
+from sqlalchemy.orm import defer
 
 from app.database import SessionLocal
 from app.modules.auth.models import User, UserRole
@@ -47,23 +48,35 @@ def _next_version(version: str) -> str:
     return f"{m.group(1)}.{int(m.group(2)) + 1}" if m else f"{version}.1"
 
 
-def plan(db) -> dict:
+def content_editor_column_present(db) -> bool:
+    """Migration d7a3f1c9e5b2 (payroll_report_templates.content_editor_id) applied?"""
+    return "content_editor_id" in {c["name"] for c in inspect(db.get_bind()).get_columns(ReportTemplate.__tablename__)}
+
+
+def _templates(db, migrated: bool):
+    q = db.query(ReportTemplate)
+    if not migrated:   # a dry run works before the migration: the column is never read
+        q = q.options(defer(ReportTemplate.content_editor_id))
+    return q
+
+
+def plan(db, migrated: bool = True) -> dict:
     """{"create": [(template, new_version)], "skip": [(template, reason)], "info": [(template, note)]} — reads only."""
     out = {"create": [], "skip": [], "info": []}
-    wrong = [t for t in db.query(ReportTemplate).order_by(ReportTemplate.jurisdiction_country,
-                                                         ReportTemplate.template_key, ReportTemplate.id)
+    wrong = [t for t in _templates(db, migrated).order_by(ReportTemplate.jurisdiction_country,
+                                                          ReportTemplate.template_key, ReportTemplate.id)
              if _is_per_employee_document(t) and t.document_scope != "PER_EMPLOYEE"]
     for t in wrong:
         if t.status != "Published":
             out["info"].append((t, f"{t.status}: not handled by this script (only Published rows are)"))
             continue
-        latest = (db.query(ReportTemplate).filter(ReportTemplate.template_key == t.template_key)
+        latest = (_templates(db, migrated).filter(ReportTemplate.template_key == t.template_key)
                   .order_by(ReportTemplate.created_at.desc(), ReportTemplate.id.desc()).first())
         if latest.id != t.id:
             out["skip"].append((t, f"a later version already exists (v{latest.version}, {latest.status})"))
             continue
         new_version = _next_version(t.version)
-        if db.query(ReportTemplate).filter(ReportTemplate.template_key == t.template_key,
+        if _templates(db, migrated).filter(ReportTemplate.template_key == t.template_key,
                                            ReportTemplate.version == new_version).first():
             out["skip"].append((t, f"v{new_version} already exists"))
             continue
@@ -99,8 +112,15 @@ def main(argv=None, session_factory=SessionLocal) -> int:
         if actor is None or actor.role != UserRole.SUPER_ADMIN or not actor.is_active:
             print(f"Refused: {args.actor_email!r} is not an active Super Admin.")
             return 2
-        p = plan(db)
+        migrated = content_editor_column_present(db)
+        if args.apply and not migrated:
+            print("Refused: this database has not run migration d7a3f1c9e5b2 (payroll_report_templates."
+                  "content_editor_id) yet — deploy it first. A dry run (without --apply) works now.")
+            return 3
+        p = plan(db, migrated)
         mode = "APPLY" if args.apply else "DRY RUN — nothing is changed"
+        if not migrated:
+            mode += " (migration d7a3f1c9e5b2 not applied yet: --apply will wait for it)"
         print(f"{mode}. Actor: user #{actor.id}. Published per-employee templates stored with the wrong scope: "
               f"{len(p['create']) + len(p['skip'])}.")
         for t, new_version in p["create"]:
