@@ -2783,6 +2783,7 @@ class ReportTemplateResponse(BaseModel):
     approvedById:        Optional[int] = Field(None, validation_alias="approved_by_id", serialization_alias="approvedById")
     createdById:         Optional[int] = Field(None, validation_alias="created_by_id", serialization_alias="createdById")
     updatedById:         Optional[int] = Field(None, validation_alias="updated_by_id", serialization_alias="updatedById")
+    contentEditorId:     Optional[int] = Field(None, validation_alias="content_editor_id", serialization_alias="contentEditorId")  # last CONTENT editor (four-eyes)
     previousVersionId:   Optional[int] = Field(None, validation_alias="previous_version_id", serialization_alias="previousVersionId")
     createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
     updatedAt:           Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")

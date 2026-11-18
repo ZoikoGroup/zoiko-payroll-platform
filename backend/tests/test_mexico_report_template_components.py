@@ -52,6 +52,19 @@ def test_other_countries_and_unknown_types_are_unchanged():
             {"key": k, "label": lbl} for k, lbl in options], report_type
 
 
+def test_gate_text_mentions_the_payslip_field_proof_only_where_activation_runs_it(db):
+    from app.modules.payroll import mexico_report_service as R
+    from tests.test_mexico_report_generators import _seed
+
+    templates = _seed(db)
+    engine = R._mx_platform_gate_text(db, templates["MX-PAYROLL-REGISTER"])
+    dedicated = R._mx_platform_gate_text(db, templates["MX-IDSE-MOVEMENTS"])
+    receipt = R._mx_platform_gate_text(db, templates["MX-CFDI-NOMINA-RECEIPT"])
+    assert engine.endswith("(and the payslip field proof at activation)") and "not SIGNED" in engine
+    for text in (dedicated, receipt):
+        assert "not SIGNED" in text and "payslip field proof" not in text
+
+
 def test_a_component_cannot_be_added_to_a_seeded_dedicated_template(db):
     from app.core.exceptions import BadRequestException
     from app.modules.payroll import service
