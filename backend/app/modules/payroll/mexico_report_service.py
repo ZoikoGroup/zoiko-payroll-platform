@@ -705,7 +705,11 @@ def _mx_platform_gate_text(db: Session, template) -> Optional[str]:
     if reasons is None:
         return "not a Mexico report type this release can activate"
     if reasons:
-        return "; ".join(reasons) + " (and the payslip field proof at activation)"
+        # The payslip field proof runs only for a snapshot-field template
+        # (mx_report_activation_refusal); a dedicated generator / the CFDI
+        # receipt is never asked for it, so its text does not mention it.
+        proof = " (and the payslip field proof at activation)" if _kind(template) == "TEMPLATE_ENGINE" else ""
+        return "; ".join(reasons) + proof
     return None
 
 

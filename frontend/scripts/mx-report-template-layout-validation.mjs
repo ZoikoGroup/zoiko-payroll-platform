@@ -267,7 +267,7 @@ globalThis.__MX_FIX = {
       { id: 51, version: "1.0", status: "Draft", fields: 0, contentHash: "dddddddddddddddd", activationRefusal: GATE_G1, changeSummary: null }] },
     { templateKey: IDSE.templateKey, name: IDSE.name, kind: "DEDICATED", versions: [
       { id: 61, version: "1.0", status: "Draft", fields: 0, contentHash: "eeeeeeeeeeeeeeee",
-        activationRefusal: "release gate(s) G2 not SIGNED (and the payslip field proof at activation)", changeSummary: null }] },
+        activationRefusal: "release gate(s) G2 not SIGNED; pack MX-PAYROLL-2026 is not Active", changeSummary: null }] },
   ],
 };
 const ctx = { reloadDetail() {}, reloadTemplates() {}, selectTemplate() {} };
@@ -298,6 +298,7 @@ await check("Overview block: MX-ANNUAL-ISR-ADJ is a snapshot-field template, 11 
 const overviewIdse = R.render(R.renderMxOverview(IDSE, ctx));
 await check("Overview block: a dedicated generator says so", () => {
   has(overviewIdse, "Dedicated generator"); has(overviewIdse, ">G2<"); has(overviewIdse, NA_DEDICATED);
+  lacks(overviewIdse, "payslip field proof");          // never asked of a dedicated generator
 });
 const versions = R.render(tab("mx-versions-gates").render(ISR, ctx));
 await check("Versions & gates shows only the selected template's versions", () => {

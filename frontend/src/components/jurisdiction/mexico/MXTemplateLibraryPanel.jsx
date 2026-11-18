@@ -74,7 +74,11 @@ export function MXTemplateStatusBlock({ detail }) {
             <p className="text-foreground-muted">Activation gate (platform data)</p>
             {!ver ? <p className="text-foreground-muted">—</p> : ver.activationRefusal
               ? <p className="font-medium text-warning">{ver.activationRefusal}</p>
-              : <p className="font-medium text-success">would pass on platform data (the payslip field proof still runs at activation)</p>}
+              : <p className="font-medium text-success">
+                  {row.kind === "TEMPLATE_ENGINE"
+                    ? "would pass on platform data (the payslip field proof still runs at activation)"
+                    : "would pass on platform data"}
+                </p>}
             {gates.length > 0 && (
               <ul className="mt-1 space-y-0.5" data-testid="mx-template-gate-states">
                 {gates.map((g) => (
