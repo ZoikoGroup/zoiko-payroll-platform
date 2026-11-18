@@ -2884,7 +2884,9 @@ class TaxSlab(Base):
     jurisdiction_country = Column(String(10), nullable=False, server_default="IN", default="IN")
     jurisdiction_state    = Column(String(100), nullable=True)   # null = country-level
     jurisdiction_locality = Column(String(100), nullable=True)   # null = state-level (or country-level if state is also null)
-    tax_regime            = Column(String(20), nullable=True)
+    # VARCHAR(40) since c3e8a1d5f7b2 (2026-11-18): Belgian earning-class rows hold obligation codes up to 23
+    # characters here (WITHHOLDING_EXCEPTIONAL); at 20 the governed Belgium seed failed on PostgreSQL.
+    tax_regime            = Column(String(40), nullable=True)
     # Same convention/reasoning as ContributionRate.filing_status above —
     # NULL (every pre-existing row) means "applies regardless of filing
     # status," so India/UK/existing-US bracket resolution is unaffected.
