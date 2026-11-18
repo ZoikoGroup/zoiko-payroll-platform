@@ -677,7 +677,8 @@ def mx_compare_templates(db: Session, from_id: int, to_id: int) -> dict:
 # rollback path). The shared upsert_report_template pre-populates a new version
 # from the template's LATEST version, so a rollback to an older version needs
 # this copy. Activation stays the shared lifecycle behind mx_report_activation_refusal.
-_TEMPLATE_COPY_SKIP = {"id", "version", "status", "approved_by_id", "created_by_id", "updated_by_id", "created_at",
+_TEMPLATE_COPY_SKIP = {"id", "version", "status", "approved_by_id", "created_by_id", "updated_by_id", "content_editor_id",
+                       "created_at",
                        "updated_at", "previous_version_id", "change_summary"}
 
 

@@ -11630,6 +11630,7 @@ def get_report_template_detail(db: Session, template_id: int) -> dict:
         "change_summary": template.change_summary, "source_references": template.source_references,
         "reconciliation_tolerance": template.reconciliation_tolerance, "approved_by_id": template.approved_by_id,
         "created_by_id": template.created_by_id, "updated_by_id": template.updated_by_id,
+        "content_editor_id": template.content_editor_id,
         "previous_version_id": template.previous_version_id, "created_at": template.created_at,
         "updated_at": template.updated_at, "components": component_dicts,
     }
@@ -11706,6 +11707,9 @@ def upsert_report_template(db: Session, data: "ReportTemplateUpsert", actor_id: 
             setattr(existing, k, v)
         _invalidate_report_template_approval_on_edit(existing)
         existing.updated_by_id = actor_id
+        # A metadata change is a content edit (maker-checker). actor None = the
+        # seed / a system process wrote the content: no human content editor.
+        existing.content_editor_id = actor_id
         row = existing
         db.commit()
         db.refresh(row)
@@ -11755,13 +11759,14 @@ def _report_structure_values(row, columns) -> dict:
 def _record_report_structure_edit(db: Session, template, actor_id: Optional[int], entity_type: str, action: str,
                                   old: Optional[dict], new: Optional[dict]) -> None:
     """A component / field change is a change to the template's content: the
-    actor becomes the template's last editor (the approve / publish / activate
-    maker-checker checks read updated_by_id) and the change is audited against
+    actor becomes the template's last CONTENT editor (content_editor_id, which
+    the approve / publish / activate maker-checker checks read) and the change is audited against
     the TEMPLATE id (entity types _REPORT_STRUCTURE_AUDIT_TYPES, listed by
     get_report_template_audit). Uncommitted: the caller's commit writes the
     edit and its audit row together."""
     if actor_id is not None:
         template.updated_by_id = actor_id
+    template.content_editor_id = actor_id   # None = the seed / a system process wrote this content
     record_tax_audit(db, actor_id=actor_id, action=action, entity_type=entity_type, entity_id=template.id,
                      old_value=old, new_value=new, auto_commit=False)
 
@@ -11977,18 +11982,20 @@ def _set_report_template_status(
                if status == "Published" and row.status in ("Draft", "Review") else "")
         )
     if status in ("Published", "Active"):
-        # Minimum viable maker-checker gate, same contract as
-        # set_jurisdiction_pack_status: author cannot self-approve.
-        if not row.approved_by_id or row.approved_by_id == row.updated_by_id:
-            raise BadRequestException(
-                "This template needs a distinct approver before it can be Published/Activated — "
-                "use \"Approve\" (a different Super Admin than whoever last edited it)."
-            )
+        # Four-eyes R1 / R2 (report_template_four_eyes_refusal).
+        refusal = report_template_four_eyes_refusal(row, status, actor_id, activator_rule=False)
+        if refusal:
+            raise BadRequestException(refusal)
     if status == "Active" and jurisdiction_hooks.has_module(row.jurisdiction_country):
         # Jurisdiction report templates (Hong Kong, Saudi Arabia): reviewed
         # source evidence and an activator other than the approver. Other
         # countries unchanged.
         refusal = jurisdiction_hooks.call(row.jurisdiction_country, "template_activation_refusal", db, row, actor_id)
+        if refusal:
+            raise BadRequestException(refusal)
+    if status == "Active":
+        # Four-eyes R3 (the approver may not activate), after the country hook.
+        refusal = report_template_four_eyes_refusal(row, status, actor_id)
         if refusal:
             raise BadRequestException(refusal)
     if status == "Active":
@@ -12018,6 +12025,8 @@ def _set_report_template_status(
             )
     old_status = row.status
     row.status = status
+    # updated_by_id = "last actor of any change". content_editor_id is NOT
+    # touched: a status change (Published included) is not a content edit.
     row.updated_by_id = actor_id
     db.commit()
     db.refresh(row)
@@ -12028,6 +12037,65 @@ def _set_report_template_status(
         reason=reason,
     )
     return row
+
+
+# ═══ Report-template four-eyes rules (2026-11-18 — MAKER-CHECKER CHANGE, requires
+# ZP-PRIV review (Rugvedh) before merge) ═══════════════════════════════════════
+# Explicit rules over content_editor_id (the last CONTENT editor; status changes
+# and Approve never set it) instead of updated_by_id, which every status change
+# overwrote: an approver who clicked Published became the "editor", after which
+# approver == editor refused Active for everyone (the Published trap).
+#   R1 no self-approval — Published / Active (all countries): the recorded approver
+#      != last content editor; Approve refuses it up front for
+#      _SELF_APPROVAL_REFUSED_COUNTRIES (others record it and are refused at release, as before).
+#   R2 Published needs a recorded approver (unchanged).
+#   R3 the approver may not activate — Active: activator != approver, for the
+#      countries that already apply it to packs (_APPROVER_NOT_ACTIVATOR_COUNTRIES;
+#      owner decision 2026-09-28 keeps "checker approves and activates" elsewhere).
+# Order at Active: R1 / R2, then the country template_activation_refusal hook
+# (unchanged — its own rule and message win), then R3.
+
+def _who(user_id: Optional[int]) -> str:
+    return f"user #{user_id}" if user_id is not None else "a system process"
+
+
+def report_template_content_editor_from_audit(db: Session, template) -> tuple:
+    """(user id or None, audit row id or None): the last CONTENT editor as the
+    audit log records it — the actor of the latest content-change row (template
+    create / update / new_version other than "Approver set", or any component /
+    field row). None = the seed / a system process wrote it, or no such row.
+    Never updated_by_id. Same rule as migration d7a3f1c9e5b2's backfill."""
+    rows = (db.query(TaxConfigurationAudit)
+            .filter(TaxConfigurationAudit.entity_id == template.id,
+                    TaxConfigurationAudit.entity_type.in_(("report_template",) + _REPORT_STRUCTURE_AUDIT_TYPES))
+            .order_by(TaxConfigurationAudit.created_at.desc(), TaxConfigurationAudit.id.desc()).all())
+    for a in rows:
+        if a.entity_type in _REPORT_STRUCTURE_AUDIT_TYPES or (
+                a.action in ("create", "update", "new_version") and a.reason != "Approver set"):
+            return a.actor_id, a.id
+    return None, None
+
+
+def report_template_four_eyes_refusal(row: "ReportTemplate", status: str, actor_id: Optional[int],
+                                      activator_rule: bool = True) -> Optional[str]:
+    """Why `actor_id` may not move `row` to Published / Active, naming the rule
+    and who may take the next step; None when the four-eyes rules allow it.
+    activator_rule=False checks R1 / R2 only (the status change runs R3 after
+    the country hook, so a country's own activator rule keeps its message)."""
+    label = f"{row.template_key} v{row.version}"
+    editor = row.content_editor_id
+    if not row.approved_by_id:
+        return (f"Four-eyes rule (approval required — a distinct approver is required): {label} has no recorded approver. Use \"Approve\" — any Super "
+                f"Admin other than its last content editor ({_who(editor)}) — before it can be {status}.")
+    if editor is not None and row.approved_by_id == editor:
+        return (f"Four-eyes rule (no self-approval — a distinct approver is required): the recorded approver "
+                f"({_who(row.approved_by_id)}) is also the last content editor of {label}. A different Super Admin "
+                f"must \"Approve\" it before it can be {status}.")
+    if (activator_rule and status == "Active" and row.jurisdiction_country in _APPROVER_NOT_ACTIVATOR_COUNTRIES
+            and actor_id is not None and actor_id == row.approved_by_id):
+        return (f"Four-eyes rule (the approver may not activate): you approved {label}. A different Super Admin — not "
+                f"{_who(row.approved_by_id)} — must activate it.")
+    return None
 
 
 # Countries where NO editor of a report-template version (metadata, component
@@ -12063,14 +12131,17 @@ def set_report_template_approver(db: Session, template_id: int, actor_id: Option
                    "replaced; create a new version to approve changed content.")
         _audit_refusal(db, ReportTemplate, "report_template", row.id, "approve", actor_id, message)   # Phase 6.5
         raise BadRequestException(message)
-    # Completion programme (Singapore opt-in, the pack rule of Phase 6.5 B):
-    # the last editor's self-approval is refused HERE — previously it was
-    # recorded (with an audit row calling it an approval) and only refused
-    # later, at Publish.
+    # Four-eyes R1 (2026-11-18): the last CONTENT editor's self-approval is
+    # refused HERE for _SELF_APPROVAL_REFUSED_COUNTRIES (as before); every
+    # other country records it and refuses it at Published / Active
+    # (report_template_four_eyes_refusal) — same outcome, no behaviour change.
+    # It reads content_editor_id, so a status change (e.g. this admin moving
+    # it to Approved) never makes them the "editor".
     if (row.jurisdiction_country in _SELF_APPROVAL_REFUSED_COUNTRIES and actor_id is not None
-            and row.updated_by_id is not None and row.updated_by_id == actor_id):
-        message = (f"The Super Admin who last edited {row.template_key} v{row.version} cannot approve it — "
-                   "a different Super Admin must approve (maker-checker).")
+            and row.content_editor_id is not None and row.content_editor_id == actor_id):
+        message = (f"Four-eyes rule (no self-approval): you last edited the content of {row.template_key} "
+                   f"v{row.version}, so you cannot approve it. A different Super Admin — not {_who(actor_id)} — "
+                   "must approve (maker-checker).")
         _audit_refusal(db, ReportTemplate, "report_template", row.id, "approve", actor_id, message)
         raise BadRequestException(message)
     # Hong Kong opt-in: the approver must have made NONE of this version's edits

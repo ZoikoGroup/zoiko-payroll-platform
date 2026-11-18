@@ -140,8 +140,8 @@ def test_literal_names_manifest_single_child_and_single_head():
     assert children == [FILENAME]
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
     # a4c7e1f9b3d8 (report-field source_column VARCHAR(100)) is its single child; c3e8a1d5f7b2
-    # (tax_slabs.tax_regime VARCHAR(40)) sits on it and is the head.
-    assert script.get_heads() == ["c3e8a1d5f7b2"]
+    # (tax_slabs.tax_regime VARCHAR(40)) sits on it; d7a3f1c9e5b2 (report-template content editor) is the head.
+    assert script.get_heads() == ["d7a3f1c9e5b2"]
     assert script.get_revision("c3e8a1d5f7b2").down_revision == "a4c7e1f9b3d8"
     assert script.get_revision("a4c7e1f9b3d8").down_revision == REVISION
 

@@ -3480,7 +3480,14 @@ class ReportTemplate(Base):
 
     approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
-    updated_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)   # last actor of ANY change, status included
+    # Maker-checker (2026-11-18, ZP-PRIV review): the Super Admin who last
+    # changed this version's CONTENT — metadata, components or fields.
+    # Status changes (Published included) and Approve never set it, so an
+    # approver who publishes does not become the "editor" (the Published
+    # trap). The four-eyes rules in service.py read this, not updated_by_id.
+    # Filled from updated_by_id on insert when not given (the creator).
+    content_editor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Self-reference so a new version can point back at what it replaced —
     # same "never overwrite, chain instead" convention as
@@ -3500,6 +3507,15 @@ class ReportTemplate(Base):
 
     def __repr__(self):
         return f"<ReportTemplate {self.template_key} v{self.version} status={self.status}>"
+
+
+@sa.event.listens_for(ReportTemplate, "before_insert")
+def _report_template_content_editor_on_insert(_mapper, _connection, target):
+    """A new version's content editor is whoever created it, unless the
+    creating code names one (every insert path: upsert, Mexico new-version
+    copy, country seeds)."""
+    if target.content_editor_id is None:
+        target.content_editor_id = target.updated_by_id
 
 
 class ReportTemplateComponent(Base):
