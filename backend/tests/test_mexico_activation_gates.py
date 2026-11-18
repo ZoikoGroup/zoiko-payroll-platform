@@ -378,7 +378,7 @@ def test_governance_opt_in_tuples_gain_only_mexico():
         "US", "DE", "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE"}
     assert service._GOLDEN_FIXTURES_DIR_BY_COUNTRY["MX"] == "mx_golden"
     assert len(service._GOLDEN_FIXTURES_DIR_BY_COUNTRY) == 14
-    assert service._CANONICAL_PACK_ONLY_COUNTRIES == ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")
+    assert service._CANONICAL_PACK_ONLY_COUNTRIES == ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE", "AE")
 
 
 # -- Phase 11d (gap register A9): archive copies feed Draft packs only --

@@ -39,7 +39,10 @@ export default function PackOverviewSummary({ pack, refreshKey }) {
       .then((d) => { if (!cancelled) { setData(d); setError(null); } })
       .catch((e) => { if (!cancelled) setError(e.message || "Could not load the pack summary."); });
     return () => { cancelled = true; };
-  }, [pack?.id, pack?.status, refreshKey]);
+    // updatedAt: an Edit Overview save that keeps the status (a Draft edited
+    // twice) changes neither id, status nor the row counts, and the summary
+    // kept listing fields just filled in as missing (Jamaica, 2026-11-17).
+  }, [pack?.id, pack?.status, pack?.updatedAt, refreshKey]);
 
   if (error) return <p className="mb-4 text-xs text-error">{error}</p>;
   if (!data) return <p className="mb-4 text-xs text-foreground-muted">Loading pack summary…</p>;

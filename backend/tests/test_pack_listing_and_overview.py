@@ -152,3 +152,51 @@ def test_overview_counts_configuration_and_names_missing_metadata(db):
     assert [(g["ruleType"], g["count"]) for g in ov["taxSlabs"]["byRuleType"]] == [("MARGINAL_RATE", 1), ("PT_FLAT", 1)]
     assert ov["regions"] == ["Karnataka"]
     assert "Regulatory authority" in ov["missingMetadata"] and "Currency" not in ov["missingMetadata"]
+
+
+def test_overview_counts_placeholder_shares_and_flat_amounts_like_the_caribbean_seed(db):
+    # Jamaica as seeded by seed_caribbean_canonical_packs: "—" for an empty
+    # side, the flat amount echoed into employee_share. The overview showed
+    # 6 employee / 6 employer / 0 parameters; the real split is 3 / 4 / 2.
+    pack = _pack(db, "1.0", "Approved", pack_id="JM-TAX", country="JM")
+    D = Decimal
+    _rate(db, pack, "jm_personal_allowance", employee_share="1902360", employer_share="—", total="1902360",
+          flat_amount=D("1902360"))
+    _rate(db, pack, "jm_nis", employee_share="0.03%", employer_share="0.03%", total="0.06%",
+          employee_rate_pct=D("0.03"), employer_rate_pct=D("0.03"))
+    _rate(db, pack, "jm_nht", employee_share="0.02%", employer_share="0.03%", total="0.05%",
+          employee_rate_pct=D("0.02"), employer_rate_pct=D("0.03"))
+    _rate(db, pack, "jm_education_tax", employee_share="0.0225%", employer_share="0.035%", total="0.0575%",
+          employee_rate_pct=D("0.0225"), employer_rate_pct=D("0.035"))
+    _rate(db, pack, "jm_heart_threshold", employee_share="14444", employer_share="—", total="14444",
+          flat_amount=D("14444"))
+    _rate(db, pack, "jm_heart", employee_share="—", employer_share="0.03%", total="0.03%",
+          employer_rate_pct=D("0.03"))
+
+    c = service.get_jurisdiction_pack_overview(db, pack.id)["contributions"]
+    assert (c["total"], c["employeeSide"], c["employerSide"], c["parameters"]) == (6, 3, 4, 2)
+
+
+def test_edit_overview_links_a_source_document_and_refuses_an_unknown_one(db):
+    import pytest
+
+    from app.core.exceptions import BadRequestException
+    from app.modules.payroll.models import SourceArtifact
+
+    pack = _pack(db, "1.0", "Draft", pack_id="US-TAX", country="US")
+    doc = SourceArtifact(agency="IRS", title="Publication 15-T (2026)", form_number="Pub. 15-T")
+    db.add(doc)
+    db.commit()
+
+    base = dict(id=pack.id, packId="US-TAX", jurisdictionCountry="US", packType="tax", version="1.0", status="Draft")
+    with pytest.raises(BadRequestException):
+        service.upsert_jurisdiction_pack(db, JurisdictionPackUpsert(**base, sourceDocumentId=doc.id + 999))
+    service.upsert_jurisdiction_pack(db, JurisdictionPackUpsert(**base, sourceDocumentId=doc.id))
+    db.refresh(pack)
+    assert pack.source_document_id == doc.id
+    assert service.get_jurisdiction_pack_overview(db, pack.id)["lifecycle"]["sourceDocumentAttached"] is True
+
+
+def test_overview_treats_dash_and_na_as_no_share(db):
+    assert not any(service._has_share(v) for v in ("—", "-", "–", "N/A", "na", "Nil", "", None, "0%", "0"))
+    assert all(service._has_share(v) for v in ("12%", "0.03", "As per slab"))

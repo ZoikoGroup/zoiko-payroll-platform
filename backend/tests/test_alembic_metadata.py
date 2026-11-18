@@ -311,6 +311,8 @@ def test_alembic_heads_is_single_head():
     # c3e8a1d5f7b2 (2026-11-18) widens payroll_tax_slabs.tax_regime to VARCHAR(40) on a4c7e1f9b3d8 (Belgian seed).
     # d7a3f1c9e5b2 (2026-11-18) adds payroll_report_templates.content_editor_id on c3e8a1d5f7b2 (four-eyes).
     assert heads == ["d7a3f1c9e5b2"]   # report-template content editor on tax_slabs.tax_regime VARCHAR(40)
+    # UAE (ZP-AE-ENG-001) ad01fc67ce44 adds payslip_items.ae_calculation_snapshot on c3e8a1d5f7b2.
+    assert heads == ["ad01fc67ce44"]   # UAE breakdown column on tax_slabs.tax_regime VARCHAR(40)
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -324,6 +326,8 @@ def test_real_alembic_script_directory_loads_single_head():
     script = ScriptDirectory.from_config(cfg)
     assert list(script.get_heads()) == ["d7a3f1c9e5b2"]   # report-template content editor (four-eyes)
     assert script.get_revision("d7a3f1c9e5b2").down_revision == "c3e8a1d5f7b2"
+    assert list(script.get_heads()) == ["ad01fc67ce44"]   # UAE breakdown column on c3e8a1d5f7b2
+    assert script.get_revision("ad01fc67ce44").down_revision == "c3e8a1d5f7b2"
     assert script.get_revision("c3e8a1d5f7b2").down_revision == "a4c7e1f9b3d8"
     assert script.get_revision("a4c7e1f9b3d8").down_revision == "e9c4b7a2d6f3"
     assert script.get_revision("e9c4b7a2d6f3").down_revision == "e3f9a7c1b5d2"   # Belgium Block M-ECWC on the merge
@@ -394,6 +398,7 @@ def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
     assert len(revs) == 278   # rugvedh's 272 (Mexico lifecycle + Belgium + Malaysia + merges)
+    assert len(revs) == 278   # + UAE ad01fc67ce44; rugvedh's 272 (Mexico lifecycle + Belgium + Malaysia + merges)
                               # + Belgium Block K b7e4c2a9d5f1 + merge e3f9a7c1b5d2 + Belgium M-ECWC e9c4b7a2d6f3
                               # + report-field source_column widening a4c7e1f9b3d8
                               # + tax_slabs.tax_regime widening c3e8a1d5f7b2
