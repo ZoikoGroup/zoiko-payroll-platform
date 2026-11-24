@@ -28,7 +28,9 @@ function Flag({ ok, children }) {
   );
 }
 
-export default function PackOverviewSummary({ pack, refreshKey }) {
+// `extraFlags` (optional): extra chips a country appends to the status row
+// (Belgium: engine certification). Every other country passes nothing.
+export default function PackOverviewSummary({ pack, refreshKey, extraFlags = null }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
@@ -63,6 +65,7 @@ export default function PackOverviewSummary({ pack, refreshKey }) {
         <span className="inline-flex items-center rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold text-foreground-muted">
           {lifecycle.versionCount} version{lifecycle.versionCount === 1 ? "" : "s"}
         </span>
+        {extraFlags}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

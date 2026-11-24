@@ -59,9 +59,66 @@ check("generic rates / slabs editors are hidden", () => {
   assert(/hiddenTabs: \["rates", "slabs"\]/.test(read("config/jurisdictions/belgiumComplianceConfig.jsx")), "hiddenTabs");
 });
 
-check("the console has the 14 extra tabs (plus overview + shared Organizations)", () => {
-  const keys = [...read("config/jurisdictions/belgiumComplianceConfig.jsx").matchAll(/tab\("(be-[a-z-]+)"/g)].map((m) => m[1]);
-  assert(keys.length === 14 && new Set(keys).size === 14, `tab keys: ${keys.join(", ")}`);
+const beConfig = read("config/jurisdictions/belgiumComplianceConfig.jsx");
+const PRIMARY_TABS = ["be-rates", "be-slabs", "be-policy", "be-release"];
+const MORE_TABS = ["be-holiday-pay", "be-wages-time", "be-absence", "be-public-holidays", "be-earning",
+  "be-joint-committees", "be-sources"];
+
+check("primary tabs: Overview | Contribution Rates | Tax Slabs | Policy & Rounding | Release Readiness (+ shared tabs)", () => {
+  const keys = [...beConfig.matchAll(/\btab\("(be-[a-z-]+)", "([^"]+)"[^,]*, [^,]*, "([a-z-]+)"/g)];
+  assert(keys.map((m) => m[1]).join() === PRIMARY_TABS.join(), `primary tab keys: ${keys.map((m) => m[1]).join(", ")}`);
+  assert(keys.map((m) => m[2]).join() === "Contribution Rates,Tax Slabs,Policy & Rounding,Release Readiness",
+    `labels: ${keys.map((m) => m[2]).join(", ")}`);
+  // each anchors after the previous one, starting after Overview
+  assert(keys.map((m) => m[3]).join() === ["overview", ...PRIMARY_TABS.slice(0, -1)].join(), "anchors");
+  // the shared Organizations / Versions / Audit tabs are not hidden
+  const hidden = (beConfig.match(/hiddenTabs: \[([^\]]*)\]/) || [])[1] || "";
+  for (const shared of ["organizations", "versions", "audit", "overview"]) assert(!hidden.includes(shared), `${shared} hidden`);
+});
+
+check("data tabs live in the More menu and the tab row never scrolls sideways", () => {
+  const keys = [...beConfig.matchAll(/\bmore\("(be-[a-z-]+)"/g)].map((m) => m[1]);
+  assert(keys.join() === MORE_TABS.join(), `More tabs: ${keys.join(", ")}`);
+  assert(/overflow: true/.test(beConfig), "More tabs are flagged overflow");
+  assert(/adaptiveTabs: true/.test(beConfig), "adaptive tab row");
+  const layout = read("components/jurisdiction/JurisdictionLayout.jsx");
+  assert(/visibleExtraTabs\.filter\(\(t\) => t\.overflow\)/.test(layout) && /adaptive=\{adaptiveTabs\}/.test(layout), "layout wiring");
+  const bar = read("components/jurisdiction/PackTabBar.jsx");
+  assert(/const active = tabs\.find\(\(t\) => t\.key === activeKey\)/.test(bar) && /<MoreContent tab=\{active\}/.test(bar),
+    "More shows the selected tab's name");
+});
+
+check("activation readiness, signing status and owner decisions are sections of Release Readiness", () => {
+  const release = read("components/jurisdiction/belgium/BEReleaseReadinessTab.jsx");
+  for (const name of ["BEActivationReadinessTab", "BESigningStatusTab", "BEOwnerDecisionsTab", "GoldenCertification", "GateEvidence"]) {
+    assert(release.includes(`<${name}`), `${name} rendered`);
+  }
+  assert((release.match(/<Collapsible/g) || []).length >= 5, "gate cards and sections are collapsible");
+  assert(/list-disc/.test(release) && /c\.detail/.test(release), "failing checks listed as bullets");
+  for (const old of ["be-activation", "be-signing", "be-decisions"]) assert(!new RegExp(`tab\\("${old}"`).test(beConfig), `${old} still a tab`);
+});
+
+check("old tab keys redirect to the tab that now holds them", () => {
+  const aliases = Object.fromEntries([...beConfig.matchAll(/"(be-[a-z-]+)": "(be-[a-z-]+)"/g)].map((m) => [m[1], m[2]]));
+  const expected = { "be-withholding": "be-slabs", "be-onss-employee": "be-rates", "be-onss-employer": "be-rates",
+    "be-activation": "be-release", "be-signing": "be-release", "be-decisions": "be-release" };
+  for (const [from, to] of Object.entries(expected)) assert(aliases[from] === to, `${from} -> ${aliases[from]}`);
+  for (const to of Object.values(aliases)) assert([...PRIMARY_TABS, ...MORE_TABS].includes(to), `alias target ${to}`);
+  assert(/tabAliases: BELGIUM_TAB_ALIASES/.test(beConfig), "aliases passed to the layout");
+});
+
+check("Contribution Rates / Tax Slabs use the shared tables and the governed editor", () => {
+  const tables = read("components/jurisdiction/belgium/BEPackTables.jsx");
+  assert(/import \{ ContributionRatesTable, PackTableHeader, TaxSlabsTable \} from "\.\.\/PackRowTables"/.test(tables), "shared tables");
+  assert(tables.includes("<BERowEditor") && !/upsertCanonical|deleteCanonical/.test(tables), "governed editor only");
+  assert(/locked=\{isActive\(pack\)\}/.test(tables) && /onEdit=\{editable \?/.test(tables), "Active pack locked, edits only when editable");
+});
+
+check("Overview is the shared pack summary plus the engine chip; shared country-level label", () => {
+  const overview = read("components/jurisdiction/belgium/BEOverviewDashboard.jsx");
+  assert(/<PackOverviewSummary/.test(overview) && /extraFlags=\{<EngineChip/.test(overview), "summary + chip");
+  assert(/onNavigateTab\?\.\("be-release"\)/.test(overview), "chip opens Release Readiness");
+  assert(!/countryLevelLabel/.test(beConfig), "uses the shared Country-level (no state) label");
 });
 
 check("the activation readiness tab is read-only", () => {
