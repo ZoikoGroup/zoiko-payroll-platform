@@ -77,6 +77,6 @@ RATES = (
     # ── Short fixed-term contract surcharge (spec §2, ES-010, F4; S4) ───────
     ("es_short_contract_surcharge", "Short fixed-term contract — employer additional contribution at termination",
      None, None, "33.62", None, None, "§2, ES-010, F4 / S4"),
-    ("es_short_contract_days", "Short fixed-term contract — contract length below which the surcharge applies "
-     "(days)", None, None, "30", None, None, "§2, ES-010 / S4"),
+    ("es_short_contract_days", "Short fixed-term contract — length below which the surcharge applies (days)",
+     None, None, "30", None, None, "§2, ES-010 / S4"),
 )
