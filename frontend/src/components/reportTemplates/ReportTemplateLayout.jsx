@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, Trash2, History, FileBarChart, ScrollText, ShieldCheck, CalendarClock, X } from "lucide-react";
 import ConfirmDialog from "../ConfirmDialog";
 import StatusPill from "../StatusPill";
@@ -18,6 +18,22 @@ import FilingCalendarTab from "./FilingCalendarTab";
 import { filterTemplates } from "./filterTemplates";
 import { buildDetailTabs } from "./detailTabs";
 import { describeAuditEntry } from "./auditView";
+import { activationBanner, activeOptionReason, availabilityLabel, listBadge, statusOptions } from "./readiness";
+import Notice from "../jurisdiction/Notice";
+
+// Badge beside a status pill: "Not built" / "Blocked · G3", the backend's
+// reason as its tooltip (and its accessible description).
+function ReadinessBadge({ badge }) {
+  if (!badge) return null;
+  return (
+    <span title={badge.title} aria-label={`${badge.label}: ${badge.title}`} data-testid={`readiness-badge-${badge.key}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+        badge.key === "not-built" ? "border-border bg-surface-muted text-foreground-muted" : "border-error/40 bg-error/5 text-error"
+      }`}>
+      {badge.label}
+    </span>
+  );
+}
 
 const TABS = [
   { key: "overview", label: "Overview", icon: FileBarChart },
@@ -65,6 +81,7 @@ export default function ReportTemplateLayout({
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [state, setStateRaw] = useState(initialState || "");
   const [filterText, setFilterText] = useState("");
   const [templates, setTemplates] = useState([]);
@@ -154,6 +171,15 @@ export default function ReportTemplateLayout({
   }
 
   const editable = Boolean(detail && EDITABLE_STATUSES.includes(detail.status));
+  // Readiness is the backend's dry run of the status change (detail response):
+  // presentation only — the status change itself still refuses.
+  const activeReason = detail ? activeOptionReason(STATUS_OPTIONS, detail) : null;
+  const banner = detail ? activationBanner(detail) : null;
+  // The compliance page uses the same country slug as this page
+  // (/super-admin/report-templates/<slug> -> /super-admin/compliance/<slug>;
+  // the two route maps are identical, see report-template-ui-validation). No
+  // link when embedded in another page.
+  const complianceRoute = (/^\/super-admin\/report-templates\/([a-z-]+)/.exec(pathname) || [])[1] || null;
   const ctx = { reloadDetail: loadDetail, reloadTemplates: loadTemplates, selectTemplate: setSelectedId };
   const activeTool = pageTools.find((t) => t.key === openTool);
   const activeExtraTab = extraDetailTabs.find((t) => t.key === tab);
@@ -240,9 +266,10 @@ export default function ReportTemplateLayout({
                   }`}
                 >
                   <span className="font-semibold">{t.name}</span>
-                  <span className="flex items-center gap-2 text-foreground-muted">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-foreground-muted">
                     v{t.version} · {t.reportType}{t.jurisdictionState ? ` · ${t.jurisdictionState}` : ""} · FY {t.reportingYear}
                     <StatusPill status={STATUS_PILL_MAP[t.status] || "pending"} label={t.status} />
+                    <ReadinessBadge badge={listBadge(t)} />
                   </span>
                 </button>
               ))}
@@ -262,6 +289,12 @@ export default function ReportTemplateLayout({
                   <div className="flex items-center gap-2">
                     <h2 className="text-lg font-bold text-foreground">{detail.name}</h2>
                     <StatusPill status={STATUS_PILL_MAP[detail.status] || "pending"} label={detail.status} />
+                    {availabilityLabel(detail) ? (
+                      <span data-testid="availability-label"
+                        className="inline-flex items-center rounded-full border border-border bg-surface-muted px-2.5 py-0.5 text-xs font-medium text-foreground-muted">
+                        {availabilityLabel(detail)}
+                      </span>
+                    ) : <ReadinessBadge badge={listBadge(detail)} />}
                   </div>
                   <p className="mt-0.5 text-xs text-foreground-muted">
                     v{detail.version} · {detail.reportType} · {detail.jurisdictionCountry}{detail.jurisdictionState ? ` / ${detail.jurisdictionState}` : ""} · FY {detail.reportingYear}
@@ -282,14 +315,43 @@ export default function ReportTemplateLayout({
                   >
                     <ShieldCheck size={13} /> Approve
                   </button>
-                  <select className={inputClass + " w-auto"} value={detail.status} onChange={(e) => changeStatus(e.target.value)}>
-                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  <select className={inputClass + " w-auto"} value={detail.status} onChange={(e) => changeStatus(e.target.value)}
+                    aria-describedby={activeReason ? "active-blocked-reason" : undefined} aria-label="Status">
+                    {statusOptions(STATUS_OPTIONS, detail).map((o) => (
+                      <option key={o.value} value={o.value} disabled={o.disabled} title={o.reason || undefined}>
+                        {o.value}{o.disabled && o.value === "Active" ? " (unavailable)" : ""}
+                      </option>
+                    ))}
                   </select>
                   <button onClick={() => setDeletingTemplate(detail)} className="rounded-lg border border-border p-2 text-error hover:bg-error-light">
                     <Trash2 size={14} />
                   </button>
                 </div>
               </div>
+
+              {activeReason && activeReason !== banner?.message && (
+                <p id="active-blocked-reason" data-testid="active-blocked-reason" className="-mt-2 mb-3 text-xs text-foreground-muted">
+                  <span className="font-semibold">Active is unavailable:</span> {activeReason}
+                </p>
+              )}
+              {banner && (
+                <div className="mb-4">
+                  <Notice tone={banner.tone} title={banner.title} testId="activation-banner"
+                    actions={banner.linkToReadiness && complianceRoute ? (
+                      <Link to={`/super-admin/compliance/${complianceRoute}?tab=release-readiness`}
+                        className="rounded-lg border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted">
+                        Release readiness{banner.gate ? ` (${banner.gate})` : ""}
+                      </Link>
+                    ) : null}>
+                    {banner.message}
+                    {banner.deferred.length > 0 && (
+                      <ul className="mt-1 list-disc pl-4" data-testid="activation-deferred">
+                        {banner.deferred.map((d) => <li key={d}>{d}</li>)}
+                      </ul>
+                    )}
+                  </Notice>
+                </div>
+              )}
 
               <div className="mb-4 flex items-center gap-1 border-b border-border overflow-x-auto">
                 {tabs.map((t) => (
