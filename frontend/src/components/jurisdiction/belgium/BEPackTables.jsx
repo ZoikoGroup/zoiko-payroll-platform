@@ -17,6 +17,9 @@ import { TAB_GROUPS, cleanLabel, isDraftPack, isEditablePack, loadConfiguration,
 // are shown exactly as stored; nothing is combined or computed here.
 
 const isActive = (pack) => pack?.status === "Active";
+// Belgium has no state-level rows and no filing statuses (the slab
+// filing-status column carries the dimension, shown as "Dimension").
+const HIDDEN_COLUMNS = ["state", "filingStatus"];
 
 function SignedBadge({ signed }) {
   return signed ? (
@@ -63,6 +66,7 @@ function ScalarRatesTable({ pack, config, sections, onReload }) {
     <>
       <ContributionRatesTable
         sections={sections}
+        hideColumns={HIDDEN_COLUMNS}
         onEdit={editable ? (row) => setEditing(raw(row)) : undefined}
         emptyText="No rows for these groups in the selected pack."
         componentNote={(row) => (
@@ -122,6 +126,7 @@ function SlabKeyTable({ pack, config, rowKey, title, onReload }) {
       </div>
       <TaxSlabsTable
         rows={rows}
+        hideColumns={HIDDEN_COLUMNS}
         onEdit={editable ? (row) => setEditing(raw(row)) : undefined}
         onDelete={editable && isDraftPack(pack) ? retire : undefined}
         emptyText="No rows yet — the key blocks until rows are added and signed (or the key is signed not supported)."

@@ -112,6 +112,9 @@ check("Contribution Rates / Tax Slabs use the shared tables and the governed edi
   assert(/import \{ ContributionRatesTable, PackTableHeader, TaxSlabsTable \} from "\.\.\/PackRowTables"/.test(tables), "shared tables");
   assert(tables.includes("<BERowEditor") && !/upsertCanonical|deleteCanonical/.test(tables), "governed editor only");
   assert(/locked=\{isActive\(pack\)\}/.test(tables) && /onEdit=\{editable \?/.test(tables), "Active pack locked, edits only when editable");
+  assert(/const HIDDEN_COLUMNS = \["state", "filingStatus"\]/.test(tables)
+    && (tables.match(/hideColumns=\{HIDDEN_COLUMNS\}/g) || []).length === 2, "State / Filing Status hidden on both tables");
+  for (const col of ["statusColumn", "inForceColumn", '"dimension"', '"amount"', '"formula"']) assert(tables.includes(col), `${col} kept`);
 });
 
 check("Hotfix Activate is hidden for Belgium (self-approval refused), like Mexico", () => {
