@@ -19,6 +19,8 @@ import { filterTemplates } from "./filterTemplates";
 import { buildDetailTabs } from "./detailTabs";
 import { actorLabel, describeAuditEntry, groupAuditEntries } from "./auditView";
 import Collapsible from "../jurisdiction/Collapsible";
+import { DisabledReason } from "../jurisdiction/PackRowTables";
+import { canApprove, deleteState } from "./actions";
 import { activationBanner, activeOptionReason, availabilityLabel, listBadge, statusOptions } from "./readiness";
 import Notice from "../jurisdiction/Notice";
 
@@ -231,6 +233,7 @@ export default function ReportTemplateLayout({
   // Readiness is the backend's dry run of the status change (detail response):
   // presentation only — the status change itself still refuses.
   const activeReason = detail ? activeOptionReason(STATUS_OPTIONS, detail) : null;
+  const deletion = deleteState(detail);
   const banner = detail ? activationBanner(detail) : null;
   // The compliance page uses the same country slug as this page
   // (/super-admin/report-templates/<slug> -> /super-admin/compliance/<slug>;
@@ -364,14 +367,19 @@ export default function ReportTemplateLayout({
                       edited this template must approve it before it can go
                       Published/Active — enforced server-side in
                       set_report_template_status; this button just records
-                      "I approve this," it doesn't change status itself. */}
-                  <button
-                    onClick={handleApprove}
-                    title={detail.approvedById ? `Currently approved by user #${detail.approvedById}` : "Not yet approved"}
-                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
-                  >
-                    <ShieldCheck size={13} /> Approve
-                  </button>
+                      "I approve this," it doesn't change status itself.
+                      Offered only before release (Draft / Review / Approved):
+                      the backend refuses to replace a released version's
+                      approval (set_report_template_approver). */}
+                  {canApprove(detail) && (
+                    <button
+                      onClick={handleApprove} data-testid="rt-action-approve"
+                      title={detail.approvedById ? `Currently approved by user #${detail.approvedById}` : "Not yet approved"}
+                      className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                    >
+                      <ShieldCheck size={13} /> Approve
+                    </button>
+                  )}
                   <select className={inputClass + " w-auto"} value={detail.status} onChange={(e) => changeStatus(e.target.value)}
                     aria-describedby={activeReason ? "active-blocked-reason" : undefined} aria-label="Status">
                     {statusOptions(STATUS_OPTIONS, detail).map((o) => (
@@ -380,9 +388,19 @@ export default function ReportTemplateLayout({
                       </option>
                     ))}
                   </select>
-                  <button onClick={() => setDeletingTemplate(detail)} className="rounded-lg border border-border p-2 text-error hover:bg-error-light">
-                    <Trash2 size={14} />
-                  </button>
+                  {deletion.allowed ? (
+                    <button onClick={() => setDeletingTemplate(detail)} aria-label="Delete template" data-testid="rt-action-delete"
+                      className="rounded-lg border border-border p-2 text-error hover:bg-error-light">
+                      <Trash2 size={14} />
+                    </button>
+                  ) : (
+                    <DisabledReason reason={deletion.reason}>
+                      <button disabled aria-disabled="true" aria-label={`Delete template — ${deletion.reason}`} data-testid="rt-action-delete"
+                        className="pointer-events-none rounded-lg border border-border p-2 text-error opacity-40">
+                        <Trash2 size={14} />
+                      </button>
+                    </DisabledReason>
+                  )}
                 </div>
               </div>
 
@@ -501,7 +519,8 @@ export default function ReportTemplateLayout({
       )}
       {deletingTemplate && (
         <ConfirmDialog
-          title="Delete Report Template" message={`Permanently delete "${deletingTemplate.name}" v${deletingTemplate.version}? Only allowed with no generated reports and not Published/Active.`}
+          title={deletingTemplate.status === "Approved" ? "Delete Approved Report Template" : "Delete Report Template"}
+          message={deleteState(deletingTemplate).confirmMessage}
           onConfirm={handleDelete} onClose={() => setDeletingTemplate(null)}
         />
       )}

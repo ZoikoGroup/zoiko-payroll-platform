@@ -111,6 +111,23 @@ check("layout renders grouped audit rows with names",
   layout.includes("groupAuditEntries(audit).map") && layout.includes("Refused ×${count} — last at") && layout.includes("by {actorLabel(a)}")
   && !layout.includes("by user #{a.actorId}"));
 
+// ── Approve / Delete per status (the backend's rules) ───────────────────────
+const X = await load("components/reportTemplates/actions.js");
+const tpl = (status, over = {}) => ({ status, name: "Form", version: "1.0", approvedById: 7, ...over });
+check("Approve offered on Draft / Review / Approved only (backend _EDITABLE_TEMPLATE_STATUSES)",
+  ["Draft", "Review", "Approved"].every((st) => X.canApprove(tpl(st))) && ["Published", "Active", "Superseded"].every((st) => !X.canApprove(tpl(st))));
+check("Delete allowed on Draft / Review / Approved", ["Draft", "Review", "Approved"].every((st) => X.deleteState(tpl(st)).allowed));
+check("Delete disabled on Published / Active with the supersede reason",
+  ["Published", "Active"].every((st) => !X.deleteState(tpl(st)).allowed && X.deleteState(tpl(st)).reason.includes("supersede")));
+check("Delete disabled on Superseded (kept as version history)", !X.deleteState(tpl("Superseded")).allowed
+  && /version history/.test(X.deleteState(tpl("Superseded")).reason));
+check("deleting an Approved template warns its approval record will be lost",
+  /approval record \(user #7\) will be lost/.test(X.deleteState(tpl("Approved")).confirmMessage)
+  && !/approval record/.test(X.deleteState(tpl("Draft")).confirmMessage));
+check("layout: Approve hidden outside pre-release, Delete uses the shared disabled pattern",
+  layout.includes("{canApprove(detail) && (") && layout.includes("<DisabledReason reason={deletion.reason}>")
+  && layout.includes('aria-disabled="true"') && layout.includes("deleteState(deletingTemplate).confirmMessage"));
+
 // ── generic wiring (no country-specific branch decides readiness) ───────────
 check("layout renders options from statusOptions with disabled + reason",
   layout.includes("statusOptions(STATUS_OPTIONS, detail).map") && layout.includes("disabled={o.disabled}") && layout.includes("title={o.reason || undefined}"));
