@@ -2788,6 +2788,11 @@ class ReportTemplateResponse(BaseModel):
     createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
     updatedAt:           Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
     components:          List[ReportTemplateComponentResponse] = []
+    # Computed per request for the calling Super Admin (never stored / cached):
+    # service.report_template_activation_readiness. None on responses that do
+    # not compute it (create / status change / approve).
+    activationReadiness: Optional[dict] = Field(None, validation_alias="activation_readiness",
+                                                serialization_alias="activationReadiness")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

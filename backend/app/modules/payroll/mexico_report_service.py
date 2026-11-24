@@ -539,12 +539,15 @@ def _mx_activation_platform_reasons(db: Session, template) -> Optional[list]:
     return reasons
 
 
-def mx_report_activation_refusal(db: Session, template) -> Optional[str]:
+def mx_report_activation_refusal(db: Session, template, tenant_proof: bool = True) -> Optional[str]:
+    """The Mexico activation gate. `tenant_proof=False` (the readiness dry run
+    only) leaves out the one check that reads committed tenant payslips; the
+    status change always runs it."""
     reasons = _mx_activation_platform_reasons(db, template)
     if reasons is None:
         return (f"Mexico report-template activation is refused: {getattr(template, 'report_type', None)!r} is not a "
                 f"Mexico report type this release can activate.")
-    if (template.report_type not in MX_REPORT_SPECS and template.report_type != "MX_CFDI_RECEIPT"
+    if (tenant_proof and template.report_type not in MX_REPORT_SPECS and template.report_type != "MX_CFDI_RECEIPT"
             and _mx_report_fields(db, template)):
         proof = _mx_report_fields_proven(db, template)        # reads committed payslips (tenant data)
         if proof:
@@ -555,6 +558,14 @@ def mx_report_activation_refusal(db: Session, template) -> Optional[str]:
 
 
 # ═══ Final mile X3b: the Mexico template library tools ═══════════════════════
+
+def mx_report_deferred_checks(db: Session, template) -> list:
+    """What the readiness dry run leaves to the real activation (it reads tenant data)."""
+    if (template.report_type not in MX_REPORT_SPECS and template.report_type != "MX_CFDI_RECEIPT"
+            and _mx_report_fields(db, template)):
+        return ["Each field must resolve on a committed Mexican payslip — checked when the template is activated."]
+    return []
+
 
 def _kind(template) -> str:
     if template.report_type == "MX_CFDI_RECEIPT":

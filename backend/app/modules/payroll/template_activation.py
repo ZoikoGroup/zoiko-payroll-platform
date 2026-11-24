@@ -27,6 +27,15 @@ UNKNOWN_STATUS = "unknown_status"    # the requested status does not exist
 
 BLOCKER_KINDS = (TRANSITION, FOUR_EYES, JURISDICTION_GATE, NOT_BUILT, CONFLICT, UNKNOWN_STATUS)
 
+# Country hooks. REFUSAL_HOOK is the gate the status change applies. A country
+# whose gate reads tenant data (Mexico's payslip proof) also declares
+# READINESS_HOOK — the same gate minus that part — and DEFERRED_HOOK, the
+# checks it leaves to the real activation. Every other country's readiness uses
+# REFUSAL_HOOK itself, so the rules exist once.
+REFUSAL_HOOK = "template_activation_refusal"
+READINESS_HOOK = "template_activation_readiness"
+DEFERRED_HOOK = "template_activation_deferred_checks"
+
 
 class ActivationRefusal(str):
     """A refusal message that also carries ``blocker_kind`` and ``gate``.

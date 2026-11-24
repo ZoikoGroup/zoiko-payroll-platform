@@ -11992,6 +11992,7 @@ def set_report_template_status(
 
 def report_template_status_check(
     db: Session, row: "ReportTemplate", status: str, actor_id: Optional[int] = None, *, lock: bool = True,
+    readiness: bool = False,
 ) -> dict:
     """The lifecycle checks for moving `row` to `status`, in the order the status
     change applies them; the FIRST failing check as a structured result
@@ -12001,7 +12002,10 @@ def report_template_status_check(
     Order: known status -> transition -> four-eyes R1 / R2 (Published / Active)
     -> the country template_activation_refusal hook (Active) -> four-eyes R3
     (Active) -> one Active version per slot (Active). `lock` takes Hong Kong's
-    serialising row lock before the slot check, as the status change always has."""
+    serialising row lock before the slot check, as the status change always has.
+    `readiness` (the dry run, report_template_activation_readiness) uses a
+    country's template_activation_readiness hook where it declares one; the
+    status change never sets it."""
     from app.modules.payroll import template_activation as ta
 
     if status not in REPORT_TEMPLATE_TRANSITIONS:
@@ -12027,7 +12031,7 @@ def report_template_status_check(
         # Jurisdiction report templates (Hong Kong, Saudi Arabia): reviewed
         # source evidence and an activator other than the approver. Other
         # countries unchanged.
-        refusal = jurisdiction_hooks.call(row.jurisdiction_country, "template_activation_refusal", db, row, actor_id)
+        refusal = _report_template_country_gate(db, row, actor_id, readiness=readiness)
         if refusal:
             return ta.as_result(refusal, ta.JURISDICTION_GATE)
     if status == "Active":
@@ -12062,6 +12066,64 @@ def report_template_status_check(
                 ta.CONFLICT,
             ).as_result()
     return dict(ta.ALLOWED)
+
+
+def _report_template_country_gate(db: Session, row: "ReportTemplate", actor_id: Optional[int], *,
+                                  readiness: bool = False):
+    """The country's template activation hook: the refusal hook, or — for the
+    readiness dry run only — the country's readiness hook when it declares one."""
+    from app.modules.payroll import template_activation as ta
+
+    country = row.jurisdiction_country
+    name = ta.READINESS_HOOK if readiness and jurisdiction_hooks.declares(country, ta.READINESS_HOOK) else ta.REFUSAL_HOOK
+    return jurisdiction_hooks.call(country, name, db, row, actor_id)
+
+
+def report_template_activation_readiness(db: Session, row: "ReportTemplate", actor_id: Optional[int] = None) -> dict:
+    """Whether `actor_id` could move `row` to Active now, and why not — a PURE
+    DRY RUN of the status change's own checks (report_template_status_check):
+    no row lock, no audit row, no security event, no write of any kind (autoflush
+    off; it only reads). Computed per request for the calling Super Admin — four-
+    eyes R3 depends on who asks — and never cached.
+
+    {canActivate, blockedReason, blockerKind, gate}: the first check the real
+      status change would refuse, with exactly its message.
+    countryGate: the country's own gate alone, whatever the current status (the
+      list badge: a Draft Belgian template is already known to be blocked at G3).
+    deferredChecks: checks the dry run cannot make without tenant data (Mexico's
+      payslip proof) — the real activation still makes them.
+    nextStatuses: the statuses the lifecycle allows from the current one."""
+    from app.modules.payroll import template_activation as ta
+
+    country = row.jurisdiction_country
+    with db.no_autoflush:
+        active = report_template_status_check(db, row, "Active", actor_id, lock=False, readiness=True)
+        gate = dict(ta.ALLOWED)
+        deferred = []
+        if jurisdiction_hooks.has_module(country):
+            gate = ta.as_result(_report_template_country_gate(db, row, actor_id, readiness=True), ta.JURISDICTION_GATE)
+            if jurisdiction_hooks.declares(country, ta.DEFERRED_HOOK):
+                deferred = list(jurisdiction_hooks.call(country, ta.DEFERRED_HOOK, db, row) or [])
+    return {
+        "canActivate": active["allowed"], "blockedReason": active["message"],
+        "blockerKind": active["blockerKind"], "gate": active["gate"],
+        "countryGate": gate, "deferredChecks": deferred,
+        "nextStatuses": list(REPORT_TEMPLATE_TRANSITIONS.get(row.status, ())),
+    }
+
+
+def report_template_list_readiness(db: Session, row: "ReportTemplate", actor_id: Optional[int] = None) -> dict:
+    """The list view's lighter readiness: the country gate alone (same dry run,
+    same hooks as report_template_activation_readiness, nothing else). The full
+    readiness runs one slot query per template, which on the remote database
+    made the list a round trip per row slower; the detail response carries it."""
+    from app.modules.payroll import template_activation as ta
+
+    gate = dict(ta.ALLOWED)
+    if jurisdiction_hooks.has_module(row.jurisdiction_country):
+        with db.no_autoflush:
+            gate = ta.as_result(_report_template_country_gate(db, row, actor_id, readiness=True), ta.JURISDICTION_GATE)
+    return {"countryGate": gate, "partial": True}
 
 
 def _set_report_template_status(

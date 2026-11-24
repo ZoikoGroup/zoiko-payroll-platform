@@ -1596,10 +1596,14 @@ def list_report_templates(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.list_report_templates(
+    rows = payroll_service.list_report_templates(
         db, country=country, state=state, reporting_year=reportingYear, report_type=reportType,
         status=status, search=search, include_states=includeStates,
     )
+    # Per request, for the calling Super Admin; a transient attribute, never stored.
+    for row in rows:
+        row.activation_readiness = payroll_service.report_template_list_readiness(db, row, current_user.id)
+    return rows
 
 
 @router.get(
@@ -1669,7 +1673,12 @@ def get_report_template_detail(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.get_report_template_detail(db, id)
+    detail = payroll_service.get_report_template_detail(db, id)
+    # Full readiness (a pure dry run of the status change's checks), computed
+    # per request for the calling Super Admin — never cached across users.
+    detail["activation_readiness"] = payroll_service.report_template_activation_readiness(
+        db, payroll_service.get_report_template(db, id), current_user.id)
+    return detail
 
 
 @router.put(
