@@ -83,5 +83,8 @@ export const belgiumComplianceConfig = {
   },
   hiddenTabs: ["rates", "slabs"],
   adaptiveTabs: true,
+  // Hotfix activation self-approves, and Belgium refuses self-approval
+  // (four-eyes; service._SELF_APPROVAL_REFUSED_COUNTRIES) — same opt-out as Mexico.
+  hideHotfixActivate: true,
   tabAliases: BELGIUM_TAB_ALIASES,
 };

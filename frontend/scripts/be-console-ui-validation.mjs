@@ -114,6 +114,11 @@ check("Contribution Rates / Tax Slabs use the shared tables and the governed edi
   assert(/locked=\{isActive\(pack\)\}/.test(tables) && /onEdit=\{editable \?/.test(tables), "Active pack locked, edits only when editable");
 });
 
+check("Hotfix Activate is hidden for Belgium (self-approval refused), like Mexico", () => {
+  assert(/hideHotfixActivate: true/.test(beConfig), "hideHotfixActivate");
+  assert(/!hideHotfixActivate && selectedPack\.status !== "Active"/.test(read("components/jurisdiction/JurisdictionLayout.jsx")), "layout honours it");
+});
+
 check("Overview is the shared pack summary plus the engine chip; shared country-level label", () => {
   const overview = read("components/jurisdiction/belgium/BEOverviewDashboard.jsx");
   assert(/<PackOverviewSummary/.test(overview) && /extraFlags=\{<EngineChip/.test(overview), "summary + chip");

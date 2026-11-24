@@ -41,6 +41,9 @@ check("layout defaults to pickActivePack", layout.includes("autoSelectPack || pi
 check("layout re-picks after a state / pack type change", layout.includes("setAutoPicked(false)"));
 check("Overview shows the pack summary when no country dashboard replaces it",
   /!overviewOverrideActive && \(\s*<PackOverviewSummary/.test(layout));
+check("Approve is hidden on an Active pack (tax and policy), the not-approved chip stays",
+  (layout.match(/\{selectedPack\.status !== "Active" && \(\s*<button\s*onClick=\{handleApprove\}/g) || []).length === 2
+  && summary.includes('"Not approved yet"'));
 check("New Version passes the base pack and used versions", layout.includes("basePack={") && layout.includes("existingVersions={"));
 check("New Version refuses an existing version", modal.includes("existingVersions.includes(version.trim())"));
 check("New Version pre-fills the next version", modal.includes("nextPackVersion(b.version, existingVersions)"));

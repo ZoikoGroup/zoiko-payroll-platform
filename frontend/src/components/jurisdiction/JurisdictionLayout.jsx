@@ -429,7 +429,11 @@ export default function JurisdictionLayout({
                           must approve it before it can go Active — enforced
                           server-side in set_jurisdiction_pack_status; this
                           button just records "I approve this," it doesn't
-                          change status itself. */}
+                          change status itself. Hidden once the pack is Active:
+                          approval only gates activation, so there is nothing
+                          left to approve (the Overview still flags an Active
+                          pack with no recorded approver). */}
+                      {selectedPack.status !== "Active" && (
                       <button
                         onClick={handleApprove}
                         title={selectedPack.approvedById ? `Currently approved by user #${selectedPack.approvedById}` : "Not yet approved"}
@@ -437,6 +441,7 @@ export default function JurisdictionLayout({
                       >
                         <ShieldCheck size={13} /> Approve
                       </button>
+                      )}
                     </>
                   )}
                   {selectedPack.packType === "policy" && (
@@ -461,7 +466,8 @@ export default function JurisdictionLayout({
                           approve it before it can go Active — enforced
                           server-side in set_jurisdiction_pack_status, same
                           as tax packs above; this button just records "I
-                          approve this." */}
+                          approve this." Hidden once Active, as above. */}
+                      {selectedPack.status !== "Active" && (
                       <button
                         onClick={handleApprove}
                         title={selectedPack.approvedById ? `Currently approved by user #${selectedPack.approvedById}` : "Not yet approved"}
@@ -469,6 +475,7 @@ export default function JurisdictionLayout({
                       >
                         <ShieldCheck size={13} /> Approve
                       </button>
+                      )}
                     </>
                   )}
                   <select
