@@ -43,6 +43,12 @@ export function PackTableHeader({ description, locked, lockedNoun, addLabel, onA
 // disabled + aria-disabled, with the reason as a tooltip on the wrapper (a
 // disabled button gets no hover events in every browser, so the wrapper
 // carries the title).
+// The disabled-control pattern: a disabled button gets no hover events in
+// every browser, so the reason sits on a wrapper as its tooltip.
+export function DisabledReason({ reason, children }) {
+  return <span title={reason} className="inline-flex cursor-not-allowed">{children}</span>;
+}
+
 function ActionButton({ label, onClick, disabled, hoverClass, children }) {
   const button = (
     <button onClick={disabled ? undefined : onClick} disabled={disabled}
@@ -51,7 +57,7 @@ function ActionButton({ label, onClick, disabled, hoverClass, children }) {
       {children}
     </button>
   );
-  return disabled ? <span title={LOCKED_ROW_TITLE} className="inline-flex cursor-not-allowed">{button}</span> : button;
+  return disabled ? <DisabledReason reason={LOCKED_ROW_TITLE}>{button}</DisabledReason> : button;
 }
 
 function RowActions({ row, onEdit, onDelete, disabled }) {

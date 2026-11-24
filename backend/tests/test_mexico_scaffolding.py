@@ -190,8 +190,11 @@ def test_mx_hook_module_registered_with_full_contract():
 
     assert jurisdiction_hooks._MODULES["MX"] == "app.modules.payroll.mexico_service"
     # The 13 shared hooks, plus Mexico's optional Phase 2 approval gate and its
-    # pre-transition pack-status check (sweep S1, D-27).
-    optional = {"pack_approval_refusal", "before_pack_status"}
+    # pre-transition pack-status check (sweep S1, D-27), and the report-template
+    # readiness dry run (its gate without the tenant-payslip proof) + the
+    # checks it defers to the real activation.
+    optional = {"pack_approval_refusal", "before_pack_status",
+                "template_activation_readiness", "template_activation_deferred_checks"}
     assert set(mexico_service.JURISDICTION_HOOKS) == _HOOK_KEYS | optional
     for name in _HOOK_KEYS | optional:
         assert callable(jurisdiction_hooks.get("MX", name)), name

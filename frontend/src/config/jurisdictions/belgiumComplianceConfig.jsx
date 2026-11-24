@@ -33,6 +33,8 @@ export const BELGIUM_TAB_ALIASES = {
   "be-activation": "be-release",
   "be-signing": "be-release",
   "be-decisions": "be-release",
+  // The generic key other pages link to (report templates' "Release readiness").
+  "release-readiness": "be-release",
 };
 
 export function belgiumExtraTabs() {

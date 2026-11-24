@@ -321,8 +321,26 @@ def template_activation_refusal(db: Session, template, actor_id: Optional[int]) 
     permanent refusal — its release gates SIGNED, its statutory content Active,
     and its fields proven on a committed Mexican payslip (mexico_report_service)."""
     from app.modules.payroll import mexico_report_service
+    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
 
-    return mexico_report_service.mx_report_activation_refusal(db, template)
+    refusal = mexico_report_service.mx_report_activation_refusal(db, template)
+    return ActivationRefusal(refusal, JURISDICTION_GATE) if refusal else None
+
+
+def template_activation_readiness(db: Session, template, actor_id: Optional[int]) -> Optional[str]:
+    """Readiness dry run (optional hook): the same gate without the payslip proof,
+    which reads tenant data — see template_activation_deferred_checks."""
+    from app.modules.payroll import mexico_report_service
+    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
+
+    refusal = mexico_report_service.mx_report_activation_refusal(db, template, tenant_proof=False)
+    return ActivationRefusal(refusal, JURISDICTION_GATE) if refusal else None
+
+
+def template_activation_deferred_checks(db: Session, template) -> list:
+    from app.modules.payroll import mexico_report_service
+
+    return mexico_report_service.mx_report_deferred_checks(db, template)
 
 
 # ---- Calculation and run hooks ----
@@ -463,6 +481,8 @@ JURISDICTION_HOOKS = {
     "pack_approval_refusal": "mx_pack_approval_refusal",
     "statutory_editors": "statutory_editors",
     "template_activation_refusal": "template_activation_refusal",
+    "template_activation_readiness": "template_activation_readiness",
+    "template_activation_deferred_checks": "template_activation_deferred_checks",
     "calc_inputs": "calc_inputs",
     "payment_treatment": "payment_treatment",
     "before_run_transition": "_mx_before_run_transition",

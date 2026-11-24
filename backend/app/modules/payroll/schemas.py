@@ -2788,6 +2788,11 @@ class ReportTemplateResponse(BaseModel):
     createdAt:           Optional[datetime] = Field(None, validation_alias="created_at", serialization_alias="createdAt")
     updatedAt:           Optional[datetime] = Field(None, validation_alias="updated_at", serialization_alias="updatedAt")
     components:          List[ReportTemplateComponentResponse] = []
+    # Computed per request for the calling Super Admin (never stored / cached):
+    # service.report_template_activation_readiness. None on responses that do
+    # not compute it (create / status change / approve).
+    activationReadiness: Optional[dict] = Field(None, validation_alias="activation_readiness",
+                                                serialization_alias="activationReadiness")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -3454,6 +3459,10 @@ class ActiveTaxConfigurationResponse(BaseModel):
 class TaxConfigurationAuditResponse(BaseModel):
     id: int
     actorId: Optional[int] = Field(None, validation_alias="actor_id", serialization_alias="actorId")
+    # Display name of the actor — first + last name only (never the email). Set
+    # by endpoints that resolve it (report-template audit); None elsewhere and
+    # for a system process.
+    actorName: Optional[str] = Field(None, validation_alias="actor_name", serialization_alias="actorName")
     action: str
     entityType: str = Field(validation_alias="entity_type", serialization_alias="entityType")
     entityId: int = Field(validation_alias="entity_id", serialization_alias="entityId")

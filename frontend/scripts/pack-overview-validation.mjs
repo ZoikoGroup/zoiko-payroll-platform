@@ -65,7 +65,7 @@ const rowTables = read("components/jurisdiction/PackRowTables.jsx");
 check("Active pack: shared edit/delete icons are disabled, aria-disabled, with the locked tooltip",
   rowTables.includes('export const LOCKED_ROW_TITLE = "Active pack is locked — create a New Version to edit"')
   && rowTables.includes("disabled={disabled}") && rowTables.includes("aria-disabled={disabled || undefined}")
-  && rowTables.includes("title={LOCKED_ROW_TITLE}") && rowTables.includes("onClick={disabled ? undefined : onClick}")
+  && rowTables.includes("<DisabledReason reason={LOCKED_ROW_TITLE}>") && rowTables.includes("<span title={reason} className=\"inline-flex cursor-not-allowed\">") && rowTables.includes("onClick={disabled ? undefined : onClick}")
   && read("components/jurisdiction/RatesTab.jsx").includes("actionsDisabled={isActive}")
   && read("components/jurisdiction/SlabsTab.jsx").includes("actionsDisabled={isActive}"));
 const rateForm = read("components/jurisdiction/RateFormModal.jsx");

@@ -96,7 +96,10 @@ def statutory_editors(db: Session, pack) -> set:
 
 
 def template_activation_refusal(db: Session, template, actor_id: Optional[int]) -> Optional[str]:
-    return f"Brazil report-template activation is refused: Brazil report templates are {_NOT_BUILT}."
+    from app.modules.payroll.template_activation import NOT_BUILT, ActivationRefusal
+
+    return ActivationRefusal(f"Brazil report-template activation is refused: Brazil report templates are {_NOT_BUILT}.",
+                             NOT_BUILT)
 
 
 # ---- Calculation and run hooks (Phase 6) ----

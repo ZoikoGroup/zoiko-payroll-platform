@@ -2750,32 +2750,33 @@ def golden_certification_status(db: Session) -> dict:
 
 def template_activation_refusal(db: Session, template, actor_id: Optional[int]) -> Optional[str]:
     from app.modules.payroll.models import SourceArtifact
+    from app.modules.payroll.template_activation import FOUR_EYES, JURISDICTION_GATE, ActivationRefusal
 
     if template.jurisdiction_country != HK:
         return None
     if not template.source_document_id:
-        return (f"Hong Kong template {template.template_key} v{template.version} has no source evidence — link the "
-                "official source document (a SourceArtifact) before activation.")
+        return ActivationRefusal(f"Hong Kong template {template.template_key} v{template.version} has no source evidence — link the "
+                "official source document (a SourceArtifact) before activation.", JURISDICTION_GATE)
     artifact = db.get(SourceArtifact, template.source_document_id)
     if not _reviewed_by_other(artifact):
-        return (f"The source evidence of Hong Kong template {template.template_key} v{template.version} has not been "
-                "reviewed by a Super Admin other than its uploader (an uploaded document is required).")
+        return ActivationRefusal(f"The source evidence of Hong Kong template {template.template_key} v{template.version} has not been "
+                "reviewed by a Super Admin other than its uploader (an uploaded document is required).", JURISDICTION_GATE)
     # Same source rule as statutory values: hashed, current, and not itself flagged unverified.
     if not artifact.checksum_sha256:
-        return (f"The source evidence of Hong Kong template {template.template_key} v{template.version} has no SHA-256 "
-                "— re-upload the official document so its hash is recorded.")
+        return ActivationRefusal(f"The source evidence of Hong Kong template {template.template_key} v{template.version} has no SHA-256 "
+                "— re-upload the official document so its hash is recorded.", JURISDICTION_GATE)
     if artifact.superseded_by_id:
-        return (f"The source evidence of Hong Kong template {template.template_key} v{template.version} has been "
-                "superseded — link the current version of the document.")
+        return ActivationRefusal(f"The source evidence of Hong Kong template {template.template_key} v{template.version} has been "
+                "superseded — link the current version of the document.", JURISDICTION_GATE)
     if "[UNVERIFIED" in (artifact.title or ""):
-        return (f"The source evidence of Hong Kong template {template.template_key} v{template.version} is marked "
-                "UNVERIFIED — link a verified official source.")
+        return ActivationRefusal(f"The source evidence of Hong Kong template {template.template_key} v{template.version} is marked "
+                "UNVERIFIED — link a verified official source.", JURISDICTION_GATE)
     if not template.approved_by_id:
-        return (f"Hong Kong template {template.template_key} v{template.version} has no recorded approval — "
-                "approve it (four-eyes) before activation.")
+        return ActivationRefusal(f"Hong Kong template {template.template_key} v{template.version} has no recorded approval — "
+                "approve it (four-eyes) before activation.", FOUR_EYES)
     if actor_id is not None and actor_id == template.approved_by_id:
-        return (f"Hong Kong template {template.template_key} v{template.version} must be activated by a Super Admin "
-                "other than its approver.")
+        return ActivationRefusal(f"Hong Kong template {template.template_key} v{template.version} must be activated by a Super Admin "
+                "other than its approver.", FOUR_EYES)
     return None
 
 

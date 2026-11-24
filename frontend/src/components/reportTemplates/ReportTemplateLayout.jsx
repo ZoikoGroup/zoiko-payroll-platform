@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, History, FileBarChart, ScrollText, ShieldCheck, CalendarClock, X } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { ArrowLeft, Plus, Trash2, History, FileBarChart, FileWarning, ScrollText, ShieldCheck, CalendarClock, X } from "lucide-react";
 import ConfirmDialog from "../ConfirmDialog";
 import StatusPill from "../StatusPill";
 import Field from "../jurisdiction/Field";
@@ -17,7 +17,26 @@ import ComponentsTab from "./ComponentsTab";
 import FilingCalendarTab from "./FilingCalendarTab";
 import { filterTemplates } from "./filterTemplates";
 import { buildDetailTabs } from "./detailTabs";
-import { describeAuditEntry } from "./auditView";
+import { actorLabel, describeAuditEntry, groupAuditEntries } from "./auditView";
+import Collapsible from "../jurisdiction/Collapsible";
+import { DisabledReason } from "../jurisdiction/PackRowTables";
+import { canApprove, deleteState, missingRequiredFields, toleranceLabel } from "./actions";
+import { activationBanner, activeOptionReason, availabilityLabel, listBadge, statusOptions } from "./readiness";
+import Notice from "../jurisdiction/Notice";
+
+// Badge beside a status pill: "Not built" / "Blocked · G3", the backend's
+// reason as its tooltip (and its accessible description).
+function ReadinessBadge({ badge }) {
+  if (!badge) return null;
+  return (
+    <span title={badge.title} aria-label={`${badge.label}: ${badge.title}`} data-testid={`readiness-badge-${badge.key}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+        badge.key === "not-built" ? "border-border bg-surface-muted text-foreground-muted" : "border-error/40 bg-error/5 text-error"
+      }`}>
+      {badge.label}
+    </span>
+  );
+}
 
 const TABS = [
   { key: "overview", label: "Overview", icon: FileBarChart },
@@ -58,6 +77,79 @@ const EDITABLE_STATUSES = ["Draft", "Review", "Approved"];
 // presentation only: every lifecycle rule stays server-side.
 const NO_EXTRAS = [];
 
+// A required metadata field: its value, or a "Missing" warning instead of "—".
+function RequiredField({ label, value, wide = false }) {
+  const missing = value === null || value === undefined || String(value).trim() === "";
+  const key = label.toLowerCase().replace(/[^a-z]+/g, "-");
+  return (
+    <div className={wide ? "sm:col-span-2" : undefined} data-testid={`overview-field-${key}`}>
+      <p className="mb-1 text-foreground-muted">{label}</p>
+      {missing ? (
+        <span data-testid={`overview-missing-${key}`}
+          className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning">
+          <FileWarning size={12} aria-hidden="true" /> Missing
+        </span>
+      ) : <p className="font-medium text-foreground">{value}</p>}
+    </div>
+  );
+}
+
+const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
+
+// One audit row: what happened, by whom (name, else "User #<id>"), when, and
+// the fields that changed.
+function AuditEntry({ entry: a }) {
+  const { summary, rows } = describeAuditEntry(a);
+  return (
+    <div className="rounded-lg border border-border-light p-2 text-xs" data-testid="audit-entry">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-foreground">
+          {a.action} — {a.entityType} <span className="text-foreground-disabled">· by {actorLabel(a)}</span>
+        </span>
+        <span className="text-foreground-disabled">{when(a.createdAt)}</span>
+      </div>
+      {summary && <p className="mt-1 font-semibold text-error" data-testid="audit-refused">{summary}</p>}
+      {a.reason && <p className="mt-1 text-foreground-secondary">{a.reason}</p>}
+      {rows.length > 0 && (
+        <div className="mt-1.5 space-y-0.5 border-t border-border-light pt-1.5">
+          {rows.map((r) => (
+            <div key={r.key} className="flex items-center gap-1.5 font-mono text-[11px]">
+              <span className="text-foreground-disabled">{r.key}:</span>
+              <span className="text-error line-through">{r.from}</span>
+              <span className="text-foreground-disabled">→</span>
+              <span className="text-success">{r.to}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Consecutive identical refusals (same actor, same move, same reason) shown
+// as one row that expands to every attempt — every audit record is kept.
+function RefusalGroup({ group }) {
+  const { latest, entries, count } = group;
+  const { summary } = describeAuditEntry(latest);
+  return (
+    <Collapsible
+      testId="audit-refusal-group"
+      title={`Refused ×${count} — last at ${when(latest.createdAt)}`}
+      badge={<span className="text-[11px] text-foreground-muted">by {actorLabel(latest)}</span>}
+      summary={[summary, latest.reason].filter(Boolean).join(" · ")}
+    >
+      <ul className="space-y-1 text-xs" data-testid="audit-refusal-attempts">
+        {entries.map((e) => (
+          <li key={e.id} className="flex flex-wrap justify-between gap-2 text-foreground-secondary">
+            <span>Attempt by {actorLabel(e)}</span>
+            <span className="text-foreground-disabled">{when(e.createdAt)}</span>
+          </li>
+        ))}
+      </ul>
+    </Collapsible>
+  );
+}
+
 export default function ReportTemplateLayout({
   country, countryName, initialState = "", onStateChange, embedded = false,
   extraDetailTabs = NO_EXTRAS, renderOverviewExtra = null, pageTools = NO_EXTRAS, hiddenDetailTabs = NO_EXTRAS,
@@ -65,6 +157,7 @@ export default function ReportTemplateLayout({
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [state, setStateRaw] = useState(initialState || "");
   const [filterText, setFilterText] = useState("");
   const [templates, setTemplates] = useState([]);
@@ -154,6 +247,17 @@ export default function ReportTemplateLayout({
   }
 
   const editable = Boolean(detail && EDITABLE_STATUSES.includes(detail.status));
+  // Readiness is the backend's dry run of the status change (detail response):
+  // presentation only — the status change itself still refuses.
+  const activeReason = detail ? activeOptionReason(STATUS_OPTIONS, detail) : null;
+  const deletion = deleteState(detail);
+  const missingFields = missingRequiredFields(detail);
+  const banner = detail ? activationBanner(detail) : null;
+  // The compliance page uses the same country slug as this page
+  // (/super-admin/report-templates/<slug> -> /super-admin/compliance/<slug>;
+  // the two route maps are identical, see report-template-ui-validation). No
+  // link when embedded in another page.
+  const complianceRoute = (/^\/super-admin\/report-templates\/([a-z-]+)/.exec(pathname) || [])[1] || null;
   const ctx = { reloadDetail: loadDetail, reloadTemplates: loadTemplates, selectTemplate: setSelectedId };
   const activeTool = pageTools.find((t) => t.key === openTool);
   const activeExtraTab = extraDetailTabs.find((t) => t.key === tab);
@@ -240,9 +344,10 @@ export default function ReportTemplateLayout({
                   }`}
                 >
                   <span className="font-semibold">{t.name}</span>
-                  <span className="flex items-center gap-2 text-foreground-muted">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-foreground-muted">
                     v{t.version} · {t.reportType}{t.jurisdictionState ? ` · ${t.jurisdictionState}` : ""} · FY {t.reportingYear}
                     <StatusPill status={STATUS_PILL_MAP[t.status] || "pending"} label={t.status} />
+                    <ReadinessBadge badge={listBadge(t)} />
                   </span>
                 </button>
               ))}
@@ -262,6 +367,12 @@ export default function ReportTemplateLayout({
                   <div className="flex items-center gap-2">
                     <h2 className="text-lg font-bold text-foreground">{detail.name}</h2>
                     <StatusPill status={STATUS_PILL_MAP[detail.status] || "pending"} label={detail.status} />
+                    {availabilityLabel(detail) ? (
+                      <span data-testid="availability-label"
+                        className="inline-flex items-center rounded-full border border-border bg-surface-muted px-2.5 py-0.5 text-xs font-medium text-foreground-muted">
+                        {availabilityLabel(detail)}
+                      </span>
+                    ) : <ReadinessBadge badge={listBadge(detail)} />}
                   </div>
                   <p className="mt-0.5 text-xs text-foreground-muted">
                     v{detail.version} · {detail.reportType} · {detail.jurisdictionCountry}{detail.jurisdictionState ? ` / ${detail.jurisdictionState}` : ""} · FY {detail.reportingYear}
@@ -274,22 +385,66 @@ export default function ReportTemplateLayout({
                       edited this template must approve it before it can go
                       Published/Active — enforced server-side in
                       set_report_template_status; this button just records
-                      "I approve this," it doesn't change status itself. */}
-                  <button
-                    onClick={handleApprove}
-                    title={detail.approvedById ? `Currently approved by user #${detail.approvedById}` : "Not yet approved"}
-                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
-                  >
-                    <ShieldCheck size={13} /> Approve
-                  </button>
-                  <select className={inputClass + " w-auto"} value={detail.status} onChange={(e) => changeStatus(e.target.value)}>
-                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                      "I approve this," it doesn't change status itself.
+                      Offered only before release (Draft / Review / Approved):
+                      the backend refuses to replace a released version's
+                      approval (set_report_template_approver). */}
+                  {canApprove(detail) && (
+                    <button
+                      onClick={handleApprove} data-testid="rt-action-approve"
+                      title={detail.approvedById ? `Currently approved by user #${detail.approvedById}` : "Not yet approved"}
+                      className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted"
+                    >
+                      <ShieldCheck size={13} /> Approve
+                    </button>
+                  )}
+                  <select className={inputClass + " w-auto"} value={detail.status} onChange={(e) => changeStatus(e.target.value)}
+                    aria-describedby={activeReason ? "active-blocked-reason" : undefined} aria-label="Status">
+                    {statusOptions(STATUS_OPTIONS, detail).map((o) => (
+                      <option key={o.value} value={o.value} disabled={o.disabled} title={o.reason || undefined}>
+                        {o.value}{o.disabled && o.value === "Active" ? " (unavailable)" : ""}
+                      </option>
+                    ))}
                   </select>
-                  <button onClick={() => setDeletingTemplate(detail)} className="rounded-lg border border-border p-2 text-error hover:bg-error-light">
-                    <Trash2 size={14} />
-                  </button>
+                  {deletion.allowed ? (
+                    <button onClick={() => setDeletingTemplate(detail)} aria-label="Delete template" data-testid="rt-action-delete"
+                      className="rounded-lg border border-border p-2 text-error hover:bg-error-light">
+                      <Trash2 size={14} />
+                    </button>
+                  ) : (
+                    <DisabledReason reason={deletion.reason}>
+                      <button disabled aria-disabled="true" aria-label={`Delete template — ${deletion.reason}`} data-testid="rt-action-delete"
+                        className="pointer-events-none rounded-lg border border-border p-2 text-error opacity-40">
+                        <Trash2 size={14} />
+                      </button>
+                    </DisabledReason>
+                  )}
                 </div>
               </div>
+
+              {activeReason && activeReason !== banner?.message && (
+                <p id="active-blocked-reason" data-testid="active-blocked-reason" className="-mt-2 mb-3 text-xs text-foreground-muted">
+                  <span className="font-semibold">Active is unavailable:</span> {activeReason}
+                </p>
+              )}
+              {banner && (
+                <div className="mb-4">
+                  <Notice tone={banner.tone} title={banner.title} testId="activation-banner"
+                    actions={banner.linkToReadiness && complianceRoute ? (
+                      <Link to={`/super-admin/compliance/${complianceRoute}?tab=release-readiness`}
+                        className="rounded-lg border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-foreground-secondary hover:bg-surface-muted">
+                        Release readiness{banner.gate ? ` (${banner.gate})` : ""}
+                      </Link>
+                    ) : null}>
+                    {banner.message}
+                    {banner.deferred.length > 0 && (
+                      <ul className="mt-1 list-disc pl-4" data-testid="activation-deferred">
+                        {banner.deferred.map((d) => <li key={d}>{d}</li>)}
+                      </ul>
+                    )}
+                  </Notice>
+                </div>
+              )}
 
               <div className="mb-4 flex items-center gap-1 border-b border-border overflow-x-auto">
                 {tabs.map((t) => (
@@ -308,18 +463,31 @@ export default function ReportTemplateLayout({
                 <div className="mb-4">{renderOverviewExtra(detail, ctx)}</div>
               )}
 
+              {tab === "overview" && missingFields.length > 0 && (
+                <div className="mb-4 space-y-1 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-xs text-warning"
+                  data-testid="overview-needs-attention">
+                  <p className="flex items-center gap-1.5 font-semibold">
+                    <FileWarning size={13} aria-hidden="true" /> Needs attention ({missingFields.length})
+                  </p>
+                  <p>Not filled in: {missingFields.join(", ")}.</p>
+                </div>
+              )}
+
               {tab === "overview" && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <Field label="Regulatory Authority" value={detail.regulatoryAuthority} />
-                  <Field label="Reconciliation Tolerance" value={detail.reconciliationTolerance} />
+                  <RequiredField label="Regulatory Authority" value={detail.regulatoryAuthority} />
+                  <div data-testid="overview-field-tolerance">
+                    <p className="mb-1 text-foreground-muted">Reconciliation Tolerance</p>
+                    <p className="font-medium text-foreground">
+                      {toleranceLabel(detail)}
+                      {toleranceLabel(detail) === "Exact match" && <span className="font-normal text-foreground-muted"> (no tolerance set)</span>}
+                    </p>
+                  </div>
                   <Field label="Document Scope" value={detail.documentScope === "PER_EMPLOYEE" ? "Per-Employee (certificate)" : "Aggregate (one document for the run)"} />
                   <Field label="Source Document" value={detail.sourceDocumentId ? `Artifact #${detail.sourceDocumentId}` : "None linked"} />
-                  <Field label="Source References" value={detail.sourceReferences} />
+                  <RequiredField label="Source References" value={detail.sourceReferences} />
                   <Field label="Description" value={detail.description} />
-                  <div className="sm:col-span-2">
-                    <p className="text-foreground-muted mb-1">Change Summary</p>
-                    <p className="font-medium text-foreground">{detail.changeSummary || "—"}</p>
-                  </div>
+                  <RequiredField label="Change Summary" value={detail.changeSummary} wide />
                 </div>
               )}
 
@@ -361,33 +529,9 @@ export default function ReportTemplateLayout({
                 <div className="space-y-2">
                   {audit.length === 0 ? (
                     <p className="py-6 text-center text-xs text-foreground-disabled">No audit history yet.</p>
-                  ) : audit.map((a) => {
-                    const { summary, rows } = describeAuditEntry(a);
-                    return (
-                      <div key={a.id} className="rounded-lg border border-border-light p-2 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium text-foreground">
-                            {a.action} — {a.entityType} {a.actorId ? <span className="text-foreground-disabled">· by user #{a.actorId}</span> : null}
-                          </span>
-                          <span className="text-foreground-disabled">{new Date(a.createdAt).toLocaleString()}</span>
-                        </div>
-                        {summary && <p className="mt-1 font-semibold text-error" data-testid="audit-refused">{summary}</p>}
-                        {a.reason && <p className="mt-1 text-foreground-secondary">{a.reason}</p>}
-                        {rows.length > 0 && (
-                          <div className="mt-1.5 space-y-0.5 border-t border-border-light pt-1.5">
-                            {rows.map((r) => (
-                              <div key={r.key} className="flex items-center gap-1.5 font-mono text-[11px]">
-                                <span className="text-foreground-disabled">{r.key}:</span>
-                                <span className="text-error line-through">{r.from}</span>
-                                <span className="text-foreground-disabled">→</span>
-                                <span className="text-success">{r.to}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  ) : groupAuditEntries(audit).map((g) => (g.kind === "refusals" ? (
+                    <RefusalGroup key={`g${g.latest.id}`} group={g} />
+                  ) : <AuditEntry key={g.entry.id} entry={g.entry} />))}
                 </div>
               )}
 
@@ -406,7 +550,8 @@ export default function ReportTemplateLayout({
       )}
       {deletingTemplate && (
         <ConfirmDialog
-          title="Delete Report Template" message={`Permanently delete "${deletingTemplate.name}" v${deletingTemplate.version}? Only allowed with no generated reports and not Published/Active.`}
+          title={deletingTemplate.status === "Approved" ? "Delete Approved Report Template" : "Delete Report Template"}
+          message={deleteState(deletingTemplate).confirmMessage}
           onConfirm={handleDelete} onClose={() => setDeletingTemplate(null)}
         />
       )}
