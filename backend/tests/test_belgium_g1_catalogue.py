@@ -80,3 +80,18 @@ def test_an_empty_newer_pack_no_longer_passes_no_pending_rows(db):
     assert checks["catalogue_complete"]["ok"] is False
     assert checks["no_pending_rows"]["ok"] is False                   # used to read "every row signed"
     assert not gate["passed"]
+
+
+# ── Release Readiness: who acts on each check ────────────────────────────────
+def test_every_readiness_check_names_who_acts(db):
+    from app.modules.payroll import belgium_readiness as r
+
+    gates = r.be_readiness(db)["gates"]
+    checks = [c for g in gates for c in g["checks"]]
+    assert checks and all(c["actor"] in r.ACTORS for c in checks)
+    by_key = {c["key"]: c["actor"] for c in checks}
+    assert by_key["transmission_adapter"] == "code"
+    assert by_key["catalogue_complete"] == "data" and by_key["no_pending_rows"] == "sign-off"
+    assert by_key["be-signoff-security"] == "sign-off" and by_key["be-owner-content"] == "sign-off"
+    assert all(by_key[k] == "data" for k in by_key if k.startswith("schema_"))
+    assert all(g["owner"] for g in gates)                                  # the gate's owner is shown too

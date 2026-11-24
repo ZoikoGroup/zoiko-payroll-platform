@@ -50,6 +50,32 @@ SECURITY_TAGS = ("BE-SIGNOFF-SECURITY", "BE-SIGNOFF-PRIVACY")
 OWNER_TAGS = tuple(f"BE-OWNER-{o}" for o in ("CONTENT", "PAYROLL-OPS", "INCIDENT", "CHANGE-CALENDAR", "SPECIALIST"))
 
 
+# Who acts on a failing check — shown on the Release Readiness tab as Done /
+# Missing / Who acts. "code" = engineering work; "data" = content or
+# configuration someone must supply (rows, schemas, launch employers, keys);
+# "sign-off" = a human approval or accepted evidence (signing, certification,
+# owner / security sign-offs). Keys not listed: evidence tags are sign-offs.
+CHECK_ACTORS = {
+    "pack_seeded": "data", "catalogue_complete": "data", "no_pending_rows": "sign-off",
+    "authority_examples_match": "data", "golden_certification": "sign-off",
+    "launch_employers_named": "data", "sector_coverage": "data", "no_special_regimes": "data",
+    "transmission_adapter": "code",
+    "parallel_cycles": "data",
+    "accepted_dimona": "data", "accepted_dmfa": "data", "reconciled_obligation": "data",
+    "be_identifier_keyring": "data", "be_identifier_fingerprint_key": "data",
+    "retention_decided": "sign-off",
+}
+ACTORS = ("code", "data", "sign-off")
+
+
+def check_actor(key: str) -> str:
+    if key in CHECK_ACTORS:
+        return CHECK_ACTORS[key]
+    if key.startswith("schema_"):
+        return "data"                 # an authority schema to archive
+    return "sign-off"                 # an evidence tag (BE-CONNECTIVITY-*, BE-SIGNOFF-*, BE-OWNER-*, ...)
+
+
 def _be_canonical_pack(db: Session):
     from app.modules.payroll.models import JurisdictionPack
 
@@ -201,7 +227,7 @@ def be_code_checks(db: Session) -> dict:
 
     def adder(gate):
         def add(key, ok, detail):
-            checks[gate].append({"key": key, "ok": bool(ok), "detail": detail})
+            checks[gate].append({"key": key, "ok": bool(ok), "detail": detail, "actor": check_actor(key)})
         return add
 
     pack = _be_canonical_pack(db)

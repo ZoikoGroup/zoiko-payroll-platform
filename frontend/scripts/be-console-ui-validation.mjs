@@ -101,7 +101,10 @@ check("activation readiness, signing status and owner decisions are sections of 
     assert(release.includes(`<${name}`), `${name} rendered`);
   }
   assert((release.match(/<Collapsible/g) || []).length >= 5, "gate cards and sections are collapsible");
-  assert(/list-disc/.test(release) && /c\.detail/.test(release), "failing checks listed as bullets");
+  assert(release.includes('data-testid="be-gate-details"') && release.includes('data-testid="be-gate-done"')
+    && /c\.detail/.test(release), "each gate lists what is Missing and what is Done");
+  assert(release.includes("<ActorBadge actor={c.actor} />") && release.includes('data-testid="be-gate-owner"')
+    && release.includes('"sign-off": "Sign-off"'), "who acts: the backend's actor per check + the gate owner");
   for (const old of ["be-activation", "be-signing", "be-decisions"]) assert(!new RegExp(`tab\\("${old}"`).test(beConfig), `${old} still a tab`);
 });
 
