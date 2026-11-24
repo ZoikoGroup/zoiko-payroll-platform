@@ -1413,8 +1413,10 @@ def _pl_template_activation_refusal(db: Session, template, actor_id=None) -> Opt
     report_type = str(getattr(template, "report_type", "") or "").upper()
     if country != PL and not report_type.startswith("PL_"):
         return None
-    return ("Poland ZUS / PIT form templates stay inactive until the official schemas are archived and the "
-            "filing path is certified (gate G4, PL-019).")
+    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
+
+    return ActivationRefusal("Poland ZUS / PIT form templates stay inactive until the official schemas are archived "
+                             "and the filing path is certified (gate G4, PL-019).", JURISDICTION_GATE, gate="G4")
 
 
 def _pl_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:

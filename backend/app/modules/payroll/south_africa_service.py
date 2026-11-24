@@ -949,8 +949,10 @@ def template_activation_refusal(db: Session, template, actor_id: Optional[int]) 
         return None
     version = next((row[5] for row in content.ZA_SCALAR_CONTENT if row[0] == "za_brs_version"), None)
     if not (content.ZA_BRS_CATALOG.get(version) or {}).get("source_codes"):
-        return (f"South Africa: SARS PAYE BRS v{version} source-code catalogue is not archived (evidence S4) - "
-                f"{report_type} templates stay inactive until it is.")
+        from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
+
+        return ActivationRefusal(f"South Africa: SARS PAYE BRS v{version} source-code catalogue is not archived "
+                                 f"(evidence S4) - {report_type} templates stay inactive until it is.", JURISDICTION_GATE)
     return None
 
 

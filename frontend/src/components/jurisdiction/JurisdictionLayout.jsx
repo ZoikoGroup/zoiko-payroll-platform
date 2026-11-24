@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Plus, Pencil, History, ShieldCheck, Users, ScrollText, Eye, Zap } from "lucide-react";
 import ConfirmDialog from "../ConfirmDialog";
 import StatusPill from "../StatusPill";
@@ -121,6 +121,11 @@ export default function JurisdictionLayout({
   const [selectedPack, setSelectedPack] = useState(null);
   const [tab, setTabRaw] = useState("overview");
   const setTab = (key) => setTabRaw((tabAliases && tabAliases[key]) || key);
+  // `?tab=<key>` (e.g. a report template's link to a country's Release
+  // Readiness): opens the first selected pack on that tab, through tabAliases;
+  // an unknown key falls back to Overview below. Read once, on mount.
+  const [searchParams] = useSearchParams();
+  const [requestedTab, setRequestedTab] = useState(() => searchParams.get("tab"));
 
   const [rates, setRates] = useState([]);
   const [slabs, setSlabs] = useState([]);
@@ -213,7 +218,12 @@ export default function JurisdictionLayout({
   const [tabResetPackId, setTabResetPackId] = useState(selectedPack?.id);
   if (selectedPack?.id !== tabResetPackId) {
     setTabResetPackId(selectedPack?.id);
-    setTabRaw("overview");
+    if (selectedPack && requestedTab) {
+      setTabRaw((tabAliases && tabAliases[requestedTab]) || requestedTab);
+      setRequestedTab(null);
+    } else {
+      setTabRaw("overview");
+    }
   }
 
   async function changeStatus(newStatus) {
@@ -282,6 +292,11 @@ export default function JurisdictionLayout({
   if (restrictTo) {
     tabs = tabs.filter((t) => restrictTo.includes(t.key));
     overflowTabs = overflowTabs.filter((t) => restrictTo.includes(t.key));
+  }
+  // A tab key this pack does not have (an old or foreign ?tab= link) shows
+  // Overview — same "adjust state while rendering" pattern as above.
+  if (selectedPack && tab !== "overview" && ![...tabs, ...overflowTabs].some((t) => t.key === tab)) {
+    setTabRaw("overview");
   }
   const tabLabel = (t) => (t.key === "slabs" ? (slabsOverrideActive ? resolveOverride(slabsTabOverride.label, selectedPack) : slabsLabel) : t.label);
 

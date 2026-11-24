@@ -461,8 +461,11 @@ def be_pack_assignment_refusal(pack, organization_ids=None) -> Optional[str]:
 
 # ── 10. template_activation_refusal (type a) ────────────────────────────────
 def _be_template_activation_refusal(db: Session, template, actor_id=None) -> Optional[str]:
-    return ("Belgium form templates (Dimona, DmfA, 281.10, payslip) stay inactive until the authority schemas are "
-            "archived and the filing path is certified (gate G3).")
+    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
+
+    return ActivationRefusal("Belgium form templates (Dimona, DmfA, 281.10, payslip) stay inactive until the authority "
+                             "schemas are archived and the filing path is certified (gate G3).",
+                             JURISDICTION_GATE, gate="G3")
 
 
 # ── 11. pack_holidays (type a) ──────────────────────────────────────────────

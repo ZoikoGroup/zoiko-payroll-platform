@@ -1596,10 +1596,17 @@ def list_report_templates(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.list_report_templates(
+    rows = payroll_service.list_report_templates(
         db, country=country, state=state, reporting_year=reportingYear, report_type=reportType,
         status=status, search=search, include_states=includeStates,
     )
+    # Per request, for the calling Super Admin; a transient attribute, never stored.
+    # No user (a direct call, e.g. a test) = no actor: the actor-dependent
+    # four-eyes rule then simply does not apply to the dry run.
+    actor_id = getattr(current_user, "id", None)
+    for row in rows:
+        row.activation_readiness = payroll_service.report_template_list_readiness(db, row, actor_id)
+    return rows
 
 
 @router.get(
@@ -1669,7 +1676,12 @@ def get_report_template_detail(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.get_report_template_detail(db, id)
+    detail = payroll_service.get_report_template_detail(db, id)
+    # Full readiness (a pure dry run of the status change's checks), computed
+    # per request for the calling Super Admin — never cached across users.
+    detail["activation_readiness"] = payroll_service.report_template_activation_readiness(
+        db, payroll_service.get_report_template(db, id), getattr(current_user, "id", None))
+    return detail
 
 
 @router.put(
@@ -1741,7 +1753,11 @@ def get_report_template_audit(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.get_report_template_audit(db, id)
+    rows = payroll_service.get_report_template_audit(db, id)
+    names = payroll_service.audit_actor_names(db, (r.actor_id for r in rows))
+    for row in rows:                       # transient display attribute, never stored
+        row.actor_name = names.get(row.actor_id)
+    return rows
 
 
 @router.delete(

@@ -864,8 +864,10 @@ def _jp_template_activation_refusal(db: Session, template, actor_id: Optional[in
     report_type = str(getattr(template, "report_type", "") or "").upper()
     if country != JP and not report_type.startswith("JP_"):
         return None
-    return ("Japan filing and payment-report templates stay inactive until the official "
-            "form revision and the JP-1 evidence decision are recorded.")
+    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
+
+    return ActivationRefusal("Japan filing and payment-report templates stay inactive until the official "
+                             "form revision and the JP-1 evidence decision are recorded.", JURISDICTION_GATE)
 
 
 def _jp_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:
