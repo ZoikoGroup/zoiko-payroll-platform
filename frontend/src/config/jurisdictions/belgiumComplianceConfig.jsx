@@ -12,9 +12,10 @@ import { TAB_GROUPS } from "../../components/jurisdiction/belgium/beShared";
 
 // Super Admin Belgium page (ZP-BE-ENG-001 Phase 3B; spec §14 "Content
 // control"), laid out like every other country page (Puerto Rico is the
-// reference): Overview | Contribution Rates | Tax Slabs | Policy & Rounding |
-// Release Readiness | Organizations | Versions | Audit, with the remaining data
-// tabs in the "More" menu.
+// reference): Overview | Contributions | Tax Slabs | Policy | Readiness |
+// Organizations | Versions | Audit, with the remaining data tabs in the "More"
+// menu. Tabs that do not fit the width overflow from the end (Audit, then
+// Versions, ...) into More as well.
 //
 // The generic Contribution Rates / Tax Slabs editors stay hidden: Belgian
 // statutory rows change only through the governed signing console (the backend
@@ -46,12 +47,12 @@ export function belgiumExtraTabs() {
     return render;
   };
   return [
-    tab("be-rates", "Contribution Rates", ScrollText, "overview", ({ pack }) => <BEContributionRatesTab pack={pack} />),
+    tab("be-rates", "Contributions", ScrollText, "overview", ({ pack }) => <BEContributionRatesTab pack={pack} />),
     tab("be-slabs", "Tax Slabs", ScrollText, "be-rates", ({ pack }) => <BETaxSlabsTab pack={pack} />),
-    tab("be-policy", "Policy & Rounding", Settings2, "be-slabs",
+    tab("be-policy", "Policy", Settings2, "be-slabs",
       rows(TAB_GROUPS.policy, "Scope, policy and rounding",
         "Supported scope and the rounding rules (signed pack rows only; unsigned rounding blocks the calculation).")),
-    tab("be-release", "Release Readiness", Gauge, "be-policy", ({ pack }) => <BEReleaseReadinessTab pack={pack} />),
+    tab("be-release", "Readiness", Gauge, "be-policy", ({ pack }) => <BEReleaseReadinessTab pack={pack} />),
     // ── "More" menu ──
     more("be-holiday-pay", "Holiday pay", Palmtree,
       rows(TAB_GROUPS.holidayPay, "Annual holiday pay",
@@ -85,9 +86,6 @@ export const belgiumComplianceConfig = {
   },
   hiddenTabs: ["rates", "slabs"],
   adaptiveTabs: true,
-  // Below 1760px: pack chips above the panel and no tab icons, so the eight
-  // core tabs stay visible from 1280px (only the data tabs go into More).
-  compactUntilWide: true,
   // Hotfix activation self-approves, and Belgium refuses self-approval
   // (four-eyes; service._SELF_APPROVAL_REFUSED_COUNTRIES) — same opt-out as Mexico.
   hideHotfixActivate: true,

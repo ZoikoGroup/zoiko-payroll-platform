@@ -64,10 +64,10 @@ const PRIMARY_TABS = ["be-rates", "be-slabs", "be-policy", "be-release"];
 const MORE_TABS = ["be-holiday-pay", "be-wages-time", "be-absence", "be-public-holidays", "be-earning",
   "be-joint-committees", "be-sources"];
 
-check("primary tabs: Overview | Contribution Rates | Tax Slabs | Policy & Rounding | Release Readiness (+ shared tabs)", () => {
+check("primary tabs: Overview | Contributions | Tax Slabs | Policy | Readiness (+ shared tabs)", () => {
   const keys = [...beConfig.matchAll(/\btab\("(be-[a-z-]+)", "([^"]+)"[^,]*, [^,]*, "([a-z-]+)"/g)];
   assert(keys.map((m) => m[1]).join() === PRIMARY_TABS.join(), `primary tab keys: ${keys.map((m) => m[1]).join(", ")}`);
-  assert(keys.map((m) => m[2]).join() === "Contribution Rates,Tax Slabs,Policy & Rounding,Release Readiness",
+  assert(keys.map((m) => m[2]).join() === "Contributions,Tax Slabs,Policy,Readiness",
     `labels: ${keys.map((m) => m[2]).join(", ")}`);
   // each anchors after the previous one, starting after Overview
   assert(keys.map((m) => m[3]).join() === ["overview", ...PRIMARY_TABS.slice(0, -1)].join(), "anchors");
@@ -81,13 +81,13 @@ check("data tabs live in the More menu and the tab row never scrolls sideways", 
   assert(keys.join() === MORE_TABS.join(), `More tabs: ${keys.join(", ")}`);
   assert(/overflow: true/.test(beConfig), "More tabs are flagged overflow");
   assert(/adaptiveTabs: true/.test(beConfig), "adaptive tab row");
-  // The eight core tabs stay on one row from 1280px: below 1760px the pack list sits above the panel
-  // and the tab row drops its icons (measured: core tabs need ~811px, the bar gets ~884px at 1280).
-  assert(/compactUntilWide: true/.test(beConfig), "compact layout below 1760px");
+  // Same layout as every country: the pack list in the LEFT column (240px, all compliance pages) at
+  // every width; tabs that do not fit overflow from the end into More (measured in headless Chrome).
+  assert(!/compactUntilWide/.test(beConfig), "no stacked pack chips (commit h reverted)");
   const layoutSrc = read("components/jurisdiction/JurisdictionLayout.jsx");
-  assert(layoutSrc.includes('compactUntilWide ? "grid grid-cols-1 gap-4 min-[1760px]:grid-cols-[280px_1fr]" : "grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]"')
-    && layoutSrc.includes("iconsWhenWide={compactUntilWide}") && layoutSrc.includes("compactUntilWide = false"), "layout wiring (off by default)");
-  assert(read("components/jurisdiction/PackTabBar.jsx").includes('className="hidden min-[1760px]:block"'), "tab icons only when wide");
+  assert(layoutSrc.includes('<div className="grid grid-cols-1 gap-4 lg:grid-cols-[240px_1fr]">')
+    && !/compactUntilWide|iconsWhenWide/.test(layoutSrc), "left-column layout for every country");
+  assert(!/iconsWhenWide|min-\[1760px\]/.test(read("components/jurisdiction/PackTabBar.jsx")), "tab icons always shown");
   const layout = read("components/jurisdiction/JurisdictionLayout.jsx");
   assert(/visibleExtraTabs\.filter\(\(t\) => t\.overflow\)/.test(layout) && /adaptive=\{adaptiveTabs\}/.test(layout), "layout wiring");
   const bar = read("components/jurisdiction/PackTabBar.jsx");
