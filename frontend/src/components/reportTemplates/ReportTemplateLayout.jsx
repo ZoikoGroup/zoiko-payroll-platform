@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, History, FileBarChart, ScrollText, ShieldCheck, CalendarClock, X } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, History, FileBarChart, FileWarning, ScrollText, ShieldCheck, CalendarClock, X } from "lucide-react";
 import ConfirmDialog from "../ConfirmDialog";
 import StatusPill from "../StatusPill";
 import Field from "../jurisdiction/Field";
@@ -20,7 +20,7 @@ import { buildDetailTabs } from "./detailTabs";
 import { actorLabel, describeAuditEntry, groupAuditEntries } from "./auditView";
 import Collapsible from "../jurisdiction/Collapsible";
 import { DisabledReason } from "../jurisdiction/PackRowTables";
-import { canApprove, deleteState } from "./actions";
+import { canApprove, deleteState, missingRequiredFields, toleranceLabel } from "./actions";
 import { activationBanner, activeOptionReason, availabilityLabel, listBadge, statusOptions } from "./readiness";
 import Notice from "../jurisdiction/Notice";
 
@@ -76,6 +76,23 @@ const EDITABLE_STATUSES = ["Draft", "Review", "Approved"];
 // ctx ={ reloadDetail, reloadTemplates, selectTemplate(id) }. Extensions are
 // presentation only: every lifecycle rule stays server-side.
 const NO_EXTRAS = [];
+
+// A required metadata field: its value, or a "Missing" warning instead of "—".
+function RequiredField({ label, value, wide = false }) {
+  const missing = value === null || value === undefined || String(value).trim() === "";
+  const key = label.toLowerCase().replace(/[^a-z]+/g, "-");
+  return (
+    <div className={wide ? "sm:col-span-2" : undefined} data-testid={`overview-field-${key}`}>
+      <p className="mb-1 text-foreground-muted">{label}</p>
+      {missing ? (
+        <span data-testid={`overview-missing-${key}`}
+          className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning">
+          <FileWarning size={12} aria-hidden="true" /> Missing
+        </span>
+      ) : <p className="font-medium text-foreground">{value}</p>}
+    </div>
+  );
+}
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
 
@@ -234,6 +251,7 @@ export default function ReportTemplateLayout({
   // presentation only — the status change itself still refuses.
   const activeReason = detail ? activeOptionReason(STATUS_OPTIONS, detail) : null;
   const deletion = deleteState(detail);
+  const missingFields = missingRequiredFields(detail);
   const banner = detail ? activationBanner(detail) : null;
   // The compliance page uses the same country slug as this page
   // (/super-admin/report-templates/<slug> -> /super-admin/compliance/<slug>;
@@ -445,18 +463,31 @@ export default function ReportTemplateLayout({
                 <div className="mb-4">{renderOverviewExtra(detail, ctx)}</div>
               )}
 
+              {tab === "overview" && missingFields.length > 0 && (
+                <div className="mb-4 space-y-1 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-xs text-warning"
+                  data-testid="overview-needs-attention">
+                  <p className="flex items-center gap-1.5 font-semibold">
+                    <FileWarning size={13} aria-hidden="true" /> Needs attention ({missingFields.length})
+                  </p>
+                  <p>Not filled in: {missingFields.join(", ")}.</p>
+                </div>
+              )}
+
               {tab === "overview" && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <Field label="Regulatory Authority" value={detail.regulatoryAuthority} />
-                  <Field label="Reconciliation Tolerance" value={detail.reconciliationTolerance} />
+                  <RequiredField label="Regulatory Authority" value={detail.regulatoryAuthority} />
+                  <div data-testid="overview-field-tolerance">
+                    <p className="mb-1 text-foreground-muted">Reconciliation Tolerance</p>
+                    <p className="font-medium text-foreground">
+                      {toleranceLabel(detail)}
+                      {toleranceLabel(detail) === "Exact match" && <span className="font-normal text-foreground-muted"> (no tolerance set)</span>}
+                    </p>
+                  </div>
                   <Field label="Document Scope" value={detail.documentScope === "PER_EMPLOYEE" ? "Per-Employee (certificate)" : "Aggregate (one document for the run)"} />
                   <Field label="Source Document" value={detail.sourceDocumentId ? `Artifact #${detail.sourceDocumentId}` : "None linked"} />
-                  <Field label="Source References" value={detail.sourceReferences} />
+                  <RequiredField label="Source References" value={detail.sourceReferences} />
                   <Field label="Description" value={detail.description} />
-                  <div className="sm:col-span-2">
-                    <p className="text-foreground-muted mb-1">Change Summary</p>
-                    <p className="font-medium text-foreground">{detail.changeSummary || "—"}</p>
-                  </div>
+                  <RequiredField label="Change Summary" value={detail.changeSummary} wide />
                 </div>
               )}
 

@@ -128,6 +128,19 @@ check("layout: Approve hidden outside pre-release, Delete uses the shared disabl
   layout.includes("{canApprove(detail) && (") && layout.includes("<DisabledReason reason={deletion.reason}>")
   && layout.includes('aria-disabled="true"') && layout.includes("deleteState(deletingTemplate).confirmMessage"));
 
+// ── Overview: Missing warnings, Needs attention, Exact match ────────────────
+const beDoc = { regulatoryAuthority: null, sourceReferences: "  ", changeSummary: "", reconciliationTolerance: null };
+check("Missing: empty authority / source references / change summary (blank text counts as empty)",
+  X.missingRequiredFields(beDoc).join() === "Regulatory Authority,Source References,Change Summary");
+check("nothing missing when filled (tolerance is never required)",
+  X.missingRequiredFields({ regulatoryAuthority: "Receita Federal", sourceReferences: "ZP-BR", changeSummary: "x" }).length === 0);
+check("empty tolerance reads Exact match; a value is shown as is",
+  X.toleranceLabel(beDoc) === "Exact match" && X.toleranceLabel({ reconciliationTolerance: 0.5 }) === "0.5"
+  && X.toleranceLabel({ reconciliationTolerance: 0 }) === "0");
+check("layout: Missing chips, Needs attention count, Exact match",
+  (layout.match(/<RequiredField label=/g) || []).length === 3 && layout.includes("Needs attention ({missingFields.length})")
+  && layout.includes("toleranceLabel(detail)") && !layout.includes('label="Reconciliation Tolerance" value='));
+
 // ── generic wiring (no country-specific branch decides readiness) ───────────
 check("layout renders options from statusOptions with disabled + reason",
   layout.includes("statusOptions(STATUS_OPTIONS, detail).map") && layout.includes("disabled={o.disabled}") && layout.includes("title={o.reason || undefined}"));
