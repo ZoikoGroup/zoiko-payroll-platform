@@ -4,7 +4,7 @@ import { updateBeRow } from "../../../service/superAdminService";
 import { inputClass, labelClass } from "../constants";
 import { governanceError, governancePayload, useSources } from "../new_zealand/nzForm";
 import { ErrorNote, GovernanceFields } from "../new_zealand/nzShared";
-import { cleanLabel } from "./beShared";
+import { cleanLabel, specProposal } from "./beShared";
 
 // Governed edit / sign of one canonical Belgium row (be_super_admin.update_row).
 // The value slot, choices and NOT_SUPPORTED option come from the configuration
@@ -111,6 +111,11 @@ export default function BERowEditor({ kind, row, config, onClose, onSaved }) {
   return (
     <Modal title={`Edit / sign — ${title}`} onClose={onClose} maxWidth="max-w-lg">
       <p className="mb-1 text-[12px] text-foreground-muted">{cleanLabel(row.label)}</p>
+      {specProposal(row.label) && (
+        <p className="mb-2 rounded border border-border bg-surface-muted px-2 py-1 text-[11px] text-foreground-secondary" data-testid="be-spec-proposal">
+          Spec proposal (display text for the signer — not a value): {specProposal(row.label)}
+        </p>
+      )}
       {row.specReference && <p className="mb-3 text-[11px] text-foreground-muted">Spec reference: {row.specReference}</p>}
       {row.referenceOnly && (
         <p className="mb-3 rounded-lg border border-warning/40 bg-warning/10 p-2 text-[12px] text-warning" data-testid="be-reference-note">

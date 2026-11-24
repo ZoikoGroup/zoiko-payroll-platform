@@ -42,13 +42,15 @@ export function belgiumExtraTabs() {
   const tab = (key, label, icon, after, render) => ({ key, label, icon, after, isVisible: always, render });
   const more = (key, label, icon, render) => ({ ...tab(key, label, icon, null, render), overflow: true });
   const rows = (groups, title, description) => {
-    const render = ({ pack }) => <BEPackRowsTab pack={pack} groups={groups} title={title} description={description} />;
+    const render = ({ pack, onNavigateTab }) => (
+      <BEPackRowsTab pack={pack} groups={groups} title={title} description={description} onNavigateTab={onNavigateTab} />
+    );
     render.displayName = `BERowsTab(${groups.join("+")})`;
     return render;
   };
   return [
-    tab("be-rates", "Contributions", ScrollText, "overview", ({ pack }) => <BEContributionRatesTab pack={pack} />),
-    tab("be-slabs", "Tax Slabs", ScrollText, "be-rates", ({ pack }) => <BETaxSlabsTab pack={pack} />),
+    tab("be-rates", "Contributions", ScrollText, "overview", ({ pack, onNavigateTab }) => <BEContributionRatesTab pack={pack} onNavigateTab={onNavigateTab} />),
+    tab("be-slabs", "Tax Slabs", ScrollText, "be-rates", ({ pack, onNavigateTab }) => <BETaxSlabsTab pack={pack} onNavigateTab={onNavigateTab} />),
     tab("be-policy", "Policy", Settings2, "be-slabs",
       rows(TAB_GROUPS.policy, "Scope, policy and rounding",
         "Supported scope and the rounding rules (signed pack rows only; unsigned rounding blocks the calculation).")),

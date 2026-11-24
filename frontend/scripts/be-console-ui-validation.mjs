@@ -136,6 +136,24 @@ check("Overview cards count Belgium's configuration rows (signed vs pending), ot
   assert(summary.includes("stats = null") && summary.includes("{stats ? stats.map("), "generic cards unless a country passes stats");
 });
 
+check("plain-language empty states; label suffixes stripped at display time only", () => {
+  for (const file of componentFiles) {
+    const code = read(file);
+    assert(!/the key blocks until rows are added/.test(code), `${file}: old empty-state jargon`);
+  }
+  const empty = read("components/jurisdiction/belgium/BEEmptyRows.jsx");
+  assert(empty.includes("No rows loaded yet") && empty.includes("second Super Admin") && empty.includes("Import from file")
+    && empty.includes("Add row"), "empty state text and actions");
+  for (const f of ["BEPackTables.jsx", "BESlabRowsSection.jsx"]) {
+    assert(read(`components/jurisdiction/belgium/${f}`).includes("<BEEmptyRows"), `${f} uses BEEmptyRows`);
+  }
+  const shared = read("components/jurisdiction/belgium/beShared.js");
+  assert(shared.includes('const SPEC_PROPOSED = " (spec-proposed: "') && shared.includes('const NONE_IN_SPEC = " (none in spec)"')
+    && shared.includes("export function specProposal(label)"), "display-time stripping");
+  assert(read("components/jurisdiction/belgium/BERowEditor.jsx").includes("specProposal(row.label)"),
+    "the signer still sees the spec proposal in the editor");
+});
+
 check("Hotfix Activate is hidden for Belgium (self-approval refused), like Mexico", () => {
   assert(/hideHotfixActivate: true/.test(beConfig), "hideHotfixActivate");
   assert(/!hideHotfixActivate && selectedPack\.status !== "Active"/.test(read("components/jurisdiction/JurisdictionLayout.jsx")), "layout honours it");

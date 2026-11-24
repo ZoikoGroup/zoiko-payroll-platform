@@ -14,7 +14,7 @@ import { cleanLabel, displayValue, isEditablePack, loadConfiguration } from "./b
 // ONSS employer rows are REFERENCE ONLY: each shows the backend referenceNote,
 // and the console never combines rows into one all-in employer rate.
 
-function GroupRows({ pack, config, group, onReload }) {
+function GroupRows({ pack, config, group, onReload, onImport }) {
   const [editing, setEditing] = useState(null);
   const editable = isEditablePack(pack);
   const section = config.groups?.[group];
@@ -50,7 +50,7 @@ function GroupRows({ pack, config, group, onReload }) {
       </div>
       {slabKeys.map((key) => {
         const row = section.rows.find((r) => r.componentKey === key);
-        return <BESlabRowsSection key={key} pack={pack} config={config} rowKey={key} title={cleanLabel(row?.label)} onReload={onReload} />;
+        return <BESlabRowsSection key={key} pack={pack} config={config} rowKey={key} title={cleanLabel(row?.label)} onReload={onReload} onImport={onImport} />;
       })}
       {editing && (
         <BERowEditor kind="rate" row={editing} config={config} onClose={() => setEditing(null)}
@@ -60,7 +60,7 @@ function GroupRows({ pack, config, group, onReload }) {
   );
 }
 
-function Loaded({ pack, groups, title, description }) {
+function Loaded({ pack, groups, title, description, onImport }) {
   const [config, error, loading, reload] = useLoad(() => loadConfiguration(pack));
   if (loading && !config) return <p className="text-[12px] text-foreground-muted">Loading…</p>;
   if (error) return <ErrorNote message={error} />;
@@ -76,12 +76,13 @@ function Loaded({ pack, groups, title, description }) {
           )}
         </div>
       )}
-      {groups.map((group) => <GroupRows key={group} pack={pack} config={config} group={group} onReload={reload} />)}
+      {groups.map((group) => <GroupRows key={group} pack={pack} config={config} group={group} onReload={reload} onImport={onImport} />)}
     </div>
   );
 }
 
-export default function BEPackRowsTab({ pack, groups, title, description }) {
+export default function BEPackRowsTab({ pack, groups, title, description, onNavigateTab }) {
   if (!pack) return <p className="text-[12px] text-foreground-muted">Select a Belgium pack.</p>;
-  return <Loaded key={pack.id} pack={pack} groups={groups} title={title} description={description} />;
+  return <Loaded key={pack.id} pack={pack} groups={groups} title={title} description={description}
+    onImport={onNavigateTab ? () => onNavigateTab("be-release") : undefined} />;
 }

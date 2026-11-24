@@ -4,6 +4,7 @@ import { retireBeSlabRow } from "../../../service/superAdminService";
 import { useLoad } from "../japan/jpFormat";
 import { ErrorNote } from "../new_zealand/nzShared";
 import { ContributionRatesTable, PackTableHeader, TaxSlabsTable } from "../PackRowTables";
+import BEEmptyRows from "./BEEmptyRows";
 import BERowEditor from "./BERowEditor";
 import { AddRowForm } from "./BESlabRowsSection";
 import { TAB_GROUPS, cleanLabel, isDraftPack, isEditablePack, loadConfiguration, slabRowsFor } from "./beShared";
@@ -90,7 +91,7 @@ function ScalarRatesTable({ pack, config, sections, onReload }) {
   );
 }
 
-function SlabKeyTable({ pack, config, rowKey, title, onReload }) {
+function SlabKeyTable({ pack, config, rowKey, title, onReload, onImport }) {
   const spec = config.slabSpecs?.[rowKey];
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -118,7 +119,7 @@ function SlabKeyTable({ pack, config, rowKey, title, onReload }) {
     <div className="space-y-2" data-testid={`be-slab-${spec.ruleType}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="text-[13px] font-semibold text-foreground">{title}</h4>
-        {editable && !adding && (
+        {editable && !adding && rows.length > 0 && (
           <button type="button" onClick={() => setAdding(true)}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-hover">
             <Plus size={13} /> Add row
@@ -131,7 +132,7 @@ function SlabKeyTable({ pack, config, rowKey, title, onReload }) {
         onEdit={editable || isActive(pack) ? (row) => setEditing(raw(row)) : undefined}
         onDelete={(editable && isDraftPack(pack)) || isActive(pack) ? retire : undefined}
         actionsDisabled={isActive(pack)}
-        emptyText="No rows yet — the key blocks until rows are added and signed (or the key is signed not supported)."
+        emptyState={<BEEmptyRows title={title} pack={pack} editable={editable} onAdd={() => setAdding(true)} onImport={onImport} />}
         extraColumns={[
           ...(spec.dimensions.length ? [{ key: "dimension", label: "Dimension", render: (row) => row.component || "—" }] : []),
           { key: "amount", label: "Amount", render: (row) => (row.flatAmount != null ? row.flatAmount : "—") },
@@ -164,7 +165,7 @@ function Loading({ error, loading, config }) {
   return null;
 }
 
-function RatesLoaded({ pack }) {
+function RatesLoaded({ pack, onImport }) {
   const [config, error, loading, reload] = useConfiguration(pack);
   if (error || !config) return <Loading error={error} loading={loading} config={config} />;
   const groups = [...TAB_GROUPS.onssEmployee, ...TAB_GROUPS.onssEmployer];
@@ -177,12 +178,12 @@ function RatesLoaded({ pack }) {
       />
       <ReadOnlyNote pack={pack} />
       <ScalarRatesTable pack={pack} config={config} sections={scalarSections(config, groups)} onReload={reload} />
-      {bands.map((b) => <SlabKeyTable key={b.key} pack={pack} config={config} rowKey={b.key} title={b.title} onReload={reload} />)}
+      {bands.map((b) => <SlabKeyTable key={b.key} pack={pack} config={config} rowKey={b.key} title={b.title} onReload={reload} onImport={onImport} />)}
     </div>
   );
 }
 
-function SlabsLoaded({ pack }) {
+function SlabsLoaded({ pack, onImport }) {
   const [config, error, loading, reload] = useConfiguration(pack);
   if (error || !config) return <Loading error={error} loading={loading} config={config} />;
   const groups = TAB_GROUPS.withholding;
@@ -199,7 +200,7 @@ function SlabsLoaded({ pack }) {
       {bands.length === 0 && !hasParameters && (
         <p className="rounded-lg border border-dashed border-border-light px-3 py-8 text-center text-xs text-foreground-disabled">No withholding rows in this pack.</p>
       )}
-      {bands.map((b) => <SlabKeyTable key={b.key} pack={pack} config={config} rowKey={b.key} title={b.title} onReload={reload} />)}
+      {bands.map((b) => <SlabKeyTable key={b.key} pack={pack} config={config} rowKey={b.key} title={b.title} onReload={reload} onImport={onImport} />)}
       {hasParameters && (
         <div className="space-y-2">
           <h4 className="text-[13px] font-semibold text-foreground">Withholding parameters</h4>
@@ -210,12 +211,16 @@ function SlabsLoaded({ pack }) {
   );
 }
 
-export function BEContributionRatesTab({ pack }) {
+// "Import from file" opens Readiness, where the content workbook import lives
+// (Signing status: preview, all-or-nothing, source per row, rows unsigned).
+const importer = (onNavigateTab) => (onNavigateTab ? () => onNavigateTab("be-release") : undefined);
+
+export function BEContributionRatesTab({ pack, onNavigateTab }) {
   if (!pack) return <p className="text-[12px] text-foreground-muted">Select a Belgium pack.</p>;
-  return <RatesLoaded key={pack.id} pack={pack} />;
+  return <RatesLoaded key={pack.id} pack={pack} onImport={importer(onNavigateTab)} />;
 }
 
-export function BETaxSlabsTab({ pack }) {
+export function BETaxSlabsTab({ pack, onNavigateTab }) {
   if (!pack) return <p className="text-[12px] text-foreground-muted">Select a Belgium pack.</p>;
-  return <SlabsLoaded key={pack.id} pack={pack} />;
+  return <SlabsLoaded key={pack.id} pack={pack} onImport={importer(onNavigateTab)} />;
 }
