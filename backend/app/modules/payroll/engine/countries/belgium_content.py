@@ -410,13 +410,6 @@ def is_reference_only(key: str) -> bool:
     return group == "onss_employer" and kind in (KIND_RATE, KIND_BAND)
 
 
-# Rate keys whose value is a multiplier of a base (an uplift), not a share of
-# pay: the content import's "a rate cannot exceed 100 %" check does not apply to
-# them (it still refuses negatives). Structural metadata about the key — no
-# value lives here; the value comes only from the signed, sourced row.
-RATE_CAP_EXEMPT_KEYS = ("be_onss_manual_base_uplift",)
-
-
 def key_label(key: str) -> str:
     """The seeded label: short label + spec-proposed display text (if any),
     plus the reference-only marker on onss_employer rate / band keys."""

@@ -12,8 +12,9 @@ Import (Draft packs only): the same workbook back — or the same rows as CSV /
 JSON (one row per line, a "sheet" column naming the workbook sheet; see
 be_content_import_template / scripts/templates/be_content_import_template.*).
 Every format goes through the same checks and writers: required columns per
-sheet, a rate never above 100 % (except the catalogue's multiplier keys,
-belgium_content.RATE_CAP_EXEMPT_KEYS), no overlapping brackets within one band
+sheet, a rate never above 100 % (every rate key: be_onss_manual_base_uplift too —
+it stores the percentage ADDED to the base, e.g. 8 for "gross + 8 %", see
+engine/jurisdictions/belgium/onss.py), no overlapping brackets within one band
 key / dimension / date window (the pack's existing rows included). dry_run (the default)
 validates every changed row through the SAME governed writers the console uses
 (be_super_admin.update_row / add_slab_row) and rolls everything back, returning
@@ -420,7 +421,7 @@ def be_content_import_template(fmt: str = "csv") -> tuple:
             "Required: " + "; ".join(f"{k}: {', '.join(v)}" for k, v in REQUIRED_COLUMNS.items()
                                      if k in (SHEET_SCALAR, SHEET_SLAB)) + ".",
             "Amounts and rates are decimal strings with a dot as the decimal separator; a rate is the percentage number itself "
-            "(never above 100, except the catalogue's multiplier keys). Brackets of one key must not overlap.",
+            "(never above 100). Brackets of one key must not overlap.",
             "Every row needs sourceDocumentId: the source document id or its reference (e.g. 'ZP-BE-ENG-001 S3').",
             "Imported rows are UNSIGNED ([PENDING G1]); a second Super Admin signs them. Draft packs only.",
             "The example rows hold FAKE zero values and placeholders: replace them; never import them as they are.",
@@ -620,7 +621,7 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
                            "any leading zeros (e.g. ONSS employer category 000)", key)
                 continue
             capped = [c for c in ("employeeRatePct", "employerRatePct") if c in changed
-                      and (_dec(changed[c]) or 0) > 100 and r.component_key not in content.RATE_CAP_EXEMPT_KEYS]
+                      and (_dec(changed[c]) or 0) > 100]
             if capped:
                 for column in capped:
                     report.add(sheet, n, column, header, "ERROR",

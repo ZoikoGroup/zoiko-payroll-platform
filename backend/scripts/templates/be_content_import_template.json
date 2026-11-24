@@ -2,7 +2,7 @@
   "_instructions": [
     "One object per row. 'sheet' is 'Scalar keys' (a catalogue row: rowId from the workbook export) or 'Slab keys' (a band / formula / table row: leave rowId empty to add a row).",
     "Required: Scalar keys: rowId, key, sourceDocumentId; Slab keys: key, sourceDocumentId.",
-    "Amounts and rates are decimal strings with a dot as the decimal separator; a rate is the percentage number itself (never above 100, except the catalogue's multiplier keys). Brackets of one key must not overlap.",
+    "Amounts and rates are decimal strings with a dot as the decimal separator; a rate is the percentage number itself (never above 100). Brackets of one key must not overlap.",
     "Every row needs sourceDocumentId: the source document id or its reference (e.g. 'ZP-BE-ENG-001 S3').",
     "Imported rows are UNSIGNED ([PENDING G1]); a second Super Admin signs them. Draft packs only.",
     "The example rows hold FAKE zero values and placeholders: replace them; never import them as they are."

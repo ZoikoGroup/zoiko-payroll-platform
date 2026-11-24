@@ -117,14 +117,34 @@ def test_missing_required_columns_and_unknown_sheets_are_refused(db, seeded):
     assert any(e.startswith("sheet must be one of") for e in _errors(out))
 
 
-def test_a_rate_above_100_is_refused_except_for_multiplier_keys(db, seeded):
+def test_a_rate_above_100_is_refused(db, seeded):
     src = _verified_source(db)
     out = _run(db, seeded, _csv([_scalar(db, seeded, "be_onss_employee_rate", src, employeeRatePct="150")]),
                "content.csv")
     assert any("cannot exceed 100" in e for e in _errors(out))
-    exempt = _c().RATE_CAP_EXEMPT_KEYS[0]
-    out = _run(db, seeded, _csv([_scalar(db, seeded, exempt, src, employeeRatePct="150")]), "content.csv")
-    assert not any("cannot exceed 100" in e for e in _errors(out))           # a base uplift, not a share
+
+
+def test_the_manual_worker_uplift_is_capped_like_every_rate(db, seeded):
+    """be_onss_manual_base_uplift stores the percentage ADDED to the base (the
+    engine uses (100 + uplift) / 100): "gross + 8 %" is 8, never 108."""
+    src = _verified_source(db)
+    key = "be_onss_manual_base_uplift"
+
+    def rate_errors(value):
+        out = _run(db, seeded, _csv([_scalar(db, seeded, key, src, employeeRatePct=value)]), "content.csv")
+        return [e for e in _errors(out) if "exceed" in e]
+
+    assert rate_errors("8") == []                                             # the uplift itself: accepted
+    for value in ("108", "1080"):                                             # a multiplier typed by mistake
+        assert rate_errors(value) == ["a rate is the percentage number itself and cannot exceed 100"]
+    assert not hasattr(_c(), "RATE_CAP_EXEMPT_KEYS")                          # no exemption list any more
+
+
+def test_the_ai_draft_workbook_still_imports_in_dry_run(db, seeded):
+    path = Path(__file__).resolve().parents[2] / "docs" / "belgium" / "content" / "BE_2026_AI_DRAFT.xlsx"
+    out = _wb().be_content_workbook_import(db, seeded.id, path.read_bytes(), IMPORTER, reason="TEST ONLY",
+                                           dry_run=True)
+    assert out["errors"] == 0 and out["changes"] > 0 and not out["written"]
 
 
 def _band_key():
