@@ -25,6 +25,7 @@ import RateFormModal from "./RateFormModal";
 import SlabFormModal from "./SlabFormModal";
 import ImpactPreviewModal from "./ImpactPreviewModal";
 import HotfixActivateModal from "./HotfixActivateModal";
+import PackTabBar from "./PackTabBar";
 
 // The one shared pack-management surface every Jurisdiction Compliance
 // page renders — wires the already-built canonical JurisdictionPack/
@@ -95,6 +96,14 @@ export default function JurisdictionLayout({
   autoSelectPack = null,
   // Called when the selected pack changes (for org picker updates, etc.)
   onPackChange = NOOP,
+  // Opt-in (Belgium): the tab row moves tabs that do not fit into a "More"
+  // menu instead of scrolling sideways. An extraTab with `overflow: true`
+  // always lives in that menu. Off by default — every other country's tab
+  // row is unchanged.
+  adaptiveTabs = false,
+  // Opt-in: { oldKey: newKey } for tab keys a country renamed or merged, so a
+  // request for an old key (onNavigateTab) lands on its replacement.
+  tabAliases = null,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -104,7 +113,8 @@ export default function JurisdictionLayout({
   const [packs, setPacks] = useState([]);
   const [loadingPacks, setLoadingPacks] = useState(false);
   const [selectedPack, setSelectedPack] = useState(null);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTabRaw] = useState("overview");
+  const setTab = (key) => setTabRaw((tabAliases && tabAliases[key]) || key);
 
   const [rates, setRates] = useState([]);
   const [slabs, setSlabs] = useState([]);
@@ -197,7 +207,7 @@ export default function JurisdictionLayout({
   const [tabResetPackId, setTabResetPackId] = useState(selectedPack?.id);
   if (selectedPack?.id !== tabResetPackId) {
     setTabResetPackId(selectedPack?.id);
-    setTab("overview");
+    setTabRaw("overview");
   }
 
   async function changeStatus(newStatus) {
@@ -253,16 +263,21 @@ export default function JurisdictionLayout({
   // Rates"/"Versions" tabs in favor of its own NI & Pension Rates /
   // Statutory Thresholds extra tabs. Every other country passes [].
   let tabs = BASE_TABS.filter((t) => !hiddenTabs.includes(t.key));
+  let overflowTabs = visibleExtraTabs.filter((t) => t.overflow);
   // Each extra tab anchors after a given base-tab key (default "slabs",
   // preserving the original fixed insertion point so India's existing Tax
   // Parameters tab — which doesn't set `after` — lands exactly where it
   // always has). Lets UK insert "NI & Pension Rates" before Slabs while
   // "HMRC Statutory Thresholds" lands after it, in one pass.
-  visibleExtraTabs.forEach((extraTab) => {
+  visibleExtraTabs.filter((t) => !t.overflow).forEach((extraTab) => {
     const anchorIndex = tabs.findIndex((t) => t.key === (extraTab.after || "slabs"));
     tabs.splice(anchorIndex === -1 ? tabs.length : anchorIndex + 1, 0, extraTab);
   });
-  if (restrictTo) tabs = tabs.filter((t) => restrictTo.includes(t.key));
+  if (restrictTo) {
+    tabs = tabs.filter((t) => restrictTo.includes(t.key));
+    overflowTabs = overflowTabs.filter((t) => restrictTo.includes(t.key));
+  }
+  const tabLabel = (t) => (t.key === "slabs" ? (slabsOverrideActive ? resolveOverride(slabsTabOverride.label, selectedPack) : slabsLabel) : t.label);
 
   return (
     <div>
@@ -465,23 +480,15 @@ export default function JurisdictionLayout({
                 </div>
               </div>
 
-              <div className="mb-4 flex items-center gap-1 border-b border-border overflow-x-auto">
-                {tabs.map((t) => (
-                  <button
-                    key={t.key} onClick={() => setTab(t.key)}
-                    className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium ${
-                      tab === t.key ? "border-primary text-primary" : "border-transparent text-foreground-muted hover:text-foreground"
-                    }`}
-                  >
-                    <t.icon size={13} /> {t.key === "slabs" ? (slabsOverrideActive ? resolveOverride(slabsTabOverride.label, selectedPack) : slabsLabel) : t.label}
-                  </button>
-                ))}
-              </div>
+              <PackTabBar
+                tabs={tabs} overflowTabs={overflowTabs} adaptive={adaptiveTabs}
+                activeKey={tab} onSelect={setTab} labelFor={tabLabel}
+              />
 
               {tab === "overview" && (
                 <>
                   {overviewOverrideActive && (
-                    overviewTabOverride.render({ pack: selectedPack, rates, slabs, onReload: reloadRatesAndSlabs })
+                    overviewTabOverride.render({ pack: selectedPack, rates, slabs, onReload: reloadRatesAndSlabs, onNavigateTab: setTab })
                   )}
                   {!overviewOverrideActive && (
                     <PackOverviewSummary pack={selectedPack} refreshKey={`${rates.length}-${slabs.length}`} />
