@@ -17,12 +17,15 @@ const tabClass = (active) => `flex items-center gap-1.5 whitespace-nowrap border
 }`;
 const MORE = "__more";
 
-function TabContent({ tab, labelFor }) {
-  return <><tab.icon size={13} /> {labelFor(tab)}</>;
+// `iconsWhenWide`: the row's tab icons show only from 1760px (the width
+// JurisdictionLayout's compactUntilWide switches at), so a long tab set fits
+// narrower screens. Menu items keep their icons.
+function TabContent({ tab, labelFor, iconsWhenWide = false }) {
+  return <>{iconsWhenWide ? <tab.icon size={13} className="hidden min-[1760px]:block" /> : <tab.icon size={13} />} {labelFor(tab)}</>;
 }
 
-function MoreContent({ tab, labelFor }) {
-  return <>{tab ? <><tab.icon size={13} /> {labelFor(tab)}</> : "More"} <ChevronDown size={13} aria-hidden="true" /></>;
+function MoreContent({ tab, labelFor, iconsWhenWide = false }) {
+  return <>{tab ? <TabContent tab={tab} labelFor={labelFor} iconsWhenWide={iconsWhenWide} /> : "More"} <ChevronDown size={13} aria-hidden="true" /></>;
 }
 
 function fitCount(layout, primary, overflow, activeKey) {
@@ -37,7 +40,7 @@ function fitCount(layout, primary, overflow, activeKey) {
   return 0;
 }
 
-function MoreMenu({ tabs, activeKey, onSelect, labelFor }) {
+function MoreMenu({ tabs, activeKey, onSelect, labelFor, iconsWhenWide }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const active = tabs.find((t) => t.key === activeKey);
@@ -53,7 +56,7 @@ function MoreMenu({ tabs, activeKey, onSelect, labelFor }) {
     <div ref={ref} className="relative ml-auto shrink-0">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}
         className={tabClass(Boolean(active))} data-testid="pack-tabs-more">
-        <MoreContent tab={active} labelFor={labelFor} />
+        <MoreContent tab={active} labelFor={labelFor} iconsWhenWide={iconsWhenWide} />
       </button>
       {open && (
         <div role="menu" className="absolute right-0 top-full z-30 mt-1 min-w-[220px] rounded-lg border border-border bg-surface py-1 shadow-lg">
@@ -71,7 +74,7 @@ function MoreMenu({ tabs, activeKey, onSelect, labelFor }) {
   );
 }
 
-function AdaptiveTabBar({ tabs, overflowTabs, activeKey, onSelect, labelFor }) {
+function AdaptiveTabBar({ tabs, overflowTabs, activeKey, onSelect, labelFor, iconsWhenWide }) {
   const barRef = useRef(null);
   const measureRef = useRef(null);
   const [layout, setLayout] = useState(null);
@@ -102,26 +105,31 @@ function AdaptiveTabBar({ tabs, overflowTabs, activeKey, onSelect, labelFor }) {
       {/* Off-screen copy of every tab, measured to decide what fits. */}
       <div aria-hidden="true" className="pointer-events-none invisible absolute inset-x-0 top-0 h-0 overflow-hidden">
         <div ref={measureRef} className="flex w-max">
-          {tabs.map((t) => <span key={t.key} data-measure={`tab:${t.key}`} className={tabClass(false)}><TabContent tab={t} labelFor={labelFor} /></span>)}
+          {tabs.map((t) => (
+            <span key={t.key} data-measure={`tab:${t.key}`} className={tabClass(false)}><TabContent tab={t} labelFor={labelFor} iconsWhenWide={iconsWhenWide} /></span>
+          ))}
           <span data-measure={`more:${MORE}`} className={tabClass(false)}><MoreContent labelFor={labelFor} /></span>
           {[...tabs, ...overflowTabs].map((t) => (
-            <span key={`m${t.key}`} data-measure={`more:${t.key}`} className={tabClass(true)}><MoreContent tab={t} labelFor={labelFor} /></span>
+            <span key={`m${t.key}`} data-measure={`more:${t.key}`} className={tabClass(true)}><MoreContent tab={t} labelFor={labelFor} iconsWhenWide={iconsWhenWide} /></span>
           ))}
         </div>
       </div>
       {visible.map((t) => (
         <button key={t.key} onClick={() => onSelect(t.key)} className={tabClass(activeKey === t.key)}>
-          <TabContent tab={t} labelFor={labelFor} />
+          <TabContent tab={t} labelFor={labelFor} iconsWhenWide={iconsWhenWide} />
         </button>
       ))}
-      {menu.length > 0 && <MoreMenu tabs={menu} activeKey={activeKey} onSelect={onSelect} labelFor={labelFor} />}
+      {menu.length > 0 && <MoreMenu tabs={menu} activeKey={activeKey} onSelect={onSelect} labelFor={labelFor} iconsWhenWide={iconsWhenWide} />}
     </div>
   );
 }
 
-export default function PackTabBar({ tabs, overflowTabs = [], adaptive = false, activeKey, onSelect, labelFor }) {
+export default function PackTabBar({ tabs, overflowTabs = [], adaptive = false, iconsWhenWide = false, activeKey, onSelect, labelFor }) {
   if (adaptive || overflowTabs.length > 0) {
-    return <AdaptiveTabBar tabs={tabs} overflowTabs={overflowTabs} activeKey={activeKey} onSelect={onSelect} labelFor={labelFor} />;
+    return (
+      <AdaptiveTabBar tabs={tabs} overflowTabs={overflowTabs} activeKey={activeKey} onSelect={onSelect}
+        labelFor={labelFor} iconsWhenWide={iconsWhenWide} />
+    );
   }
   return (
     <div className="mb-4 flex items-center gap-1 border-b border-border overflow-x-auto">

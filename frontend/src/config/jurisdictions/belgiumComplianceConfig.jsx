@@ -83,6 +83,9 @@ export const belgiumComplianceConfig = {
   },
   hiddenTabs: ["rates", "slabs"],
   adaptiveTabs: true,
+  // Below 1760px: pack chips above the panel and no tab icons, so the eight
+  // core tabs stay visible from 1280px (only the data tabs go into More).
+  compactUntilWide: true,
   // Hotfix activation self-approves, and Belgium refuses self-approval
   // (four-eyes; service._SELF_APPROVAL_REFUSED_COUNTRIES) — same opt-out as Mexico.
   hideHotfixActivate: true,

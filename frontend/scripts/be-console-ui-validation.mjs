@@ -81,6 +81,13 @@ check("data tabs live in the More menu and the tab row never scrolls sideways", 
   assert(keys.join() === MORE_TABS.join(), `More tabs: ${keys.join(", ")}`);
   assert(/overflow: true/.test(beConfig), "More tabs are flagged overflow");
   assert(/adaptiveTabs: true/.test(beConfig), "adaptive tab row");
+  // The eight core tabs stay on one row from 1280px: below 1760px the pack list sits above the panel
+  // and the tab row drops its icons (measured: core tabs need ~811px, the bar gets ~884px at 1280).
+  assert(/compactUntilWide: true/.test(beConfig), "compact layout below 1760px");
+  const layoutSrc = read("components/jurisdiction/JurisdictionLayout.jsx");
+  assert(layoutSrc.includes('compactUntilWide ? "grid grid-cols-1 gap-4 min-[1760px]:grid-cols-[280px_1fr]" : "grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]"')
+    && layoutSrc.includes("iconsWhenWide={compactUntilWide}") && layoutSrc.includes("compactUntilWide = false"), "layout wiring (off by default)");
+  assert(read("components/jurisdiction/PackTabBar.jsx").includes('className="hidden min-[1760px]:block"'), "tab icons only when wide");
   const layout = read("components/jurisdiction/JurisdictionLayout.jsx");
   assert(/visibleExtraTabs\.filter\(\(t\) => t\.overflow\)/.test(layout) && /adaptive=\{adaptiveTabs\}/.test(layout), "layout wiring");
   const bar = read("components/jurisdiction/PackTabBar.jsx");
