@@ -1601,8 +1601,11 @@ def list_report_templates(
         status=status, search=search, include_states=includeStates,
     )
     # Per request, for the calling Super Admin; a transient attribute, never stored.
+    # No user (a direct call, e.g. a test) = no actor: the actor-dependent
+    # four-eyes rule then simply does not apply to the dry run.
+    actor_id = getattr(current_user, "id", None)
     for row in rows:
-        row.activation_readiness = payroll_service.report_template_list_readiness(db, row, current_user.id)
+        row.activation_readiness = payroll_service.report_template_list_readiness(db, row, actor_id)
     return rows
 
 
@@ -1677,7 +1680,7 @@ def get_report_template_detail(
     # Full readiness (a pure dry run of the status change's checks), computed
     # per request for the calling Super Admin — never cached across users.
     detail["activation_readiness"] = payroll_service.report_template_activation_readiness(
-        db, payroll_service.get_report_template(db, id), current_user.id)
+        db, payroll_service.get_report_template(db, id), getattr(current_user, "id", None))
     return detail
 
 
