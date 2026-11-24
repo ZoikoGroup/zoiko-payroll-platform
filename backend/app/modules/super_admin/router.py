@@ -1750,7 +1750,11 @@ def get_report_template_audit(
 ):
     from app.modules.payroll import service as payroll_service
 
-    return payroll_service.get_report_template_audit(db, id)
+    rows = payroll_service.get_report_template_audit(db, id)
+    names = payroll_service.audit_actor_names(db, (r.actor_id for r in rows))
+    for row in rows:                       # transient display attribute, never stored
+        row.actor_name = names.get(row.actor_id)
+    return rows
 
 
 @router.delete(

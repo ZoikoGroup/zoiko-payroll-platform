@@ -12279,6 +12279,21 @@ def set_report_template_approver(db: Session, template_id: int, actor_id: Option
     return row
 
 
+def audit_actor_names(db: Session, actor_ids) -> dict:
+    """{user id: display name} for audit rows: first + last name only — one
+    query, no other user field read, and no PRIVILEGED_READ event (this is not a
+    user-detail view). A user with no name, or no longer present, reads
+    "User #<id>"."""
+    from app.modules.auth.models import User
+
+    ids = sorted({i for i in actor_ids if i is not None})
+    if not ids:
+        return {}
+    found = {uid: " ".join(p for p in ((first or "").strip(), (last or "").strip()) if p)
+             for uid, first, last in db.query(User.id, User.first_name, User.last_name).filter(User.id.in_(ids))}
+    return {uid: (found.get(uid) or f"User #{uid}") for uid in ids}
+
+
 def get_report_template_audit(db: Session, template_id: int) -> List[TaxConfigurationAudit]:
     return (
         db.query(TaxConfigurationAudit)

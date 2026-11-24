@@ -3459,6 +3459,10 @@ class ActiveTaxConfigurationResponse(BaseModel):
 class TaxConfigurationAuditResponse(BaseModel):
     id: int
     actorId: Optional[int] = Field(None, validation_alias="actor_id", serialization_alias="actorId")
+    # Display name of the actor — first + last name only (never the email). Set
+    # by endpoints that resolve it (report-template audit); None elsewhere and
+    # for a system process.
+    actorName: Optional[str] = Field(None, validation_alias="actor_name", serialization_alias="actorName")
     action: str
     entityType: str = Field(validation_alias="entity_type", serialization_alias="entityType")
     entityId: int = Field(validation_alias="entity_id", serialization_alias="entityId")
