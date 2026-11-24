@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { decideBeGateEvidence, listBeGateEvidence, recordBeGateEvidence } from "../../../service/superAdminService";
+import { decideBeGateEvidence, recordBeGateEvidence } from "../../../service/superAdminService";
 import { inputClass, labelClass } from "../constants";
-import { card, useLoad } from "../japan/jpFormat";
 import { btn } from "../japan/JPRecordSection";
 import { ErrorNote } from "../new_zealand/nzShared";
 
@@ -11,7 +10,7 @@ import { ErrorNote } from "../new_zealand/nzShared";
 
 const TONE = { ACCEPTED: "text-success", REJECTED: "text-error", PENDING: "text-warning" };
 
-function GateEvidence({ gate, block, onChange }) {
+export function GateEvidence({ gate, block, onChange }) {
   const types = [...(block.requiredEvidence || []), "SUPPORTING"];
   const [form, setForm] = useState({ evidenceType: types[0], reference: "", note: "" });
   const [state, setState] = useState({ busy: false, error: null });
@@ -71,22 +70,5 @@ function GateEvidence({ gate, block, onChange }) {
       </form>
       <ErrorNote message={state.error} />
     </details>
-  );
-}
-
-export default function BEGateEvidencePanel({ onChange }) {
-  const [data, error, loading, reload] = useLoad(listBeGateEvidence);
-  if (error) return <ErrorNote message={error} />;
-  if (loading || !data) return null;
-  const changed = () => { reload(); if (onChange) onChange(); };
-  return (
-    <div className={`${card} space-y-2`} data-testid="be-gate-evidence">
-      <h4 className="text-[12px] font-semibold text-foreground">Evidence</h4>
-      <p className="text-[11px] text-foreground-secondary">
-        Evidence counts only when a Super Admin other than the recorder accepts it, and only for the tag a gate check
-        requires. A gate is met only when all its checks pass.
-      </p>
-      {Object.entries(data).map(([gate, block]) => <GateEvidence key={gate} gate={gate} block={block} onChange={changed} />)}
-    </div>
   );
 }

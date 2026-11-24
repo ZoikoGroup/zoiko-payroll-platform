@@ -25,6 +25,7 @@ import RateFormModal from "./RateFormModal";
 import SlabFormModal from "./SlabFormModal";
 import ImpactPreviewModal from "./ImpactPreviewModal";
 import HotfixActivateModal from "./HotfixActivateModal";
+import PackTabBar from "./PackTabBar";
 
 // The one shared pack-management surface every Jurisdiction Compliance
 // page renders — wires the already-built canonical JurisdictionPack/
@@ -95,6 +96,20 @@ export default function JurisdictionLayout({
   autoSelectPack = null,
   // Called when the selected pack changes (for org picker updates, etc.)
   onPackChange = NOOP,
+  // Opt-in (Belgium): the tab row moves tabs that do not fit into a "More"
+  // menu instead of scrolling sideways. An extraTab with `overflow: true`
+  // always lives in that menu. Off by default — every other country's tab
+  // row is unchanged.
+  adaptiveTabs = false,
+  // Opt-in: { oldKey: newKey } for tab keys a country renamed or merged, so a
+  // request for an old key (onNavigateTab) lands on its replacement.
+  tabAliases = null,
+  // Opt-in (Belgium, with adaptiveTabs): below 1760px the pack list becomes a
+  // row of pack chips above the detail panel and the tab row drops its icons,
+  // so a long core tab set stays on one row from 1280px. From 1760px (where
+  // the side column plus icons fits) the layout is the usual side column. Off by default — every other country's
+  // layout is unchanged.
+  compactUntilWide = false,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -104,7 +119,8 @@ export default function JurisdictionLayout({
   const [packs, setPacks] = useState([]);
   const [loadingPacks, setLoadingPacks] = useState(false);
   const [selectedPack, setSelectedPack] = useState(null);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTabRaw] = useState("overview");
+  const setTab = (key) => setTabRaw((tabAliases && tabAliases[key]) || key);
 
   const [rates, setRates] = useState([]);
   const [slabs, setSlabs] = useState([]);
@@ -197,7 +213,7 @@ export default function JurisdictionLayout({
   const [tabResetPackId, setTabResetPackId] = useState(selectedPack?.id);
   if (selectedPack?.id !== tabResetPackId) {
     setTabResetPackId(selectedPack?.id);
-    setTab("overview");
+    setTabRaw("overview");
   }
 
   async function changeStatus(newStatus) {
@@ -253,16 +269,21 @@ export default function JurisdictionLayout({
   // Rates"/"Versions" tabs in favor of its own NI & Pension Rates /
   // Statutory Thresholds extra tabs. Every other country passes [].
   let tabs = BASE_TABS.filter((t) => !hiddenTabs.includes(t.key));
+  let overflowTabs = visibleExtraTabs.filter((t) => t.overflow);
   // Each extra tab anchors after a given base-tab key (default "slabs",
   // preserving the original fixed insertion point so India's existing Tax
   // Parameters tab — which doesn't set `after` — lands exactly where it
   // always has). Lets UK insert "NI & Pension Rates" before Slabs while
   // "HMRC Statutory Thresholds" lands after it, in one pass.
-  visibleExtraTabs.forEach((extraTab) => {
+  visibleExtraTabs.filter((t) => !t.overflow).forEach((extraTab) => {
     const anchorIndex = tabs.findIndex((t) => t.key === (extraTab.after || "slabs"));
     tabs.splice(anchorIndex === -1 ? tabs.length : anchorIndex + 1, 0, extraTab);
   });
-  if (restrictTo) tabs = tabs.filter((t) => restrictTo.includes(t.key));
+  if (restrictTo) {
+    tabs = tabs.filter((t) => restrictTo.includes(t.key));
+    overflowTabs = overflowTabs.filter((t) => restrictTo.includes(t.key));
+  }
+  const tabLabel = (t) => (t.key === "slabs" ? (slabsOverrideActive ? resolveOverride(slabsTabOverride.label, selectedPack) : slabsLabel) : t.label);
 
   return (
     <div>
@@ -312,18 +333,18 @@ export default function JurisdictionLayout({
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
+      <div className={compactUntilWide ? "grid grid-cols-1 gap-4 min-[1760px]:grid-cols-[280px_1fr]" : "grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]"}>
         <div className="rounded-xl border border-border bg-surface p-2">
           {loadingPacks ? (
             <p className="py-8 text-center text-xs text-foreground-disabled">Loading…</p>
           ) : packs.length === 0 ? (
             <p className="py-8 text-center text-xs text-foreground-disabled">No {packType} packs for this jurisdiction yet.</p>
           ) : (
-            <div className="space-y-1">
+            <div className={compactUntilWide ? "flex flex-wrap gap-1 min-[1760px]:block min-[1760px]:space-y-1" : "space-y-1"}>
               {packs.map((p) => (
                 <button
                   key={p.id} onClick={() => setSelectedPack(p)}
-                  className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left text-xs ${
+                  className={`flex ${compactUntilWide ? "w-auto min-[1760px]:w-full" : "w-full"} flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left text-xs ${
                     selectedPack?.id === p.id ? "bg-primary/10 text-primary" : "text-foreground-secondary hover:bg-surface-muted"
                   }`}
                 >
@@ -414,7 +435,11 @@ export default function JurisdictionLayout({
                           must approve it before it can go Active — enforced
                           server-side in set_jurisdiction_pack_status; this
                           button just records "I approve this," it doesn't
-                          change status itself. */}
+                          change status itself. Hidden once the pack is Active:
+                          approval only gates activation, so there is nothing
+                          left to approve (the Overview still flags an Active
+                          pack with no recorded approver). */}
+                      {selectedPack.status !== "Active" && (
                       <button
                         onClick={handleApprove}
                         title={selectedPack.approvedById ? `Currently approved by user #${selectedPack.approvedById}` : "Not yet approved"}
@@ -422,6 +447,7 @@ export default function JurisdictionLayout({
                       >
                         <ShieldCheck size={13} /> Approve
                       </button>
+                      )}
                     </>
                   )}
                   {selectedPack.packType === "policy" && (
@@ -446,7 +472,8 @@ export default function JurisdictionLayout({
                           approve it before it can go Active — enforced
                           server-side in set_jurisdiction_pack_status, same
                           as tax packs above; this button just records "I
-                          approve this." */}
+                          approve this." Hidden once Active, as above. */}
+                      {selectedPack.status !== "Active" && (
                       <button
                         onClick={handleApprove}
                         title={selectedPack.approvedById ? `Currently approved by user #${selectedPack.approvedById}` : "Not yet approved"}
@@ -454,6 +481,7 @@ export default function JurisdictionLayout({
                       >
                         <ShieldCheck size={13} /> Approve
                       </button>
+                      )}
                     </>
                   )}
                   <select
@@ -465,23 +493,15 @@ export default function JurisdictionLayout({
                 </div>
               </div>
 
-              <div className="mb-4 flex items-center gap-1 border-b border-border overflow-x-auto">
-                {tabs.map((t) => (
-                  <button
-                    key={t.key} onClick={() => setTab(t.key)}
-                    className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium ${
-                      tab === t.key ? "border-primary text-primary" : "border-transparent text-foreground-muted hover:text-foreground"
-                    }`}
-                  >
-                    <t.icon size={13} /> {t.key === "slabs" ? (slabsOverrideActive ? resolveOverride(slabsTabOverride.label, selectedPack) : slabsLabel) : t.label}
-                  </button>
-                ))}
-              </div>
+              <PackTabBar
+                tabs={tabs} overflowTabs={overflowTabs} adaptive={adaptiveTabs} iconsWhenWide={compactUntilWide}
+                activeKey={tab} onSelect={setTab} labelFor={tabLabel}
+              />
 
               {tab === "overview" && (
                 <>
                   {overviewOverrideActive && (
-                    overviewTabOverride.render({ pack: selectedPack, rates, slabs, onReload: reloadRatesAndSlabs })
+                    overviewTabOverride.render({ pack: selectedPack, rates, slabs, onReload: reloadRatesAndSlabs, onNavigateTab: setTab })
                   )}
                   {!overviewOverrideActive && (
                     <PackOverviewSummary pack={selectedPack} refreshKey={`${rates.length}-${slabs.length}`} />

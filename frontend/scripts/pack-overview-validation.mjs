@@ -33,6 +33,48 @@ check("next version of a bare number", c.nextPackVersion("2") === "2.1");
 check("non-numeric version left for the user", c.nextPackVersion("2026-H1") === "");
 check("Superseded is a selectable status", c.STATUS_OPTIONS.includes("Superseded") && c.STATUS_PILL_MAP.Superseded);
 
+// Contribution-rate units: fraction countries (PR, BS, BB, KY, DO, GY, JM) show x100, all others unchanged.
+check("PR Social Security 0.0620 shows 6.2%", c.formatContributionRate("0.0620", "PR") === "6.2%");
+check("PR Medicare 0.0145 shows 1.45%", c.formatContributionRate("0.0145", "PR") === "1.45%");
+check("Barbados 0.1275 shows 12.75%", c.formatContributionRate("0.1275", "BB") === "12.75%");
+check("percent countries unchanged (US 6.2, CA 4, FR 6.90, BE 13.07)",
+  c.formatContributionRate("6.2", "US") === "6.2%" && c.formatContributionRate("4", "CA") === "4%"
+  && c.formatContributionRate("6.90", "FR") === "6.90%" && c.formatContributionRate("13.07", "BE") === "13.07%");
+// Rate edit form round trip: stored -> shown in the form -> saved.
+const roundTrip = (stored, country) => c.percentToRate(c.rateToPercent(stored, country), country);
+check("PR edit form shows 0.062 as 6.2", c.rateToPercent("0.062", "PR") === "6.2" && c.rateToPercent("0.0620", "PR") === "6.2");
+check("PR edit form saves 6.2 as 0.062", c.percentToRate("6.2", "PR") === "0.062");
+check("fraction round trip 0.062 -> 6.2 -> 0.062 (and 0.0145, 0.1275, 0.003, 1, 0)",
+  [["0.062", "0.062"], ["0.0620", "0.062"], ["0.0145", "0.0145"], ["0.1275", "0.1275"], ["0.003", "0.003"], ["1", "1"], ["0", "0"]]
+    .every(([stored, saved]) => roundTrip(stored, "PR") === saved && roundTrip(stored, "JM") === saved));
+check("fraction input conversions (12.75 -> 0.1275, 0.25 -> 0.0025, 100 -> 1, .5 -> 0.005)",
+  c.percentToRate("12.75", "BB") === "0.1275" && c.percentToRate("0.25", "BB") === "0.0025"
+  && c.percentToRate("100", "KY") === "1" && c.percentToRate(".5", "DO") === "0.005");
+check("whole-percent round trip unchanged (US 6.2, CA 4, FR 6.90, BE 13.07, UK 8, AU 1.0)",
+  [["6.2", "US"], ["4", "CA"], ["6.90", "FR"], ["13.07", "BE"], ["8", "UK"], ["1.0", "AU"]]
+    .every(([stored, country]) => c.rateToPercent(stored, country) === stored && roundTrip(stored, country) === stored));
+check("empty rate stays empty both ways", c.rateToPercent(null, "PR") === "" && c.percentToRate("", "PR") === ""
+  && c.percentToRate("  ", "US") === "");
+check("over-100 % warns, a normal rate does not",
+  c.ratePercentWarnings("620", "PR").some((w) => w.startsWith("Over 100"))
+  && c.ratePercentWarnings("150", "US").some((w) => w.startsWith("Over 100"))
+  && c.ratePercentWarnings("6.2", "PR").length === 0 && c.ratePercentWarnings("100", "US").length === 0);
+check("fraction precision warning past 2 decimals of a percentage",
+  c.ratePercentWarnings("1.455", "PR").some((w) => w.includes("rounded")) && c.ratePercentWarnings("1.455", "US").length === 0);
+const rowTables = read("components/jurisdiction/PackRowTables.jsx");
+check("Active pack: shared edit/delete icons are disabled, aria-disabled, with the locked tooltip",
+  rowTables.includes('export const LOCKED_ROW_TITLE = "Active pack is locked — create a New Version to edit"')
+  && rowTables.includes("disabled={disabled}") && rowTables.includes("aria-disabled={disabled || undefined}")
+  && rowTables.includes("title={LOCKED_ROW_TITLE}") && rowTables.includes("onClick={disabled ? undefined : onClick}")
+  && read("components/jurisdiction/RatesTab.jsx").includes("actionsDisabled={isActive}")
+  && read("components/jurisdiction/SlabsTab.jsx").includes("actionsDisabled={isActive}"));
+const rateForm = read("components/jurisdiction/RateFormModal.jsx");
+check("rate form converts on load and save with the same unit flag",
+  rateForm.includes("rateToPercent(rate?.employeeRatePct, country)") && rateForm.includes("rateToPercent(rate?.employerRatePct, country)")
+  && rateForm.includes("percentToRate(form.employeeSharePct, country)") && rateForm.includes("percentToRate(form.employerSharePct, country)")
+  && rateForm.includes("window.confirm("));
+check("fraction country list", ["PR", "BS", "BB", "KY", "DO", "GY", "JM"].join() === c.FRACTION_RATE_COUNTRIES.join());
+
 const layout = read("components/jurisdiction/JurisdictionLayout.jsx");
 const modal = read("components/jurisdiction/NewPackModal.jsx");
 const landing = read("pages/CompliancePage.jsx");
@@ -41,6 +83,9 @@ check("layout defaults to pickActivePack", layout.includes("autoSelectPack || pi
 check("layout re-picks after a state / pack type change", layout.includes("setAutoPicked(false)"));
 check("Overview shows the pack summary when no country dashboard replaces it",
   /!overviewOverrideActive && \(\s*<PackOverviewSummary/.test(layout));
+check("Approve is hidden on an Active pack (tax and policy), the not-approved chip stays",
+  (layout.match(/\{selectedPack\.status !== "Active" && \(\s*<button\s*onClick=\{handleApprove\}/g) || []).length === 2
+  && summary.includes('"Not approved yet"'));
 check("New Version passes the base pack and used versions", layout.includes("basePack={") && layout.includes("existingVersions={"));
 check("New Version refuses an existing version", modal.includes("existingVersions.includes(version.trim())"));
 check("New Version pre-fills the next version", modal.includes("nextPackVersion(b.version, existingVersions)"));

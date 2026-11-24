@@ -22,7 +22,7 @@ const FIELD_LABELS = { minAmount: "From", maxAmount: "To (empty = open)", ratePc
   effectiveFrom: "Row effective from", effectiveTo: "Row effective to" };
 const DATE_FIELDS = new Set(["date", "effectiveFrom", "effectiveTo"]);
 
-function AddRowForm({ pack, rowKey, spec, onClose, onSaved }) {
+export function AddRowForm({ pack, rowKey, spec, onClose, onSaved }) {
   const sources = useSources();
   const fields = [...spec.fields, ...(OPTIONAL[spec.kind] || [])];
   const [values, setValues] = useState({});
