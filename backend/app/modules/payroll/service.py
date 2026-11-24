@@ -912,6 +912,13 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         # which would just push Super Admins back toward editing Active
         # packs in place — defeating the guard's purpose.
         _clone_pack_rates(db, source_pack_id=(base or previous).id, target_pack_id=row.id)
+        if row.jurisdiction_country == "BE":
+            # Belgium's signed state lives in the row label ("[PENDING G1]"), which
+            # the clone copies: a new version's rows start UNSIGNED and are signed
+            # again through the governed console (ZP-BE-ENG-001 §17).
+            from app.modules.payroll import belgium_service
+
+            belgium_service.be_mark_version_rows_unsigned(db, row, actor_id)
     record_tax_audit(
         db, actor_id=actor_id, action="create", entity_type="jurisdiction_pack", entity_id=row.id,
         jurisdiction_pack_id=row.id, tax_version=row.version, legal_reference=row.source_references,
