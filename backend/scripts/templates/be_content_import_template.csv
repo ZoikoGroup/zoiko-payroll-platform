@@ -1,0 +1,3 @@
+sheet,rowId,key,employeeRatePct,employerRatePct,flatAmount,textValue,effectiveFrom,effectiveTo,sourceDocumentId,minAmount,maxAmount,ratePct,formulaText,name,date,dimension
+Scalar keys,0,REPLACE-with-the-catalogue-key,0.00,0.00,,,,,EXAMPLE-SOURCE-REFERENCE,,,,,,,
+Slab keys,,REPLACE-with-a-band-key,,,,,,,EXAMPLE-SOURCE-REFERENCE,0.00,0.00,0.00,,,,
