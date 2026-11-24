@@ -29,8 +29,10 @@ function Flag({ ok, children }) {
 }
 
 // `extraFlags` (optional): extra chips a country appends to the status row
-// (Belgium: engine certification). Every other country passes nothing.
-export default function PackOverviewSummary({ pack, refreshKey, extraFlags = null }) {
+// (Belgium: engine certification). `stats` (optional): the four summary cards
+// [{ label, value, hint }] counted from the country's own data shape
+// (Belgium: its configuration API). Every other country passes neither.
+export default function PackOverviewSummary({ pack, refreshKey, extraFlags = null, stats = null }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
@@ -69,10 +71,14 @@ export default function PackOverviewSummary({ pack, refreshKey, extraFlags = nul
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Employee deductions" value={contributions.employeeSide} hint="rates with an employee share" />
-        <Stat label="Employer contributions" value={contributions.employerSide} hint="rates with an employer share" />
-        <Stat label="Parameters & thresholds" value={contributions.parameters} hint="flat amounts, limits, values" />
-        <Stat label="Tax slabs / bands" value={taxSlabs.total} hint={`${taxSlabs.byRuleType.length} rule type${taxSlabs.byRuleType.length === 1 ? "" : "s"}`} />
+        {stats ? stats.map((st) => <Stat key={st.label} label={st.label} value={st.value} hint={st.hint} />) : (
+          <>
+            <Stat label="Employee deductions" value={contributions.employeeSide} hint="rates with an employee share" />
+            <Stat label="Employer contributions" value={contributions.employerSide} hint="rates with an employer share" />
+            <Stat label="Parameters & thresholds" value={contributions.parameters} hint="flat amounts, limits, values" />
+            <Stat label="Tax slabs / bands" value={taxSlabs.total} hint={`${taxSlabs.byRuleType.length} rule type${taxSlabs.byRuleType.length === 1 ? "" : "s"}`} />
+          </>
+        )}
       </div>
 
       {taxSlabs.byRuleType.length > 0 && (

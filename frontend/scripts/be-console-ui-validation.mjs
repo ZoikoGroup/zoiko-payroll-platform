@@ -125,6 +125,17 @@ check("Contribution Rates / Tax Slabs use the shared tables and the governed edi
   for (const col of ["statusColumn", "inForceColumn", '"dimension"', '"amount"', '"formula"']) assert(tables.includes(col), `${col} kept`);
 });
 
+check("Overview cards count Belgium's configuration rows (signed vs pending), other countries unchanged", () => {
+  const shared = read("components/jurisdiction/belgium/beShared.js");
+  assert(/export function beOverviewCounts\(config\)/.test(shared) && shared.includes("pending: rows.filter((r) => !r.signed).length"),
+    "counts from config rows' signed flag");
+  assert(shared.includes("TAB_GROUPS.onssEmployee") && shared.includes("TAB_GROUPS.onssEmployer"), "groups from TAB_GROUPS, no key names");
+  const overview = read("components/jurisdiction/belgium/BEOverviewDashboard.jsx");
+  assert(/stats=\{stats\}/.test(overview) && overview.includes("loadConfiguration(pack)"), "BE passes its own cards");
+  const summary = read("components/jurisdiction/PackOverviewSummary.jsx");
+  assert(summary.includes("stats = null") && summary.includes("{stats ? stats.map("), "generic cards unless a country passes stats");
+});
+
 check("Hotfix Activate is hidden for Belgium (self-approval refused), like Mexico", () => {
   assert(/hideHotfixActivate: true/.test(beConfig), "hideHotfixActivate");
   assert(/!hideHotfixActivate && selectedPack\.status !== "Active"/.test(read("components/jurisdiction/JurisdictionLayout.jsx")), "layout honours it");

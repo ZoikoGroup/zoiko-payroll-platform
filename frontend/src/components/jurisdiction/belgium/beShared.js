@@ -62,3 +62,32 @@ export function engineStatusLabel(status) {
   const words = String(status || "unknown").replace(/_/g, " ").toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+// Overview cards from the Belgium configuration (GET .../configuration):
+// catalogue rows by group, slab rows by key — each with how many still await
+// a second Super Admin's signature. Counts only; no value is read or shown.
+const EMPLOYEE_GROUPS = TAB_GROUPS.onssEmployee;
+const EMPLOYER_GROUPS = TAB_GROUPS.onssEmployer;
+const tally = (rows) => ({ rows: rows.length, pending: rows.filter((r) => !r.signed).length });
+
+export function beOverviewCounts(config) {
+  const groups = config?.groups || {};
+  const rowsOf = (names) => names.flatMap((g) => groups[g]?.rows || []);
+  const order = config?.groupOrder || Object.keys(groups);
+  const parameterGroups = order.filter((g) => !EMPLOYEE_GROUPS.includes(g) && !EMPLOYER_GROUPS.includes(g));
+  const slabKeys = Object.keys(config?.slabSpecs || {});
+  const slabRows = slabKeys.flatMap((key) => slabRowsFor(config, key));
+  return {
+    employee: tally(rowsOf(EMPLOYEE_GROUPS)),
+    employer: tally(rowsOf(EMPLOYER_GROUPS)),
+    parameters: tally(rowsOf(parameterGroups)),
+    slabs: { ...tally(slabRows), keys: slabKeys.length,
+      keysWithoutRows: slabKeys.filter((key) => slabRowsFor(config, key).length === 0).length },
+  };
+}
+
+// "12 rows · 3 pending signature" / "12 rows · all signed" / "no rows yet".
+export function rowsHint({ rows, pending }) {
+  if (!rows) return "no rows yet";
+  return `${rows} row${rows === 1 ? "" : "s"} · ${pending ? `${pending} pending signature` : "all signed"}`;
+}
