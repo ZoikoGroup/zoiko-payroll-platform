@@ -321,8 +321,10 @@ def template_activation_refusal(db: Session, template, actor_id: Optional[int]) 
     permanent refusal — its release gates SIGNED, its statutory content Active,
     and its fields proven on a committed Mexican payslip (mexico_report_service)."""
     from app.modules.payroll import mexico_report_service
+    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
 
-    return mexico_report_service.mx_report_activation_refusal(db, template)
+    refusal = mexico_report_service.mx_report_activation_refusal(db, template)
+    return ActivationRefusal(refusal, JURISDICTION_GATE) if refusal else None
 
 
 # ---- Calculation and run hooks ----

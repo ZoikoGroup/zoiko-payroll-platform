@@ -1572,8 +1572,10 @@ def _nz_template_activation_refusal(db: Session, template, actor_id=None) -> Opt
     report_type = str(getattr(template, "report_type", "") or "").upper()
     if country != NZ and not report_type.startswith("NZ_"):
         return None
-    return ("New Zealand filing and payment templates stay inactive until the payday-filing schema is "
-            "certified (gate G3).")
+    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
+
+    return ActivationRefusal("New Zealand filing and payment templates stay inactive until the payday-filing schema is "
+                             "certified (gate G3).", JURISDICTION_GATE, gate="G3")
 
 
 def _nz_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:

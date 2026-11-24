@@ -11990,42 +11990,53 @@ def set_report_template_status(
         raise
 
 
-def _set_report_template_status(
-    db: Session, template_id: int, status: str, actor_id: Optional[int] = None, reason: Optional[str] = None,
-) -> ReportTemplate:
-    row = get_report_template(db, template_id)
+def report_template_status_check(
+    db: Session, row: "ReportTemplate", status: str, actor_id: Optional[int] = None, *, lock: bool = True,
+) -> dict:
+    """The lifecycle checks for moving `row` to `status`, in the order the status
+    change applies them; the FIRST failing check as a structured result
+    {allowed, message, blockerKind, gate} (template_activation.as_result), or
+    allowed. The message is exactly the text the status change raises.
+
+    Order: known status -> transition -> four-eyes R1 / R2 (Published / Active)
+    -> the country template_activation_refusal hook (Active) -> four-eyes R3
+    (Active) -> one Active version per slot (Active). `lock` takes Hong Kong's
+    serialising row lock before the slot check, as the status change always has."""
+    from app.modules.payroll import template_activation as ta
+
     if status not in REPORT_TEMPLATE_TRANSITIONS:
-        raise BadRequestException(f"Unknown report template status {status!r} — one of "
-                                  f"{', '.join(REPORT_TEMPLATE_TRANSITIONS)}.")
+        return ta.ActivationRefusal(f"Unknown report template status {status!r} — one of "
+                                    f"{', '.join(REPORT_TEMPLATE_TRANSITIONS)}.", ta.UNKNOWN_STATUS).as_result()
     allowed = REPORT_TEMPLATE_TRANSITIONS.get(row.status, ())
     if status not in allowed:
-        raise BadRequestException(
+        return ta.ActivationRefusal(
             f"{row.template_key} v{row.version} cannot move from {row.status} to {status}"
             + (f" (allowed: {', '.join(allowed)})." if allowed else " — Superseded is final.")
             + (" A released version is never edited in place — create a new version instead."
                if row.status in ("Published", "Active", "Superseded") and status in _EDITABLE_TEMPLATE_STATUSES else "")
             + (" Publishing requires an Approved template — use \"Approve\" (a distinct Super Admin) first."
-               if status == "Published" and row.status in ("Draft", "Review") else "")
-        )
+               if status == "Published" and row.status in ("Draft", "Review") else ""),
+            ta.TRANSITION,
+        ).as_result()
     if status in ("Published", "Active"):
         # Four-eyes R1 / R2 (report_template_four_eyes_refusal).
         refusal = report_template_four_eyes_refusal(row, status, actor_id, activator_rule=False)
         if refusal:
-            raise BadRequestException(refusal)
+            return ta.as_result(refusal, ta.FOUR_EYES)
     if status == "Active" and jurisdiction_hooks.has_module(row.jurisdiction_country):
         # Jurisdiction report templates (Hong Kong, Saudi Arabia): reviewed
         # source evidence and an activator other than the approver. Other
         # countries unchanged.
         refusal = jurisdiction_hooks.call(row.jurisdiction_country, "template_activation_refusal", db, row, actor_id)
         if refusal:
-            raise BadRequestException(refusal)
+            return ta.as_result(refusal, ta.JURISDICTION_GATE)
     if status == "Active":
         # Four-eyes R3 (the approver may not activate), after the country hook.
         refusal = report_template_four_eyes_refusal(row, status, actor_id)
         if refusal:
-            raise BadRequestException(refusal)
+            return ta.as_result(refusal, ta.FOUR_EYES)
     if status == "Active":
-        if row.jurisdiction_country == "HK":
+        if lock and row.jurisdiction_country == "HK":
             # Same serialization as HK pack activation: one Active template per
             # report type and year, even under concurrent activations.
             db.query(ReportTemplate).filter(
@@ -12045,10 +12056,21 @@ def _set_report_template_status(
             .first()
         )
         if conflict:
-            raise BadRequestException(
+            return ta.ActivationRefusal(
                 f"Template {conflict.template_key} v{conflict.version} is already Active for this "
-                f"jurisdiction/reporting year/report type — supersede it before activating a new version."
-            )
+                f"jurisdiction/reporting year/report type — supersede it before activating a new version.",
+                ta.CONFLICT,
+            ).as_result()
+    return dict(ta.ALLOWED)
+
+
+def _set_report_template_status(
+    db: Session, template_id: int, status: str, actor_id: Optional[int] = None, reason: Optional[str] = None,
+) -> ReportTemplate:
+    row = get_report_template(db, template_id)
+    check = report_template_status_check(db, row, status, actor_id)
+    if not check["allowed"]:
+        raise BadRequestException(check["message"])
     old_status = row.status
     row.status = status
     # updated_by_id = "last actor of any change". content_editor_id is NOT
@@ -12108,19 +12130,21 @@ def report_template_four_eyes_refusal(row: "ReportTemplate", status: str, actor_
     and who may take the next step; None when the four-eyes rules allow it.
     activator_rule=False checks R1 / R2 only (the status change runs R3 after
     the country hook, so a country's own activator rule keeps its message)."""
+    from app.modules.payroll.template_activation import FOUR_EYES, ActivationRefusal
+
     label = f"{row.template_key} v{row.version}"
     editor = row.content_editor_id
     if not row.approved_by_id:
-        return (f"Four-eyes rule (approval required — a distinct approver is required): {label} has no recorded approver. Use \"Approve\" — any Super "
-                f"Admin other than its last content editor ({_who(editor)}) — before it can be {status}.")
+        return ActivationRefusal(f"Four-eyes rule (approval required — a distinct approver is required): {label} has no recorded approver. Use \"Approve\" — any Super "
+                f"Admin other than its last content editor ({_who(editor)}) — before it can be {status}.", FOUR_EYES)
     if editor is not None and row.approved_by_id == editor:
-        return (f"Four-eyes rule (no self-approval — a distinct approver is required): the recorded approver "
+        return ActivationRefusal(f"Four-eyes rule (no self-approval — a distinct approver is required): the recorded approver "
                 f"({_who(row.approved_by_id)}) is also the last content editor of {label}. A different Super Admin "
-                f"must \"Approve\" it before it can be {status}.")
+                f"must \"Approve\" it before it can be {status}.", FOUR_EYES)
     if (activator_rule and status == "Active" and row.jurisdiction_country in _APPROVER_NOT_ACTIVATOR_COUNTRIES
             and actor_id is not None and actor_id == row.approved_by_id):
-        return (f"Four-eyes rule (the approver may not activate): you approved {label}. A different Super Admin — not "
-                f"{_who(row.approved_by_id)} — must activate it.")
+        return ActivationRefusal(f"Four-eyes rule (the approver may not activate): you approved {label}. A different Super Admin — not "
+                f"{_who(row.approved_by_id)} — must activate it.", FOUR_EYES)
     return None
 
 

@@ -1464,8 +1464,10 @@ def _my_template_activation_refusal(db: Session, template, actor_id=None) -> Opt
     report_type = str(getattr(template, "report_type", "") or "").upper()
     if country != MY and not report_type.startswith("MY_"):
         return None
-    return ("Malaysia statutory form templates stay inactive until the official authority layouts are archived "
-            "and the filing path is certified (gate G3, MY-022).")
+    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
+
+    return ActivationRefusal("Malaysia statutory form templates stay inactive until the official authority layouts are "
+                             "archived and the filing path is certified (gate G3, MY-022).", JURISDICTION_GATE, gate="G3")
 
 
 def _my_statutory_editors(db: Session, pack) -> set:
