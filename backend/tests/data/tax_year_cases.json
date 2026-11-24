@@ -154,6 +154,55 @@
       "to": "2026-12-31",
       "ok": true,
       "why": "not a next-year split: not checked"
+    },
+    {
+      "taxYear": "2026-27",
+      "from": "2026-04-06",
+      "to": null,
+      "ok": true,
+      "why": "UK fiscal year, open-ended"
+    },
+    {
+      "taxYear": "2026-27",
+      "from": "2026-07-01",
+      "to": "2027-06-30",
+      "ok": true,
+      "why": "Australia fiscal year 1 Jul - 30 Jun"
+    },
+    {
+      "taxYear": "2026-2027",
+      "from": "2026-07-01",
+      "to": null,
+      "ok": true,
+      "why": "Australia fiscal year, open-ended, 4-digit split"
+    },
+    {
+      "taxYear": "2026-27",
+      "from": "2026-04-01",
+      "to": "2027-03-31",
+      "ok": true,
+      "why": "India fiscal year 1 Apr - 31 Mar"
+    },
+    {
+      "taxYear": "2026-27",
+      "from": "2026-04-01",
+      "to": null,
+      "ok": true,
+      "why": "India fiscal year, open-ended"
+    },
+    {
+      "taxYear": "2026-27",
+      "from": "2026-04-01",
+      "to": "2027-03-31",
+      "ok": true,
+      "why": "New Zealand fiscal year 1 Apr - 31 Mar"
+    },
+    {
+      "taxYear": "2027-28",
+      "from": "2026-04-01",
+      "to": null,
+      "ok": false,
+      "why": "India/NZ open-ended: split must include the start year"
     }
   ]
 }
