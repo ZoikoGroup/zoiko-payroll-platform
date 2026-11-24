@@ -87,16 +87,25 @@ def _be_g1(db, pack, add):
     add("pack_seeded", pack is not None, f"{pack.pack_id} {pack.version} ({pack.status})" if pack
         else "no canonical Belgium pack is seeded")
     if pack is None:
-        for key in ("no_pending_rows", "authority_examples_match", "golden_certification"):
+        for key in ("catalogue_complete", "no_pending_rows", "authority_examples_match", "golden_certification"):
             add(key, False, "no pack")
         return
-    pending = ([r.component_key for r in db.query(ContributionRate).filter(
-        ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))
-        if content.PENDING_MARK in (r.label or "")]
-        + [s.rule_type for s in db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
-                                                         TaxSlab.organization_id.is_(None))
-           if content.PENDING_MARK in (s.rate_label or "")])
-    add("no_pending_rows", not pending, f"{len(pending)} row(s) PENDING G1" if pending else "every row signed")
+    rates = db.query(ContributionRate).filter(
+        ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None)).all()
+    # An empty (or partly seeded) pack has nothing pending — that must not read
+    # as "every row signed": the catalogue itself has to be present first.
+    missing = sorted(set(content.KEYS) - {r.component_key for r in rates})
+    add("catalogue_complete", not missing,
+        "every catalogue key has a row" if not missing else
+        f"{len(missing)} of {len(content.KEYS)} catalogue row(s) missing (e.g. {', '.join(missing[:5])})")
+    pending = ([r.component_key for r in rates if content.PENDING_MARK in (r.label or "")]
+               + [s.rule_type for s in db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                                                TaxSlab.organization_id.is_(None))
+                  if content.PENDING_MARK in (s.rate_label or "")])
+    if not rates:
+        add("no_pending_rows", False, "no catalogue rows to sign")
+    else:
+        add("no_pending_rows", not pending, f"{len(pending)} row(s) PENDING G1" if pending else "every row signed")
     golden = belgium_golden.be_golden_check(db, pack)
     bad = sum(1 for r in golden["results"] if not r["ok"])
     add("authority_examples_match", golden["passed"],
