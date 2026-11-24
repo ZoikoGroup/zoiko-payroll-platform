@@ -170,7 +170,7 @@ def test_drift_filter_explains():
                                         "payroll_be_absence_episodes", "payroll_be_holiday_certificates", "payroll_be_payment_batches", "payroll_be_payment_items", "payroll_be_component_mappings", "payroll_be_filings", "payroll_be_obligations", "payroll_be_reconciliation_variances", "payroll_be_parallel_imports", "payroll_be_parallel_differences", "payroll_be_gate_evidence", "payroll_be_decisions", "payroll_be_onss_rate_files", "payroll_be_onss_rates", "payroll_be_onss_code_combinations", "payroll_be_onss_type_rules", "payroll_payslip_templates", "payroll_payslip_template_versions", "payroll_payslip_template_assignments"}  # + Belgium Block B (2943a0490b5b) + Block C (8a1f5ef9fa5d)
     assert {t: columns.pop(t, None) for t in MX_LIFECYCLE_COLUMNS} == MX_LIFECYCLE_COLUMNS
     assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
-    assert columns == {"payslip_items": {"pl_calculation_snapshot", "my_calculation_snapshot", "be_calculation_snapshot", "ae_calculation_snapshot",
+    assert columns == {"payslip_items": {"pl_calculation_snapshot", "my_calculation_snapshot", "be_calculation_snapshot", "ae_calculation_snapshot", "es_calculation_snapshot",
                                          "template_version_id"},
                        "payroll_runs": {"pl_approval_fingerprint", "my_approval_fingerprint", "be_approval_fingerprint"},
                        **MX_M21}

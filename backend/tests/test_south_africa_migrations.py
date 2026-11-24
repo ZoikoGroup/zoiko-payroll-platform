@@ -267,7 +267,7 @@ def test_deploy_drift_filter_explains_every_za_object():
                                                              "mx_sdi_evidence_ref"} == {name for name, _t in module._PROFILE_COLUMNS}
     assert columns["payslip_items"] == {"za_calculation_snapshot", "jp_calculation_snapshot",
                                         "nz_calculation_snapshot", "nz_correction_of_id", "pl_calculation_snapshot",
-                                        "be_calculation_snapshot", "ae_calculation_snapshot", "my_calculation_snapshot", "template_version_id"}  # + Belgium P2
+                                        "be_calculation_snapshot", "ae_calculation_snapshot", "es_calculation_snapshot", "my_calculation_snapshot", "template_version_id"}  # + Belgium P2
     assert columns["payroll_runs"] == {"za_approval_fingerprint", "jp_approval_fingerprint",
                                        "jp_payment_kind", "nz_approval_fingerprint", "nz_payment_kind",
                                        "nz_run_options", "pl_approval_fingerprint", "my_approval_fingerprint", "be_approval_fingerprint"}

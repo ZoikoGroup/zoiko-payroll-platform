@@ -168,6 +168,15 @@ export const JURISDICTION_TAX_SCHEMAS = {
       { key: "gpssa_employer_number", label: "GPSSA employer registration number", pattern: "^[A-Za-z0-9][A-Za-z0-9 /-]{2,19}$", example: "123456", primary: false },
     ],
   },
+  // Spain (ZP-ES-ENG-001) — mirrors backend core/jurisdiction.py
+  // JURISDICTION_TAX_SCHEMAS.ES exactly.
+  ES: {
+    label: "NIF",
+    fields: [
+      { key: "nif", label: "NIF (employer tax ID)", pattern: "^[A-Za-z0-9]{9}$", example: "B12345678", primary: true },
+      { key: "ccc", label: "CCC (Social Security contribution account)", pattern: "^[0-9][0-9 /-]{8,19}$", example: "28123456789", primary: false },
+    ],
+  },
 };
 
 const COUNTRY_NAME_TO_CODE = {
@@ -225,6 +234,12 @@ const COUNTRY_NAME_TO_CODE = {
   "u.a.e": "AE",
   "the uae": "AE",
   emirates: "AE",
+  // Spain — never the bare "es" (also a Brazilian state code).
+  spain: "ES",
+  "españa": "ES",
+  espana: "ES",
+  "kingdom of spain": "ES",
+  "reino de españa": "ES",
 };
 
 const CODE_TO_COUNTRY_NAME = {
@@ -244,6 +259,7 @@ const CODE_TO_COUNTRY_NAME = {
   MY: "Malaysia",
   BE: "Belgium",
   AE: "United Arab Emirates",
+  ES: "Spain",
 };
 
 export function getJurisdictionCode(country) {

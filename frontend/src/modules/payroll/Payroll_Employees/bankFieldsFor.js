@@ -21,7 +21,7 @@
 
 import { COUNTRY_FIELD_SPECS } from "./countryFieldSpecs";
 
-export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR", "CH", "SA", "BE", "AE", "ZA", "PL", "MY"];
+export const BANK_ROUTING_COUNTRIES = ["IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR", "FR", "IE", "HK", "NL", "MX", "BR", "CH", "SA", "BE", "AE", "ES", "ZA", "PL", "MY"];
 
 // Mirrors backend bank_routing.py's PAYMENT_MODE_LABEL.
 const PAYMENT_MODE_LABEL = {
@@ -43,6 +43,7 @@ const PAYMENT_MODE_LABEL = {
   MY: "IBG / DuitNow",
   BE: "SEPA",
   AE: "WPS",
+  ES: "SEPA",
   BB: "EFT",
   KY: "EFT",
   DO: "EFT",
@@ -76,6 +77,7 @@ const BTF_ROUTING_LABEL = {
   MY: "SWIFT / Account",
   BE: "IBAN",
   AE: "IBAN",
+  ES: "IBAN",
   BB: "Bank/Branch Code",
   KY: "Bank/Branch Code",
   DO: "Bank/Branch Code",
@@ -112,6 +114,8 @@ const BANKING_COMPLIANCE_KEYS = {
   BE: ["iban"],
   // United Arab Emirates: IBAN only until the UAE employee record (Phase 5).
   AE: ["iban"],
+  // Spain: the Spanish IBAN (ES + 22 digits) — backend ROUTING_FIELDS.ES.
+  ES: ["iban"],
   BB: ["bank_branch_code"],
   KY: ["bank_branch_code"],
   DO: ["bank_branch_code"],

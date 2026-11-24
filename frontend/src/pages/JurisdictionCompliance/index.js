@@ -31,6 +31,7 @@ export { default as PLCompliancePage } from "./PLCompliancePage";
 export { default as MYCompliancePage } from "./MYCompliancePage";
 export { default as BECompliancePage } from "./BECompliancePage";
 export { default as AECompliancePage } from "./AECompliancePage";
+export { default as ESCompliancePage } from "./ESCompliancePage";
 
 // Single source of truth for the route-slug naming — used by App.jsx (to
 // define the routes) and the CompliancePage.jsx landing page (to link to
@@ -68,4 +69,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   MY: "malaysia",
   BE: "belgium",
   AE: "united-arab-emirates",
+  ES: "spain",
 };
