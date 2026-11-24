@@ -2,38 +2,62 @@ import { useState } from "react";
 import Modal from "../Modal";
 import { useToast } from "../../context/ToastContext";
 import { upsertCanonicalContributionRate } from "../../service/superAdminService";
-import { inputClass, labelClass } from "./constants";
+import { inputClass, isFractionRateCountry, labelClass, percentToRate, ratePercentWarnings, rateToPercent } from "./constants";
 
 // See the matching note in SlabFormModal.jsx — same US-only, optional,
 // blank-means-"applies to every filing status" convention.
 const US_FILING_STATUSES = ["SINGLE", "MFJ", "MFS", "HOH"];
 
+// Rate fields always take a PERCENTAGE (6.2 = 6.2 %). For countries whose
+// engine stores a fraction (constants.FRACTION_RATE_COUNTRIES) the stored
+// value is shown x100 and saved /100, so what is stored never changes unit.
+function RateField({ label, value, onChange, warnings }) {
+  return (
+    <div>
+      <label className={labelClass}>{label}</label>
+      <input className={inputClass} value={value} onChange={onChange} placeholder="12.00" inputMode="decimal"
+        aria-invalid={warnings.length > 0 || undefined} />
+      {warnings.map((w) => <p key={w} role="alert" className="mt-1 text-[11px] text-warning">{w}</p>)}
+    </div>
+  );
+}
+
 export default function RateFormModal({ pack, rate, onClose, onSaved }) {
   const { addToast } = useToast() || {};
+  const country = pack.jurisdictionCountry;
   const [form, setForm] = useState({
     componentKey: rate?.componentKey || "", label: rate?.label || "",
     jurisdictionState: rate?.jurisdictionState || pack.jurisdictionState || "",
-    employeeSharePct: rate?.employeeRatePct ?? "", employerSharePct: rate?.employerRatePct ?? "",
+    employeeSharePct: rateToPercent(rate?.employeeRatePct, country),
+    employerSharePct: rateToPercent(rate?.employerRatePct, country),
     flatAmount: rate?.flatAmount ?? "", filingStatus: rate?.filingStatus || "",
     sortOrder: rate?.sortOrder ?? 0, reason: "",
   });
   const [saving, setSaving] = useState(false);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
   const isUS = pack.jurisdictionCountry === "US";
+  const employeeWarnings = ratePercentWarnings(form.employeeSharePct, country);
+  const employerWarnings = ratePercentWarnings(form.employerSharePct, country);
 
   async function save() {
     if (!form.componentKey.trim() || !form.label.trim()) {
       addToast?.("Component key and label are required.", "error");
       return;
     }
+    if ((employeeWarnings.length || employerWarnings.length)
+      && !window.confirm(["Check the rates before saving:", ...employeeWarnings, ...employerWarnings, "", "Save anyway?"].join("\n"))) {
+      return;
+    }
+    const employeeRate = percentToRate(form.employeeSharePct, country);
+    const employerRate = percentToRate(form.employerSharePct, country);
     setSaving(true);
     try {
       await upsertCanonicalContributionRate({
         id: rate?.id, jurisdictionPackId: pack.id, jurisdictionCountry: pack.jurisdictionCountry,
         jurisdictionState: form.jurisdictionState || null, taxRegime: pack.taxRegime || null,
         componentKey: form.componentKey, label: form.label,
-        employeeSharePct: form.employeeSharePct === "" ? null : form.employeeSharePct,
-        employerSharePct: form.employerSharePct === "" ? null : form.employerSharePct,
+        employeeSharePct: employeeRate === "" ? null : employeeRate,
+        employerSharePct: employerRate === "" ? null : employerRate,
         flatAmount: form.flatAmount === "" ? null : form.flatAmount,
         filingStatus: isUS && form.filingStatus ? form.filingStatus : null,
         sortOrder: Number(form.sortOrder) || 0, reason: form.reason || null,
@@ -60,10 +84,15 @@ export default function RateFormModal({ pack, rate, onClose, onSaved }) {
 
         <FormSection title="Rate Configuration">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div><label className={labelClass}>Employee Rate %</label><input className={inputClass} value={form.employeeSharePct} onChange={set("employeeSharePct")} placeholder="12.00" /></div>
-            <div><label className={labelClass}>Employer Rate %</label><input className={inputClass} value={form.employerSharePct} onChange={set("employerSharePct")} placeholder="12.00" /></div>
+            <RateField label="Employee Rate %" value={form.employeeSharePct} onChange={set("employeeSharePct")} warnings={employeeWarnings} />
+            <RateField label="Employer Rate %" value={form.employerSharePct} onChange={set("employerSharePct")} warnings={employerWarnings} />
             <div><label className={labelClass}>Flat Amount</label><input className={inputClass} value={form.flatAmount} onChange={set("flatAmount")} placeholder="e.g. 200" /></div>
           </div>
+          {isFractionRateCountry(country) && (
+            <p className="mt-2 text-[11px] text-foreground-muted" data-testid="rate-unit-note">
+              Enter rates as percentages (6.2 for 6.2 %). {country} stores them as fractions (0.062); the conversion is automatic.
+            </p>
+          )}
         </FormSection>
 
         {isUS && (
