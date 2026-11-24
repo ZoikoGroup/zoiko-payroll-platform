@@ -36,3 +36,28 @@ export const PACK_TABS = [
   { key: "tax", label: "Tax" },
   { key: "policy", label: "Policy" },
 ];
+
+// Unit of ContributionRate.employee_rate_pct / employer_rate_pct per country.
+// Most engines store a percentage NUMBER (6.2 = 6.2 %: US, UK, CA, AU, FR,
+// BE, ...). These engines store a FRACTION (0.062 = 6.2 %) — their defaults
+// in backend engine/countries/<country>.py are fractions and the value is
+// multiplied in without /100. Display only: stored values are never changed.
+export const FRACTION_RATE_COUNTRIES = ["PR", "BS", "BB", "KY", "DO", "GY", "JM"];
+
+// "0.0620" -> "6.2" by moving the decimal point two places (string-based, so
+// no floating-point noise such as 6.200000000000001).
+function fractionToPercent(value) {
+  const match = /^(-?)(\d*)(?:\.(\d*))?$/.exec(String(value).trim());
+  if (!match) return String(Number((Number(value) * 100).toPrecision(12)));
+  const [, sign, int = "", frac = ""] = match;
+  const padded = frac.padEnd(2, "0");
+  const whole = `${int}${padded.slice(0, 2)}`.replace(/^0+(?=\d)/, "") || "0";
+  const rest = padded.slice(2).replace(/0+$/, "");
+  return `${sign}${whole}${rest ? `.${rest}` : ""}`;
+}
+
+// A contribution rate as shown in the Contribution Rates table.
+export function formatContributionRate(value, country) {
+  if (value == null || value === "") return "—";
+  return FRACTION_RATE_COUNTRIES.includes(String(country || "").toUpperCase()) ? `${fractionToPercent(value)}%` : `${value}%`;
+}

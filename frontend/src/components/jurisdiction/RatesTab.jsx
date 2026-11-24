@@ -1,3 +1,4 @@
+import { formatContributionRate } from "./constants";
 import { ContributionRatesTable, PackTableHeader } from "./PackRowTables";
 
 // Generic Contribution Rates tab — used by every country's compliance page
@@ -13,7 +14,10 @@ export default function RatesTab({ pack, rates, onAdd, onEdit, onDelete }) {
         description="Canonical contribution rates linked to this pack — org-scoped rows sync from these."
         locked={isActive} lockedNoun="rates" addLabel="Add Rate" onAdd={onAdd}
       />
-      <ContributionRatesTable rows={rates} onEdit={onEdit} onDelete={onDelete} />
+      <ContributionRatesTable
+        rows={rates} onEdit={onEdit} onDelete={onDelete}
+        formatRate={(value) => formatContributionRate(value, pack?.jurisdictionCountry)}
+      />
     </div>
   );
 }

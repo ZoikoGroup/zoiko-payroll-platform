@@ -33,6 +33,15 @@ check("next version of a bare number", c.nextPackVersion("2") === "2.1");
 check("non-numeric version left for the user", c.nextPackVersion("2026-H1") === "");
 check("Superseded is a selectable status", c.STATUS_OPTIONS.includes("Superseded") && c.STATUS_PILL_MAP.Superseded);
 
+// Contribution-rate units: fraction countries (PR, BS, BB, KY, DO, GY, JM) show x100, all others unchanged.
+check("PR Social Security 0.0620 shows 6.2%", c.formatContributionRate("0.0620", "PR") === "6.2%");
+check("PR Medicare 0.0145 shows 1.45%", c.formatContributionRate("0.0145", "PR") === "1.45%");
+check("Barbados 0.1275 shows 12.75%", c.formatContributionRate("0.1275", "BB") === "12.75%");
+check("percent countries unchanged (US 6.2, CA 4, FR 6.90, BE 13.07)",
+  c.formatContributionRate("6.2", "US") === "6.2%" && c.formatContributionRate("4", "CA") === "4%"
+  && c.formatContributionRate("6.90", "FR") === "6.90%" && c.formatContributionRate("13.07", "BE") === "13.07%");
+check("fraction country list", ["PR", "BS", "BB", "KY", "DO", "GY", "JM"].join() === c.FRACTION_RATE_COUNTRIES.join());
+
 const layout = read("components/jurisdiction/JurisdictionLayout.jsx");
 const modal = read("components/jurisdiction/NewPackModal.jsx");
 const landing = read("pages/CompliancePage.jsx");
