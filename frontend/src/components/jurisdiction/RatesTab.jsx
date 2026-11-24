@@ -15,7 +15,7 @@ export default function RatesTab({ pack, rates, onAdd, onEdit, onDelete }) {
         locked={isActive} lockedNoun="rates" addLabel="Add Rate" onAdd={onAdd}
       />
       <ContributionRatesTable
-        rows={rates} onEdit={onEdit} onDelete={onDelete}
+        rows={rates} onEdit={onEdit} onDelete={onDelete} actionsDisabled={isActive}
         formatRate={(value) => formatContributionRate(value, pack?.jurisdictionCountry)}
       />
     </div>

@@ -14,7 +14,7 @@ export default function SlabsTab({ pack, slabs, onAdd, onEdit, onDelete }) {
         description="Canonical tax brackets linked to this pack."
         locked={isActive} lockedNoun="brackets" addLabel="Add Bracket" onAdd={onAdd}
       />
-      <TaxSlabsTable rows={slabs} onEdit={onEdit} onDelete={onDelete} />
+      <TaxSlabsTable rows={slabs} onEdit={onEdit} onDelete={onDelete} actionsDisabled={isActive} />
     </div>
   );
 }

@@ -67,7 +67,8 @@ function ScalarRatesTable({ pack, config, sections, onReload }) {
       <ContributionRatesTable
         sections={sections}
         hideColumns={HIDDEN_COLUMNS}
-        onEdit={editable ? (row) => setEditing(raw(row)) : undefined}
+        onEdit={editable || isActive(pack) ? (row) => setEditing(raw(row)) : undefined}
+        actionsDisabled={isActive(pack)}
         emptyText="No rows for these groups in the selected pack."
         componentNote={(row) => (
           <>
@@ -127,8 +128,9 @@ function SlabKeyTable({ pack, config, rowKey, title, onReload }) {
       <TaxSlabsTable
         rows={rows}
         hideColumns={HIDDEN_COLUMNS}
-        onEdit={editable ? (row) => setEditing(raw(row)) : undefined}
-        onDelete={editable && isDraftPack(pack) ? retire : undefined}
+        onEdit={editable || isActive(pack) ? (row) => setEditing(raw(row)) : undefined}
+        onDelete={(editable && isDraftPack(pack)) || isActive(pack) ? retire : undefined}
+        actionsDisabled={isActive(pack)}
         emptyText="No rows yet — the key blocks until rows are added and signed (or the key is signed not supported)."
         extraColumns={[
           ...(spec.dimensions.length ? [{ key: "dimension", label: "Dimension", render: (row) => row.component || "—" }] : []),

@@ -11,7 +11,8 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 const th = "px-3 py-2";
 const td = "px-3 py-2 text-foreground-secondary";
 const iconBtn = "rounded p-1 text-foreground-disabled";
-const iconBtnDisabled = " disabled:cursor-not-allowed disabled:opacity-40";
+const iconBtnDisabled = " pointer-events-none opacity-40";
+export const LOCKED_ROW_TITLE = "Active pack is locked — create a New Version to edit";
 
 export function LockedPackNotice({ noun }) {
   return (
@@ -38,17 +39,33 @@ export function PackTableHeader({ description, locked, lockedNoun, addLabel, onA
   );
 }
 
+// `disabled` (an Active pack): the icons stay visible but cannot be used —
+// disabled + aria-disabled, with the reason as a tooltip on the wrapper (a
+// disabled button gets no hover events in every browser, so the wrapper
+// carries the title).
+function ActionButton({ label, onClick, disabled, hoverClass, children }) {
+  const button = (
+    <button onClick={disabled ? undefined : onClick} disabled={disabled}
+      aria-disabled={disabled || undefined} aria-label={disabled ? `${label} — ${LOCKED_ROW_TITLE}` : label}
+      className={`${iconBtn} ${disabled ? iconBtnDisabled.trim() : hoverClass}`}>
+      {children}
+    </button>
+  );
+  return disabled ? <span title={LOCKED_ROW_TITLE} className="inline-flex cursor-not-allowed">{button}</span> : button;
+}
+
 function RowActions({ row, onEdit, onDelete, disabled }) {
-  const extra = disabled ? iconBtnDisabled : "";
   return (
     <div className="flex items-center gap-1">
       {onEdit && (
-        <button onClick={() => onEdit(row)} disabled={disabled} aria-label="Edit"
-          className={`${iconBtn} hover:text-primary hover:bg-surface-muted${extra}`}><Pencil size={12} /></button>
+        <ActionButton label="Edit" onClick={() => onEdit(row)} disabled={disabled} hoverClass="hover:text-primary hover:bg-surface-muted">
+          <Pencil size={12} />
+        </ActionButton>
       )}
       {onDelete && (
-        <button onClick={() => onDelete(row)} disabled={disabled} aria-label="Delete"
-          className={`${iconBtn} hover:text-error hover:bg-error-light${extra}`}><Trash2 size={12} /></button>
+        <ActionButton label="Delete" onClick={() => onDelete(row)} disabled={disabled} hoverClass="hover:text-error hover:bg-error-light">
+          <Trash2 size={12} />
+        </ActionButton>
       )}
     </div>
   );
