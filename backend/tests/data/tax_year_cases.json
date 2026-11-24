@@ -1,0 +1,159 @@
+{
+  "_doc": "Tax year vs. effective dates — shared by backend/tests/test_tax_year_rules.py and frontend/scripts/pack-overview-validation.mjs so the server and the form apply the same rule. ok=false rows must be refused.",
+  "cases": [
+    {
+      "taxYear": "2027",
+      "from": "2027-01-01",
+      "to": "2027-12-31",
+      "ok": true,
+      "why": "calendar-year pack, single year"
+    },
+    {
+      "taxYear": "2027-2028",
+      "from": "2027-01-01",
+      "to": "2027-12-31",
+      "ok": false,
+      "why": "BE-PAYROLL-2027 as stored"
+    },
+    {
+      "taxYear": "2027-28",
+      "from": "2027-01-01",
+      "to": "2027-12-31",
+      "ok": false,
+      "why": "split year on a calendar-year pack"
+    },
+    {
+      "taxYear": "2026",
+      "from": "2027-01-01",
+      "to": "2027-12-31",
+      "ok": false,
+      "why": "wrong single year"
+    },
+    {
+      "taxYear": "2027",
+      "from": "2027-03-01",
+      "to": "2027-09-30",
+      "ok": true,
+      "why": "part of one calendar year"
+    },
+    {
+      "taxYear": "2026-27",
+      "from": "2026-04-06",
+      "to": "2027-04-05",
+      "ok": true,
+      "why": "spans two years (UK-style): not checked"
+    },
+    {
+      "taxYear": "2026",
+      "from": "2026-04-06",
+      "to": "2027-04-05",
+      "ok": true,
+      "why": "spans two years: not checked"
+    },
+    {
+      "taxYear": "2026",
+      "from": "2026-03-01",
+      "to": null,
+      "ok": true,
+      "why": "open-ended, single = start year"
+    },
+    {
+      "taxYear": "2025",
+      "from": "2026-03-01",
+      "to": null,
+      "ok": false,
+      "why": "open-ended, single != start year"
+    },
+    {
+      "taxYear": "2026-27",
+      "from": "2026-07-01",
+      "to": null,
+      "ok": true,
+      "why": "open-ended, split includes start year"
+    },
+    {
+      "taxYear": "2025-26",
+      "from": "2026-01-01",
+      "to": null,
+      "ok": true,
+      "why": "open-ended, split includes start year (second)"
+    },
+    {
+      "taxYear": "2024-25",
+      "from": "2026-07-01",
+      "to": null,
+      "ok": false,
+      "why": "open-ended, split excludes start year"
+    },
+    {
+      "taxYear": "2026 – 2027",
+      "from": "2026-07-01",
+      "to": null,
+      "ok": true,
+      "why": "spaces and an en dash"
+    },
+    {
+      "taxYear": "2026/27",
+      "from": "2027-01-01",
+      "to": "2027-12-31",
+      "ok": false,
+      "why": "slash split on a calendar-year pack"
+    },
+    {
+      "taxYear": "2099/00",
+      "from": "2100-01-01",
+      "to": null,
+      "ok": true,
+      "why": "century wrap"
+    },
+    {
+      "taxYear": "FY2026",
+      "from": "2026-01-01",
+      "to": "2026-12-31",
+      "ok": true,
+      "why": "other format: not checked"
+    },
+    {
+      "taxYear": "",
+      "from": "2026-01-01",
+      "to": "2026-12-31",
+      "ok": true,
+      "why": "no tax year"
+    },
+    {
+      "taxYear": null,
+      "from": "2026-01-01",
+      "to": "2026-12-31",
+      "ok": true,
+      "why": "no tax year"
+    },
+    {
+      "taxYear": "2026",
+      "from": null,
+      "to": null,
+      "ok": true,
+      "why": "no dates"
+    },
+    {
+      "taxYear": "2026-07",
+      "from": "2026-07-01",
+      "to": "2026-12-31",
+      "ok": true,
+      "why": "NL half-year window label: not a split year, not checked"
+    },
+    {
+      "taxYear": "2027-07",
+      "from": "2027-07-01",
+      "to": null,
+      "ok": true,
+      "why": "CH window label, open-ended: not checked"
+    },
+    {
+      "taxYear": "2026-2028",
+      "from": "2026-01-01",
+      "to": "2026-12-31",
+      "ok": true,
+      "why": "not a next-year split: not checked"
+    }
+  ]
+}

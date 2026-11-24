@@ -787,6 +787,20 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         raise BadRequestException(
             "Effective To date cannot be before Effective From date — this pack would never resolve for any calculation."
         )
+    # Tax year vs. dates (tax_year_rules, generic and date-based): checked on
+    # create, and on an edit only when the tax year or a date changes — an
+    # existing record is never refused for a value it already holds.
+    from app.modules.payroll import tax_year_rules
+
+    sent_fields = data.model_fields_set
+    tax_year = data.taxYear if not existing or "taxYear" in sent_fields else existing.tax_year
+    if not existing or any(
+            name in sent_fields and getattr(data, name) != getattr(existing, column)
+            for name, column in (("taxYear", "tax_year"), ("effectiveFrom", "effective_from"),
+                                 ("effectiveTo", "effective_to"))):
+        refusal = tax_year_rules.tax_year_date_refusal(tax_year, eff_from, eff_to)
+        if refusal:
+            raise BadRequestException(refusal)
     # Real bypass this closes: set_jurisdiction_pack_status's overlap
     # guard, inverted-date guard, and distinct-approver maker-checker gate
     # (below) only ever run when THAT function is the one making a pack
