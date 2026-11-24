@@ -23,6 +23,7 @@ const failures = [];
 const check = (name, ok) => (ok ? (passed += 1) : failures.push(name));
 
 const R = await load("components/reportTemplates/readiness.js");
+const layout = read("components/reportTemplates/ReportTemplateLayout.jsx");
 const STATUSES = ["Draft", "Review", "Approved", "Published", "Active", "Superseded"];
 
 // Fixtures shaped like the backend's responses.
@@ -87,8 +88,30 @@ check("banner: deferred checks listed (Mexico payslip proof)",
   R.activationBanner(full("Published", { canActivate: true, deferredChecks: ["Each field must resolve…"] }))?.deferred.length === 1);
 check("banner: none for Active", R.activationBanner(full("Active", { countryGate: gate("jurisdiction_gate", G3, "G3") })) === null);
 
+// ── audit: names and collapsed repeated refusals ────────────────────────────
+const A = await load("components/reportTemplates/auditView.js");
+const refused = (id, at, over = {}) => ({ id, action: "refused", entityType: "report_template", actorId: 1, actorName: "Ada Lovelace",
+  oldValue: { status: "Published" }, newValue: { attempted: "Active", result: "REFUSED" }, reason: G3, createdAt: at, ...over });
+const change = (id) => ({ id, action: "status_change", entityType: "report_template", actorId: 2, oldValue: { status: "Approved" },
+  newValue: { status: "Published" }, createdAt: "2026-11-20T10:00:00Z" });
+const log = [refused(9, "2026-11-24T10:04:00Z"), refused(8, "2026-11-24T10:03:00Z"), refused(7, "2026-11-24T10:02:00Z"),
+  refused(6, "2026-11-24T10:01:00Z"), change(5), refused(4, "2026-11-19T09:00:00Z"),
+  refused(3, "2026-11-18T09:00:00Z", { actorId: 3, actorName: null }), refused(2, "2026-11-18T08:00:00Z", { reason: "other" })];
+const grouped = A.groupAuditEntries(log);
+check("audit: 4 consecutive identical refusals collapse into one ×4 group",
+  grouped[0].kind === "refusals" && grouped[0].count === 4 && grouped[0].latest.id === 9 && grouped[0].entries.map((e) => e.id).join() === "9,8,7,6");
+check("audit: a different row breaks the run; a lone refusal stays a plain row", grouped[1].entry?.id === 5 && grouped[2].kind === "entry");
+check("audit: a different actor or reason is not grouped", grouped.length === 5 && grouped[3].entry.id === 3 && grouped[4].entry.id === 2);
+check("audit: grouping keeps every record (nothing dropped or altered)",
+  grouped.flatMap((g) => (g.kind === "refusals" ? g.entries : [g.entry])).map((e) => e.id).join() === log.map((e) => e.id).join()
+  && JSON.stringify(log[0]) === JSON.stringify(refused(9, "2026-11-24T10:04:00Z")));
+check("audit: actor name, else User #id, else System",
+  A.actorLabel(log[0]) === "Ada Lovelace" && A.actorLabel(log[6]) === "User #3" && A.actorLabel({ actorId: null }) === "System");
+check("layout renders grouped audit rows with names",
+  layout.includes("groupAuditEntries(audit).map") && layout.includes("Refused ×${count} — last at") && layout.includes("by {actorLabel(a)}")
+  && !layout.includes("by user #{a.actorId}"));
+
 // ── generic wiring (no country-specific branch decides readiness) ───────────
-const layout = read("components/reportTemplates/ReportTemplateLayout.jsx");
 check("layout renders options from statusOptions with disabled + reason",
   layout.includes("statusOptions(STATUS_OPTIONS, detail).map") && layout.includes("disabled={o.disabled}") && layout.includes("title={o.reason || undefined}"));
 check("layout shows the Active reason as text (unless the banner says the same), linked to the select", layout.includes("activeReason && activeReason !== banner?.message") && layout.includes('data-testid="active-blocked-reason"')

@@ -17,7 +17,8 @@ import ComponentsTab from "./ComponentsTab";
 import FilingCalendarTab from "./FilingCalendarTab";
 import { filterTemplates } from "./filterTemplates";
 import { buildDetailTabs } from "./detailTabs";
-import { describeAuditEntry } from "./auditView";
+import { actorLabel, describeAuditEntry, groupAuditEntries } from "./auditView";
+import Collapsible from "../jurisdiction/Collapsible";
 import { activationBanner, activeOptionReason, availabilityLabel, listBadge, statusOptions } from "./readiness";
 import Notice from "../jurisdiction/Notice";
 
@@ -73,6 +74,62 @@ const EDITABLE_STATUSES = ["Draft", "Review", "Approved"];
 // ctx ={ reloadDetail, reloadTemplates, selectTemplate(id) }. Extensions are
 // presentation only: every lifecycle rule stays server-side.
 const NO_EXTRAS = [];
+
+const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
+
+// One audit row: what happened, by whom (name, else "User #<id>"), when, and
+// the fields that changed.
+function AuditEntry({ entry: a }) {
+  const { summary, rows } = describeAuditEntry(a);
+  return (
+    <div className="rounded-lg border border-border-light p-2 text-xs" data-testid="audit-entry">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-foreground">
+          {a.action} — {a.entityType} <span className="text-foreground-disabled">· by {actorLabel(a)}</span>
+        </span>
+        <span className="text-foreground-disabled">{when(a.createdAt)}</span>
+      </div>
+      {summary && <p className="mt-1 font-semibold text-error" data-testid="audit-refused">{summary}</p>}
+      {a.reason && <p className="mt-1 text-foreground-secondary">{a.reason}</p>}
+      {rows.length > 0 && (
+        <div className="mt-1.5 space-y-0.5 border-t border-border-light pt-1.5">
+          {rows.map((r) => (
+            <div key={r.key} className="flex items-center gap-1.5 font-mono text-[11px]">
+              <span className="text-foreground-disabled">{r.key}:</span>
+              <span className="text-error line-through">{r.from}</span>
+              <span className="text-foreground-disabled">→</span>
+              <span className="text-success">{r.to}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Consecutive identical refusals (same actor, same move, same reason) shown
+// as one row that expands to every attempt — every audit record is kept.
+function RefusalGroup({ group }) {
+  const { latest, entries, count } = group;
+  const { summary } = describeAuditEntry(latest);
+  return (
+    <Collapsible
+      testId="audit-refusal-group"
+      title={`Refused ×${count} — last at ${when(latest.createdAt)}`}
+      badge={<span className="text-[11px] text-foreground-muted">by {actorLabel(latest)}</span>}
+      summary={[summary, latest.reason].filter(Boolean).join(" · ")}
+    >
+      <ul className="space-y-1 text-xs" data-testid="audit-refusal-attempts">
+        {entries.map((e) => (
+          <li key={e.id} className="flex flex-wrap justify-between gap-2 text-foreground-secondary">
+            <span>Attempt by {actorLabel(e)}</span>
+            <span className="text-foreground-disabled">{when(e.createdAt)}</span>
+          </li>
+        ))}
+      </ul>
+    </Collapsible>
+  );
+}
 
 export default function ReportTemplateLayout({
   country, countryName, initialState = "", onStateChange, embedded = false,
@@ -423,33 +480,9 @@ export default function ReportTemplateLayout({
                 <div className="space-y-2">
                   {audit.length === 0 ? (
                     <p className="py-6 text-center text-xs text-foreground-disabled">No audit history yet.</p>
-                  ) : audit.map((a) => {
-                    const { summary, rows } = describeAuditEntry(a);
-                    return (
-                      <div key={a.id} className="rounded-lg border border-border-light p-2 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium text-foreground">
-                            {a.action} — {a.entityType} {a.actorId ? <span className="text-foreground-disabled">· by user #{a.actorId}</span> : null}
-                          </span>
-                          <span className="text-foreground-disabled">{new Date(a.createdAt).toLocaleString()}</span>
-                        </div>
-                        {summary && <p className="mt-1 font-semibold text-error" data-testid="audit-refused">{summary}</p>}
-                        {a.reason && <p className="mt-1 text-foreground-secondary">{a.reason}</p>}
-                        {rows.length > 0 && (
-                          <div className="mt-1.5 space-y-0.5 border-t border-border-light pt-1.5">
-                            {rows.map((r) => (
-                              <div key={r.key} className="flex items-center gap-1.5 font-mono text-[11px]">
-                                <span className="text-foreground-disabled">{r.key}:</span>
-                                <span className="text-error line-through">{r.from}</span>
-                                <span className="text-foreground-disabled">→</span>
-                                <span className="text-success">{r.to}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  ) : groupAuditEntries(audit).map((g) => (g.kind === "refusals" ? (
+                    <RefusalGroup key={`g${g.latest.id}`} group={g} />
+                  ) : <AuditEntry key={g.entry.id} entry={g.entry} />))}
                 </div>
               )}
 
