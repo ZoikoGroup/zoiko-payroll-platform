@@ -150,7 +150,7 @@ def be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[str
     slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
                                       TaxSlab.organization_id.is_(None)).all())
     if not rates:
-        return "Belgium pack has no statutory content — seed it from belgium_content.py first."
+        return BE_NO_CATALOGUE
     problems = []
     for key, (_group, kind, _ref, _label) in content.KEYS.items():
         row = rates.get(key)
@@ -183,6 +183,103 @@ def be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[str
 
 def _be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[str]:
     return be_pack_activation_refusal(db, pack, actor_id)
+
+
+# ── 5b. review / approval refusals (2026-11-25, owner decision) ──────────────
+# A Belgian pack may not move to QA, In Review or Approved while any catalogue
+# key is missing, and may not be approved (Approve action, or Approved on the
+# status list) until every catalogue row is valued, sourced and signed. Stricter
+# only; a pack's current status is never changed retroactively.
+BE_REVIEW_STATUSES = ("QA", "In Review", "Approved")
+BE_NO_CATALOGUE = "This pack has no Belgian statutory rows yet. Set up the catalogue and load values first."
+
+
+def be_catalogue_refusal(db: Session, pack) -> Optional[str]:
+    """Why the pack's catalogue is not complete (any catalogue key absent), or None.
+    `pack` None (a pack being created) has no rows."""
+    from app.modules.payroll.models import ContributionRate
+
+    content = _content()
+    have = set() if pack is None or getattr(pack, "id", None) is None else {
+        k for (k,) in db.query(ContributionRate.component_key).filter(
+            ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))}
+    missing = [k for k in content.KEYS if k not in have]
+    if not missing:
+        return None
+    if len(missing) == len(content.KEYS):
+        return BE_NO_CATALOGUE
+    return (f"This pack is missing {len(missing)} of {len(content.KEYS)} Belgian statutory rows. "
+            "Set up the catalogue and load values first.")
+
+
+def be_approval_content_refusal(db: Session, pack) -> Optional[str]:
+    """Why the pack cannot be approved yet, or None: the catalogue must be
+    complete and every row valued, sourced and signed (the same row rules as
+    gate G1 at activation, without the certification run and the activator
+    check). Each problem is counted on its own, e.g. "12 rows empty, 40 unsigned"."""
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    refusal = be_catalogue_refusal(db, pack)
+    if refusal:
+        return refusal
+    content = _content()
+    rates = {r.component_key: r for r in db.query(ContributionRate).filter(
+        ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))}
+    slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None)).all()
+    empty = unsigned = unsourced = slab_keys = 0
+    for key, (_group, kind, _ref, _label) in content.KEYS.items():
+        row = rates[key]
+        empty += _row_empty(row, kind)
+        unsigned += content.PENDING_MARK in (row.label or "")
+        unsourced += row.source_document_id is None
+        if kind in content.SLAB_KINDS and (row.text_value or "").upper() == content.SLAB_ROWS:
+            mine = [s for s in slabs if s.rule_type == content.RULE_TYPES[key]]
+            slab_keys += (not mine or any(content.PENDING_MARK in (s.rate_label or "") for s in mine))
+    classes = [s for s in slabs if s.rule_type == content.EARNING_CLASS_RULE]
+    classes_unsigned = sum(1 for s in classes if content.PENDING_MARK in (s.rate_label or ""))
+    parts = [text for n, text in (
+        (empty, f"{empty} rows empty"), (unsigned, f"{unsigned} unsigned"), (unsourced, f"{unsourced} without a source"),
+        (slab_keys, f"{slab_keys} band / formula / table keys with rows missing or unsigned"),
+        (classes_unsigned, f"{classes_unsigned} earning classifications unsigned")) if n]
+    if not classes:
+        parts.append("no earning classifications")
+    if not parts:
+        return None
+    return (f"This pack cannot be approved yet: {', '.join(parts)}. "
+            "Every Belgian statutory row must be valued, sourced and signed first.")
+
+
+def be_pack_status_refusal(db: Session, pack, status: str) -> Optional[str]:
+    """The Belgian check for a move to `status` (QA / In Review / Approved), or None."""
+    if status not in BE_REVIEW_STATUSES:
+        return None
+    if status == "Approved":
+        return be_approval_content_refusal(db, pack)
+    return be_catalogue_refusal(db, pack)
+
+
+def _be_tax_pack(pack) -> bool:
+    return (getattr(pack, "jurisdiction_country", None) or "").upper() == BE and getattr(pack, "pack_type", None) == "tax"
+
+
+def _be_before_pack_status(db: Session, pack, status: str, actor_id: Optional[int] = None) -> None:
+    """Status list (PUT .../status): refuse QA / In Review / Approved per be_pack_status_refusal.
+    The shared wrapper audits the refusal."""
+    if _be_tax_pack(pack) and status != pack.status:
+        refusal = be_pack_status_refusal(db, pack, status)
+        if refusal:
+            raise BadRequestException(refusal)
+
+
+def _be_pack_approval_refusal(db: Session, pack, actor_id: Optional[int] = None) -> Optional[str]:
+    """Approve action (PUT .../approve): complete catalogue, every row valued, sourced and signed."""
+    return be_approval_content_refusal(db, pack) if _be_tax_pack(pack) else None
+
+
+def _be_pack_upsert_status_refusal(db: Session, pack, status: str) -> Optional[str]:
+    """Create / edit setting a review status (QA / In Review): the same catalogue check.
+    `pack` is None for a pack being created."""
+    return be_pack_status_refusal(db, pack, status)
 
 
 def _with_pending_mark(label: Optional[str], width: int) -> str:
@@ -419,9 +516,7 @@ def seed_belgium_pack(db: Session):
     Idempotent and create-only: an existing Draft pack only gains the rows it
     lacks (a row edited in the console is never overwritten); a pack that has
     left Draft is refused. Creates no Joint Committee pack."""
-    from decimal import Decimal
-
-    from app.modules.payroll.models import ContributionRate, JurisdictionPack, SourceArtifact, TaxSlab
+    from app.modules.payroll.models import JurisdictionPack
 
     content = _content()
     pack_id, window_from, window_to = content.BE_2026
@@ -440,6 +535,25 @@ def seed_belgium_pack(db: Session):
         db.add(pack)
         db.flush()
 
+    be_write_catalogue_rows(db, pack, sources)
+    return pack
+
+
+def be_write_catalogue_rows(db: Session, pack, sources: dict) -> dict:
+    """Write the belgium_content catalogue into `pack` (any Belgian pack id): one
+    canonical ContributionRate row per catalogue key with EVERY value field
+    empty and the label "<label> (spec-proposed: ...) [PENDING G1]" (a spec
+    figure is display text only, never a value), and one BE_EARNING_CLASS row
+    per (obligation, component), REVIEW, pending. Create-only: a key or class
+    the pack already holds is skipped, never overwritten. `sources` maps the
+    evidence-register codes to their SourceArtifact ids. Returns the counts
+    written. Shared by seed_belgium_pack and be_set_up_catalogue."""
+    from decimal import Decimal
+
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    content = _content()
+    added_rows = added_classes = 0
     existing = {r.component_key for r in db.query(ContributionRate.component_key).filter(
         ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))}
     for order, (key, (_group, _kind, ref, _label)) in enumerate(content.KEYS.items()):
@@ -451,6 +565,7 @@ def seed_belgium_pack(db: Session):
             label=f"{content.key_label(key)} {content.PENDING_MARK}"[:100], employee_share="—", employer_share="—",
             total="PENDING G1", employee_rate_pct=None, employer_rate_pct=None, flat_amount=None, text_value=None,
             source_document_id=sources[cited[0]] if cited else None, sort_order=order))
+        added_rows += 1
 
     have_classes = {(s.tax_regime, s.filing_status) for s in db.query(TaxSlab).filter(
         TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None),
@@ -469,8 +584,45 @@ def seed_belgium_pack(db: Session):
                            assessment_basis="REVIEW", tax_formula="",
                            rate_label=f"{obligation}: {component} — REVIEW {content.PENDING_MARK}"[:150],
                            sort_order=order))
+            added_classes += 1
     db.flush()
-    return pack
+    return {"rows": added_rows, "earningClasses": added_classes}
+
+
+def be_set_up_catalogue(db: Session, pack_row_id: int, actor_id, reason) -> dict:
+    """"Set up Belgian catalogue" (Super Admin, 2026-11-25): write the standard
+    catalogue into a Draft Belgian pack that lacks it — the same rows as the seed
+    (be_write_catalogue_rows: every value empty, [PENDING G1]), nothing copied
+    from another pack, no value invented. Create-only (rows the pack holds are
+    never touched), Draft only, reason required, audited (who, when, reason,
+    counts). Flushes; the caller commits."""
+    from app.modules.payroll.models import ContributionRate, JurisdictionPack
+    from app.modules.payroll.service import record_tax_audit
+
+    pack = db.get(JurisdictionPack, pack_row_id)
+    if pack is None or not _be_tax_pack(pack):
+        raise NotFoundException("Belgian pack", pack_row_id)
+    if pack.status != "Draft":
+        raise BadRequestException(f"{pack.pack_id} v{pack.version} is {pack.status}: the catalogue is set up in a "
+                                  "Draft pack only.")
+    reason = (reason or "").strip()
+    if not reason:
+        raise BadRequestException("A reason is required to set up the catalogue.")
+    if be_catalogue_refusal(db, pack) is None:
+        raise BadRequestException(f"{pack.pack_id} v{pack.version} already holds the full Belgian catalogue.")
+    before = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                               ContributionRate.organization_id.is_(None)).count()
+    added = be_write_catalogue_rows(db, pack, be_register_evidence_sources(db))
+    record_tax_audit(
+        db, actor_id=actor_id, action="catalogue_setup", entity_type="jurisdiction_pack", entity_id=pack.id,
+        jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference=SPEC,
+        old_value={"catalogueRows": before},
+        new_value={"catalogueRowsAdded": added["rows"], "earningClassesAdded": added["earningClasses"],
+                   "values": "none (every row empty, [PENDING G1])"},
+        reason=reason, auto_commit=False,
+    )
+    db.flush()
+    return {"packRowId": pack.id, "packId": pack.pack_id, "version": pack.version, **added}
 
 
 # ── shared-flow guards (BE-guarded branches call these) ─────────────────────
@@ -545,6 +697,9 @@ JURISDICTION_HOOKS = {
     "statutory_profile_errors": "_be_statutory_profile_errors",
     "statutory_profile_values": "_be_profile_values",
     "pack_activation_refusal": "_be_pack_activation_refusal",
+    "pack_approval_refusal": "_be_pack_approval_refusal",
+    "before_pack_status": "_be_before_pack_status",
+    "pack_upsert_status_refusal": "_be_pack_upsert_status_refusal",
     "retention_settings": "_be_retention_settings",
     "service_registry_transition": "_be_service_registry_transition",
     "statutory_summary": "be_statutory_summary",       # be_-unique: the callgraph links by simple name

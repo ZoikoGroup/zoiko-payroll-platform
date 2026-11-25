@@ -415,7 +415,7 @@ def test_retention_registry_template_and_activation_hooks(world):
     assert jurisdiction_hooks.call("PL", "template_activation_refusal", w.db,
                                    SimpleNamespace(jurisdiction_country="ZA", report_type="ZA_EMP201"), None) is None
     pack = SimpleNamespace(jurisdiction_country="PL", id=0, pack_id="PL-PAYROLL-2026")
-    assert "no statutory content" in jurisdiction_hooks.call("PL", "pack_activation_refusal", w.db, pack, None)
+    assert "no Polish statutory rows yet" in jurisdiction_hooks.call("PL", "pack_activation_refusal", w.db, pack, None)
     summary = jurisdiction_hooks.call("PL", "statutory_summary", w.db)
     assert summary["available"] is False and [u["key"] for u in summary["unmet"]][:2] == ["G1", "G2"]
 

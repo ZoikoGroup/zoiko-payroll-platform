@@ -5327,6 +5327,18 @@ def belgium_seed_draft(payload: dict = Body(...), current_user=Depends(get_curre
     return result
 
 
+@router.post("/compliance/belgium/packs/{pack_row_id}/catalogue-setup",
+             summary="Set up the standard Belgian catalogue in a Draft pack that lacks it (empty, unsigned rows; "
+                     "reason; audited)")
+def belgium_catalogue_setup(pack_row_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_service
+
+    result = belgium_service.be_set_up_catalogue(db, pack_row_id, current_user.id, (payload or {}).get("reason"))
+    db.commit()
+    return result
+
+
 @router.get("/compliance/belgium/decisions", summary="Belgium owner / specialist decisions (gaps register)")
 def belgium_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
     from app.modules.payroll import belgium_service

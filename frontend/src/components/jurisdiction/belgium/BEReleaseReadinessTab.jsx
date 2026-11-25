@@ -1,9 +1,10 @@
-import { getBeSummary, listBeGateEvidence } from "../../../service/superAdminService";
+import { getBeSigningStatus, getBeSummary, listBeGateEvidence } from "../../../service/superAdminService";
 import Collapsible from "../Collapsible";
 import Notice from "../Notice";
 import { card, useLoad } from "../japan/jpFormat";
 import { ErrorNote } from "../new_zealand/nzShared";
 import BEActivationReadinessTab from "./BEActivationReadinessTab";
+import BECatalogueNotice from "./BECatalogueNotice";
 import { GateEvidence } from "./BEGateEvidencePanel";
 import { GoldenCertification } from "./BEOverviewDashboard";
 import BEOwnerDecisionsTab from "./BEOwnerDecisionsTab";
@@ -103,6 +104,35 @@ function GateCard({ gate, met, detail, evidence, onChange }) {
   );
 }
 
+// The pack's own sections, or — for a pack holding no catalogue rows — the calm
+// catalogue notice instead of per-row reports that would only say "missing".
+function PackSections({ pack }) {
+  const [status, error, , reload] = useLoad(() => getBeSigningStatus(pack.id));
+  if (error) return <ErrorNote message={error} />;
+  if (!status) return <p className="text-[12px] text-foreground-muted">Loading…</p>;
+  if (status.catalogue && status.catalogue.rows === 0) return <BECatalogueNotice pack={pack} onDone={reload} />;
+  return (
+    <>
+      <Collapsible title="Golden certification (gate G1)" testId="be-section-golden"
+        summary="Authority examples replayed against this pack's rows; the certification run activation requires.">
+        <GoldenCertification key={`g${pack.id}`} pack={pack} />
+      </Collapsible>
+      <Collapsible title="Activation readiness" testId="be-section-activation"
+        summary="What blocks activating this pack, row by row, and who clears each item. Read-only.">
+        <BEActivationReadinessTab pack={pack} />
+      </Collapsible>
+      <Collapsible title="Signing status" testId="be-section-signing"
+        summary="Unsigned, empty and unsourced rows; content workbook export / import; bulk signing.">
+        <BESigningStatusTab pack={pack} />
+      </Collapsible>
+      <Collapsible title="Owner decisions" testId="be-section-decisions"
+        summary="Owner and specialist decisions that block launch, and their decision records.">
+        <BEOwnerDecisionsTab />
+      </Collapsible>
+    </>
+  );
+}
+
 export default function BEReleaseReadinessTab({ pack }) {
   const [summary, error, , reload] = useLoad(getBeSummary);
   const [evidence, evidenceError, , reloadEvidence] = useLoad(listBeGateEvidence);
@@ -147,22 +177,7 @@ export default function BEReleaseReadinessTab({ pack }) {
       {pack && (
         <>
           <h3 className="pt-1 text-[13px] font-semibold text-foreground">This pack ({pack.packId} v{pack.version})</h3>
-          <Collapsible title="Golden certification (gate G1)" testId="be-section-golden"
-            summary="Authority examples replayed against this pack's rows; the certification run activation requires.">
-            <GoldenCertification key={`g${pack.id}`} pack={pack} />
-          </Collapsible>
-          <Collapsible title="Activation readiness" testId="be-section-activation"
-            summary="What blocks activating this pack, row by row, and who clears each item. Read-only.">
-            <BEActivationReadinessTab pack={pack} />
-          </Collapsible>
-          <Collapsible title="Signing status" testId="be-section-signing"
-            summary="Unsigned, empty and unsourced rows; content workbook export / import; bulk signing.">
-            <BESigningStatusTab pack={pack} />
-          </Collapsible>
-          <Collapsible title="Owner decisions" testId="be-section-decisions"
-            summary="Owner and specialist decisions that block launch, and their decision records.">
-            <BEOwnerDecisionsTab />
-          </Collapsible>
+          <PackSections key={pack.id} pack={pack} />
         </>
       )}
     </div>

@@ -1190,6 +1190,10 @@ export const getBeSummary = () => apiFetch("/api/super-admin/compliance/jurisdic
 export const listBePacks = () => apiFetch(`${BE_SA}/packs`);
 export const getBeConfiguration = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/configuration`);
 export const getBeSigningStatus = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/signing-status`);
+// "Set up Belgian catalogue": the standard catalogue (every row empty, unsigned) into a Draft pack
+// that lacks it. Reason required; audited; never copies or invents a value.
+export const setUpBeCatalogue = (packRowId, reason) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/catalogue-setup`, { method: "POST", body: { reason } });
 // Read-only: every row / condition blocking activation, why, and who clears it.
 export const getBeActivationReadiness = (packRowId) =>
   apiFetch(`${BE_SA}/packs/${packRowId}/activation-readiness`);
