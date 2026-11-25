@@ -52,6 +52,12 @@ CURRENCY = "EUR"
 BE_2026 = ("BE-PAYROLL-2026", date(2026, 1, 1), date(2026, 12, 31))
 TAX_YEAR = "2026"
 
+# TODO(BE-SIGNED-STATUS): a Belgian row's signed / unsigned state is stored as
+# this marker inside its label (ContributionRate.label / TaxSlab.rate_label):
+# present = unsigned. It should become a real status field (e.g. signed_by_id /
+# signed_at / status) in a future migration; until then every reader (signing
+# console, activation gate, readiness G1, new-version clone, overview counts)
+# relies on the marker. Not changed now — see docs/belgium/BELGIUM_GAPS_AND_DECISIONS.md.
 PENDING_MARK = "[PENDING G1]"
 NOT_SUPPORTED = "NOT_SUPPORTED"
 SLAB_ROWS = "SLAB_ROWS"

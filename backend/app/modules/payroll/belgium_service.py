@@ -185,6 +185,47 @@ def _be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[st
     return be_pack_activation_refusal(db, pack, actor_id)
 
 
+def _with_pending_mark(label: Optional[str], width: int) -> str:
+    """`label` ending in the "[PENDING G1]" marker, the marker never truncated."""
+    mark = _content().PENDING_MARK
+    text = (label or "").strip()
+    if mark in text:
+        return text
+    return f"{text[: width - len(mark) - 1].rstrip()} {mark}".strip()
+
+
+def be_mark_version_rows_unsigned(db: Session, pack, actor_id=None) -> int:
+    """A new Belgian pack version is pre-populated with its base version's rows
+    (service._clone_pack_rates copies every column, the label included — and
+    in Belgium the label's "[PENDING G1]" marker IS the signed / unsigned
+    state). Mark every copied canonical row and slab row unsigned again, so the
+    new version goes through the governed signing (source + reason, a second
+    Super Admin signs) like any other content change. Values, sources and dates
+    are kept as copied; nothing is signed or activated. One audit row records
+    it. Returns how many rows were marked."""
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+    from app.modules.payroll.service import record_tax_audit
+
+    if (getattr(pack, "jurisdiction_country", None) or "").upper() != BE:
+        return 0
+    marked = 0
+    for model, column, width in ((ContributionRate, "label", 100), (TaxSlab, "rate_label", 150)):
+        for row in db.query(model).filter(model.jurisdiction_pack_id == pack.id, model.organization_id.is_(None)):
+            new = _with_pending_mark(getattr(row, column), width)
+            if new != getattr(row, column):
+                setattr(row, column, new)
+                marked += 1
+    if marked:
+        record_tax_audit(db, actor_id=actor_id, action="update", entity_type="jurisdiction_pack", entity_id=pack.id,
+                         jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference=SPEC,
+                         old_value={"unsignedRows": 0}, new_value={"unsignedRows": marked},
+                         reason=(f"New version {pack.pack_id} v{pack.version}: {marked} copied row(s) set to "
+                                 f"{_content().PENDING_MARK} — a second Super Admin signs them again."),
+                         auto_commit=False)
+    db.commit()
+    return marked
+
+
 # ── 6. retention_settings (type b + a) ──────────────────────────────────────
 BE_RETENTION_CATEGORIES: tuple = ()      # none declared until G-21 is decided
 

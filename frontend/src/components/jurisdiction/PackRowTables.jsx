@@ -79,13 +79,14 @@ function RowActions({ row, onEdit, onDelete, disabled }) {
 
 // columns: [{ key, label, render(row) }]. sections: [{ key, label, rows }] —
 // when given, rows are grouped under a section heading inside one table.
-function PackTable({ columns, rows, sections, onEdit, onDelete, actionsDisabled, emptyText }) {
+function PackTable({ columns, rows, sections, onEdit, onDelete, actionsDisabled, emptyText, emptyState = null }) {
   const groups = sections || [{ key: "all", label: null, rows: rows || [] }];
   const total = groups.reduce((n, g) => n + g.rows.length, 0);
   const hasActions = Boolean(onEdit || onDelete);
   const span = columns.length + (hasActions ? 1 : 0);
   if (total === 0) {
-    return <p className="rounded-lg border border-dashed border-border-light px-3 py-8 text-center text-xs text-foreground-disabled">{emptyText}</p>;
+    // `emptyState` (optional): a country's own empty state (text + actions).
+    return emptyState || <p className="rounded-lg border border-dashed border-border-light px-3 py-8 text-center text-xs text-foreground-disabled">{emptyText}</p>;
   }
   return (
     <div className="overflow-x-auto rounded-xl border border-border">
@@ -132,7 +133,7 @@ const defaultRateFormat = (value) => `${value}%`;
 // rate value; `componentNote(row)` adds a line under the component key.
 export function ContributionRatesTable({
   rows, sections, onEdit, onDelete, actionsDisabled = false, hideColumns = [], extraColumns = [],
-  componentNote, formatRate = defaultRateFormat, emptyText = "No contribution rates yet.",
+  componentNote, formatRate = defaultRateFormat, emptyText = "No contribution rates yet.", emptyState = null,
 }) {
   const columns = [
     { key: "component", label: "Component", cellClass: "px-3 py-2", render: (r) => (
@@ -150,14 +151,14 @@ export function ContributionRatesTable({
   ];
   return (
     <PackTable columns={pick(columns, hideColumns, extraColumns)} rows={rows} sections={sections}
-      onEdit={onEdit} onDelete={onDelete} actionsDisabled={actionsDisabled} emptyText={emptyText} />
+      onEdit={onEdit} onDelete={onDelete} actionsDisabled={actionsDisabled} emptyText={emptyText} emptyState={emptyState} />
   );
 }
 
 // Tax Slabs: Min | Max | Rate % | Label | State | Filing Status.
 export function TaxSlabsTable({
   rows, sections, onEdit, onDelete, actionsDisabled = false, hideColumns = [], extraColumns = [],
-  emptyText = "No tax slabs yet.",
+  emptyText = "No tax slabs yet.", emptyState = null,
 }) {
   const columns = [
     { key: "min", label: "Min", render: (s) => s.minAmount ?? "—" },
@@ -169,6 +170,6 @@ export function TaxSlabsTable({
   ];
   return (
     <PackTable columns={pick(columns, hideColumns, extraColumns)} rows={rows} sections={sections}
-      onEdit={onEdit} onDelete={onDelete} actionsDisabled={actionsDisabled} emptyText={emptyText} />
+      onEdit={onEdit} onDelete={onDelete} actionsDisabled={actionsDisabled} emptyText={emptyText} emptyState={emptyState} />
   );
 }

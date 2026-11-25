@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
-  bulkSignBeRows, downloadBeContentWorkbook, getBeConfiguration, getBeSigningStatus, importBeContentWorkbook,
+  bulkSignBeRows, downloadBeContentWorkbook, downloadBeImportTemplate, getBeConfiguration, getBeSigningStatus,
+  importBeContentWorkbook,
 } from "../../../service/superAdminService";
 import { inputClass, labelClass } from "../constants";
 import { card, useLoad } from "../japan/jpFormat";
@@ -49,13 +50,20 @@ function WorkbookPanel({ pack }) {
       <h3 className="text-[14px] font-semibold text-foreground">Content workbook (specialist intake)</h3>
       <p className="text-[12px] text-foreground-secondary">
         Export every key, slab, earning class, schema version, tolerance, calendar template, decision and source to
-        XLSX. Import it back into a Draft pack: the dry run lists every changed cell; importing never signs.
+        XLSX. Import it back — or rate / slab rows as CSV or JSON (see the template) — into a Draft pack: the dry
+        run lists every changed cell and every problem (missing columns, a rate above 100 %, overlapping brackets,
+        a row without a source); nothing is written unless every row passes, and importing never signs.
       </p>
       <button type="button" className={btnCls} disabled={state.busy}
         onClick={() => run(() => downloadBeContentWorkbook(pack.id), "Workbook downloaded.")}>Export workbook</button>
+      <span className="ml-2 text-[12px] text-foreground-muted">or a blank file to fill in:</span>
+      <button type="button" className={`${btnCls} ml-2`} disabled={state.busy} data-testid="be-template-csv"
+        onClick={() => run(() => downloadBeImportTemplate("csv"), "CSV template downloaded.")}>CSV template</button>
+      <button type="button" className={`${btnCls} ml-2`} disabled={state.busy} data-testid="be-template-json"
+        onClick={() => run(() => downloadBeImportTemplate("json"), "JSON template downloaded.")}>JSON template</button>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
         <label className={labelClass}>Workbook (.xlsx)
-          <input type="file" accept=".xlsx" onChange={(e) => { setFile(e.target.files?.[0] || null); setReport(null); }} />
+          <input type="file" accept=".xlsx,.csv,.json" onChange={(e) => { setFile(e.target.files?.[0] || null); setReport(null); }} />
         </label>
         <label className={labelClass}>Reason *
           <input className={inputClass} value={reason} onChange={(e) => setReason(e.target.value)} />

@@ -7,6 +7,7 @@ import { Table } from "../japan/jpShared";
 import { EditButton } from "../new_zealand/NZPackRowsTab";
 import { governanceError, governancePayload, useSources } from "../new_zealand/nzForm";
 import { ErrorNote, GovernanceFields, SignedPill } from "../new_zealand/nzShared";
+import BEEmptyRows from "./BEEmptyRows";
 import BERowEditor from "./BERowEditor";
 import { cleanLabel, isDraftPack, isEditablePack, slabRowsFor } from "./beShared";
 
@@ -83,7 +84,7 @@ export function AddRowForm({ pack, rowKey, spec, onClose, onSaved }) {
   );
 }
 
-export default function BESlabRowsSection({ pack, config, rowKey, title, onReload }) {
+export default function BESlabRowsSection({ pack, config, rowKey, title, onReload, onImport }) {
   const spec = config?.slabSpecs?.[rowKey];
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -108,14 +109,16 @@ export default function BESlabRowsSection({ pack, config, rowKey, title, onReloa
     <div className={card} data-testid={`be-slab-${spec.ruleType}`}>
       <div className="mb-2 flex items-center justify-between">
         <h4 className="text-[13px] font-semibold text-foreground">{title} — rows ({spec.ruleType})</h4>
-        {editable && !adding && (
+        {editable && !adding && rows.length > 0 && (
           <button type="button" onClick={() => setAdding(true)}
             className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] font-semibold text-foreground-secondary hover:bg-surface-muted">
             <Plus size={11} /> Add row
           </button>
         )}
       </div>
-      <Table rows={rows} empty="No rows yet — the key blocks until rows are added and signed (or the key is signed NOT_SUPPORTED)."
+      {rows.length === 0 ? (
+        <BEEmptyRows title={title} pack={pack} editable={editable} onAdd={() => setAdding(true)} onImport={onImport} />
+      ) : <Table rows={rows} empty=""
         columns={[
           ...(spec.dimensions.length ? [{ label: "Dimension", render: (row) => row.component || "—" }] : []),
           { label: "Row", render: (row) => cleanLabel(row.label) },
@@ -134,7 +137,7 @@ export default function BESlabRowsSection({ pack, config, rowKey, title, onReloa
               )}
             </span>
           ) }] : []),
-        ]} />
+        ]} />}
       <ErrorNote message={error} />
       {adding && (
         <AddRowForm pack={pack} rowKey={rowKey} spec={spec} onClose={() => setAdding(false)}

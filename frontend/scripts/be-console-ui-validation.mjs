@@ -64,10 +64,10 @@ const PRIMARY_TABS = ["be-rates", "be-slabs", "be-policy", "be-release"];
 const MORE_TABS = ["be-holiday-pay", "be-wages-time", "be-absence", "be-public-holidays", "be-earning",
   "be-joint-committees", "be-sources"];
 
-check("primary tabs: Overview | Contribution Rates | Tax Slabs | Policy & Rounding | Release Readiness (+ shared tabs)", () => {
+check("primary tabs: Overview | Contributions | Tax Slabs | Policy | Readiness (+ shared tabs)", () => {
   const keys = [...beConfig.matchAll(/\btab\("(be-[a-z-]+)", "([^"]+)"[^,]*, [^,]*, "([a-z-]+)"/g)];
   assert(keys.map((m) => m[1]).join() === PRIMARY_TABS.join(), `primary tab keys: ${keys.map((m) => m[1]).join(", ")}`);
-  assert(keys.map((m) => m[2]).join() === "Contribution Rates,Tax Slabs,Policy & Rounding,Release Readiness",
+  assert(keys.map((m) => m[2]).join() === "Contributions,Tax Slabs,Policy,Readiness",
     `labels: ${keys.map((m) => m[2]).join(", ")}`);
   // each anchors after the previous one, starting after Overview
   assert(keys.map((m) => m[3]).join() === ["overview", ...PRIMARY_TABS.slice(0, -1)].join(), "anchors");
@@ -81,13 +81,13 @@ check("data tabs live in the More menu and the tab row never scrolls sideways", 
   assert(keys.join() === MORE_TABS.join(), `More tabs: ${keys.join(", ")}`);
   assert(/overflow: true/.test(beConfig), "More tabs are flagged overflow");
   assert(/adaptiveTabs: true/.test(beConfig), "adaptive tab row");
-  // The eight core tabs stay on one row from 1280px: below 1760px the pack list sits above the panel
-  // and the tab row drops its icons (measured: core tabs need ~811px, the bar gets ~884px at 1280).
-  assert(/compactUntilWide: true/.test(beConfig), "compact layout below 1760px");
+  // Same layout as every country: the pack list in the LEFT column (240px, all compliance pages) at
+  // every width; tabs that do not fit overflow from the end into More (measured in headless Chrome).
+  assert(!/compactUntilWide/.test(beConfig), "no stacked pack chips (commit h reverted)");
   const layoutSrc = read("components/jurisdiction/JurisdictionLayout.jsx");
-  assert(layoutSrc.includes('compactUntilWide ? "grid grid-cols-1 gap-4 min-[1760px]:grid-cols-[280px_1fr]" : "grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]"')
-    && layoutSrc.includes("iconsWhenWide={compactUntilWide}") && layoutSrc.includes("compactUntilWide = false"), "layout wiring (off by default)");
-  assert(read("components/jurisdiction/PackTabBar.jsx").includes('className="hidden min-[1760px]:block"'), "tab icons only when wide");
+  assert(layoutSrc.includes('<div className="grid grid-cols-1 gap-4 lg:grid-cols-[240px_1fr]">')
+    && !/compactUntilWide|iconsWhenWide/.test(layoutSrc), "left-column layout for every country");
+  assert(!/iconsWhenWide|min-\[1760px\]/.test(read("components/jurisdiction/PackTabBar.jsx")), "tab icons always shown");
   const layout = read("components/jurisdiction/JurisdictionLayout.jsx");
   assert(/visibleExtraTabs\.filter\(\(t\) => t\.overflow\)/.test(layout) && /adaptive=\{adaptiveTabs\}/.test(layout), "layout wiring");
   const bar = read("components/jurisdiction/PackTabBar.jsx");
@@ -101,7 +101,10 @@ check("activation readiness, signing status and owner decisions are sections of 
     assert(release.includes(`<${name}`), `${name} rendered`);
   }
   assert((release.match(/<Collapsible/g) || []).length >= 5, "gate cards and sections are collapsible");
-  assert(/list-disc/.test(release) && /c\.detail/.test(release), "failing checks listed as bullets");
+  assert(release.includes('data-testid="be-gate-details"') && release.includes('data-testid="be-gate-done"')
+    && /c\.detail/.test(release), "each gate lists what is Missing and what is Done");
+  assert(release.includes("<ActorBadge actor={c.actor} />") && release.includes('data-testid="be-gate-owner"')
+    && release.includes('"sign-off": "Sign-off"'), "who acts: the backend's actor per check + the gate owner");
   for (const old of ["be-activation", "be-signing", "be-decisions"]) assert(!new RegExp(`tab\\("${old}"`).test(beConfig), `${old} still a tab`);
 });
 
@@ -123,6 +126,35 @@ check("Contribution Rates / Tax Slabs use the shared tables and the governed edi
   assert(/const HIDDEN_COLUMNS = \["state", "filingStatus"\]/.test(tables)
     && (tables.match(/hideColumns=\{HIDDEN_COLUMNS\}/g) || []).length === 2, "State / Filing Status hidden on both tables");
   for (const col of ["statusColumn", "inForceColumn", '"dimension"', '"amount"', '"formula"']) assert(tables.includes(col), `${col} kept`);
+});
+
+check("Overview cards count Belgium's configuration rows (signed vs pending), other countries unchanged", () => {
+  const shared = read("components/jurisdiction/belgium/beShared.js");
+  assert(/export function beOverviewCounts\(config\)/.test(shared) && shared.includes("pending: rows.filter((r) => !r.signed).length"),
+    "counts from config rows' signed flag");
+  assert(shared.includes("TAB_GROUPS.onssEmployee") && shared.includes("TAB_GROUPS.onssEmployer"), "groups from TAB_GROUPS, no key names");
+  const overview = read("components/jurisdiction/belgium/BEOverviewDashboard.jsx");
+  assert(/stats=\{stats\}/.test(overview) && overview.includes("loadConfiguration(pack)"), "BE passes its own cards");
+  const summary = read("components/jurisdiction/PackOverviewSummary.jsx");
+  assert(summary.includes("stats = null") && summary.includes("{stats ? stats.map("), "generic cards unless a country passes stats");
+});
+
+check("plain-language empty states; label suffixes stripped at display time only", () => {
+  for (const file of componentFiles) {
+    const code = read(file);
+    assert(!/the key blocks until rows are added/.test(code), `${file}: old empty-state jargon`);
+  }
+  const empty = read("components/jurisdiction/belgium/BEEmptyRows.jsx");
+  assert(empty.includes("No rows loaded yet") && empty.includes("second Super Admin") && empty.includes("Import from file")
+    && empty.includes("Add row"), "empty state text and actions");
+  for (const f of ["BEPackTables.jsx", "BESlabRowsSection.jsx"]) {
+    assert(read(`components/jurisdiction/belgium/${f}`).includes("<BEEmptyRows"), `${f} uses BEEmptyRows`);
+  }
+  const shared = read("components/jurisdiction/belgium/beShared.js");
+  assert(shared.includes('const SPEC_PROPOSED = " (spec-proposed: "') && shared.includes('const NONE_IN_SPEC = " (none in spec)"')
+    && shared.includes("export function specProposal(label)"), "display-time stripping");
+  assert(read("components/jurisdiction/belgium/BERowEditor.jsx").includes("specProposal(row.label)"),
+    "the signer still sees the spec proposal in the editor");
 });
 
 check("Hotfix Activate is hidden for Belgium (self-approval refused), like Mexico", () => {

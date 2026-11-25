@@ -14,7 +14,7 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, Body, File, Form, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core import object_storage
@@ -5383,8 +5383,18 @@ def belgium_content_workbook(pack_row_id: int, current_user=Depends(get_current_
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
+@router.get("/compliance/belgium/content-import-template",
+            summary="The CSV / JSON template for importing Belgian rate / slab rows (fake example values only)")
+def belgium_content_import_template(format: str = Query("csv", pattern="^(csv|json)$"),
+                                    current_user=Depends(get_current_super_admin)):
+    from app.modules.payroll import be_content_workbook
+
+    name, data, media = be_content_workbook.be_content_import_template(format)
+    return Response(content=data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @router.post("/compliance/belgium/packs/{pack_row_id}/content-workbook/import",
-             summary="Import the Belgium content workbook into a Draft pack (dry run by default; never signs)")
+             summary="Import Belgian content (XLSX workbook, CSV or JSON) into a Draft pack (dry run by default; never signs)")
 async def belgium_content_workbook_import(pack_row_id: int, file: UploadFile = File(...), reason: str = Form(...),
                                           dry_run: bool = Query(True), current_user=Depends(get_current_super_admin),
                                           db: Session = Depends(get_db)):
@@ -5392,7 +5402,7 @@ async def belgium_content_workbook_import(pack_row_id: int, file: UploadFile = F
 
     data = await file.read()
     out = be_content_workbook.be_content_workbook_import(db, pack_row_id, data, getattr(current_user, "id", None),
-                                                         reason=reason, dry_run=dry_run)
+                                                         reason=reason, dry_run=dry_run, filename=file.filename)
     if out["written"]:
         db.commit()
     return out

@@ -3,6 +3,7 @@ import Modal from "../Modal";
 import { useToast } from "../../context/ToastContext";
 import { upsertCompliancePolicy } from "../../service/superAdminService";
 import { inputClass, labelClass, STATUS_OPTIONS, POLICY_STATUS_OPTIONS, nextPackVersion } from "./constants";
+import { taxYearDateProblem } from "./taxYear";
 
 // "New Version" passes `basePack` (the pack being versioned): the form starts
 // on the next free version number with that pack's metadata, instead of
@@ -35,7 +36,15 @@ export default function NewPackModal({ country, state, packType, stateOptions = 
     ? (nextPackVersion(b.version, existingVersions) || form.version)
     : form.version;
 
+  // Same rule the server applies on create (tax_year_rules): a pack within one
+  // calendar year uses that single year; open-ended packs must include the start year.
+  const taxYearProblem = taxYearDateProblem(form.taxYear, form.effectiveFrom, form.effectiveTo);
+
   async function save() {
+    if (taxYearProblem) {
+      addToast?.(taxYearProblem, "error");
+      return;
+    }
     if (!form.packId.trim() || !form.effectiveFrom || !version.trim()) {
       addToast?.("Pack ID, Version and Effective From are required.", "error");
       return;
@@ -86,7 +95,12 @@ export default function NewPackModal({ country, state, packType, stateOptions = 
         </div>
         <div><label className={labelClass}>Version</label><input className={inputClass} value={version} onChange={set("version")} /></div>
         <div><label className={labelClass}>Status</label><select className={inputClass} value={form.status} onChange={set("status")}>{(packType === "policy" ? POLICY_STATUS_OPTIONS : STATUS_OPTIONS).map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
-        <div><label className={labelClass}>Tax Year</label><input className={inputClass} value={form.taxYear} onChange={set("taxYear")} placeholder="2026-27" /></div>
+        <div>
+          <label className={labelClass} htmlFor="pack-tax-year">Tax Year</label>
+          <input id="pack-tax-year" className={inputClass} value={form.taxYear} onChange={set("taxYear")} placeholder="2026 or 2026-27"
+            aria-invalid={taxYearProblem ? true : undefined} aria-describedby={taxYearProblem ? "pack-tax-year-problem" : undefined} />
+          {taxYearProblem && <p id="pack-tax-year-problem" role="alert" data-testid="tax-year-problem" className="mt-1 text-[11px] text-error">{taxYearProblem}</p>}
+        </div>
         <div><label className={labelClass}>Effective From</label><input type="date" className={inputClass} value={form.effectiveFrom} onChange={set("effectiveFrom")} /></div>
         <div><label className={labelClass}>Effective To</label><input type="date" className={inputClass} value={form.effectiveTo} onChange={set("effectiveTo")} /></div>
         <div><label className={labelClass}>Tax Regime</label><input className={inputClass} value={form.taxRegime} onChange={set("taxRegime")} placeholder="Old / New" /></div>
@@ -101,7 +115,7 @@ export default function NewPackModal({ country, state, packType, stateOptions = 
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>
-        <button onClick={save} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">{saving ? "Creating…" : "Create"}</button>
+        <button onClick={save} disabled={saving || Boolean(taxYearProblem)} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">{saving ? "Creating…" : "Create"}</button>
       </div>
     </Modal>
   );

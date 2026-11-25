@@ -1240,6 +1240,19 @@ export async function downloadBeContentWorkbook(packRowId) {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
+// The CSV / JSON import template (every column; example rows with fake 0.00 values only).
+export async function downloadBeImportTemplate(format = "csv") {
+  const res = await beFetchRaw(`${BE_SA}/content-import-template` + `?format=${format === "json" ? "json" : "csv"}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `belgium-content-import-template.${format === "json" ? "json" : "csv"}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+}
 export async function importBeContentWorkbook(packRowId, file, reason, dryRun = true) {
   const form = new FormData();
   form.append("file", file);

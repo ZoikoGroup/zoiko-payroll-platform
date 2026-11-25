@@ -8,7 +8,14 @@ calendar (rows + a template), the owner decisions and the evidence register
 S1-S24 with its archive status, plus an Instructions sheet. Content only: no
 personal data. Every cell is written as text (no float rounding).
 
-Import (Draft packs only): the same workbook back. dry_run (the default)
+Import (Draft packs only): the same workbook back — or the same rows as CSV /
+JSON (one row per line, a "sheet" column naming the workbook sheet; see
+be_content_import_template / scripts/templates/be_content_import_template.*).
+Every format goes through the same checks and writers: required columns per
+sheet, a rate never above 100 % (every rate key: be_onss_manual_base_uplift too —
+it stores the percentage ADDED to the base, e.g. 8 for "gross + 8 %", see
+engine/jurisdictions/belgium/onss.py), no overlapping brackets within one band
+key / dimension / date window (the pack's existing rows included). dry_run (the default)
 validates every changed row through the SAME governed writers the console uses
 (be_super_admin.update_row / add_slab_row) and rolls everything back, returning
 a report per changed cell (sheet!cell, OK / ERROR + reason). A real import is
@@ -285,7 +292,88 @@ def _col(index: int) -> str:
     return get_column_letter(index)
 
 
-def _read(data: bytes) -> dict:
+IMPORT_SHEETS = (SHEET_SCALAR, SHEET_SLAB, SHEET_CLASS, SHEET_SCHEMA, SHEET_TOLERANCE, SHEET_CALENDAR)
+# Columns a CSV / JSON row of each sheet must carry (the XLSX export always has them).
+REQUIRED_COLUMNS = {
+    SHEET_SCALAR: ("rowId", "key", "sourceDocumentId"),
+    SHEET_SLAB: ("key", "sourceDocumentId"),
+    SHEET_CLASS: ("rowId", "component", "treatment", "sourceDocumentId"),
+    SHEET_SCHEMA: ("key", "version", "sourceDocumentId"),
+    SHEET_TOLERANCE: ("rowId", "key", "flatAmount", "sourceDocumentId"),
+    SHEET_CALENDAR: ("reportType", "reportingYear", "periodKey", "dueDate", "sourceDocumentId"),
+}
+
+
+def _format(data: bytes, filename: Optional[str]) -> str:
+    name = (filename or "").lower()
+    if data[:2] == b"PK" or name.endswith(".xlsx"):
+        return "xlsx"
+    if name.endswith(".json") or data.lstrip()[:1] in (b"{", b"["):
+        return "json"
+    return "csv"
+
+
+def _tabular(records, source: str) -> dict:
+    """[(row number, {column: value, "sheet": name})] -> the XLSX reader's shape."""
+    out = {}
+    for n, record in records:
+        sheet = str(record.get("sheet") or "").strip()
+        row = {k: v for k, v in record.items() if k != "sheet"}
+        header, rows = out.setdefault(sheet, ([], []))
+        for column in row:
+            if column not in header:
+                header.append(column)
+        rows.append((n, row))
+    if not out:
+        raise BadRequestException(f"The {source} file has no rows.")
+    return out
+
+
+def _read_csv(data: bytes) -> dict:
+    import csv
+
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise BadRequestException("The CSV file must be UTF-8 encoded.")
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames or "sheet" not in [f.strip() for f in reader.fieldnames]:
+        raise BadRequestException('The CSV file needs a header row with a "sheet" column (see the template).')
+    records = []
+    for record in reader:
+        clean = {(k or "").strip(): (v.strip() if isinstance(v, str) and v.strip() != "" else None)
+                 for k, v in record.items() if k is not None}
+        if any(v for k, v in clean.items() if k != "sheet"):
+            records.append((reader.line_num, clean))
+    return _tabular(records, "CSV")
+
+
+def _read_json(data: bytes) -> dict:
+    import json
+
+    try:
+        doc = json.loads(data.decode("utf-8-sig"), parse_float=Decimal)    # decimals stay exact
+    except (UnicodeDecodeError, ValueError):
+        raise BadRequestException("The JSON file is not valid UTF-8 JSON.")
+    rows = doc.get("rows") if isinstance(doc, dict) else doc
+    if not isinstance(rows, list):
+        raise BadRequestException('The JSON file must be a list of rows, or {"rows": [...]} (see the template).')
+    records = []
+    for i, record in enumerate(rows, start=1):
+        if not isinstance(record, dict):
+            raise BadRequestException(f"JSON row {i} is not an object.")
+        if any(isinstance(v, (dict, list)) for v in record.values()):
+            raise BadRequestException(f"JSON row {i}: values must be plain text or numbers.")
+        records.append((i, {str(k).strip(): v for k, v in record.items()}))
+    return _tabular(records, "JSON")
+
+
+def _read(data: bytes, filename: Optional[str] = None) -> dict:
+    fmt = _format(data, filename)
+    if fmt == "csv":
+        return _read_csv(data)
+    if fmt == "json":
+        return _read_json(data)
     from openpyxl import load_workbook
 
     try:
@@ -300,6 +388,91 @@ def _read(data: bytes) -> dict:
         header = [str(h).strip() if h is not None else "" for h in rows[0]]
         out[ws.title] = (header, [(i + 2, dict(zip(header, r))) for i, r in enumerate(rows[1:])])
     return out
+
+
+TEMPLATE_PLACEHOLDER_SOURCE = "EXAMPLE-SOURCE-REFERENCE"
+# The template's example value: an obviously fake zero (TEMPLATE_FAKE_VALUE), never a real figure.
+TEMPLATE_FAKE_VALUE = format(Decimal(0), ".2f")
+
+
+def be_content_import_template(fmt: str = "csv") -> tuple:
+    """(filename, bytes, media type) of the CSV / JSON import template: every
+    column of the scalar and slab sheets, the required ones marked, and one
+    example line each with obviously fake values (0.00) and a placeholder key
+    and source — replace them with the catalogue key, the official figure and
+    the source reference before importing. No real Belgian figure."""
+    import csv
+    import json
+
+    columns = ["sheet"] + [c for c in SCALAR_COLS if c not in ("group", "kind", "specReference", "specProposed",
+                                                               "vocabulary", "state")]
+    columns += [c for c in SLAB_COLS if c not in columns and c not in ("ruleType", "kind", "requiredFields",
+                                                                       "dimensionFormat", "state")]
+    examples = [
+        {"sheet": SHEET_SCALAR, "rowId": "0", "key": "REPLACE-with-the-catalogue-key", "employeeRatePct": TEMPLATE_FAKE_VALUE,
+         "employerRatePct": TEMPLATE_FAKE_VALUE, "sourceDocumentId": TEMPLATE_PLACEHOLDER_SOURCE},
+        {"sheet": SHEET_SLAB, "key": "REPLACE-with-a-band-key", "minAmount": TEMPLATE_FAKE_VALUE, "maxAmount": TEMPLATE_FAKE_VALUE,
+         "ratePct": TEMPLATE_FAKE_VALUE, "sourceDocumentId": TEMPLATE_PLACEHOLDER_SOURCE},
+    ]
+    if fmt == "json":
+        doc = {"_instructions": [
+            "One object per row. 'sheet' is 'Scalar keys' (a catalogue row: rowId from the workbook export) or "
+            "'Slab keys' (a band / formula / table row: leave rowId empty to add a row).",
+            "Required: " + "; ".join(f"{k}: {', '.join(v)}" for k, v in REQUIRED_COLUMNS.items()
+                                     if k in (SHEET_SCALAR, SHEET_SLAB)) + ".",
+            "Amounts and rates are decimal strings with a dot as the decimal separator; a rate is the percentage number itself "
+            "(never above 100). Brackets of one key must not overlap.",
+            "Every row needs sourceDocumentId: the source document id or its reference (e.g. 'ZP-BE-ENG-001 S3').",
+            "Imported rows are UNSIGNED ([PENDING G1]); a second Super Admin signs them. Draft packs only.",
+            "The example rows hold FAKE zero values and placeholders: replace them; never import them as they are.",
+        ], "columns": columns, "rows": [{c: row.get(c) for c in columns} for row in examples]}
+        return "belgium-content-import-template.json", (json.dumps(doc, indent=2) + "\n").encode("utf-8"), \
+            "application/json"
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=columns, lineterminator="\n")
+    writer.writeheader()
+    for row in examples:
+        writer.writerow({c: row.get(c, "") for c in columns})
+    return "belgium-content-import-template.csv", buffer.getvalue().encode("utf-8"), "text/csv"
+
+
+def _bands(content, slabs) -> dict:
+    """{(rule type, dimension): [(row id, min, max, from, to)]} of the pack's band rows."""
+    band_rules = {content.RULE_TYPES[k] for k, spec in content.SLAB_SPECS.items() if spec["kind"] == content.KIND_BAND}
+    out = {}
+    for s in slabs.values():
+        if s.rule_type in band_rules:
+            out.setdefault((s.rule_type, (s.filing_status or "").upper()), []).append(
+                [s.id, s.min_amount, s.max_amount, s.effective_from, s.effective_to])
+    return out
+
+
+def _dec(value) -> Optional[Decimal]:
+    text = _norm(value)
+    if text is None:
+        return None
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
+
+
+def _date(value) -> Optional[date]:
+    text = _norm(value, text=True)
+    try:
+        return date.fromisoformat(text[:10]) if text else None
+    except ValueError:
+        return None
+
+
+def _overlaps(a, b) -> bool:
+    """Two bands [min, max) — max None = open — that overlap in amount AND in time."""
+    _ida, amin, amax, afrom, ato = a
+    _idb, bmin, bmax, bfrom, bto = b
+    amin, bmin = amin or Decimal(0), bmin or Decimal(0)
+    amounts = (bmax is None or amin < bmax) and (amax is None or bmin < amax)
+    times = (bto is None or afrom is None or afrom <= bto) and (ato is None or bfrom is None or bfrom <= ato)
+    return amounts and times
 
 
 class _Report:
@@ -357,7 +530,7 @@ def _source_id(db: Session, raw: Optional[str]) -> Optional[int]:
 
 
 def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor_id, *, reason=None,
-                               dry_run: bool = True) -> dict:
+                               dry_run: bool = True, filename: Optional[str] = None) -> dict:
     from app.modules.payroll.models import ContributionRate, SourceArtifact, StatutoryFilingCalendar, TaxSlab
 
     sa, content = _sa(), _content()
@@ -368,8 +541,23 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
     reason = (reason or "").strip()
     if not reason:
         raise BadRequestException("A reason is required for a workbook import.")
-    sheets = _read(data)
+    fmt = _format(data, filename)
+    sheets = _read(data, filename)
     report = _Report()
+    if fmt != "xlsx":
+        # CSV / JSON: every row names its sheet, and each sheet carries its required columns.
+        for name in list(sheets):
+            header, rows = sheets[name]
+            if name not in IMPORT_SHEETS:
+                for n, _row in rows:
+                    report.add(name or "(no sheet)", n, "sheet", header, "ERROR",
+                               f"sheet must be one of: {', '.join(IMPORT_SHEETS)}")
+                del sheets[name]
+                continue
+            missing = [c for c in REQUIRED_COLUMNS.get(name, ()) if c not in header]
+            if missing:
+                report.add(name, 1, missing[0], header, "ERROR", f"missing required column(s): {', '.join(missing)}")
+                del sheets[name]
     # Draft sources first (optional sheet): every listed reference that does not
     # exist yet becomes an UNVERIFIED, unarchived SourceArtifact (it can never be
     # used to sign); existing references are left untouched.
@@ -432,6 +620,13 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
                            "codes must be entered as TEXT (format the cell as Text): a numeric cell has already lost "
                            "any leading zeros (e.g. ONSS employer category 000)", key)
                 continue
+            capped = [c for c in ("employeeRatePct", "employerRatePct") if c in changed
+                      and (_dec(changed[c]) or 0) > 100]
+            if capped:
+                for column in capped:
+                    report.add(sheet, n, column, header, "ERROR",
+                               "a rate is the percentage number itself and cannot exceed 100", key)
+                continue
             payload = {k: ("" if _cell(k, v) is None else _cell(k, v)) for k, v in changed.items()}
             _apply(report, sheet, n, header, key, changed,
                    lambda: sa.update_row(db, "rate", rid, {**payload, "sourceDocumentId": source, "reason": reason},
@@ -439,6 +634,47 @@ def be_content_workbook_import(db: Session, pack_row_id: int, data: bytes, actor
 
     # slab keys (bands / formulas / tables)
     header, rows = sheets.get(SHEET_SLAB, ([], []))
+    # Pre-pass: no rate above 100 %, and no two brackets of one band key /
+    # dimension overlapping in amount and time — the pack's rows as they would
+    # be after this import (existing rows with their edits, plus new rows).
+    bands = _bands(content, slabs)
+    new_bands, edited = [], set()
+    for n, row in rows:
+        key = row.get("key")
+        if (_dec(row.get("ratePct")) or 0) > 100:
+            report.add(SHEET_SLAB, n, "ratePct", header, "ERROR",
+                       "a rate is the percentage number itself and cannot exceed 100", key)
+        spec = content.SLAB_SPECS.get(key)
+        if not spec or spec["kind"] != content.KIND_BAND:
+            continue
+        rule = content.RULE_TYPES[key]
+        dimension = (_norm(row.get("dimension"), text=True) or "").upper()
+        rid = _norm(row.get("rowId"))
+        if rid is not None and rid.isdigit() and int(rid) in slabs:
+            for band in bands.get((rule, (slabs[int(rid)].filing_status or "").upper()), []):
+                if band[0] == int(rid):
+                    for i, column in ((1, "minAmount"), (2, "maxAmount")):
+                        if column in row and _norm(row.get(column)) != _norm(band[i]):
+                            band[i] = _dec(row.get(column))
+                            edited.add(int(rid))
+            continue
+        if rid is None:
+            new_bands.append((n, key, (rule, dimension), [f"row {n}", _dec(row.get("minAmount")),
+                              _dec(row.get("maxAmount")), _date(row.get("effectiveFrom")), _date(row.get("effectiveTo"))]))
+    for n, key, slot, band in new_bands:
+        clash = next((other for other in bands.get(slot, []) if _overlaps(band, other)), None)
+        if clash is not None:
+            what = f"pack row #{clash[0]}" if isinstance(clash[0], int) else f"the file's {clash[0]}"
+            report.add(SHEET_SLAB, n, "minAmount", header, "ERROR",
+                       f"this bracket overlaps {what} of the same key / dimension: brackets must not overlap", key)
+        bands.setdefault(slot, []).append(band)
+    for key_slot, members in bands.items():          # rows this import edits, against the pack's other rows
+        existing = [m for m in members if isinstance(m[0], int)]
+        for i, a in enumerate(existing):
+            for b in existing[i + 1:]:
+                if (a[0] in edited or b[0] in edited) and _overlaps(a, b):
+                    report.add(SHEET_SLAB, 1, "minAmount", header, "ERROR",
+                               f"pack rows #{a[0]} and #{b[0]} would overlap after this import", key_slot[0])
     for n, row in rows:
         key = row.get("key")
         values = {c: row.get(c) for c in SLAB_NEW}

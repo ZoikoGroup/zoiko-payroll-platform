@@ -7,7 +7,7 @@ import { inputClass, labelClass } from "../constants";
 import { card, useLoad } from "../japan/jpFormat";
 import { ErrorNote } from "../new_zealand/nzShared";
 import PackOverviewSummary from "../PackOverviewSummary";
-import { engineStatusLabel, gateCounts } from "./beShared";
+import { beOverviewCounts, engineStatusLabel, gateCounts, loadConfiguration, rowsHint } from "./beShared";
 
 // Belgium pack Overview: the same summary every country shows
 // (PackOverviewSummary — status chips, counts, effective dates, regions, needs
@@ -130,13 +130,37 @@ function EngineChip({ onOpen }) {
   );
 }
 
+// The four summary cards counted from Belgium's own configuration data (the
+// generic counter only sees rows with a stored rate; every unsigned Belgian
+// row is empty until it is signed). Falls back to the generic cards while the
+// configuration loads or if it cannot be read.
+function useBeStats(pack) {
+  const [config] = useLoad(() => loadConfiguration(pack));
+  if (!config) return null;
+  const c = beOverviewCounts(config);
+  return [
+    { label: "Employee deductions", value: c.employee.rows, hint: `ONSS employee · ${rowsHint(c.employee)}` },
+    { label: "Employer contributions", value: c.employer.rows, hint: `ONSS employer & reductions · ${rowsHint(c.employer)}` },
+    { label: "Parameters & thresholds", value: c.parameters.rows, hint: rowsHint(c.parameters) },
+    { label: "Tax slabs / bands", value: c.slabs.rows,
+      hint: `${rowsHint(c.slabs)}${c.slabs.keysWithoutRows ? ` · ${c.slabs.keysWithoutRows} of ${c.slabs.keys} band / formula keys have none yet` : ""}` },
+  ];
+}
+
+function Summary({ pack, refreshKey, onNavigateTab }) {
+  const stats = useBeStats(pack);
+  return (
+    <PackOverviewSummary
+      pack={pack} refreshKey={refreshKey} stats={stats}
+      extraFlags={<EngineChip onOpen={() => onNavigateTab?.("be-release")} />}
+    />
+  );
+}
+
 export default function BEOverviewDashboard({ pack, refreshKey, onNavigateTab }) {
   return (
     <div data-testid="be-overview">
-      <PackOverviewSummary
-        pack={pack} refreshKey={refreshKey}
-        extraFlags={<EngineChip onOpen={() => onNavigateTab?.("be-release")} />}
-      />
+      <Summary key={pack?.id} pack={pack} refreshKey={refreshKey} onNavigateTab={onNavigateTab} />
     </div>
   );
 }

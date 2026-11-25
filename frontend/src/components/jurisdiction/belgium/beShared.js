@@ -27,7 +27,35 @@ export const TAB_GROUPS = {
 };
 
 export const PENDING_MARK = "[PENDING G1]";
-export const cleanLabel = (label) => String(label || "").replace(PENDING_MARK, "").trim();
+// Stored catalogue labels carry display-only suffixes for the G1 signer:
+// "<label> (spec-proposed: …) [ref. marker] [PENDING G1]" or "<label> (none in
+// spec)". Tables show the plain label; the stored label is never rewritten.
+const SPEC_PROPOSED = " (spec-proposed: ";
+const NONE_IN_SPEC = " (none in spec)";
+
+export function cleanLabel(label) {
+  let text = String(label || "").replace(PENDING_MARK, "").trim();
+  const at = text.indexOf(SPEC_PROPOSED);
+  if (at >= 0) text = text.slice(0, at);
+  const none = text.indexOf(NONE_IN_SPEC);
+  if (none >= 0) text = text.slice(0, none);
+  return text.trim();
+}
+
+// The spec's proposal from a stored label (display text for the signer, never
+// a value), or null: the text inside "(spec-proposed: …)", nested brackets kept.
+export function specProposal(label) {
+  const text = String(label || "");
+  const at = text.indexOf(SPEC_PROPOSED);
+  if (at < 0) return null;
+  let depth = 1;
+  for (let i = at + SPEC_PROPOSED.length; i < text.length; i += 1) {
+    if (text[i] === "(") depth += 1;
+    if (text[i] === ")") depth -= 1;
+    if (depth === 0) return text.slice(at + SPEC_PROPOSED.length, i).trim() || null;
+  }
+  return text.slice(at + SPEC_PROPOSED.length).trim() || null;
+}
 
 export function loadConfiguration(pack) {
   return pack ? getBeConfiguration(pack.id) : Promise.resolve(null);
@@ -61,4 +89,33 @@ export function gateCounts(summary) {
 export function engineStatusLabel(status) {
   const words = String(status || "unknown").replace(/_/g, " ").toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+// Overview cards from the Belgium configuration (GET .../configuration):
+// catalogue rows by group, slab rows by key — each with how many still await
+// a second Super Admin's signature. Counts only; no value is read or shown.
+const EMPLOYEE_GROUPS = TAB_GROUPS.onssEmployee;
+const EMPLOYER_GROUPS = TAB_GROUPS.onssEmployer;
+const tally = (rows) => ({ rows: rows.length, pending: rows.filter((r) => !r.signed).length });
+
+export function beOverviewCounts(config) {
+  const groups = config?.groups || {};
+  const rowsOf = (names) => names.flatMap((g) => groups[g]?.rows || []);
+  const order = config?.groupOrder || Object.keys(groups);
+  const parameterGroups = order.filter((g) => !EMPLOYEE_GROUPS.includes(g) && !EMPLOYER_GROUPS.includes(g));
+  const slabKeys = Object.keys(config?.slabSpecs || {});
+  const slabRows = slabKeys.flatMap((key) => slabRowsFor(config, key));
+  return {
+    employee: tally(rowsOf(EMPLOYEE_GROUPS)),
+    employer: tally(rowsOf(EMPLOYER_GROUPS)),
+    parameters: tally(rowsOf(parameterGroups)),
+    slabs: { ...tally(slabRows), keys: slabKeys.length,
+      keysWithoutRows: slabKeys.filter((key) => slabRowsFor(config, key).length === 0).length },
+  };
+}
+
+// "12 rows · 3 pending signature" / "12 rows · all signed" / "no rows yet".
+export function rowsHint({ rows, pending }) {
+  if (!rows) return "no rows yet";
+  return `${rows} row${rows === 1 ? "" : "s"} · ${pending ? `${pending} pending signature` : "all signed"}`;
 }

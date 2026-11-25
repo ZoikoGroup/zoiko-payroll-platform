@@ -1232,6 +1232,7 @@ GET,/api/super-admin/commercial/revenue-collections,platform,read,revenue-collec
 GET,/api/super-admin/compliance/active-tax-configuration,platform,read,active-tax-configuration,super_admin,platform,,,,no,
 PUT,/api/super-admin/compliance/belgium/configuration/rows/{kind}/{row_id},platform,update,rows,super_admin,platform,,,,no,
 DELETE,/api/super-admin/compliance/belgium/configuration/slab-rows/{row_id},platform,delete,slab-rows,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/belgium/content-import-template,platform,read,content-import-template,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/belgium/decision-records,platform,read,decision-records,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/belgium/decision-records,platform,create,decision-records,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/belgium/decision-records/import-proposals,platform,create,import-proposals,super_admin,platform,,,,no,
