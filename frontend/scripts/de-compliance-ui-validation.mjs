@@ -87,6 +87,13 @@ check("every earlier Germany section maps to a tab that exists", () => {
   assert(page.includes('searchParams.get("section")') && page.includes("<Navigate replace"), "?section= links rewritten");
 });
 
+check("/germany/registries redirects to the tab holding its default (PAP) section", () => {
+  const app = read("App.jsx");
+  const route = app.split(/\r?\n/).find((line) => line.includes('path="/super-admin/compliance/germany/registries"')) || "";
+  assert(route.includes('<Navigate replace to="/super-admin/compliance/germany?tab=de-slabs"'), `route: ${route}`);
+  assert(/pap: "de-slabs"/.test(shared), "pap lives in Tax Slabs");
+});
+
 check("every registry editor stays reachable from a tab", () => {
   const all = [config, ...NEW_FILES.map(read)].join("\n");
   for (const name of ["PapTab", "HealthFundsTab", "ContributionCeilingsTab", "PvConfigTab", "MinijobMidijobParametersTab",

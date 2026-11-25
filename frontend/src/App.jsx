@@ -47,7 +47,6 @@ import {
   GYStatutoryPage, JMStatutoryPage, BSStatutoryPage, TTStatutoryPage, SGStatutoryPage,
   PRStatutoryPage, IEStatutoryPage, SEStatutoryPage, HKStatutoryPage, NLStatutoryPage, MXStatutoryPage, BRStatutoryPage,
 } from "./pages/JurisdictionStatutory";
-import GermanyStatutoryRegistriesPage from "./pages/JurisdictionCompliance/GermanyStatutoryRegistriesPage";
 import ReportTemplatesPage from "./pages/ReportTemplatesPage";
 import {
   INReportTemplatesPage, UKReportTemplatesPage, USAReportTemplatesPage, CAReportTemplatesPage, AUReportTemplatesPage,
@@ -228,7 +227,8 @@ export default function App() {
         <Route path="/super-admin/compliance/canada" element={<SuperAdminShell><CACompliancePage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/canada/:jurisdiction" element={<SuperAdminShell><CACompliancePage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/germany" element={<SuperAdminShell><DECompliancePage /></SuperAdminShell>} />
-        <Route path="/super-admin/compliance/germany/registries" element={<SuperAdminShell><GermanyStatutoryRegistriesPage /></SuperAdminShell>} />
+        {/* The former registries page (default tab: PAP) now lives in the Germany page's tabs. */}
+        <Route path="/super-admin/compliance/germany/registries" element={<Navigate replace to="/super-admin/compliance/germany?tab=de-slabs" />} />
         <Route path="/super-admin/compliance/germany/:jurisdiction" element={<SuperAdminShell><DECompliancePage /></SuperAdminShell>} />
             <Route path="/super-admin/compliance/france" element={<SuperAdminShell><FRCompliancePage /></SuperAdminShell>} />
         <Route path="/super-admin/compliance/france/:jurisdiction" element={<SuperAdminShell><FRCompliancePage /></SuperAdminShell>} />
