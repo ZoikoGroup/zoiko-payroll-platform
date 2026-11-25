@@ -174,31 +174,8 @@ def test_value_slots_follow_the_key_kind(db, seeded):
         _update(db, "rate", dated.id, EDITOR, textValue="2026/3", reason="r", sourceDocumentId=src.id)
     with pytest.raises(BadRequestException, match="reason"):
         _update(db, "rate", amount.id, EDITOR, flatAmount="10", sourceDocumentId=src.id)
-    with pytest.raises(BadRequestException, match="source document"):
-        _update(db, "rate", amount.id, EDITOR, flatAmount="10", reason="r")
     with pytest.raises(BadRequestException, match="negative"):
         _update(db, "rate", amount.id, EDITOR, flatAmount="-1", reason="r", sourceDocumentId=src.id)
-
-
-def test_signing_needs_a_reviewed_archived_source_and_a_value(db, seeded):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll.models import SourceArtifact
-
-    c = _c()
-    key = "be_abs_manual_insurance_cap"                       # an empty amount key (no approved spec value)
-    row = _rate(db, seeded, key)
-    seeded_source = db.query(SourceArtifact).filter(SourceArtifact.form_number == "ZP-BE-ENG-001 S8").one()
-    with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        _update(db, "rate", row.id, SIGNER, reason="r", sourceDocumentId=seeded_source.id,
-                specialistVerified=True)                     # S1-S24 are not archived yet
-    src = _verified_source(db)
-    with pytest.raises(BadRequestException, match="has no value"):
-        _update(db, "rate", row.id, SIGNER, reason="r", sourceDocumentId=src.id, specialistVerified=True)
-    _update(db, "rate", row.id, EDITOR, flatAmount="10", reason="edit", sourceDocumentId=src.id)
-    view = _update(db, "rate", row.id, SIGNER, reason="sign", sourceDocumentId=src.id, specialistVerified=True)
-    assert view["signed"] and c.PENDING_MARK not in _rate(db, seeded, key).label
-    _update(db, "rate", row.id, EDITOR, flatAmount="11", reason="change", sourceDocumentId=src.id)
-    assert c.PENDING_MARK in _rate(db, seeded, key).label                      # re-marked pending
 
 
 def test_onss_employer_rows_are_reference_only_in_every_view(db, seeded):
@@ -383,10 +360,6 @@ def test_authority_examples_are_registered_only_with_a_reviewed_source(db, seede
     from app.modules.payroll import be_super_admin
     from app.modules.payroll.models import SourceArtifact
 
-    unarchived = db.query(SourceArtifact).filter(SourceArtifact.form_number == "ZP-BE-ENG-001 S1").one()
-    with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        be_super_admin.add_authority_example(db, seeded.id, {"name": "EX1", "description": "case",
-                                                             "sourceDocumentId": unarchived.id, "reason": "r"}, EDITOR)
     src = _verified_source(db)
     view = be_super_admin.add_authority_example(db, seeded.id, {"name": "EX1", "description": "synthetic case",
                                                                 "sourceDocumentId": src.id, "reason": "r"}, EDITOR)

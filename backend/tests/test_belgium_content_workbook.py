@@ -70,7 +70,7 @@ def test_the_export_has_every_sheet_and_every_catalogue_row(db, seeded):
     proposed = [r for r in sheets["Scalar keys"][1:] if r[1] == "be_onss_employee_rate"][0]
     # gate removal 2026-11-25: the approved spec figure is seeded as the value
     assert proposed[5] == c.SPEC_PROPOSED["be_onss_employee_rate"] and proposed[8] == "13.0700"
-    assert {r[7] for r in sheets["Scalar keys"][1:]} == {"SIGNED"}        # no legacy marker is seeded
+    assert {r[7] for r in sheets["Scalar keys"][1:]} <= {"SET", "EMPTY"}   # state = value present or not (2026-11-25)
 
 
 def test_the_workbook_carries_no_personal_data(db, seeded):
@@ -149,7 +149,7 @@ def test_a_valid_import_writes_unsigned_rows_and_draft_calendar_rows(db, seeded)
     db.commit()
     assert out["written"] and out["errors"] == 0 and out["changes"] == 2
     rate = _rate(db, seeded, "be_rounding_onss")
-    assert rate.text_value == "CENT_HALF_UP" and c.PENDING_MARK in rate.label           # never signed
+    assert rate.text_value == "CENT_HALF_UP" and c.PENDING_MARK not in rate.label  # no marker: no signing since 2026-11-25
     audit = (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "be_statutory_rate",
                                                     TaxConfigurationAudit.entity_id == rate.id).one())
     assert audit.actor_id == IMPORTER and audit.old_value["textValue"] is None          # before-image kept
@@ -164,34 +164,6 @@ def test_import_refuses_a_pack_that_is_not_draft(db, seeded):
     db.commit()
     with pytest.raises(BadRequestException, match="Draft pack only"):
         _import(db, seeded, book)
-
-
-def test_the_importer_cannot_bulk_sign_but_another_super_admin_can(db, seeded):
-    from app.modules.payroll.models import TaxConfigurationAudit
-    from tests.test_belgium_super_admin import _rate
-
-    c = _c()
-    src = _verified_source(db)
-    book = _export(db, seeded)
-    scalar = book["Scalar keys"]
-    for key, value in (("be_rounding_onss", "CENT_HALF_UP"), ("be_rounding_holiday", "CENT_DOWN")):
-        row, header = _find(scalar, "key", key)
-        _set(scalar, row, header, textValue=value, sourceDocumentId=str(src.id))
-    assert _import(db, seeded, book, dry_run=False)["written"]
-    db.commit()
-    rows = [{"kind": "rate", "id": _rate(db, seeded, k).id} for k in ("be_rounding_onss", "be_rounding_holiday")]
-    with pytest.raises(BadRequestException, match="Four-eyes"):
-        _wb().be_bulk_sign_rows(db, seeded.id, {"rows": rows, "reason": "sign"}, IMPORTER)
-    out = _wb().be_bulk_sign_rows(db, seeded.id, {"rows": rows, "reason": "TEST ONLY reviewed"}, SIGNER)
-    db.commit()
-    assert len(out["signed"]) == 2
-    for k in ("be_rounding_onss", "be_rounding_holiday"):
-        rate = _rate(db, seeded, k)
-        assert c.PENDING_MARK not in rate.label
-        signs = (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "be_statutory_rate",
-                                                        TaxConfigurationAudit.entity_id == rate.id,
-                                                        TaxConfigurationAudit.actor_id == SIGNER).all())
-        assert len(signs) == 1 and signs[0].new_value["signed"] is True                 # one audit row per row
 
 
 # ── Block E: source references, draft sources, the committed AI draft ──────
@@ -213,7 +185,7 @@ def test_a_source_reference_works_like_an_id_and_draft_sources_are_created_unver
     source = db.query(SourceArtifact).filter_by(form_number="ZP-BE-TEST D01").one()
     assert "[UNVERIFIED" in source.title and source.checksum_sha256 is None                 # can never sign
     rate = _rate(db, seeded, "be_rounding_onss")
-    assert rate.source_document_id == source.id and c.PENDING_MARK in rate.label
+    assert rate.source_document_id == source.id and c.PENDING_MARK not in rate.label
     again = _import(db, seeded, book)                                                    # reference exists now
     assert again["errors"] == 0 and db.query(SourceArtifact).filter_by(form_number="ZP-BE-TEST D01").count() == 1
 
@@ -233,16 +205,15 @@ def test_the_committed_ai_draft_imports_without_error_and_signs_nothing(db, seed
     assert done["written"]
     rates = db.query(ContributionRate).filter_by(jurisdiction_pack_id=seeded.id).all()
     slabs = db.query(TaxSlab).filter_by(jurisdiction_pack_id=seeded.id).all()
-    # gate removal 2026-11-25: seeded rows carry no marker; every row the import CHANGED is marked again
+    # gate removal 2026-11-25: no row is ever marked - neither seeded nor imported ones
     from app.modules.payroll.belgium_service import _be_seed_value_columns
 
     names = ("employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value")
     changed = [r for r in rates
                if tuple(getattr(r, n) for n in names) != tuple(_be_seed_value_columns(r.component_key)[n]
                                                               for n in names)]
-    assert changed and all(c.PENDING_MARK in r.label for r in changed)                    # nothing signed
-    assert all(c.PENDING_MARK in s.rate_label for s in slabs
-               if s.rule_type != c.EARNING_CLASS_RULE or s.assessment_basis != "REVIEW")
+    assert changed and not any(c.PENDING_MARK in (r.label or "") for r in changed)
+    assert not any(c.PENDING_MARK in (s.rate_label or "") for s in slabs)
     assert seeded.status == "Draft"
     by_key = {r.component_key: r for r in rates}
     assert by_key["be_supported_pay_frequencies"].text_value == "MONTHLY"                    # G-11

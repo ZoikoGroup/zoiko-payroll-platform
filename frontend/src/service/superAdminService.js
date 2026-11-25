@@ -1237,5 +1237,3 @@ export async function importBeContentWorkbook(packRowId, file, reason, dryRun = 
     { method: "POST", body: form });
   return res.json();
 }
-export const bulkSignBeRows = (packRowId, rows, reason) =>
-  apiFetch(`${BE_SA}/packs/${packRowId}/bulk-sign`, { method: "POST", body: { rows, reason } });

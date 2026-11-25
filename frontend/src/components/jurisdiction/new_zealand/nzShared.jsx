@@ -32,16 +32,23 @@ export function GovernanceFields({ value, onChange, sources }) {
   );
 }
 
+// Value state of a row. There is no signing step since the gate removal
+// (owner decision 2026-11-25), so an old "[PENDING G1]" label marker means
+// nothing: a row either has a value (in force) or does not (blocks only the
+// calculation that needs it).
+const VALUE_FIELDS = ["flatAmount", "textValue", "employeeRatePct", "employerRatePct", "ratePct", "minAmount",
+  "maxAmount", "taxFormula", "treatment"];
+
 export function SignedPill({ row }) {
-  const label = String(row?.label || row?.rateLabel || "");
-  if (label.includes("[PENDING G1]")) {
+  const hasValue = VALUE_FIELDS.some((key) => row?.[key] != null && row?.[key] !== "");
+  if (!hasValue) {
     return (
       <span className="inline-flex rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
-        PENDING G1
+        No value
       </span>
     );
   }
-  return <span className="inline-flex rounded border border-success/40 bg-success/10 px-1.5 py-0.5 text-[10px] font-semibold text-success">Signed</span>;
+  return <span className="inline-flex rounded border border-success/40 bg-success/10 px-1.5 py-0.5 text-[10px] font-semibold text-success">Set</span>;
 }
 
 export function ErrorNote({ message }) {

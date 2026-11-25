@@ -23792,22 +23792,6 @@
    "overridden": false
   },
   {
-   "method": "POST",
-   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/bulk-sign",
-   "data_class": "platform",
-   "action": "create",
-   "resource": "bulk-sign",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
    "method": "GET",
    "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/configuration",
    "data_class": "platform",
@@ -26750,22 +26734,6 @@
    "data_class": "platform",
    "action": "update",
    "resource": "rows",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/super-admin/compliance/malaysia/configuration/sign",
-   "data_class": "platform",
-   "action": "create",
-   "resource": "sign",
    "principals": [
     "super_admin"
    ],

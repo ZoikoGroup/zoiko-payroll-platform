@@ -107,8 +107,6 @@ def test_dimension_format_is_canonical_and_round_trips():
 def test_add_band_row_needs_source_reason_and_fields(db, seeded, source):
     from app.core.exceptions import BadRequestException
 
-    with pytest.raises(BadRequestException, match="source document"):
-        _add(db, seeded, "be_red_social_work_bonus", reason="r", minAmount="0", ratePct="1")
     with pytest.raises(BadRequestException, match="reason"):
         _add(db, seeded, "be_red_social_work_bonus", sourceDocumentId=source.id, minAmount="0", ratePct="1")
     with pytest.raises(BadRequestException, match="needs: ratePct or flatAmount"):
@@ -120,23 +118,7 @@ def test_add_band_row_needs_source_reason_and_fields(db, seeded, source):
              ratePct="1")
     view = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="0",
                 maxAmount="100", ratePct="1")
-    assert view["ruleType"] == "BE_RED_SOCIAL_WORK_BONUS" and view["signed"] is False
-
-
-def test_signing_needs_a_reviewed_source(db, seeded, source):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll.models import SourceArtifact
-
-    unarchived = db.query(SourceArtifact).filter(SourceArtifact.form_number == "ZP-BE-ENG-001 S24").one()
-    pending = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=unarchived.id,
-                   minAmount="0", ratePct="1")
-    with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        _sign_slab(db, pending["id"], unarchived.id)
-    db.rollback()
-    view = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="1",
-                ratePct="1")
-    assert view["signed"] is False
-    assert _sign_slab(db, view["id"], source.id)["signed"] is True
+    assert view["ruleType"] == "BE_RED_SOCIAL_WORK_BONUS" and view["signed"] is True     # in force on save
 
 
 def test_onss_employer_dimensions_need_the_signed_code_lists(db, seeded, source):
@@ -145,7 +127,7 @@ def test_onss_employer_dimensions_need_the_signed_code_lists(db, seeded, source)
     row = dict(reason="r", sourceDocumentId=source.id, minAmount="0", ratePct="1")
     with pytest.raises(BadRequestException, match="exactly the dimensions EC, WC"):
         _add(db, seeded, "be_onss_employer_base_rate", **row)
-    with pytest.raises(BadRequestException, match="not signed yet"):
+    with pytest.raises(BadRequestException, match="has no value yet"):
         _add(db, seeded, "be_onss_employer_base_rate", dimension="EC=EC1;WC=WC1", **row)
     _sign_codes(db, seeded, source)
     with pytest.raises(BadRequestException, match="EC=EC9 is not in the signed"):

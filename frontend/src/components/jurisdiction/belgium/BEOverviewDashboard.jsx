@@ -35,7 +35,7 @@ export function SeedDraftPanel({ onDone }) {
     <form onSubmit={submit} className={`${card} space-y-2`} data-testid="be-seed-draft">
       <h3 className="text-[14px] font-semibold text-foreground">No Belgium pack yet</h3>
       <p className="text-[12px] text-foreground-secondary">
-        Creates the Draft pack from the content catalogue: every row PENDING G1 with no value. Nothing becomes Active here.
+        Creates the Draft pack from the content catalogue, with the approved specification values filled in. Nothing becomes Active here.
       </p>
       <label className={labelClass} htmlFor="be-seed-reason">Reason *</label>
       <input id="be-seed-reason" className={inputClass} value={reason} onChange={(e) => setReason(e.target.value)} />
