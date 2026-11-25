@@ -1,21 +1,73 @@
 name: Deploy Zoiko Payroll Backend
 
+# The ONE deploy pipeline: production (backend AND frontend) is deployed only
+# after the frontend build, the backend tests and the privacy-isolation job
+# have all passed for the same commit. Before, the frontend deployed from its
+# own workflow after its build alone, while the backend tests were still running.
 on:
+  # No path filter on push: every push to main/rugvedh runs build + test +
+  # privacy-isolation. The `changes` job decides which side is deployed, so a
+  # frontend-only change still never restarts the backend (and vice versa).
   push:
     branches: [main, rugvedh]
-    paths:
-      - 'backend/**'
-      - '.github/workflows/**'
-      - 'scripts/**'
-      - 'docs/privacy/**'
   # No path filter on PRs: the test + privacy jobs must report on every PR
   # (a frontend-only PR otherwise shows no backend checks at all). The
-  # deploy job is push-only, so this never deploys from a PR.
+  # deploy jobs are push/dispatch-only, so this never deploys from a PR.
   pull_request:
     branches: [main, rugvedh]
   workflow_dispatch:
 
 jobs:
+  # Which side this push changed (same paths the two workflows used to filter
+  # on). A manual dispatch deploys both.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.diff.outputs.backend }}
+      frontend: ${{ steps.diff.outputs.frontend }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Changed paths
+        id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          both() { echo "Changed paths unknown ($1): treating backend AND frontend as changed."
+                   echo "backend=true" >> "$GITHUB_OUTPUT"; echo "frontend=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          # Fail safe: whenever the diff cannot be determined, both sides count as changed.
+          [ "${{ github.event_name }}" = "push" ] || both "not a push"
+          [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] || both "new branch / no previous commit"
+          git cat-file -e "$BEFORE^{commit}" 2>/dev/null || both "previous commit $BEFORE not in history (force push?)"
+          files="$(git diff --name-only "$BEFORE" "${{ github.sha }}" 2>/dev/null)" || both "git diff failed"
+          echo "$files"
+          if echo "$files" | grep -qE '^(backend/|\.github/workflows/|scripts/|docs/privacy/)'; then b=true; else b=false; fi
+          if echo "$files" | grep -qE '^(frontend/|\.github/workflows/(frontend-build|backend-deploy)\.yml$)'; then f=true; else f=false; fi
+          echo "backend=$b" >> "$GITHUB_OUTPUT"; echo "frontend=$f" >> "$GITHUB_OUTPUT"
+
+  # The frontend build, here so the deploys can wait for it. Same steps as
+  # frontend-build.yml's build (which still reports the PR check).
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Refuse undefined names (no-undef / jsx-no-undef)
+        working-directory: frontend
+        run: npm run check:undefined
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
   # Runs on every PR and every push to main/rugvedh. Nothing previously ran the
   # test suite in CI at all -- a broken test could reach main and deploy
   # unchecked. Needs zero configured secrets: tests/conftest.py's `db`
@@ -99,8 +151,8 @@ jobs:
         working-directory: backend
 
   deploy:
-    needs: [test, privacy-isolation]
-    if: github.event_name == 'push'
+    needs: [changes, build, test, privacy-isolation]
+    if: github.event_name == 'push' && needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     env:
       HAS_SMOKE: ${{ secrets.ZP_SMOKE_BASE_URL != '' }}
@@ -227,3 +279,106 @@ jobs:
             cd /var/www/zoiko-payroll/backend/backend
             source venv/bin/activate
             python -m scripts.check_schema_drift
+
+  # The frontend deploy (moved from frontend-build.yml): waits for the build, the backend
+  # tests and privacy-isolation of the same commit. main only, as before.
+  # Order: when the backend is also deployed, the frontend goes only after the
+  # backend deploy SUCCEEDED (a new frontend may call new backend endpoints).
+  # `!cancelled()` lets this job evaluate when `deploy` was skipped (no backend
+  # change, or a manual run); every other dependency must be an explicit success.
+  deploy-frontend:
+    needs: [changes, build, test, privacy-isolation, deploy]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main'
+      && needs.changes.result == 'success' && needs.build.result == 'success'
+      && needs.test.result == 'success' && needs.privacy-isolation.result == 'success'
+      && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped')
+      && ((github.event_name == 'push' && needs.changes.outputs.frontend == 'true') || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    # Never two frontend deploys at once; a newer push waits for the one in flight.
+    concurrency:
+      group: frontend-deploy-production
+      cancel-in-progress: false
+    env:
+      # Repository variable (Settings > Secrets and variables > Actions >
+      # Variables). It is compiled into public JavaScript, so it is a
+      # variable, not a secret. Example: https://payroll.example.com
+      VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+      # These pre-fill the login form (LoginPage.jsx). They must never be
+      # baked into a production bundle, whatever a developer's local
+      # frontend/.env holds.
+      VITE_DEFAULT_EMAIL: ''
+      VITE_DEFAULT_PASSWORD: ''
+      # Optional repository variable; defaults to the docroot in
+      # deploy/nginx/zoiko-payroll.conf.
+      FRONTEND_DIST_PATH: ${{ vars.FRONTEND_DIST_PATH || '/var/www/zoiko-payroll/frontend/dist' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Require the production API base URL
+        run: |
+          if [ -z "$VITE_API_BASE_URL" ]; then
+            echo "::error::Repository variable VITE_API_BASE_URL is not set. Without it the bundle calls <host>:8000, which production does not expose, so the deploy is refused rather than shipping a broken site."
+            exit 1
+          fi
+          echo "API base URL: $VITE_API_BASE_URL"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend for production
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run check:undefined
+          npm run build
+
+      - name: Verify the bundle
+        working-directory: frontend
+        run: |
+          test -f dist/index.html || { echo "::error::dist/index.html missing"; exit 1; }
+          grep -rqF "$VITE_API_BASE_URL" dist/assets || { echo "::error::VITE_API_BASE_URL was not compiled into the bundle"; exit 1; }
+          tar -czf ../frontend-dist.tgz -C dist .
+          ls -l ../frontend-dist.tgz
+
+      - name: Upload build to the server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
+          source: frontend-dist.tgz
+          target: zoiko-frontend-release/${{ github.sha }}
+
+      - name: Swap in the new build (keeps the previous one for rollback)
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
+          envs: RELEASE_SHA,FRONTEND_DIST_PATH
+          script: |
+            set -euo pipefail
+            RELEASE="$HOME/zoiko-frontend-release/$RELEASE_SHA"
+            mkdir -p "$RELEASE/dist"
+            tar -xzf "$RELEASE/frontend-dist.tgz" -C "$RELEASE/dist"
+            test -f "$RELEASE/dist/index.html"
+
+            echo "--- deploying $RELEASE_SHA to $FRONTEND_DIST_PATH"
+            sudo mkdir -p "$FRONTEND_DIST_PATH"
+            # Rollback copy of what is live right now:
+            #   sudo rsync -a --delete "${FRONTEND_DIST_PATH}.previous/" "$FRONTEND_DIST_PATH/"
+            sudo rsync -a --delete "$FRONTEND_DIST_PATH/" "${FRONTEND_DIST_PATH}.previous/"
+            sudo rsync -a --delete "$RELEASE/dist/" "$FRONTEND_DIST_PATH/"
+
+            cmp "$RELEASE/dist/index.html" "$FRONTEND_DIST_PATH/index.html"
+            echo "--- live index.html now references:"
+            grep -o 'assets/index-[A-Za-z0-9_-]*\.js' "$FRONTEND_DIST_PATH/index.html" || true
+
+            # Keep the last 5 uploaded releases on disk.
+            ls -1dt "$HOME"/zoiko-frontend-release/*/ 2>/dev/null | tail -n +6 | xargs -r rm -rf
