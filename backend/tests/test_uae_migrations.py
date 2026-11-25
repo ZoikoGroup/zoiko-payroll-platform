@@ -142,8 +142,7 @@ def test_single_head():
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert list(script.get_heads()) == ["e4b7c2a9d1f3"]   # on merge b5f3e8a1c6d9 (REVISION + d7a3f1c9e5b2)
-    assert list(script.get_heads()) == ["86f1ec062709"]   # Spain column on merge b5f3e8a1c6d9 (REVISION + d7a3f1c9e5b2)
+    assert list(script.get_heads()) == ["c8d2f6a4e1b9"]   # merge of Spain 86f1ec062709 + e4b7c2a9d1f3, on b5f3e8a1c6d9
     assert set(script.get_revision("b5f3e8a1c6d9").down_revision) == {REVISION, "d7a3f1c9e5b2"}
 
 

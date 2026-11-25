@@ -312,10 +312,10 @@ def test_alembic_heads_is_single_head():
     # d7a3f1c9e5b2 (2026-11-18) adds payroll_report_templates.content_editor_id on c3e8a1d5f7b2 (four-eyes).
     # UAE (ZP-AE-ENG-001) ad01fc67ce44 adds payslip_items.ae_calculation_snapshot on c3e8a1d5f7b2.
     # Both grow from c3e8a1d5f7b2; the no-op merge b5f3e8a1c6d9 joins them (PR #179 two-heads deploy failure).
-    # e4b7c2a9d1f3 (certification runs tied to a pack) on merge b5f3e8a1c6d9.
-    assert heads == ["e4b7c2a9d1f3"]   # on merge b5f3e8a1c6d9 (UAE ad01fc67ce44 + content editor d7a3f1c9e5b2)
-    # Spain (ZP-ES-ENG-001) 86f1ec062709 adds payslip_items.es_calculation_snapshot on that merge and is the head.
-    assert heads == ["86f1ec062709"]   # Spain breakdown column on merge b5f3e8a1c6d9
+    # Spain (ZP-ES-ENG-001) 86f1ec062709 (payslip_items.es_calculation_snapshot) and e4b7c2a9d1f3
+    # (certification runs tied to a pack) both grow from merge b5f3e8a1c6d9; the no-op merge
+    # c8d2f6a4e1b9 joins them and is the single head.
+    assert heads == ["c8d2f6a4e1b9"]   # merge of Spain 86f1ec062709 + certification runs e4b7c2a9d1f3
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -327,9 +327,9 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["e4b7c2a9d1f3"]   # certification runs tied to a pack, on the merge below
+    assert list(script.get_heads()) == ["c8d2f6a4e1b9"]   # merge of Spain + certification runs tied to a pack
+    assert script.get_revision("c8d2f6a4e1b9").down_revision == ("86f1ec062709", "e4b7c2a9d1f3")
     assert script.get_revision("e4b7c2a9d1f3").down_revision == "b5f3e8a1c6d9"
-    assert list(script.get_heads()) == ["86f1ec062709"]   # Spain breakdown column on the merge
     assert script.get_revision("86f1ec062709").down_revision == "b5f3e8a1c6d9"
     assert script.get_revision("b5f3e8a1c6d9").down_revision == ("ad01fc67ce44", "d7a3f1c9e5b2")
     assert script.get_revision("d7a3f1c9e5b2").down_revision == "c3e8a1d5f7b2"
@@ -406,8 +406,8 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 281   # rugvedh's 272 (Mexico lifecycle + Belgium + Malaysia + merges) + UAE ad01fc67ce44
-    assert len(revs) == 281   # + Spain es_foundation 86f1ec062709; rugvedh's 272 (Mexico lifecycle + Belgium + Malaysia + merges) + UAE ad01fc67ce44
+    assert len(revs) == 283   # + certification runs e4b7c2a9d1f3 + merge c8d2f6a4e1b9
+                              # + Spain es_foundation 86f1ec062709; rugvedh's 272 (Mexico lifecycle + Belgium + Malaysia + merges) + UAE ad01fc67ce44
                               # + Belgium Block K b7e4c2a9d5f1 + merge e3f9a7c1b5d2 + Belgium M-ECWC e9c4b7a2d6f3
                               # + report-field source_column widening a4c7e1f9b3d8
                               # + tax_slabs.tax_regime widening c3e8a1d5f7b2

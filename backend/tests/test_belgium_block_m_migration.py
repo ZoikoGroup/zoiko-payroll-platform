@@ -141,10 +141,9 @@ def test_literal_names_manifest_single_child_and_single_head():
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
     # a4c7e1f9b3d8 (report-field source_column VARCHAR(100)) is its single child; c3e8a1d5f7b2
     # (tax_slabs.tax_regime VARCHAR(40)) sits on it; UAE ad01fc67ce44 and the report-template content
-    # editor d7a3f1c9e5b2 both grow from that; merge b5f3e8a1c6d9 joins them, and e4b7c2a9d1f3 (certification runs tied to a pack) is the head.
-    assert script.get_heads() == ["e4b7c2a9d1f3"]
-    # editor d7a3f1c9e5b2 both grow from that, merge b5f3e8a1c6d9 joins them and Spain 86f1ec062709 is the head.
-    assert script.get_heads() == ["86f1ec062709"]
+    # editor d7a3f1c9e5b2 both grow from that; merge b5f3e8a1c6d9 joins them; Spain 86f1ec062709 and
+    # e4b7c2a9d1f3 (certification runs tied to a pack) grow from it, joined by merge c8d2f6a4e1b9 (the head).
+    assert script.get_heads() == ["c8d2f6a4e1b9"]
     assert script.get_revision("ad01fc67ce44").down_revision == "c3e8a1d5f7b2"
     assert script.get_revision("c3e8a1d5f7b2").down_revision == "a4c7e1f9b3d8"
     assert script.get_revision("a4c7e1f9b3d8").down_revision == REVISION
