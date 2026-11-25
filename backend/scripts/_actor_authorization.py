@@ -7,6 +7,10 @@ Germany statutory activation script that performs a maker-checker action
 
 WHY THIS EXISTS
 
+(2026-11-25: Germany's pack approver may not activate the pack, so the two
+Germany pack seed scripts also take --activator-id, checked by
+resolve_and_authorize_activator below.)
+
 `publish_seeded_germany_registries.py` and
 `seed_germany_compliance_pack_2026.py` (as validated on the `nikhil`
 branch) both called their maker-checker service functions with hardcoded

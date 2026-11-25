@@ -25,7 +25,12 @@ there as an "obviously-fake" placeholder convention. This version instead
 REQUIRES --maker-id/--checker-id on the command line and validates both
 resolve to real, active `User` rows with role=super_admin (see
 scripts/_actor_authorization.py) before doing anything else. No other
-logic was changed from the validated nikhil version. Also confirmed this
+logic was changed from the validated nikhil version.
+
+2026-11-25: Germany is on the four-eyes lists (the Super Admin who approved
+a pack may not activate it), so this also REQUIRES --activator-id: a real,
+active Super Admin distinct from the maker and the checker, validated
+before anything is touched (_actor_authorization.resolve_and_authorize_activator). Also confirmed this
 phase (8DF) against main's current `upsert_jurisdiction_pack` /
 `set_jurisdiction_pack_approver` / `set_jurisdiction_pack_status`: main
 has since grown a "policy" pack type and a US-only tax-pack activation

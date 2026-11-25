@@ -77,3 +77,22 @@ def test_other_countries_are_unchanged():
     for country in ("CA", "PR", "BS", "BB"):
         assert country not in service._SELF_APPROVAL_REFUSED_COUNTRIES
         assert country not in service._APPROVER_NOT_ACTIVATOR_COUNTRIES
+
+
+def test_seed_scripts_require_a_distinct_activator(monkeypatch):
+    import sys
+
+    from scripts import _actor_authorization as auth
+    from scripts import seed_germany_2026_all_jurisdictions as land_seed
+    from scripts import seed_germany_compliance_pack_2026 as pack_seed
+
+    for module, extra in ((pack_seed, []), (land_seed, ["--federal-pack-id", "1"])):
+        monkeypatch.setattr(sys, "argv", ["x", "--maker-id", "1", "--checker-id", "2", *extra])
+        with pytest.raises(SystemExit):                       # --activator-id is required
+            module._parse_args()
+        monkeypatch.setattr(sys, "argv", ["x", "--maker-id", "1", "--checker-id", "2", "--activator-id", "3", *extra])
+        assert module._parse_args().activator_id == 3
+    for same in (MAKER, CHECKER):
+        with pytest.raises(auth.ActorAuthorizationError) as refused:
+            auth.resolve_and_authorize_activator(None, same, MAKER, CHECKER)
+        assert "must differ from the maker" in refused.value.message

@@ -260,7 +260,7 @@ def main() -> None:
         maker, checker = resolve_and_authorize_maker_checker(db, args.maker_id, args.checker_id)
         activator = resolve_and_authorize_activator(db, args.activator_id, maker.id, checker.id)
         print(f"[{SCRIPT_NAME}] maker={maker.id} ({maker.email}), checker={checker.id} ({checker.email}) "
-              "— both verified active Super Admin users.")
+              f"activator={activator.id} ({activator.email}) — all verified active Super Admin users.")
 
         federal_pack = _resolve_federal_pack(db, args.federal_pack_id)
         print(f"[{SCRIPT_NAME}] Federal pack: {federal_pack.pack_id} (id={federal_pack.id}, status={federal_pack.status}).")
