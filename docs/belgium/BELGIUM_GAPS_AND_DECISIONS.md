@@ -1,5 +1,19 @@
 # Belgium (BE) — Gaps and Decisions Register
 
+## Gate removal (2026-11-25)
+
+| ID | Status | Description |
+|---|---|---|
+| GR-1 | DECIDED | **Go-live like Spain.** No dormancy switch, canary list, release gates (G0–G8), gate evidence, sign-offs, owner-decision records or parallel-run requirement. Registration opens once an Active `BE-PAYROLL-2026` pack with content exists and no PLANNED registry row blocks it. |
+| GR-2 | DECIDED | **No signing.** The `[PENDING G1]` label marker no longer blocks and is never written. A saved value is in force. A source document is optional provenance; a change reason is required. |
+| GR-3 | DECIDED | **Missing values.** A value no document gives is never invented. It blocks only the calculation that needs it, with a named reason, until a Super Admin enters it. |
+| GR-4 | DECIDED | **Approval.** Only the platform-wide rules apply: approver ≠ the pack's last editor; no overlapping Active packs. |
+| GR-5 | DECIDED | **Proposed values.** The owner approved every proposed policy value (P) and statutory value not stated by the spec (S) in `GATE_REMOVAL_INVENTORY.md`. |
+
+**Values written:** the 25 single-value spec figures (`belgium_content.VALUES`), e.g. ONSS employee 13.07%, manual-worker uplift 8% (108%), special 1.60%, pension special 8.86%, RMMMG EUR 2,233.61 from 2026-07-01, index threshold EUR 4,000 from 2026-06-01, OT 50% / 100%, guaranteed salary 30 days at 100%.
+
+**Still blocked:** Annex III withholding scales; employer ONSS bands; `be_onss_manual_base_categories` and `be_abs_wc_min_contract_months` (owner to confirm `MANUAL` and 3 months); maternity multiple-birth weeks; public holidays; DmfA schema versions; the 46 keys with no spec value; and the ONSS rate-table four-eyes (`BE_ONSS_RATE_UNSIGNED`, kept — open question). Gate rows G-01…G-34 below remain as content gaps only, not go-live gates.
+
 Spec: docs/belgium/Zoiko_Payroll_Belgium_Engineering_Implementation_Wireframe_v1.0.docx (ZP-BE-ENG-001 v1.0, authoritative; file name kept as-is)
 Plan: docs/belgium/BELGIUM_IMPLEMENTATION_PLAN.md
 Created: Phase 0, 2026-11-11, against commit 1af3d44 (branch nikhil). Alembic head: efc56f3235e2.

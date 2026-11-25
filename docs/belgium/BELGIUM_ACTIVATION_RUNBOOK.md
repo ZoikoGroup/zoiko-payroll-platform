@@ -1,5 +1,7 @@
 # Belgium activation runbook (ZP-BE-ENG-001 §15 / §17)
 
+> **Superseded 2026-11-25 (gate removal, owner decision).** The release gates, evidence, sign-offs and parallel-run requirements described here no longer apply: this country goes live like Spain once its pack is Active. See `docs/GATE_REMOVAL.md` and the "Gate removal" section of `docs/belgium/BELGIUM_GAPS_AND_DECISIONS.md`. Kept for history.
+
 Audience: payroll operations, the Belgian statutory-content owner, platform engineering on call.
 Engineering completion is not production authorisation: Belgian payroll stays dormant until every
 release gate G1–G7 is green for the legal-employer scope being activated.

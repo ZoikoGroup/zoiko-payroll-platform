@@ -1,5 +1,7 @@
 # New Zealand release gates
 
+> **Superseded 2026-11-25 (gate removal, owner decision).** The release gates, evidence, sign-offs and parallel-run requirements described here no longer apply: this country goes live like Spain once its pack is Active. See `docs/GATE_REMOVAL.md` and `docs/new_zealand/NEW_ZEALAND_GAPS_AND_DECISIONS.md`. Kept for history.
+
 New Zealand (ZP-NZ-ENG-001) stays switched off (`NZ_TENANT_ONBOARDING_ENABLED=False`, `NZ_CANARY_ORG_IDS` empty) and its service availability stays PLANNED until every gate below passes and owner decisions D-1 to D-7 are recorded. The service-registry step to AVAILABLE is refused by the server until then.
 
 | Gate | Subject | Owner |

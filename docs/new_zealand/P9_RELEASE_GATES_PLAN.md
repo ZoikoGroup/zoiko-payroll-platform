@@ -1,5 +1,7 @@
 # New Zealand P9: release gates, parallel cycles, privacy proof, key rotation
 
+> **Superseded 2026-11-25 (gate removal, owner decision).** The release gates, evidence, sign-offs and parallel-run requirements described here no longer apply: this country goes live like Spain once its pack is Active. See `docs/GATE_REMOVAL.md` and `docs/new_zealand/NEW_ZEALAND_GAPS_AND_DECISIONS.md`. Kept for history.
+
 Spec: ZP-NZ-ENG-001 §13–§15 (AC-NZ-03, NZ-025, NZ-026).
 Template: Japan P9 (`japan_readiness.py`, `japan_parallel.py`, `rotate_jp_my_number_keys.py`, `docs/japan/release-gates/`, `RUNBOOK_GO_LIVE.md`).
 Base: `venu` at `fd190f3`. Single Alembic head `dd8a60634320`.

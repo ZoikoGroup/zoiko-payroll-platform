@@ -1,5 +1,7 @@
 # Japan go-live runbook (ZP-JP-ENG-001)
 
+> **Superseded 2026-11-25 (gate removal, owner decision).** The release gates, evidence, sign-offs and parallel-run requirements described here no longer apply: this country goes live like Spain once its pack is Active. See `docs/GATE_REMOVAL.md` and `docs/japan/JAPAN_GAPS_AND_DECISIONS.md`. Kept for history.
+
 Japan ships switched off. Deploying the code changes nothing for tenants: the Japan routes answer 404, the
 rule pack is Draft, and every Japan calculation blocks with a named reason until the official data is
 signed. This runbook is the order of the steps that turn it on. Each step needs its named owner; none is
