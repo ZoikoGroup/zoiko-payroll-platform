@@ -12,10 +12,11 @@ as engine/jurisdictions/saudi_arabia/labour.py.
                            and evidence (ZA-013); damage / loss deductions need
                            a configured limit.
 
-Doctrine: a value the specification does not state (the BCEA premium
-multipliers, the damage-deduction limit) is a content row with NO value — a
-check that needs it reports NOT_CONFIGURED (WARN) or BLOCKS. A number is never
-assumed. The wage floor is a validation, not a PAYE base (spec §2).
+Doctrine: a value the specification does not state is a content row; the BCEA
+premium multipliers and the damage-deduction limit carry the owner-approved
+BCEA values (2026-11-25). A row with NO value makes a check that needs it
+report NOT_CONFIGURED (WARN) or BLOCK. A number is never assumed. The wage
+floor is a validation, not a PAYE base (spec §2).
 """
 from __future__ import annotations
 

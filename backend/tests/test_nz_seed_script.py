@@ -60,7 +60,7 @@ def test_apply_seeds_draft_packs_and_registry_and_is_repeatable(db, run):
     summary = nzs.nz_seed_summary(db)
     main = next(p for p in summary["packs"] if p["packId"] == content.NZ_2026_27[0])
     assert main["rates"] == summary["content"]["rates"] and main["slabs"] == summary["content"]["slabs"]
-    assert main["pending"] == main["rates"] + main["slabs"]                 # every row PENDING G1
+    assert main["pending"] == 0                                             # plain labels (gate removal)
     assert main["activationRefusal"] is None and summary["registry"] == "PLANNED"       # gate removal 2026-11-25
     assert summary["blockers"] == []
     code, _ = run("--apply")                                                 # unchanged re-run

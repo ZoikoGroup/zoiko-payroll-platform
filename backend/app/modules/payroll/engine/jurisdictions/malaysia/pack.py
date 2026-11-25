@@ -2,10 +2,11 @@
 
 Every statutory value the engine uses is read here from ``ctx.rate_map`` /
 ``ctx.slabs`` (rows of the resolved pack: ORM objects or plain dicts),
-selected by the PAY DATE. A row whose label still carries "[PENDING G1]"
-blocks even inside an Active pack, an empty value blocks, and a policy row
-still at "PENDING_G1" (or signed NOT_SUPPORTED) blocks: nothing is ever
-defaulted (spec page 1, G1).
+selected by the PAY DATE. An empty value blocks, and a policy row still at
+"PENDING_G1" (value not yet provided) or set to NOT_SUPPORTED blocks: nothing
+is ever defaulted (spec page 1). Gate removal (owner decision 2026-11-25,
+Spain model): a "[PENDING G1]" label marker no longer blocks — a row with a
+value calculates whatever its label says.
 
 Territorial labour rows are read with ``row(key, territory)`` (MY-024); a
 contribution is read from its schedule TABLE with ``schedule()`` (MY-005 /
@@ -104,10 +105,6 @@ class MyPack:
     def block(self, key: str, reason: str):
         raise E.MYCalculationBlockedError(key, reason, self.organization_id)
 
-    def _signed(self, ident: str, label) -> None:
-        if label and PENDING_MARK in str(label):
-            self.block(E.keyed(E.PACK_UNSIGNED, ident), f"{ident} is not signed (gate G1)")
-
     def _note(self, kind: str, ident: str, row, value: dict) -> None:
         start, end = as_date(field(row, "effective_from")), as_date(field(row, "effective_to"))
         self._used[(kind, ident)] = {"kind": kind, "id": ident, "rowId": field(row, "id"),
@@ -128,7 +125,6 @@ class MyPack:
         row = self.rate_map.get(key)
         if row is None or not in_window(field(row, "effective_from"), field(row, "effective_to"), self.as_of):
             self.block(E.keyed(E.ROW_MISSING, key), "no parameter row is in force on the pay date")
-        self._signed(key, field(row, "label"))
         names = ("employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value")
         self._note("rate", key, row, {n: None if field(row, n) is None else str(field(row, n)) for n in names})
         return row
@@ -150,9 +146,9 @@ class MyPack:
         key = self.key(base, territory)
         value = upper(field(self.row(base, territory), "text_value"))
         if not value or value == PENDING:
-            self.block(E.keyed(E.POLICY_PENDING, key), "policy is not signed (PENDING_G1)")
+            self.block(E.keyed(E.POLICY_PENDING, key), "policy value not yet provided (PENDING_G1)")
         if value == NOT_SUPPORTED:
-            self.block(E.keyed(E.POLICY_NOT_SUPPORTED, key), "the policy is signed NOT_SUPPORTED")
+            self.block(E.keyed(E.POLICY_NOT_SUPPORTED, key), "the policy is set to NOT_SUPPORTED")
         if allowed is not None and value not in tuple(upper(a) for a in allowed):
             self.block(E.keyed(E.POLICY_PENDING, key), f"{value!r} is not one of {', '.join(allowed)}")
         return value
@@ -178,9 +174,6 @@ class MyPack:
                 and in_window(field(r, "effective_from"), field(r, "effective_to"), self.as_of)]
         if not rows:
             self.block(E.keyed(E.TABLE_EMPTY, rule_type), f"{rule_type} has no rows in force on the pay date")
-        for index, r in enumerate(rows):
-            self._signed(f"{rule_type}:{field(r, 'filing_status') or ''}:{field(r, 'tax_regime') or ''}"
-                         f":{field(r, 'min_amount')}:{index}", field(r, "rate_label"))
         return sorted(rows, key=lambda r: (dec(field(r, "min_amount")), field(r, "sort_order") or 0))
 
     def schedule(self, rule_type: str, member_class: str, wage: Decimal) -> dict:

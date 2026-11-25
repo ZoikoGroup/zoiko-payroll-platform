@@ -31,7 +31,7 @@ export function malaysiaExtraTabs() {
     tab("my-events", "Events & forms", CalendarDays, "my-earning", group("events")),
     tab("my-policy", "Scope & operations", Settings2, "my-events", group("policy")),
     tab("my-workbook", "Import & verify", FileSpreadsheet, "my-policy", ({ pack }) => <MYWorkbookTab pack={pack} />),
-    tab("my-signing", "Signing status", Gauge, "my-workbook", ({ pack }) => <MYSigningStatusTab pack={pack} />),
+    tab("my-signing", "Missing content", Gauge, "my-workbook", ({ pack }) => <MYSigningStatusTab pack={pack} />),
     tab("sources", "Sources", FileCheck2, "my-signing", () => <SourceEvidencePanel />),
   ];
 }

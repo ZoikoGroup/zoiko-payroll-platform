@@ -309,10 +309,10 @@ def test_band_lookup_by_dimension_never_falls_back(db):
         pack.band("be_wage_rmmmg")                                         # not a band key
 
 
-def test_unsigned_slab_rows_block(db):
-    with _blocked("BE_CONTENT_PENDING"):
-        _pack(_MARKER, [_band_row("EC=EC1;WC=WC1", "10", label="x [PENDING G1]")]).band(
-            "be_onss_employer_base_rate", EC="EC1", WC="WC1")
+def test_a_legacy_pending_label_on_a_slab_row_no_longer_blocks(db):
+    rows = _pack(_MARKER, [_band_row("EC=EC1;WC=WC1", "10", label="x [PENDING G1]")]).band(
+        "be_onss_employer_base_rate", EC="EC1", WC="WC1")
+    assert [r["rate_pct"] for r in rows] == ["10"]
 
 
 def test_band_row_dates_select_by_pay_date():
@@ -329,20 +329,20 @@ def _holiday(day, label="Synthetic day"):
             "tax_formula": label}
 
 
-def test_public_holidays_are_signed_only_and_block_when_pending_or_not_supported():
+def test_public_holidays_block_when_the_marker_is_empty_or_not_supported():
     marker = {"be_public_holidays": {"component_key": "be_public_holidays", "label": "x", "text_value": "SLAB_ROWS"}}
     days = [_holiday(date(2026, 3, 3)), _holiday(date(2026, 1, 2)), _holiday(date(2025, 12, 31))]
     assert _pack(marker, days).public_holidays(2026) == [(date(2026, 1, 2), "Synthetic day"),
                                                          (date(2026, 3, 3), "Synthetic day")]
-    with _blocked("BE_CONTENT_PENDING"):
-        _pack(marker, days + [_holiday(date(2026, 5, 5), "x [PENDING G1]")]).public_holidays(2026)
+    assert (date(2026, 5, 5), "x [PENDING G1]") in _pack(                # legacy label: display only
+        marker, days + [_holiday(date(2026, 5, 5), "x [PENDING G1]")]).public_holidays(2026)
     with _blocked("BE_TABLE_EMPTY"):
         _pack(marker, days).public_holidays(2030)
     with _blocked("BE_FEATURE_BLOCKED"):
         _pack({"be_public_holidays": dict(marker["be_public_holidays"], text_value="NOT_SUPPORTED")},
               days).public_holidays(2026)
     with _blocked("BE_CONTENT_PENDING"):
-        _pack({"be_public_holidays": dict(marker["be_public_holidays"], label="x [PENDING G1]")},
+        _pack({"be_public_holidays": dict(marker["be_public_holidays"], label="x [PENDING G1]", text_value="")},
               days).public_holidays(2026)
 
 

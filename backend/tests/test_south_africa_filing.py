@@ -103,17 +103,38 @@ def test_emp201_reads_committed_runs_of_this_organisation_only(db, organization,
     assert filing.build_za_emp201(db, organization.id, "2026-09")["paye"] == "14190.83"
 
 
-def test_eti_is_shown_available_but_not_utilised_while_the_policy_is_pending(db, organization, september):
-    run, e1, _e2 = september
-    db.add(PayrollZaEtiLedgerEntry(organization_id=organization.id, employee_id=e1.id,
+def _eti_ledger(db, organization, employee):
+    db.add(PayrollZaEtiLedgerEntry(organization_id=organization.id, employee_id=employee.id,
                                    claim_month=date(2026, 9, 1), qualifying_month_no=1, paid_hours=Decimal("160"),
                                    remuneration=Decimal("5000"), normalised_remuneration=Decimal("5000"),
                                    eti_amount=Decimal("1500"), status="CALCULATED"))
     db.flush()
+
+
+def test_eti_is_offset_against_paye_under_the_approved_policy(db, organization, september):
+    # Owner-approved 2026-11-25 (inventory B, P): OFFSET_UP_TO_PAYE.
+    run, e1, _e2 = september
+    _eti_ledger(db, organization, e1)
+    emp201 = filing.build_za_emp201(db, organization.id, "2026-09")
+    assert (emp201["etiAvailable"], emp201["etiUtilised"], emp201["etiOffsetPolicy"]) == (
+        "1500.00", "1500.00", "OFFSET_UP_TO_PAYE")
+    assert emp201["paye"] == "14190.83"                       # employee PAYE never reduced (ZA-010)
+    assert emp201["amountDue"] == "14199.31"                  # 15699.31 - 1500.00 ETI offset
+    assert emp201["warnings"] == []
+
+
+def test_eti_is_shown_available_but_not_utilised_while_the_policy_is_still_pending_g1(
+        db, organization, september, monkeypatch):
+    run, e1, _e2 = september
+    _eti_ledger(db, organization, e1)
+    real_text = filing._text
+    monkeypatch.setattr(filing, "_text",
+                        lambda key: "PENDING_G1" if key == "za_eti_offset_policy" else real_text(key))
     emp201 = filing.build_za_emp201(db, organization.id, "2026-09")
     assert (emp201["etiAvailable"], emp201["etiUtilised"], emp201["etiOffsetPolicy"]) == ("1500.00", "0.00", "PENDING_G1")
     assert emp201["paye"] == "14190.83"                       # employee PAYE never reduced (ZA-010)
-    assert emp201["warnings"]
+    assert emp201["amountDue"] == "15699.31"
+    assert any("not yet provided" in w for w in emp201["warnings"])
 
 
 # ── due date (spec §9) ──────────────────────────────────────────────────────

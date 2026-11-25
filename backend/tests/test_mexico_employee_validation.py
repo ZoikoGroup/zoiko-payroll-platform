@@ -99,7 +99,7 @@ def test_strategy_map_and_message_unchanged():
     # + ZA, NZ, PL, MY, BE: ordinary since the gate removal (owner decision 2026-11-25).
     assert list(_STRATEGIES) == ["IN", "US", "UK", "AU", "CA", "DE", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR",
                                  "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL", "AE", "ES",
-                                 "ZA", "NZ", "PL", "MY", "BE"]
+                                 "JP", "ZA", "NZ", "PL", "MY", "BE"]
     # Brazil (ZP-BR-ENG-001 Phase 3) is dormant like Mexico, behind its own flag.
     assert list(_DORMANT_STRATEGIES) == ["MX", "BR"]
     assert all(not getattr(cls, "MASK_DUPLICATE_VALUE", False) for cls in _STRATEGIES.values())

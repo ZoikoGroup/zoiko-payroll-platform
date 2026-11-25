@@ -76,8 +76,9 @@ def seed_nz_pack(db: Session, *, status: str = "Draft") -> "JurisdictionPack":
       * every earning-classification row (TaxSlab NZ_EARNING_CLASS).
     The authority tables the specification does not reproduce
     (content.NZ_EMPTY_TABLES) write no rows: they are filled from archived
-    artefacts at their gate, and until then the engine BLOCKS. Every row is
-    labelled PENDING G1.
+    artefacts at their gate, and until then the engine BLOCKS. Rows are
+    written with plain labels (no "[PENDING G1]" marker: gate removal, owner
+    decision 2026-11-25).
 
     Also writes the Employment Leave Act 2026 staging pack NZ-ELA-2028 as an
     EMPTY Draft (spec §8, AC-NZ-08); nz_pack_activation_refusal keeps it
@@ -108,7 +109,9 @@ def seed_nz_pack(db: Session, *, status: str = "Draft") -> "JurisdictionPack":
         return Decimal(str(value)) if value is not None else None
 
     def pending(label, flag, limit):
-        return (label + (PENDING_G1_SUFFIX if flag else ""))[:limit]
+        # Gate removal (2026-11-25): the content's pending_g1 flag no longer
+        # appends the "[PENDING G1]" marker; the label is written plain.
+        return label[:limit]
 
     order = 0
     for (key, label, ee, er, flat, text, src, is_pending, eff_from, eff_to) in content.NZ_SCALAR_CONTENT:
@@ -1547,7 +1550,7 @@ def _nz_pack_holidays(db: Session, year: int) -> list:
             if (row.rule_type or "").upper() != content.NZ_PUBLIC_HOLIDAY_RULE or row.jurisdiction_state:
                 continue
             day = row.effective_from
-            if day is None or day.year != year or day in seen or "[PENDING G1]" in (row.rate_label or ""):
+            if day is None or day.year != year or day in seen:
                 continue
             seen.add(day)
             out.append({"date": day.isoformat(), "name": row.rate_label or "Public holiday"})

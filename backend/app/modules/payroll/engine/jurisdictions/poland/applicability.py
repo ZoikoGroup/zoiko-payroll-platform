@@ -81,9 +81,10 @@ def determine(ctx, pack: PlPack, pay_date: date) -> dict:
             pack.block(E.keyed(E.FUND_APPLICABILITY_UNKNOWN, obligation),
                        "the employer registration does not decide this fund (PL-011)")
         if value is True and exemption:
-            # Named exemption rules with exact periods are not in the spec (§6).
+            # pl_fund_exemption_rules names the statutory rules, but the engine
+            # does not evaluate exemption periods yet (§6): never guessed.
             pack.block(E.keyed(E.FUND_EXEMPTION_UNSIGNED, obligation),
-                       "a named employer-fund exemption needs signed exemption rules")
+                       "employer-fund exemptions are not calculated yet")
         obligations[obligation] = {"applies": value is True,
                                    "reason": E.R_EMPLOYER_LIABLE if value else E.R_EMPLOYER_NOT_LIABLE}
 

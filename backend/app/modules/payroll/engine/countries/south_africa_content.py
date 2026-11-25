@@ -58,11 +58,13 @@ MONTHLY payroll. Weekly/fortnightly frequencies, non-residents, SEZ ETI,
 equity awards and foreign-currency pay have NO rows on purpose — the engine
 BLOCKS them.
 
-Status is Draft throughout; the registry row stays PLANNED. Rows marked
-pending_g1=True must be signed by Payroll/Tax Operations and an independent
-South African reviewer at gate G1 (spec §14) before any pack carrying them
-is activated. The production safety rule (spec, page 1) applies: no value
-here is active merely because it appears in the specification.
+Gate removal (owner decision 2026-11-25, "Spain model"): there is no signing
+gate. The tuple's pending_g1 flag is kept for data-shape stability only — the
+seed no longer writes a "[PENDING G1]" label marker and the engine never reads
+one. The only remaining blocks are narrow "value not provided" blocks: an
+empty value, or a policy value that is still the literal "PENDING_G1". The
+owner approved the proposed-policy (P) and statutory (S) values in
+docs/south-africa/GATE_REMOVAL_INVENTORY.md section B on 2026-11-25.
 """
 
 from datetime import date
@@ -212,12 +214,14 @@ ZA_SCALAR_CONTENT = (
     ("za_supported_pay_frequencies", "Pay frequencies certified for calculation (spec §1)",
      None, None, None, "MONTHLY", "S1", False, None, None),
     # ZA-006: earning date, payment date, payroll period and certificate year
-    # are distinct; the date that selects the tax year is a signed policy.
+    # are distinct; the date that selects the tax year is a policy value.
+    # Owner-approved 2026-11-25 (inventory B, P): PAYE applies on the date paid.
     ("za_paye_tax_year_date_basis", "Date that selects the PAYE tax year (ZA-006)",
-     None, None, None, "PENDING_G1", "S1", True, None, None),
+     None, None, None, "PAYMENT_DATE", "S1", True, None, None),
     # ZA-006: section 7B variable remuneration paid/accrual timing.
+    # Owner-approved 2026-11-25 (inventory B, P): s7B — accrues when paid.
     ("za_variable_remuneration_basis", "Section 7B variable remuneration timing (ZA-006)",
-     None, None, None, "PENDING_G1", "S1", True, None, None),
+     None, None, None, "PAYMENT_DATE", "S1", True, None, None),
     # SARS rounding/truncation points come from the certified deduction-table
     # algorithm (spec §3 "Dates, precision and rounding") — PENDING_G1.
     ("za_rounding_mode", "ZAR rounding mode for statutory amounts", None, None, None, "HALF_UP", "S3", True,
@@ -302,11 +306,12 @@ ZA_SCALAR_CONTENT = (
     # Annual filing season to 31 May, "subject to SARS notice" (S1) — PENDING_G1.
     ("za_emp501_annual_close", "EMP501 annual reconciliation closes (MM-DD)",
      None, None, None, "05-31", "S1", True, None, None),
-    # How ETI reduces the EMP201 PAYE remittance and is carried forward is not
-    # decided by the specification — PENDING_G1: EMP201 shows ETI available but
-    # utilises none until this is signed.
+    # How ETI reduces the EMP201 PAYE remittance is not decided by the
+    # specification. Owner-approved 2026-11-25 (inventory B, P): ETI is offset
+    # against PAYE on the EMP201, up to the PAYE declared (south_africa_filing).
+    # The literal "PENDING_G1" would utilise none (value not provided).
     ("za_eti_offset_policy", "ETI offset against the EMP201 PAYE remittance",
-     None, None, None, "PENDING_G1", "S8", True, None, None),
+     None, None, None, "OFFSET_UP_TO_PAYE", "S8", True, None, None),
     # Zero tolerance until G1 signs another value (ZA-019).
     ("za_reconciliation_tolerance", "EMP501 balancing tolerance per month (ZAR)",
      None, None, "0", None, "S5", True, None, None),
@@ -314,17 +319,24 @@ ZA_SCALAR_CONTENT = (
     # ── Labour controls and lifecycle (spec §5, §8; Phase 9) ──────────────
     # The specification names the BCEA working-time protections but gives NO
     # premium multipliers, NO damage/loss deduction limit and NO four-eyes
-    # thresholds. These rows exist EMPTY on purpose (ZA_EMPTY_BY_DESIGN): a
-    # check that needs one reports "not configured" or BLOCKS — a number is
-    # never assumed (spec, production safety rule).
+    # thresholds. The multipliers and the damage limit are the public BCEA
+    # values the owner approved on 2026-11-25 (inventory B, S). The four-eyes
+    # rows stay EMPTY on purpose (ZA_EMPTY_BY_DESIGN): a check that needs one
+    # reports "not configured" or BLOCKS — a number is never assumed.
+    # BCEA s10(2): overtime at 1.5 times the wage (labour.py: hours x hourly x multiplier).
     ("za_bcea_overtime_multiplier", "BCEA overtime pay multiplier (not stated by the spec)",
-     None, None, None, None, "S11", True, None, None),
+     None, None, "1.5", None, "S11", True, None, None),
+    # BCEA s16: double pay (1.5 where the employee ordinarily works Sundays —
+    # the engine holds ONE value, so 2.0 is the check applied).
     ("za_bcea_sunday_multiplier", "BCEA Sunday work multiplier (not stated by the spec)",
-     None, None, None, None, "S11", True, None, None),
+     None, None, "2.0", None, "S11", True, None, None),
+    # BCEA s18(3): double pay for work on a public holiday.
     ("za_bcea_public_holiday_multiplier", "BCEA public-holiday work multiplier (not stated by the spec)",
-     None, None, None, None, "S11", True, None, None),
+     None, None, "2.0", None, "S11", True, None, None),
+    # BCEA s34(2)(c): at most one quarter of the employee's net pay (labour.py
+    # caps against net before the deduction).
     ("za_damage_deduction_limit_pct", "Damage / loss deduction limit (% of pay; not stated by the spec)",
-     None, None, None, None, "S11", True, None, None),
+     "25.0000", None, None, None, "S11", True, None, None),
     ("za_four_eyes_variable_pay_pct", "Variable pay above this % of salary needs a second approver (ZA-016)",
      None, None, None, None, "S1", True, None, None),
     ("za_four_eyes_bank_change_days", "Bank change within this many days of pay day needs a second approver",
@@ -339,10 +351,10 @@ ZA_SCALAR_CONTENT = (
 )
 
 # Rows that are deliberately empty: present so "not configured" is explicit,
-# never filled with an assumed value (Phase 9).
+# never filled with an assumed value (Phase 9). The BCEA multipliers and the
+# damage limit left this set on 2026-11-25 (owner-approved values above).
 ZA_EMPTY_BY_DESIGN = frozenset({
-    "za_bcea_overtime_multiplier", "za_bcea_sunday_multiplier", "za_bcea_public_holiday_multiplier",
-    "za_damage_deduction_limit_pct", "za_four_eyes_variable_pay_pct", "za_four_eyes_bank_change_days",
+    "za_four_eyes_variable_pay_pct", "za_four_eyes_bank_change_days",
     "za_parallel_materiality_amount",
 })
 DEDUCTION_TYPES_NEEDING_LIMIT = ("DAMAGE", "LOSS")

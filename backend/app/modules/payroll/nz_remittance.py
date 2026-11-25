@@ -27,7 +27,6 @@ from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.payroll import new_zealand_service as nzs
 
 ZERO = Decimal("0")
-MARK = "[PENDING G1]"
 # obligation -> nz_result.obligations key (PAYE already includes the ACC earner levy)
 OBLIGATION_FIELDS = (("PAYE", "payeTotal"), ("STUDENT_LOAN", "studentLoan"), ("KS_EMPLOYEE", "ksEmployee"),
                      ("KS_EMPLOYER_NET", "ksEmployerNet"), ("ESCT", "esct"), ("CHILD_SUPPORT", "childSupport"))
@@ -43,11 +42,10 @@ def _dec(value) -> Decimal:
 
 
 def signed_row(rate_map: Optional[dict], key: str):
-    """A content row only when it exists and is signed (no PENDING marker)."""
-    row = (rate_map or {}).get(key)
-    if row is None or MARK in (getattr(row, "label", None) or ""):
-        return None
-    return row
+    """A content row when it exists. A "[PENDING G1]" label marker no longer
+    hides it (gate removal, owner decision 2026-11-25); an empty value still
+    reads as None."""
+    return (rate_map or {}).get(key)
 
 
 def signed_amount(rate_map, key) -> Optional[Decimal]:

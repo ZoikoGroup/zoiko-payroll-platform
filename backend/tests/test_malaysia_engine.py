@@ -131,13 +131,38 @@ def test_review_treatment_with_an_amount_blocks_the_obligations_that_need_it():
     assert error.blocked["SOCSO"]["code"] == "MY_EARNING_CLASS_REVIEW:SOCSO:BENEFIT_IN_KIND"
 
 
-def test_an_unsigned_schedule_row_blocks_its_obligation():
+def test_a_legacy_pending_marker_on_a_schedule_row_no_longer_blocks():
+    """Gate removal (2026-11-25): a "[PENDING G1]" label marker never blocks;
+    the schedule row with a value calculates."""
     rate_map, slabs = build_pack()
     for s in slabs:
         if s["rule_type"] == "MY_EIS_SCHEDULE":
             s["rate_label"] += " [PENDING G1]"
     error = _blocked(ctx(pack=(rate_map, slabs)))
-    assert error.blocked["EIS"]["code"].startswith("MY_PACK_UNSIGNED:MY_EIS_SCHEDULE")
+    assert "EIS" not in error.blocked
+    assert error.partial["obligations"]["EIS"]["employee"] == "9.90"
+
+
+def test_a_legacy_pending_marker_on_a_scalar_row_with_a_value_calculates():
+    """A rate row whose label still carries "[PENDING G1]" is read like any
+    other once its value is present; an empty / PENDING_G1 value still blocks."""
+    from app.modules.payroll.engine.jurisdictions.malaysia.pack import MyPack
+
+    rate_map, slabs = build_pack(unsigned=("my_socso_wage_ceiling", "my_rounding_hrd"))
+    assert "[PENDING G1]" in rate_map["my_socso_wage_ceiling"]["label"]
+    pack = MyPack(rate_map, slabs, 1, date(2026, 3, 31))
+    assert pack.amount("my_socso_wage_ceiling") == Decimal("6000")
+    assert pack.rounder("my_rounding_hrd")(Decimal("50.005")) == Decimal("50.01")
+    error = _blocked(ctx(pack=(rate_map, slabs)))
+    assert "SOCSO" not in error.blocked and "HRD" not in error.blocked
+    empty = MyPack(build_pack(overrides={"my_socso_wage_ceiling": {"flat_amount": None}})[0], slabs, 1,
+                   date(2026, 3, 31))
+    with pytest.raises(MYCalculationBlockedError, match="MY_ROW_MISSING:my_socso_wage_ceiling"):
+        empty.amount("my_socso_wage_ceiling")
+    pending = MyPack(build_pack(overrides={"my_rounding_hrd": {"text_value": "PENDING_G1"}})[0], slabs, 1,
+                     date(2026, 3, 31))
+    with pytest.raises(MYCalculationBlockedError, match="MY_POLICY_PENDING:my_rounding_hrd"):
+        pending.rounder("my_rounding_hrd")
 
 
 def test_no_band_or_above_the_schedule_blocks_never_a_percentage():

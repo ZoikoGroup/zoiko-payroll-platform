@@ -1,5 +1,5 @@
 """Malaysia tax-year rollover (SQLite only): MY-PAYROLL-2026 -> MY-PAYROLL-2027
-as a Draft copy — every row re-marked PENDING G1 (values prefilled), the
+as a Draft copy — values prefilled, no [PENDING G1] marker (gate removal), the
 year-specific tables (holidays, PCB tables, authority examples) not copied,
 expired rows dropped, the source pack untouched, one rollover per year, the
 Super Admin action and the operator script (dry run / --apply)."""
@@ -67,8 +67,8 @@ def test_rollover_creates_a_pending_draft_and_leaves_the_source_alone(db, source
     assert (new.pack_id, new.status, new.tax_year) == ("MY-PAYROLL-2027", "Draft", "2027")
     assert (new.effective_from, new.effective_to) == (date(2027, 1, 1), date(2027, 12, 31))
     rates, slabs = _rows(db, new.id)
-    assert all(r.label.endswith(MARK) and r.label.count(MARK) == 1 for r in rates)    # every row re-pended
-    assert all(s.rate_label.endswith(MARK) for s in slabs)
+    assert all(MARK not in r.label for r in rates)                    # gate removal 2026-11-25: never re-pended
+    assert all(MARK not in s.rate_label for s in slabs)
     by_key = {(r.component_key, r.jurisdiction_state): r for r in rates}
     old_signed = db.get(ContributionRate, signed_id)
     assert not old_signed.label.endswith(MARK)                                          # source untouched

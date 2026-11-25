@@ -83,8 +83,10 @@ def test_setup_is_create_only_idempotent_and_never_signs_activates_or_assigns(db
     assert (pack.pack_id, pack.status) == (content.BE_2026[0], "Draft")
     rates = db.query(ContributionRate).filter_by(jurisdiction_pack_id=pack.id).all()
     slabs = db.query(TaxSlab).filter_by(jurisdiction_pack_id=pack.id).all()
-    assert rates and all(content.PENDING_MARK in (r.label or "") for r in rates)               # nothing signed
-    assert all(content.PENDING_MARK in (s_.rate_label or "") for s_ in slabs)
+    assert rates and not any(content.PENDING_MARK in (r.label or "") for r in rates)        # no legacy marker
+    assert not any(content.PENDING_MARK in (s_.rate_label or "") for s_ in slabs)
+    assert {r.component_key for r in rates if r.flat_amount is not None or r.text_value is not None
+            or r.employee_rate_pct is not None or r.employer_rate_pct is not None} == set(content.VALUES)
     forms = {f"ZP-BE-ENG-001 {code}" for code, *_ in content.SOURCE_REFERENCES}
     assert db.query(SourceArtifact).filter(SourceArtifact.form_number.in_(forms)).count() == len(forms) == 24
     assert not db.query(JurisdictionPack).filter(JurisdictionPack.pack_id.like("BE-DEMO%")).count()  # no DEMO pack

@@ -73,29 +73,23 @@ def _ask(source, **kw):
 
 
 # ── governed edit / sign ────────────────────────────────────────────────────
-def test_edit_needs_reason_and_source(db, pack, sources, admins):
+def test_edit_needs_a_reason_and_the_source_is_optional(db, pack, sources, admins):
     row = _rate(db, pack, "nz_acc_earner_levy_rate")
     with pytest.raises(BadRequestException, match="reason"):
         console.update_row(db, "rate", row.id, {"sourceDocumentId": sources[0]}, admins[0])
-    with pytest.raises(BadRequestException, match="source document"):
-        console.update_row(db, "rate", row.id, {"reason": "x"}, admins[0])
+    console.update_row(db, "rate", row.id, {"reason": "x", "flatAmount": "1.75"}, admins[0])   # no source needed
+    assert row.flat_amount == Decimal("1.75") and MARK not in row.label
     with pytest.raises(BadRequestException, match="not editable here"):
         console.update_row(db, "rate", row.id, _ask(sources[0], label="hack"), admins[0])
 
 
-def test_signing_needs_a_source_reviewed_by_another_admin(db, pack, sources, admins):
+def test_a_change_is_in_force_and_never_marks_the_row(db, pack, sources, admins):
+    """Gate removal (2026-11-25): no signing step; an edit never adds "[PENDING G1]" and strips an old one."""
     row = _rate(db, pack, "nz_acc_earner_levy_rate")
-    with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        console.update_row(db, "rate", row.id, _ask(sources[1], specialistVerified=True), admins[0])
-    view = console.update_row(db, "rate", row.id, _ask(sources[0], specialistVerified=True), admins[0])
-    assert view["signed"] is True and MARK not in row.label and row.flat_amount == Decimal("1.75")
-
-
-def test_unverified_change_is_marked_pending_again(db, pack, sources, admins):
-    row = _rate(db, pack, "nz_acc_earner_levy_rate")
-    console.update_row(db, "rate", row.id, _ask(sources[0], specialistVerified=True), admins[0])
-    view = console.update_row(db, "rate", row.id, _ask(sources[0], flatAmount="1.80"), admins[0])
-    assert view["signed"] is False and row.label.endswith(MARK) and row.total == "1.80%"
+    row.label = f"{row.label} {MARK}"                                      # an already-seeded DB row
+    db.flush()
+    view = console.update_row(db, "rate", row.id, _ask(sources[1], flatAmount="1.80"), admins[0])
+    assert view["signed"] is True and MARK not in row.label and row.total == "1.80%"
 
 
 def test_text_rows_use_the_engine_vocabulary(db, pack, sources, admins):
@@ -110,9 +104,6 @@ def test_text_rows_use_the_engine_vocabulary(db, pack, sources, admins):
             sources[0], textValue="CHILD_SUPPORT,PAYE,ACC_LEVY,STUDENT_LOAN,KS_EMPLOYEE"), admins[0])
     with pytest.raises(BadRequestException, match="holds text"):
         console.update_row(db, "rate", rounding.id, _ask(sources[0], flatAmount="2"), admins[0])
-    empty = _rate(db, pack, "nz_hol_awe_divisor_weeks")
-    with pytest.raises(BadRequestException, match="fill it before signing"):
-        console.update_row(db, "rate", empty.id, _ask(sources[0], specialistVerified=True), admins[0])
 
 
 def test_earning_class_treatment_and_active_pack_refused(db, pack, sources, admins):
@@ -121,7 +112,7 @@ def test_earning_class_treatment_and_active_pack_refused(db, pack, sources, admi
     with pytest.raises(BadRequestException, match="treatment"):
         console.update_row(db, "slab", slab.id, _ask(sources[0], treatment="MAYBE"), admins[0])
     console.update_row(db, "slab", slab.id, _ask(sources[0], treatment="included"), admins[0])
-    assert slab.assessment_basis == "INCLUDED" and slab.rate_label.endswith(MARK)
+    assert slab.assessment_basis == "INCLUDED" and MARK not in slab.rate_label      # no signing (2026-11-25)
     pack.status = "Active"
     db.commit()
     with pytest.raises(BadRequestException, match="no\\s+longer editable"):

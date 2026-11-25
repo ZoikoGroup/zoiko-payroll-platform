@@ -4898,18 +4898,6 @@ def malaysia_configuration_update_row(kind: str, row_id: int, payload: dict = Bo
     return result
 
 
-@router.post("/compliance/malaysia/configuration/sign",
-             summary="Sign many Malaysia rows at once (all or nothing; reviewed source; audited)")
-def malaysia_configuration_sign(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
-                                db: Session = Depends(get_db)):
-    from app.modules.payroll import my_super_admin
-
-    result = my_super_admin.sign_rows(db, payload.get("refs") or [], current_user.id, payload.get("reason"),
-                                      payload.get("sourceDocumentId"))
-    db.commit()
-    return result
-
-
 @router.post("/compliance/malaysia/packs/{pack_row_id}/tables/{rule_type}",
              summary="Load a whole Malaysia table into a Draft pack (all or nothing; every row unsigned; audited)")
 def malaysia_replace_table(pack_row_id: int, rule_type: str, payload: dict = Body(...),
@@ -5293,17 +5281,6 @@ async def belgium_content_workbook_import(pack_row_id: int, file: UploadFile = F
                                                          reason=reason, dry_run=dry_run, filename=file.filename)
     if out["written"]:
         db.commit()
-    return out
-
-
-@router.post("/compliance/belgium/packs/{pack_row_id}/bulk-sign",
-             summary="Sign selected Belgium rows in one action (not the importer / editor; each row audited)")
-def belgium_bulk_sign(pack_row_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
-                      db: Session = Depends(get_db)):
-    from app.modules.payroll import be_content_workbook
-
-    out = be_content_workbook.be_bulk_sign_rows(db, pack_row_id, payload, getattr(current_user, "id", None))
-    db.commit()
     return out
 
 

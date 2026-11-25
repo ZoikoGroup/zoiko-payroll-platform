@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_EVEN, ROUND_HALF_UP, ROUND_UP
+from decimal import (Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_DOWN, ROUND_HALF_EVEN,
+                     ROUND_HALF_UP, ROUND_UP)
 
 from app.modules.payroll.engine.base import PayrollContext
 from app.modules.payroll.engine.countries import japan_content as content
@@ -37,6 +38,9 @@ _MODES = {
     "HALF_EVEN": ROUND_HALF_EVEN,
     "BANKERS": ROUND_HALF_EVEN,
     "ROUND_HALF_EVEN": ROUND_HALF_EVEN,
+    # Japanese 50-sen rule for the employee share (<= 0.50 yen down, > 0.50 up).
+    "HALF_DOWN": ROUND_HALF_DOWN,
+    "ROUND_HALF_DOWN": ROUND_HALF_DOWN,
 }
 
 JPCalculationBlockedError = JapanCalculationBlockedError
@@ -145,7 +149,7 @@ class _Pack:
         row = self.row(key, as_of=as_of)
         text = _upper(_field(row, "text_value"))
         if not text or text == PENDING:
-            self.block(key, "rounding is PENDING_G1")
+            self.block(key, "rounding value not yet provided")
         unit = Decimal("1")
         mode_name = text
         if text.startswith("DOWN_") and text[5:].isdigit():
@@ -400,9 +404,16 @@ def _labour_check(ctx: PayrollContext, pack: _Pack, salary_components: list,
         bool(breakdown.night_minutes),
     )
     if sum(categories) > 1:
-        pack.block("jp_premium_combination_rule",
-                   "overtime, holiday and night premiums combine but the signed "
-                   "combination rule is not configured")
+        # labour.premium_floor already adds each category's premium on its own
+        # minutes (overtime + night = 50%, holiday + night = 60%), i.e. ADDITIVE;
+        # any other rule, or one not yet provided, BLOCKS.
+        rule = _upper(_field(pack.row("jp_premium_combination_rule"), "text_value"))
+        if not rule or rule == PENDING:
+            pack.block("jp_premium_combination_rule",
+                       "overtime, holiday and night premiums combine but the combination "
+                       "rule value is not yet provided")
+        if rule not in content.PREMIUM_COMBINATION_RULES:
+            pack.block("jp_premium_combination_rule", f"unsupported premium combination rule {rule!r}")
     try:
         floor = _labour.premium_floor(hourly, breakdown, rates)
         _labour.check_premium(paid_premium, floor)

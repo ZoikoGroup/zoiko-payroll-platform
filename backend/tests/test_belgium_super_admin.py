@@ -55,22 +55,37 @@ def _update(db, kind, row_id, actor, **data):
 
 
 # ── seed ───────────────────────────────────────────────────────────────────
-def test_seed_writes_every_key_pending_with_no_value_in_any_value_field(db, seeded):
+def test_seed_writes_the_approved_values_and_leaves_every_other_key_empty(db, seeded):
     from app.modules.payroll.models import ContributionRate, SourceArtifact, TaxSlab
 
     c = _c()
     rates = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == seeded.id).all()
     assert sorted(r.component_key for r in rates) == sorted(c.KEYS)
     for r in rates:
-        assert (r.employee_rate_pct, r.employer_rate_pct, r.flat_amount, r.text_value) == (None, None, None, None)
-        assert c.PENDING_MARK in r.label and r.organization_id is None and r.jurisdiction_country == "BE"
+        values = {"employee_rate_pct": r.employee_rate_pct, "employer_rate_pct": r.employer_rate_pct,
+                  "flat_amount": r.flat_amount, "text_value": r.text_value}
+        # gate removal 2026-11-25: no "[PENDING G1]" marker in any seeded label
+        assert c.PENDING_MARK not in r.label and r.organization_id is None and r.jurisdiction_country == "BE"
         if r.component_key in c.SPEC_PROPOSED:
-            assert f"spec-proposed: {c.SPEC_PROPOSED[r.component_key]}"[:60] in r.label
+            assert f"spec: {c.SPEC_PROPOSED[r.component_key]}"[:60] in r.label
+        entry = c.VALUES.get(r.component_key)
+        if entry is None:
+            assert set(values.values()) == {None}, r.component_key          # empty -> the engine blocks
+            assert r.effective_from is None
+            continue
+        name, value, effective_from = entry
+        written = values.pop(name)
+        assert (Decimal(value) if name != "text_value" else value) == written, r.component_key
+        assert set(values.values()) == {None}, r.component_key              # only the kind's field
+        assert r.effective_from == (date.fromisoformat(effective_from) if effective_from else None)
+    assert sum(1 for r in rates if r.component_key in c.VALUES) == len(c.VALUES) == 25
+    for key in c.keys_in_group("parallel"):
+        assert key not in c.VALUES                                           # tolerances stay empty
     classes = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == seeded.id,
                                        TaxSlab.rule_type == c.EARNING_CLASS_RULE).all()
     assert len(classes) == len(c.OBLIGATIONS) * len(c.COMPONENTS)
     assert {s.assessment_basis for s in classes} == {"REVIEW"}
-    assert all(c.PENDING_MARK in s.rate_label for s in classes)
+    assert not any(c.PENDING_MARK in s.rate_label for s in classes)
     sources = db.query(SourceArtifact).filter(SourceArtifact.form_number.like("ZP-BE-ENG-001 S%")).all()
     assert len(sources) == 24 and all(s.checksum_sha256 is None and s.file_path is None for s in sources)
     assert seeded.status == "Draft" and seeded.pack_id == "BE-PAYROLL-2026"
@@ -170,7 +185,8 @@ def test_signing_needs_a_reviewed_archived_source_and_a_value(db, seeded):
     from app.modules.payroll.models import SourceArtifact
 
     c = _c()
-    row = _rate(db, seeded, "be_wage_rmmmg")
+    key = "be_abs_manual_insurance_cap"                       # an empty amount key (no approved spec value)
+    row = _rate(db, seeded, key)
     seeded_source = db.query(SourceArtifact).filter(SourceArtifact.form_number == "ZP-BE-ENG-001 S8").one()
     with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
         _update(db, "rate", row.id, SIGNER, reason="r", sourceDocumentId=seeded_source.id,
@@ -180,9 +196,9 @@ def test_signing_needs_a_reviewed_archived_source_and_a_value(db, seeded):
         _update(db, "rate", row.id, SIGNER, reason="r", sourceDocumentId=src.id, specialistVerified=True)
     _update(db, "rate", row.id, EDITOR, flatAmount="10", reason="edit", sourceDocumentId=src.id)
     view = _update(db, "rate", row.id, SIGNER, reason="sign", sourceDocumentId=src.id, specialistVerified=True)
-    assert view["signed"] and c.PENDING_MARK not in _rate(db, seeded, "be_wage_rmmmg").label
+    assert view["signed"] and c.PENDING_MARK not in _rate(db, seeded, key).label
     _update(db, "rate", row.id, EDITOR, flatAmount="11", reason="change", sourceDocumentId=src.id)
-    assert c.PENDING_MARK in _rate(db, seeded, "be_wage_rmmmg").label          # re-marked pending
+    assert c.PENDING_MARK in _rate(db, seeded, key).label                      # re-marked pending
 
 
 def test_onss_employer_rows_are_reference_only_in_every_view(db, seeded):
@@ -222,7 +238,9 @@ def test_signing_status_and_configuration(db, seeded):
 
     c = _c()
     status = be_super_admin.signing_status(db, seeded.id)
-    assert sorted(status["pendingRates"]) == sorted(c.KEYS) == sorted(status["emptyValues"])
+    # gate removal 2026-11-25: no seeded row carries the legacy marker; only keys without a value are empty
+    assert status["pendingRates"] == []
+    assert sorted(status["emptyValues"]) == sorted(set(c.KEYS) - set(c.VALUES))
     assert status["reviewClasses"] == len(c.OBLIGATIONS) * len(c.COMPONENTS) and status["editors"] == []
     assert status["activationRefusal"] is None                       # structural check only (gate removal 2026-11-25)
     config = be_super_admin.configuration(db, seeded.id)
@@ -357,7 +375,7 @@ def test_owner_decisions_and_summary(db, seeded):
     assert {d["key"] for d in decisions} >= {"G-11", "G-16", "G-21"} and {d["state"] for d in decisions} == {"OPEN"}
     summary = belgium_service.be_statutory_summary(db)
     assert summary["available"] is False and "gates" not in summary            # no gates since 2026-11-25
-    assert summary["packs"][0]["pendingRows"] == len(_c().KEYS)
+    assert summary["packs"][0]["pendingRows"] == 0                              # no legacy marker is seeded
 
 
 def test_authority_examples_are_registered_only_with_a_reviewed_source(db, seeded):

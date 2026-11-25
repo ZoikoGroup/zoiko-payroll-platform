@@ -55,13 +55,17 @@ Conventions (the engine must match them, and they are the Japan conventions):
 
 Rounding (spec §3): "use official rounding/whole-dollar/cents rules from the
 IRD business-rule specification, not generic currency rounding". The
-specification does not state them, so every rounding row is PENDING_G1 and
-the engine BLOCKS on it. There is no global rounding helper.
+specification does not state them; each rounding row carries the owner-approved
+policy NEAREST_CENT_HALF_UP (gate removal, owner decision 2026-11-25). There is
+no global rounding helper.
 
-Status is Draft throughout and the registry row stays PLANNED. Per the
-production safety rule (spec, page 1) every row below is pending_g1=True:
-signed effective-dated content, archived authority evidence, fixtures and
-an independent New Zealand payroll/tax review come first (gate G1).
+Gate removal (owner decision 2026-11-25, "Spain model"): rows are seeded with
+plain labels (no "[PENDING G1]" marker) and the engine no longer blocks on a
+label marker. The tuple's pending_g1 column is kept only so the data shape is
+stable; it no longer marks anything. The owner-approved proposed-policy (P) and
+statutory (S) values of docs/new_zealand/GATE_REMOVAL_INVENTORY.md section B
+are filled in below. A row that is still empty / PENDING_G1 blocks narrowly
+("value not yet provided").
 """
 
 from datetime import date
@@ -268,21 +272,30 @@ NZ_SCALAR_CONTENT = (
     ("nz_supported_pay_frequencies", "Pay frequencies certified for calculation (spec §1)",
      None, None, None, "WEEKLY,FORTNIGHTLY,FOUR_WEEKLY,MONTHLY", "S1", True, None, None),
     # NZ-006: retro corrections create compensating results and amended filings.
+    # Owner-approved P value CORRECT_IN_LATER_PAYDAY_FILING = the implemented
+    # compensating-delta correction run filed with a later payday (nz_lifecycle).
     ("nz_correction_policy", "Retro-pay and correction policy (NZ-006)",
-     None, None, None, PENDING, "S1", True, None, None),
+     None, None, None, "COMPENSATING_DELTA", "S1", True, None, None),
     # NZ-011: legal deduction priority is an approved country policy.
+    # Owner-approved P value "PAYE > STUDENT_LOAN > KIWISAVER > CHILD_SUPPORT >
+    # OTHER" in the engine vocabulary: the ACC earner levy is part of PAYE
+    # (IRD), KIWISAVER = KS_EMPLOYEE, OTHER (voluntary) always comes last.
     ("nz_deduction_precedence", "Statutory deduction precedence (NZ-011)",
-     None, None, None, PENDING, "S3", True, None, None),
+     None, None, None, "PAYE,ACC_LEVY,STUDENT_LOAN,KS_EMPLOYEE,CHILD_SUPPORT", "S3", True, None, None),
 
-    # Spec §3: official IRD rounding — not stated by the specification.
-    ("nz_paye_rounding", "PAYE rounding (per the IRD business rules)", None, None, None, PENDING, "S1", True,
+    # Spec §3: official IRD rounding — not stated by the specification; owner-
+    # approved policy (inventory B, P).
+    ("nz_paye_rounding", "PAYE rounding (per the IRD business rules)", None, None, None,
+     "NEAREST_CENT_HALF_UP", "S1", True, None, None),
+    ("nz_acc_rounding", "ACC earner levy rounding (per the IRD business rules)", None, None, None,
+     "NEAREST_CENT_HALF_UP", "S1", True, None, None),
+    ("nz_sl_rounding", "Student-loan deduction rounding", None, None, None, "NEAREST_CENT_HALF_UP", "S1", True,
      None, None),
-    ("nz_acc_rounding", "ACC earner levy rounding (per the IRD business rules)", None, None, None, PENDING,
-     "S1", True, None, None),
-    ("nz_sl_rounding", "Student-loan deduction rounding", None, None, None, PENDING, "S1", True, None, None),
-    ("nz_ks_rounding", "KiwiSaver contribution rounding", None, None, None, PENDING, "S1", True, None, None),
-    ("nz_esct_rounding", "ESCT rounding", None, None, None, PENDING, "S1", True, None, None),
-    ("nz_cs_rounding", "Child-support deduction rounding", None, None, None, PENDING, "S1", True, None, None),
+    ("nz_ks_rounding", "KiwiSaver contribution rounding", None, None, None, "NEAREST_CENT_HALF_UP", "S1", True,
+     None, None),
+    ("nz_esct_rounding", "ESCT rounding", None, None, None, "NEAREST_CENT_HALF_UP", "S1", True, None, None),
+    ("nz_cs_rounding", "Child-support deduction rounding", None, None, None, "NEAREST_CENT_HALF_UP", "S1", True,
+     None, None),
 
     ("nz_acc_earner_levy_rate", "ACC earner levy 2026-27 (% of liable earnings)",
      None, None, "1.7500", None, "S3", True, None, None),
@@ -299,10 +312,10 @@ NZ_SCALAR_CONTENT = (
      None, None, "3.5000", None, "S4", True, _KS_2026_FROM, None),
     ("nz_ks_employer_min_age", "KiwiSaver compulsory employer contributions — from member age",
      None, None, "16", None, "S4", True, _KS_2026_FROM, None),
-    # Not stated by the specification: empty, so an employer contribution for
-    # a member at an age the rule would exclude BLOCKS until G1 signs it.
+    # Not stated by the specification; owner-approved statutory value (S): NZ
+    # Super eligibility age. The engine treats it as exclusive (age < 65).
     ("nz_ks_employer_max_age", "KiwiSaver compulsory employer contributions — up to member age",
-     None, None, None, None, "S4", True, None, None),
+     None, None, "65", None, "S4", True, None, None),
     ("nz_ks_rate_selection_basis", "KiwiSaver rate selected by (NZ-008)",
      None, None, None, "PAYDAY", "S4", True, None, None),
 
@@ -380,26 +393,30 @@ NZ_SCALAR_CONTENT = (
     ("nz_hol_ph_worked_multiplier", "Public holiday worked — minimum pay multiplier",
      None, None, "1.5", None, "S7", True, None, None),
 
-    # Holidays Act leave pay (Phase 6): not stated by the specification.
-    ("nz_hol_pay_rounding", "Holiday and leave pay rounding", None, None, None, PENDING, "S7", True, None, None),
-    ("nz_hol_awe_lookback_months", "Average weekly earnings — lookback (months)",
-     None, None, None, None, "S7", True, None, None),
-    ("nz_hol_awe_divisor_weeks", "Average weekly earnings — divisor (weeks)",
-     None, None, None, None, "S7", True, None, None),
-    ("nz_hol_owp_fallback_weeks", "Ordinary weekly pay — fallback lookback (weeks)",
-     None, None, None, None, "S7", True, None, None),
-    ("nz_hol_adp_lookback_weeks", "Average daily pay — lookback (weeks)",
-     None, None, None, None, "S7", True, None, None),
-    ("nz_hol_owp_method", "Ordinary weekly pay — method", None, None, None, None, "S7", True, None, None),
-    ("nz_hol_rdp_method", "Relevant daily pay — method", None, None, None, None, "S7", True, None, None),
+    # Holidays Act leave pay (Phase 6): not stated by the specification; the
+    # owner-approved policy (P) and statutory (S) values (inventory section B).
+    ("nz_hol_pay_rounding", "Holiday and leave pay rounding", None, None, None, "NEAREST_CENT_HALF_UP", "S7",
+     True, None, None),
+    ("nz_hol_awe_lookback_months", "Average weekly earnings — lookback (months)",       # Holidays Act s5
+     None, None, "12", None, "S7", True, None, None),
+    ("nz_hol_awe_divisor_weeks", "Average weekly earnings — divisor (weeks)",           # Holidays Act s5
+     None, None, "52", None, "S7", True, None, None),
+    ("nz_hol_owp_fallback_weeks", "Ordinary weekly pay — fallback lookback (weeks)",    # s8(2)(b)
+     None, None, "4", None, "S7", True, None, None),
+    ("nz_hol_adp_lookback_weeks", "Average daily pay — lookback (weeks)",               # s9A
+     None, None, "52", None, "S7", True, None, None),
+    ("nz_hol_owp_method", "Ordinary weekly pay — method", None, None, None, "AGREEMENT_THEN_FALLBACK", "S7", True,
+     None, None),
+    ("nz_hol_rdp_method", "Relevant daily pay — method", None, None, None, "AGREEMENT_DAILY", "S7", True,
+     None, None),
     ("nz_hol_adp_use_rule", "When average daily pay replaces relevant daily pay",
-     None, None, None, None, "S7", True, None, None),
+     None, None, None, "RDP_UNDETERMINABLE_OR_VARIES", "S7", True, None, None),
     ("nz_hol_final_pay_unvested_method", "Final pay — holiday pay on unvested employment",
-     None, None, None, None, "S7", True, None, None),
+     None, None, None, "PCT_OF_GROSS_SINCE_ANNIVERSARY", "S7", True, None, None),
     ("nz_out_of_cycle_paye_method", "Out-of-cycle payment — PAYE method (IRD)",
-     None, None, None, None, "S1", True, None, None),
+     None, None, None, "EXTRA_PAY", "S1", True, None, None),
     ("nz_lump_sum_paye_method", "Lump sum / extra pay — PAYE method (IRD)",
-     None, None, None, None, "S1", True, None, None),
+     None, None, None, "EXTRA_PAY_FOUR_WEEK_ANNUALISE", "S1", True, None, None),
 
     ("nz_record_retention_years", "Wage/time and holiday/leave records retained (years)",
      None, None, "6", None, "S9", True, None, None),
@@ -407,12 +424,9 @@ NZ_SCALAR_CONTENT = (
 
 # Rows that are deliberately empty: present so "not configured" is explicit,
 # never filled with an assumed value.
+# (The KiwiSaver max age, leave-pay windows/methods and IRD extra-pay methods
+# were filled at gate removal, owner decision 2026-11-25.)
 NZ_EMPTY_BY_DESIGN = frozenset({
-    "nz_ks_employer_max_age",
-    # Phase 6: leave-pay windows and methods, and the IRD extra-pay methods.
-    "nz_hol_awe_lookback_months", "nz_hol_awe_divisor_weeks", "nz_hol_owp_fallback_weeks",
-    "nz_hol_adp_lookback_weeks", "nz_hol_owp_method", "nz_hol_rdp_method", "nz_hol_adp_use_rule",
-    "nz_hol_final_pay_unvested_method", "nz_out_of_cycle_paye_method", "nz_lump_sum_paye_method",
     # Phase 8: filing deadline definition and payload schema version.
     "nz_working_day_rule", "nz_filing_payload_version",
 })

@@ -76,8 +76,12 @@ def test_guards():
     _blocked(ctx(nz_tax_profile=tax_profile(effective_from=date(2026, 5, 1))), "NZ_PROFILE_NOT_ACTIVE:tax_profile")
     _blocked(ctx(nz_tax_profile=tax_profile(residency_status="NON_RESIDENT")), E.NON_RESIDENT_UNSUPPORTED)
     _blocked(ctx(nz_payment_kind="BONUS_RUN"), E.PAYMENT_KIND_UNSUPPORTED)
-    # Phase 6: a lump sum is accepted, then blocks on the unsigned IRD extra-pay method.
-    _blocked(ctx(nz_payment_kind="LUMP_SUM"), "NZ_ROW_MISSING:nz_lump_sum_paye_method")
+    # Phase 6: a lump sum is accepted; the IRD extra-pay method is now provided
+    # (gate removal), so it blocks narrowly on the empty lump_sum_method table,
+    # and on the method row itself when its value is not provided.
+    _blocked(ctx(nz_payment_kind="LUMP_SUM"), "NZ_TABLE_EMPTY:lump_sum_method")
+    _blocked(ctx(nz_payment_kind="LUMP_SUM", pack=build_pack(overrides={"nz_lump_sum_paye_method": None})),
+             "NZ_ROW_MISSING:nz_lump_sum_paye_method")
     _blocked(ctx(nz_accumulators=None), E.ACC_ACCUMULATOR_MISSING)
 
 
@@ -101,8 +105,16 @@ def test_precedence_from_the_pack_is_used():
 
 
 # ── shipped content stays fail-closed ───────────────────────────────────────
-def test_shipped_content_blocks_unsigned():
-    _blocked(ctx(pack=build_pack(pending=True)), E.PACK_UNSIGNED)
+def test_shipped_content_blocks_only_on_its_empty_authority_tables():
+    # A legacy-seeded pack (labels carry "[PENDING G1]") no longer blocks on the
+    # marker; the first narrow block is the empty IRD PAYE method table.
+    _blocked(ctx(pack=build_pack(pending=True)), "NZ_TABLE_EMPTY:paye_main_method")
+
+
+def test_a_legacy_marked_pack_calculates_when_its_values_are_present():
+    plain = engine.calculate(ctx())["nz_result"]
+    marked = engine.calculate(ctx(pack=build_pack(marked=True)))["nz_result"]
+    assert marked["netPay"] == plain["netPay"] and marked["obligations"] == plain["obligations"]
 
 
 def test_shipped_content_without_pending_still_blocks_on_empty_authority_tables():

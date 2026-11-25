@@ -68,8 +68,9 @@ def test_each_value_sits_in_the_slot_its_kind_names():
     for row in content.ZA_SCALAR_CONTENT:
         filled = tuple(i for i in (2, 3, 4, 5) if row[i] is not None)
         if row[0] in content.ZA_EMPTY_BY_DESIGN:
-            # Phase 9: the spec states no value — the row must stay EMPTY and pending.
-            assert filled == () and row[7] is True, row[0]
+            # The spec states no value and the owner supplied none (gate-only
+            # rows) — the row stays EMPTY, so a check that needs it blocks.
+            assert filled == (), row[0]
             continue
         assert filled == slots[content.ZA_PARAMETER_KEYS[row[0]]], row[0]
 
@@ -93,11 +94,28 @@ def test_values_fit_their_columns():
         assert len(row[4]) <= 150
 
 
-def test_policy_choices_the_spec_leaves_open_are_pending_g1():
+def test_policy_choices_carry_the_owner_approved_values():
+    # Gate removal (2026-11-25): inventory section B "P" values, each an
+    # engine token the reader accepts.
     for key in ("za_paye_tax_year_date_basis", "za_variable_remuneration_basis"):
         row = _scalar(key)
-        assert row[5] == "PENDING_G1" and row[7] is True
+        assert row[5] == "PAYMENT_DATE"
         assert row[5] in content.DATE_BASES
+    eti = _scalar("za_eti_offset_policy")
+    assert eti[5] == "OFFSET_UP_TO_PAYE" and eti[5] in content.ETI_OFFSET_POLICIES
+    # "PENDING_G1" stays a recognised token: it is the narrow "value not yet
+    # provided" block, never a value the catalogue ships.
+    assert "PENDING_G1" in content.DATE_BASES and "PENDING_G1" in content.ETI_OFFSET_POLICIES
+
+
+def test_bcea_statutory_values_are_filled():
+    # Gate removal (2026-11-25): inventory section B "S" values (BCEA).
+    assert _amount("za_bcea_overtime_multiplier") == Decimal("1.5")          # s10(2)
+    assert _amount("za_bcea_sunday_multiplier") == Decimal("2.0")            # s16
+    assert _amount("za_bcea_public_holiday_multiplier") == Decimal("2.0")    # s18(3)
+    assert Decimal(_scalar("za_damage_deduction_limit_pct")[2]) == Decimal("25")   # s34(2)(c)
+    assert content.ZA_EMPTY_BY_DESIGN == {"za_four_eyes_variable_pay_pct", "za_four_eyes_bank_change_days",
+                                          "za_parallel_materiality_amount"}   # gate-only rows stay empty
 
 
 def test_only_monthly_is_supported():
@@ -280,7 +298,14 @@ def test_seed_writes_a_draft_pack_with_every_row(db):
     assert by_key["za_uif_monthly_ceiling"].flat_amount == Decimal("17712")
     assert by_key["za_uif"].employee_rate_pct == Decimal("1") and by_key["za_uif"].employer_rate_pct == Decimal("1")
     assert by_key["za_brs_version"].text_value == "25.3.0"
-    assert by_key["za_brs_version"].label.endswith("[PENDING G1]")
+    # Gate removal (2026-11-25): rows are seeded plain — no "[PENDING G1]" marker.
+    assert by_key["za_brs_version"].label == _scalar("za_brs_version")[1]
+    assert not any("[PENDING G1]" in r.label for r in rates)
+    assert by_key["za_paye_tax_year_date_basis"].text_value == "PAYMENT_DATE"
+    assert by_key["za_eti_offset_policy"].text_value == "OFFSET_UP_TO_PAYE"
+    assert by_key["za_bcea_overtime_multiplier"].flat_amount == Decimal("1.5")
+    assert by_key["za_damage_deduction_limit_pct"].employee_rate_pct == Decimal("25")
+    assert by_key["za_four_eyes_variable_pay_pct"].total == "NOT CONFIGURED"   # gate-only row stays empty
     assert by_key["za_bcea_earnings_threshold"].effective_from == date(2026, 5, 1)
 
     slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).all()
@@ -289,6 +314,7 @@ def test_seed_writes_a_draft_pack_with_every_row(db):
         by_rule.setdefault(s.rule_type, []).append(s)
     assert len(by_rule["ZA_PAYE_BAND"]) == 7
     assert len(by_rule["ZA_ETI_BAND"]) == 6
+    assert not any("[PENDING G1]" in (s.rate_label or "") for s in slabs)
     assert len(by_rule["ZA_EARNING_CLASS"]) == len(content.ZA_EARNING_CLASSES)
     assert all(s.tax_table_number is None for s in by_rule["ZA_EARNING_CLASS"])   # no guessed IRP5 code
     top = max(by_rule["ZA_PAYE_BAND"], key=lambda s: s.min_amount)

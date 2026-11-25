@@ -1,5 +1,5 @@
 {
-  "description": "A bonus whose structured earned period is the PREVIOUS month, while the section 7B timing rule is PENDING_G1: the period is derived from the item and the run BLOCKS.",
+  "description": "A bonus whose structured earned period is the PREVIOUS month, while the section 7B timing rule is still the literal PENDING_G1 (value not yet provided): the period is derived from the item and the run BLOCKS. The content value is PAYMENT_DATE (see test_south_africa_engine.py).",
   "source": "ZP-ZA-ENG-001 v1.0 (22 Sep 2026) ZA-006.",
   "context": {
     "country": "ZA",
@@ -39,7 +39,7 @@
         "text_value": "MONTHLY"
       },
       "za_paye_tax_year_date_basis": {
-        "text_value": "PENDING_G1"
+        "text_value": "PAYMENT_DATE"
       },
       "za_variable_remuneration_basis": {
         "text_value": "PENDING_G1"

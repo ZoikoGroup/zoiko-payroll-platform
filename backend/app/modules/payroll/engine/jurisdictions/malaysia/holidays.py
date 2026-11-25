@@ -41,15 +41,16 @@ def calendar(pack: MyPack, holiday_state: str, year: int) -> dict:
 
 
 def national_rows(slabs, year: int) -> list:
-    """Signed national holidays of `year` from raw pack rows (for the platform
-    holiday list); unsigned or undated rows are skipped, never guessed."""
+    """National holidays of `year` from raw pack rows (for the platform
+    holiday list); undated rows are skipped, never guessed. Gate removal
+    (2026-11-25): a legacy "[PENDING G1]" label marker no longer hides a row;
+    it is only stripped from the displayed name."""
     out = {}
     for row in slabs or []:
         if upper(field(row, "rule_type")) != content.MY_PUBLIC_HOLIDAY_RULE or field(row, "jurisdiction_state"):
             continue
-        if PENDING_MARK in str(field(row, "rate_label") or ""):
-            continue
         day = row_date(row)
         if day is not None and day.year == year:
-            out[day] = str(field(row, "rate_label") or "Public holiday")
+            name = " ".join(str(field(row, "rate_label") or "").replace(PENDING_MARK, " ").split())
+            out[day] = name or "Public holiday"
     return [{"date": d.isoformat(), "name": n} for d, n in sorted(out.items())]

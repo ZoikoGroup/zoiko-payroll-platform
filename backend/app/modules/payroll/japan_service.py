@@ -24,6 +24,7 @@ from app.core.exceptions import BadRequestException
 
 JP = "JP"
 SPEC = "ZP-JP-ENG-001 v1.0"
+# Legacy label marker; no longer written by seed_japan_pack (gate removal).
 PENDING_G1_SUFFIX = " [PENDING G1]"
 
 
@@ -89,7 +90,10 @@ def seed_japan_pack(db: Session, *, effective_from: date = date(2026, 1, 1),
         return Decimal(str(value)) if value is not None else None
 
     def pending(label, flag, limit):
-        return (label + (PENDING_G1_SUFFIX if flag else ""))[:limit]
+        # Gate removal (2026-11-25, Spain model): no "[PENDING G1]" label
+        # marker is written; the content's pending_g1 flag is ignored. A value
+        # not yet provided is carried by the value itself (empty / PENDING_G1).
+        return label[:limit]
 
     order = 0
     for (key, label, ee, er, flat, text, src, is_pending, eff_from, eff_to) in content.JP_SCALAR_CONTENT:

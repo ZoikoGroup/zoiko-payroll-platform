@@ -157,12 +157,15 @@ def test_vest_carries_sick_and_supersedes_the_old_year(db, organization, employe
     assert [(e.status, e.carried_in) for e in sick] == [("SUPERSEDED", D("0")), ("ACTIVE", D("6"))]
 
 
-def test_vest_blocks_on_unsigned_pack(db, organization, employee, monkeypatch):
+def test_vest_runs_on_a_marked_pack_and_blocks_on_an_empty_value(db, organization, employee, monkeypatch):
     _employment(db, organization.id, employee.id, date(2025, 5, 12))
-    _pack_fixture(monkeypatch, pending=True)
+    _pack_fixture(monkeypatch, pending=True)             # legacy "[PENDING G1]" labels no longer block
+    assert lv.vest_entitlements(db, organization.id, date(2026, 7, 1))["vested"] == 3
+    rate_map, _slabs, _pack = nzs._nz_pack_in_force(db, date(2026, 7, 1))
+    rate_map["nz_hol_sick_days"].flat_amount = None
     with pytest.raises(HTTPException) as refused:
-        lv.vest_entitlements(db, organization.id, date(2026, 7, 1))
-    assert refused.value.status_code == 409 and "NZ_PACK_UNSIGNED" in refused.value.detail
+        lv.vest_entitlements(db, organization.id, date(2026, 11, 12))
+    assert refused.value.status_code == 409 and "NZ_ROW_MISSING" in refused.value.detail
     monkeypatch.setattr(nzs, "_nz_pack_in_force", lambda db, on: (None, None, None))
     with pytest.raises(HTTPException, match="no rule pack"):
         lv.vest_entitlements(db, organization.id, date(2026, 7, 1))

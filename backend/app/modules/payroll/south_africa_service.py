@@ -33,7 +33,6 @@ from app.core.exceptions import BadRequestException, NotFoundException
 
 ZA = "ZA"
 SPEC = "ZP-ZA-ENG-001 v1.0"
-PENDING_G1_SUFFIX = " [PENDING G1]"
 DIRECTIVE_TYPES = ("FIXED_PERCENTAGE", "FIXED_AMOUNT", "LUMP_SUM", "OTHER")
 ETI_LEDGER_STATUSES = ("CALCULATED", "CLAIMED")
 EMPLOYMENT_TYPES = ("STANDARD", "NON_STANDARD")
@@ -111,11 +110,10 @@ def seed_south_africa_pack(db: Session, *, effective_from: date = date(2026, 3, 
     def dec(value):
         return Decimal(str(value)) if value is not None else None
 
-    def pending(label, flag, limit):
-        return (label + (PENDING_G1_SUFFIX if flag else ""))[:limit]
-
+    # Gate removal (2026-11-25, Spain model): rows are written plain — no
+    # "[PENDING G1]" label marker; the content's pending flag is not used here.
     order = 0
-    for (key, label, ee, er, flat, text, src, is_pending, eff_from, eff_to) in content.ZA_SCALAR_CONTENT:
+    for (key, label, ee, er, flat, text, src, _pending_flag, eff_from, eff_to) in content.ZA_SCALAR_CONTENT:
         order += 1
         ee_shown = f"{ee}%" if ee is not None else "—"
         er_shown = f"{er}%" if er is not None else "—"
@@ -129,7 +127,7 @@ def seed_south_africa_pack(db: Session, *, effective_from: date = date(2026, 3, 
             total = text if text is not None else str(flat)
         db.add(ContributionRate(
             jurisdiction_pack_id=pack.id, organization_id=None, jurisdiction_country=ZA,
-            component_key=key, label=pending(label, is_pending, 100),
+            component_key=key, label=label[:100],
             employee_share=ee_shown[:50], employer_share=er_shown[:50], total=total[:50],
             employee_rate_pct=dec(ee), employer_rate_pct=dec(er),
             flat_amount=dec(flat), text_value=text,
@@ -152,7 +150,7 @@ def seed_south_africa_pack(db: Session, *, effective_from: date = date(2026, 3, 
             rule_type=content.ZA_ETI_BAND_RULE,
             min_amount=dec(lo), max_amount=dec(hi),
             rate_pct=dec(rate) if rate is not None else Decimal("0"), flat_amount=dec(flat),
-            rate_label=pending(label, True, 150), tax_formula=f"ETI {period}: {formula}"[:150],
+            rate_label=label[:150], tax_formula=f"ETI {period}: {formula}"[:150],
             filing_status=period, tax_regime=formula,
             source_document_id=sources.get(src), sort_order=order))
 

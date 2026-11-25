@@ -16,11 +16,12 @@ OTHER = 777
 def test_the_same_user_cannot_edit_and_sign_in_one_action(db, seeded):
     src = _verified_source(db)
     row = _rate(db, seeded, "be_wage_rmmmg")
+    before = row.flat_amount                                                         # seeded value (gate removal)
     with pytest.raises(BadRequestException, match="never edited and signed in one action"):
         _update(db, "rate", row.id, EDITOR, flatAmount="10", reason="r", sourceDocumentId=src.id,
                 specialistVerified=True)
     db.rollback()
-    assert _rate(db, seeded, "be_wage_rmmmg").flat_amount is None                   # nothing applied
+    assert _rate(db, seeded, "be_wage_rmmmg").flat_amount == before                 # nothing applied
 
 
 def test_the_editor_cannot_sign_but_a_different_user_can(db, seeded):

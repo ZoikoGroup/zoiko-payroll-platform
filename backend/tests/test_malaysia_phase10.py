@@ -178,7 +178,9 @@ def test_rotation_moves_every_identifier_to_the_newest_key(world, monkeypatch):
     assert my.reveal_my_identifier(w.db, w.org, row.id, w.a)["value"] == NRIC
 
 
-def test_console_adds_examples_only_with_a_reviewed_source(db):
+def test_console_adds_examples_with_an_optional_source(db):
+    """Gate removal (2026-11-25): an authority example needs a reason and a valid formula; its source document
+    is optional provenance (no reviewed-source requirement)."""
     from app.modules.auth.models import User, UserRole
     from app.modules.payroll import my_super_admin as msa
     from app.modules.payroll.models import SourceArtifact
@@ -190,22 +192,18 @@ def test_console_adds_examples_only_with_a_reviewed_source(db):
         db.add(u)
         users.append(u)
     db.flush()
-    reviewed = SourceArtifact(agency="KWSP", title="EPF Third Schedule examples", checksum_sha256="a" * 64,
-                              file_path="sources/epf.pdf", created_by_id=users[1].id,
-                              reviewer_id=users[2].id)
     draft = SourceArtifact(agency="KWSP", title="notes", created_by_id=users[1].id)
-    db.add_all([reviewed, draft])
+    db.add(draft)
     db.flush()
     pack_id = msa.seed_draft(db, {"reason": "start"}, users[0].id)["packs"][0]["id"]
     payload = {"name": "EPF 5000", "taxFormula": "G=5000 => epfEe=550", "reason": "official example",
-               "sourceDocumentId": reviewed.id}
+               "sourceDocumentId": draft.id}                                # an unreviewed source is accepted
     row = msa.add_golden_example(db, pack_id, payload, users[0].id)
     assert row["ruleType"] == "MY_AUTHORITY_EXAMPLE" and row["detail"] == "G=5000 => epfEe=550"
     with pytest.raises(BadRequestException, match="already has"):
         msa.add_golden_example(db, pack_id, payload, users[0].id)
     with pytest.raises(BadRequestException, match="taxFormula"):
         msa.add_golden_example(db, pack_id, {**payload, "name": "bad", "taxFormula": "G=5000"}, users[0].id)
-    with pytest.raises(BadRequestException):
-        msa.add_golden_example(db, pack_id, {**payload, "name": "draft src", "sourceDocumentId": draft.id},
-                               users[0].id)
-    assert msa.golden_check(db, pack_id)["examples"] == 1
+    no_source = {k: v for k, v in payload.items() if k != "sourceDocumentId"}
+    msa.add_golden_example(db, pack_id, {**no_source, "name": "EPF 6000"}, users[0].id)
+    assert msa.golden_check(db, pack_id)["examples"] == 2

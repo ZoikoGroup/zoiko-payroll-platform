@@ -53,29 +53,17 @@ def test_configuration_groups_every_row(console):
     assert territorial and all(r["territory"] == "SABAH" for r in territorial)
     assert set(conf["schedules"]) == set(content.SCHEDULE_RULES) and all(v == [] for v in conf["schedules"].values())
     assert conf["holidays"] == [] and len(conf["earningClasses"]) == len(content.MALAYSIA_EARNING_CLASSES)
-    assert all(r["signed"] is False for r in conf["rates"])                      # every seeded row is extracted
+    assert all(r["signed"] is True for r in conf["rates"])                       # gate removal: no seeded marker
 
 
 def test_signing_status_lists_what_blocks_activation(console):
     c = console
     status = c.msa.signing_status(c.db, c.pack)
     assert set(status["emptyTables"]) >= {"MY_EPF_SCHEDULE", "MY_PUBLIC_HOLIDAY"}
-    assert "my_min_wage_monthly" in status["pendingRates"] and status["activationRefusal"] is None  # gate removal 2026-11-25
-    assert "my_ot_rate_days_divisor__PEN" in status["emptyValues"]
-
-
-def test_bulk_signing_needs_a_reviewed_source_and_records_the_editor(console):
-    from app.modules.payroll.models import ContributionRate
-
-    c = console
-    row = c.db.query(ContributionRate).filter_by(jurisdiction_pack_id=c.pack, component_key="my_min_wage_monthly",
-                                                 organization_id=None).one()
-    out = c.msa.sign_rows(c.db, [{"kind": "rate", "id": row.id}], c.editor, "signed from the order",
-                          source_document_id=c.source)
-    assert out["signed"] == 1 and not row.label.endswith("[PENDING G1]")
-    assert c.editor in c.msa.signing_status(c.db, c.pack)["editors"]
-    with pytest.raises(BadRequestException):
-        c.msa.sign_rows(c.db, [], c.editor, "nothing")
+    assert status["pendingRates"] == [] and status["activationRefusal"] is None  # gate removal 2026-11-25
+    assert "my_reconciliation_tolerance" in status["emptyValues"]
+    assert "my_ot_rate_days_divisor__PEN" not in status["emptyValues"]           # owner-approved value (26)
+    assert "my_epf_due_rule" in status["pendingPolicies"]
 
 
 def test_workbook_round_trip_preview_and_apply(console):
@@ -101,12 +89,14 @@ def test_the_generic_row_editor_refuses_malaysian_rows():
 def test_super_admin_routes_are_declared():
     from app.modules.super_admin.router import router
 
+    # Gate removal (2026-11-25): there is no bulk-sign route any more.
+    assert not any(r.path.endswith("/compliance/malaysia/configuration/sign") for r in router.routes)
+
     paths = {(sorted(r.methods)[0], r.path) for r in router.routes if "/malaysia" in r.path}
     for method, path in (("GET", "/compliance/malaysia/packs"),
                          ("GET", "/compliance/malaysia/packs/{pack_row_id}/configuration"),
                          ("GET", "/compliance/malaysia/packs/{pack_row_id}/signing-status"),
                          ("PUT", "/compliance/malaysia/configuration/rows/{kind}/{row_id}"),
-                         ("POST", "/compliance/malaysia/configuration/sign"),
                          ("POST", "/compliance/malaysia/packs/{pack_row_id}/tables/{rule_type}"),
                          ("POST", "/compliance/malaysia/seed-draft"),
                          ("GET", "/compliance/malaysia/packs/{pack_row_id}/workbook/export"),

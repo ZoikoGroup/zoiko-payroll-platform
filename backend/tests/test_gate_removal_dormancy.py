@@ -76,7 +76,7 @@ def test_backfill_follows_the_organisation_country(db, code):
     assert service.get_company_details(db, t.org.id).jurisdiction_country == code
 
 
-@pytest.mark.parametrize("code", ["ZA", "NZ", "PL", "MY", "BE"])
+@pytest.mark.parametrize("code", ["JP", "ZA", "NZ", "PL", "MY", "BE"])
 def test_employee_validation_is_an_ordinary_strategy(code):
     from app.modules.payroll import employee_validation as ev
 

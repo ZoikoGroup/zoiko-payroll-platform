@@ -26,8 +26,19 @@ def _blocked(code):
     return pytest.raises(BECalculationBlockedError, match=code)
 
 
-def test_pending_label_blocks_with_content_pending():
-    pack = _pack({"be_wage_rmmmg": _row("be_wage_rmmmg", f"RMMMG {MARK}", flat_amount="1000")})
+def test_legacy_pending_label_no_longer_blocks_when_the_value_is_present():
+    # Gate removal 2026-11-25: rows seeded earlier still carry "[PENDING G1]" in
+    # their label (already-seeded DB packs). The label is display text only.
+    pack = _pack({"be_wage_rmmmg": _row("be_wage_rmmmg", f"RMMMG {MARK}", flat_amount="1000"),
+                  "be_onss_employee_rate": _row("be_onss_employee_rate", f"ONSS {MARK}", employee_rate_pct="10"),
+                  "be_supported_pay_bases": _row("be_supported_pay_bases", f"bases {MARK}", text_value="SALARIED")})
+    assert pack.amount("be_wage_rmmmg") == Decimal("1000")
+    assert pack.pct("be_onss_employee_rate", "employee") == Decimal("10")
+    assert pack.text_list("be_supported_pay_bases") == ["SALARIED"]
+
+
+def test_legacy_pending_label_with_an_empty_value_still_blocks():
+    pack = _pack({"be_wage_rmmmg": _row("be_wage_rmmmg", f"RMMMG {MARK}")})
     with _blocked("BE_CONTENT_PENDING:be_wage_rmmmg"):
         pack.amount("be_wage_rmmmg")
 
@@ -67,9 +78,9 @@ def test_mid_year_window_selects_the_row_in_force_on_the_pay_date():
     assert used.used()[0]["effectiveFrom"] == "2026-07-01"
 
 
-def test_a_pending_successor_blocks_only_after_its_start():
+def test_an_empty_successor_blocks_only_after_its_start():
     rows = [_row("be_wage_rmmmg", flat_amount="1000", effective_to=date(2026, 6, 30)),
-            _row("be_wage_rmmmg", f"RMMMG {MARK}", flat_amount="1100", effective_from=date(2026, 7, 1))]
+            _row("be_wage_rmmmg", f"RMMMG {MARK}", effective_from=date(2026, 7, 1))]
     assert _pack({"be_wage_rmmmg": rows}, as_of=date(2026, 6, 30)).amount("be_wage_rmmmg") == Decimal("1000")
     with _blocked("BE_CONTENT_PENDING"):
         _pack({"be_wage_rmmmg": rows}, as_of=date(2026, 7, 1)).amount("be_wage_rmmmg")
@@ -97,16 +108,16 @@ def test_rates_and_text_lists():
     assert pack.text_list("be_supported_pay_frequencies") == ["MONTHLY", "WEEKLY"]
 
 
-def test_rounding_comes_only_from_signed_be_rounding_rows():
+def test_rounding_comes_only_from_be_rounding_rows():
     pack = _pack({"be_rounding_onss": _row("be_rounding_onss", text_value="CENT_HALF_UP"),
                   "be_rounding_holiday": _row("be_rounding_holiday", text_value="EURO_DOWN"),
-                  "be_rounding_withholding": _row("be_rounding_withholding", f"r {MARK}", text_value="CENT_DOWN"),
+                  "be_rounding_withholding": _row("be_rounding_withholding", f"r {MARK}"),
                   "be_wage_rmmmg": _row("be_wage_rmmmg", text_value="CENT_HALF_UP")})
     assert pack.rounder("be_rounding_onss")(Decimal("10.005")) == Decimal("10.01")
     assert pack.rounder("be_rounding_holiday")(Decimal("10.99")) == Decimal("10")
     assert pack.rounding_events[0]["key"] == "be_rounding_onss"
     with _blocked("BE_CONTENT_PENDING:be_rounding_withholding"):
-        pack.rounder("be_rounding_withholding")                    # unsigned rounding row
+        pack.rounder("be_rounding_withholding")                    # rounding row with no value
     with _blocked("BE_ROUNDING_KEY_INVALID:be_wage_rmmmg"):
         pack.rounder("be_wage_rmmmg")                              # never from a non-rounding row
     with _blocked("BE_ROW_MISSING:be_rounding_missing"):
@@ -119,16 +130,16 @@ def test_unknown_rounding_rule_blocks():
         pack.rounder("be_rounding_onss")
 
 
-def test_table_needs_a_signed_slab_rows_marker_and_signed_rows():
+def test_table_needs_a_slab_rows_marker_and_rows():
     marker = _row("be_public_holidays", text_value="SLAB_ROWS")
     holiday = {"rule_type": "BE_PUBLIC_HOLIDAY", "min_amount": "0", "rate_label": "holiday A",
                "filing_status": "A", "effective_from": date(2026, 1, 1), "effective_to": date(2026, 12, 31)}
     assert len(_pack({"be_public_holidays": marker}, [holiday]).table("be_public_holidays")) == 1
     with _blocked("BE_TABLE_EMPTY:be_public_holidays"):
         _pack({"be_public_holidays": marker}, []).table("be_public_holidays")
-    with _blocked("BE_CONTENT_PENDING"):
-        _pack({"be_public_holidays": marker}, [dict(holiday, rate_label=f"holiday A {MARK}")]).table(
-            "be_public_holidays")
+    # a legacy "[PENDING G1]" slab label no longer blocks
+    assert len(_pack({"be_public_holidays": marker}, [dict(holiday, rate_label=f"holiday A {MARK}")]).table(
+        "be_public_holidays")) == 1
     with _blocked("BE_FEATURE_BLOCKED"):
         _pack({"be_public_holidays": _row("be_public_holidays", text_value="NOT_SUPPORTED")},
               [holiday]).table("be_public_holidays")
@@ -137,12 +148,14 @@ def test_table_needs_a_signed_slab_rows_marker_and_signed_rows():
             "be_public_holidays")
 
 
-def test_earning_classes_block_while_pending():
+def test_earning_classes_read_the_treatment_not_the_label():
     signed = {"rule_type": "BE_EARNING_CLASS", "tax_regime": "ONSS_EMPLOYEE", "filing_status": "SALARY",
               "assessment_basis": "INCLUDED", "rate_label": "ONSS_EMPLOYEE: SALARY"}
     assert _pack({}, [signed]).earning_classes() == {("ONSS_EMPLOYEE", "SALARY"): "INCLUDED"}
+    assert _pack({}, [dict(signed, rate_label=f"x {MARK}")]).earning_classes() == {
+        ("ONSS_EMPLOYEE", "SALARY"): "INCLUDED"}                   # legacy label marker: display only
     with _blocked("BE_CONTENT_PENDING"):
-        _pack({}, [dict(signed, rate_label=f"x {MARK}")]).earning_classes()
+        _pack({}, [dict(signed, assessment_basis="")]).earning_classes()
     with _blocked("BE_TABLE_EMPTY"):
         _pack({}, []).earning_classes()
 

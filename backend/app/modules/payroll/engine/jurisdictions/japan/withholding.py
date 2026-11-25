@@ -89,7 +89,7 @@ def _rounder(pack, rounding):
         _block(pack, "jp_wht_rounding", "no withholding rounding row is configured")
     text = str(_field(round_row, "text_value") or "").strip().upper()
     if not text or text == PENDING:
-        _block(pack, "jp_wht_rounding", "withholding rounding is PENDING_G1")
+        _block(pack, "jp_wht_rounding", "withholding rounding value not yet provided")
     unit = Decimal("1")
     mode_name = text
     if text.startswith("DOWN_") and text[5:].isdigit():
@@ -137,7 +137,7 @@ def _scalar_amount(pack, key):
     row = _row(pack, key)
     value = _field(row, "flat_amount") if row is not None else None
     if value is None:
-        _block(pack, key, "no signed amount is configured")
+        _block(pack, key, "value not yet provided")
     return _dec(value)
 
 
@@ -231,7 +231,7 @@ def monthly_withholding(base_after_si, declaration_class, dependants, method, sl
 
     method = str(method or "").strip().upper()
     if not method or method == PENDING:
-        _block(scalars, "jp_withholding_method", "withholding method is PENDING_G1")
+        _block(scalars, "jp_withholding_method", "withholding method value not yet provided")
     if method not in (_COMPUTER_METHOD, _TABLES_ONLY):
         _block(scalars, "jp_withholding_method", f"unsupported withholding method {method!r}")
 

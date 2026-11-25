@@ -68,8 +68,9 @@ def test_the_export_has_every_sheet_and_every_catalogue_row(db, seeded):
                                                                       if v[1] == c.KIND_VERSION)
     assert {r[0] for r in sheets["Owner decisions"][1:]} >= {"G-11", "G-16", "G-21"}
     proposed = [r for r in sheets["Scalar keys"][1:] if r[1] == "be_onss_employee_rate"][0]
-    assert proposed[5] == c.SPEC_PROPOSED["be_onss_employee_rate"] and proposed[8] == ""   # label only, no value
-    assert all(r[7] in ("PENDING", "EMPTY") for r in sheets["Scalar keys"][1:])
+    # gate removal 2026-11-25: the approved spec figure is seeded as the value
+    assert proposed[5] == c.SPEC_PROPOSED["be_onss_employee_rate"] and proposed[8] == "13.0700"
+    assert {r[7] for r in sheets["Scalar keys"][1:]} == {"SIGNED"}        # no legacy marker is seeded
 
 
 def test_the_workbook_carries_no_personal_data(db, seeded):
@@ -232,8 +233,16 @@ def test_the_committed_ai_draft_imports_without_error_and_signs_nothing(db, seed
     assert done["written"]
     rates = db.query(ContributionRate).filter_by(jurisdiction_pack_id=seeded.id).all()
     slabs = db.query(TaxSlab).filter_by(jurisdiction_pack_id=seeded.id).all()
-    assert all(c.PENDING_MARK in r.label for r in rates)                                   # nothing signed
-    assert all(c.PENDING_MARK in s.rate_label for s in slabs)
+    # gate removal 2026-11-25: seeded rows carry no marker; every row the import CHANGED is marked again
+    from app.modules.payroll.belgium_service import _be_seed_value_columns
+
+    names = ("employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value")
+    changed = [r for r in rates
+               if tuple(getattr(r, n) for n in names) != tuple(_be_seed_value_columns(r.component_key)[n]
+                                                              for n in names)]
+    assert changed and all(c.PENDING_MARK in r.label for r in changed)                    # nothing signed
+    assert all(c.PENDING_MARK in s.rate_label for s in slabs
+               if s.rule_type != c.EARNING_CLASS_RULE or s.assessment_basis != "REVIEW")
     assert seeded.status == "Draft"
     by_key = {r.component_key: r for r in rates}
     assert by_key["be_supported_pay_frequencies"].text_value == "MONTHLY"                    # G-11

@@ -1128,8 +1128,6 @@ export const getMyConfiguration = (packRowId) => apiFetch(`${MY_SA}/packs/${pack
 export const getMySigningStatus = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/signing-status`);
 export const updateMyRow = (kind, rowId, payload) =>
   apiFetch(`${MY_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
-export const signMyRows = (refs, reason, sourceDocumentId) =>
-  apiFetch(`${MY_SA}/configuration/sign`, { method: "POST", body: { refs, reason, sourceDocumentId } });
 export const seedMyDraftPack = (reason) => apiFetch(`${MY_SA}/seed-draft`, { method: "POST", body: { reason } });
 export const getMyRolloverPlan = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/rollover`);
 export const rolloverMyPack = (packRowId, reason) =>

@@ -8,9 +8,10 @@ japan_filing.py — Japan remittance obligations and statutory filings
                  the following month) and resident tax per municipality.
                  Employment insurance is settled through the annual labour-
                  insurance declaration, not monthly, so it has no obligation
-                 here. A due-date rule that is not signed leaves due_on empty;
-                 dates are never moved for holidays (jp_wht_due_non_business_day_rule
-                 is PENDING_G1).
+                 here. A due-date rule whose value is not yet provided leaves
+                 due_on empty; dates are never moved for holidays
+                 (jp_wht_due_non_business_day_rule is PENDING_G1: a shift needs
+                 the public-holiday table, which is empty).
   * workflow     CREATED -> APPROVED (a second person) -> SUBMITTED (channel)
                  -> ACCEPTED / REJECTED with the receipt.
   * previews     withholding certificate, salary payment reports by
@@ -150,8 +151,8 @@ def record_run_obligations(db: Session, run, actor_id: Optional[int]) -> list:
             organization_id=run.organization_id, obligation_type=kind, obligation_key=key, period=period,
             municipality_code=municipality, due_on=due, amount=max(ZERO, amount), source_run_id=run.id,
             status="CREATED", created_by_id=actor_id,
-            detail={"netAmount": str(amount), "dueRule": rule if due else f"{rule} not signed — no due date",
-                    "holidayShift": "NOT APPLIED (jp_wht_due_non_business_day_rule PENDING_G1)",
+            detail={"netAmount": str(amount), "dueRule": rule if due else f"{rule} value not yet provided — no due date",
+                    "holidayShift": "NOT APPLIED (jp_wht_due_non_business_day_rule value not yet provided)",
                     "payslips": [i.id for i in items]})
         db.add(row)
         created.append(row)

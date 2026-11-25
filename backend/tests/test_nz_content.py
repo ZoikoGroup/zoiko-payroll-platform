@@ -3,7 +3,8 @@
 These assert the values the specification states (§2 baseline, §3 PAYE bands,
 §4 KiwiSaver/ESCT, §5 student loan/child support, §7 minimum wage, §8 Holidays
 Act, §9 payday filing/remittance, §15 evidence register) and the production
-safety rule: every row is PENDING G1, nothing the specification does not
+gate-removal content (owner decision 2026-11-25): rows are seeded plain, the
+owner-approved policy/statutory values are filled, nothing the specification does not
 reproduce (IRD PAYE method, secondary/ND rates, IETC, variation codes,
 lump-sum method, public holidays) is filled, and there is no global rounding.
 Also covers the Draft seeder, the activation refusal and the isolated
@@ -17,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from app.modules.payroll.engine.countries import new_zealand_content as content
+from app.modules.payroll.engine.jurisdictions.new_zealand.pack import ROUNDING_RULES
 
 
 def _scalar(key):
@@ -68,8 +70,14 @@ def test_only_listed_rows_may_be_empty():
     assert empty == set(content.NZ_EMPTY_BY_DESIGN)
 
 
-def test_every_row_is_pending_g1():
-    assert all(row[7] is True for row in content.NZ_SCALAR_CONTENT)
+def test_the_pending_flag_column_is_kept_for_a_stable_shape():
+    # The pending_g1 column no longer marks anything (gate removal); it stays
+    # so the tuple shape is stable.
+    assert all(len(row) == 10 and row[7] is True for row in content.NZ_SCALAR_CONTENT)
+
+
+def test_only_the_filing_rows_stay_empty_by_design():
+    assert content.NZ_EMPTY_BY_DESIGN == frozenset({"nz_working_day_rule", "nz_filing_payload_version"})
 
 
 def test_values_parse_and_dates_are_ordered():
@@ -81,13 +89,14 @@ def test_values_parse_and_dates_are_ordered():
 
 
 # ── rounding: one row per statutory amount, none stated by the spec ────────
-def test_there_is_no_global_rounding_row_and_every_rounding_is_pending():
+def test_there_is_no_global_rounding_row_and_every_rounding_is_the_approved_policy():
     rounding = {k for k in content.NZ_PARAMETER_KEYS if k.endswith("_rounding")}
     assert rounding == {"nz_paye_rounding", "nz_acc_rounding", "nz_sl_rounding",
                         "nz_ks_rounding", "nz_esct_rounding", "nz_cs_rounding",
                         "nz_hol_pay_rounding"}                                   # + Phase 6 leave pay
     for key in rounding:
-        assert _scalar(key)[5] == content.PENDING, key
+        assert _scalar(key)[5] == "NEAREST_CENT_HALF_UP", key
+        assert _scalar(key)[5] in ROUNDING_RULES, key
 
 
 # ── spec-stated values ──────────────────────────────────────────────────────
@@ -167,9 +176,31 @@ def test_holidays_act_baseline():
 
 def test_scope_and_policy():
     assert _scalar("nz_supported_pay_frequencies")[5] == ",".join(content.PAY_FREQUENCIES)
-    assert _scalar("nz_correction_policy")[5] == content.PENDING
-    assert _scalar("nz_deduction_precedence")[5] == content.PENDING
+    assert _scalar("nz_correction_policy")[5] == "COMPENSATING_DELTA"
+    assert _scalar("nz_deduction_precedence")[5] == "PAYE,ACC_LEVY,STUDENT_LOAN,KS_EMPLOYEE,CHILD_SUPPORT"
     assert content.NZ_EXPORT_SCHEMAS == {}
+
+
+def test_owner_approved_values_use_the_engine_vocabulary():
+    # Gate removal (inventory section B, P and S rows).
+    from app.modules.payroll.engine.jurisdictions.new_zealand import deduction_precedence as prec
+    from app.modules.payroll.engine.jurisdictions.new_zealand import extra_pay, leave_pay
+    from app.modules.payroll.nz_lifecycle import CORRECTION_POLICY
+
+    assert _scalar("nz_correction_policy")[5] == CORRECTION_POLICY
+    order = _scalar("nz_deduction_precedence")[5].split(",")
+    assert sorted(order) == sorted(prec.STATUTORY) and order[-1] == "CHILD_SUPPORT"
+    assert {k: _scalar(k)[4] for k in ("nz_ks_employer_max_age", "nz_hol_awe_lookback_months",
+                                       "nz_hol_awe_divisor_weeks", "nz_hol_owp_fallback_weeks",
+                                       "nz_hol_adp_lookback_weeks")} == {
+        "nz_ks_employer_max_age": "65", "nz_hol_awe_lookback_months": "12", "nz_hol_awe_divisor_weeks": "52",
+        "nz_hol_owp_fallback_weeks": "4", "nz_hol_adp_lookback_weeks": "52"}
+    assert _scalar("nz_hol_owp_method")[5] == leave_pay.OWP_METHOD
+    assert _scalar("nz_hol_rdp_method")[5] == leave_pay.RDP_METHOD
+    assert _scalar("nz_hol_adp_use_rule")[5] == leave_pay.ADP_RULE
+    assert _scalar("nz_hol_final_pay_unvested_method")[5] == leave_pay.UNVESTED_METHOD
+    assert _scalar("nz_out_of_cycle_paye_method")[5] == "EXTRA_PAY"
+    assert _scalar("nz_lump_sum_paye_method")[5] == extra_pay.FOUR_WEEK_ANNUALISE
 
 
 # ── authority tables, tax codes and earning classes ─────────────────────────
@@ -250,10 +281,11 @@ def test_seed_writes_a_draft_pack_with_every_row(db):
     rates = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).all()
     assert {r.component_key for r in rates} == set(content.NZ_PARAMETER_KEYS)
     by_key = {r.component_key: r for r in rates}
-    assert all(r.label.endswith("[PENDING G1]") for r in rates)
+    assert not any("[PENDING G1]" in r.label for r in rates)
     assert by_key["nz_acc_earner_levy_rate"].flat_amount == Decimal("1.75")
     assert by_key["nz_sl_threshold_monthly"].flat_amount == Decimal("2010.66")
-    assert by_key["nz_ks_employer_max_age"].total == "NOT CONFIGURED"
+    assert by_key["nz_ks_employer_max_age"].flat_amount == Decimal("65")
+    assert by_key["nz_working_day_rule"].total == "NOT CONFIGURED"
     assert by_key["nz_ks_default_rate"].effective_from == date(2026, 4, 1)
 
     slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).all()
@@ -267,7 +299,7 @@ def test_seed_writes_a_draft_pack_with_every_row(db):
     assert {s.filing_status for s in by_rule["NZ_TAX_CODE"] if s.tax_column == "SL"} == {
         c for c in content.SUPPORTED_TAX_CODES if c.endswith(" SL")}
     assert len(by_rule["NZ_EARNING_CLASS"]) == len(content.NZ_EARNING_CLASSES)
-    assert all(s.rate_label.endswith("[PENDING G1]") for s in slabs)
+    assert not any("[PENDING G1]" in s.rate_label for s in slabs)
     assert db.query(SourceArtifact).filter(SourceArtifact.form_number.like("ZP-NZ-ENG-001 S%")).count() == 10
 
     ela = db.query(JurisdictionPack).filter(JurisdictionPack.pack_id == "NZ-ELA-2028").one()

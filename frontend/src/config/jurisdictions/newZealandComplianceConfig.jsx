@@ -35,7 +35,7 @@ export function newZealandExtraTabs() {
       ({ pack, slabs, onReload }) => <NZEarningClassTab pack={pack} slabs={slabs} onReload={onReload} />),
     tab("nz-authority", "Authority tables", Table2, "nz-earning",
       ({ pack, slabs, onReload }) => <NZAuthorityTablesTab pack={pack} slabs={slabs} onReload={onReload} />),
-    tab("nz-signing", "Signing status", Gauge, "nz-authority", ({ pack }) => <NZSigningStatusTab pack={pack} />),
+    tab("nz-signing", "Missing content", Gauge, "nz-authority", ({ pack }) => <NZSigningStatusTab pack={pack} />),
     tab("sources", "Sources", FileCheck2, "nz-signing", () => <SourceEvidencePanel />),
   ];
 }

@@ -61,15 +61,16 @@ def test_a_holiday_state_outside_the_territory_is_a_conflict(with_pcb):
     assert error.blocked["LABOUR"]["code"] == "MY_TERRITORY_CONFLICT"
 
 
-def test_a_transfer_inside_the_period_needs_the_signed_split_rule(with_pcb):
+def test_a_transfer_inside_the_period_needs_the_split_rule(with_pcb):
     moved = [SimpleNamespace(labour_territory="PENINSULAR_LABUAN", holiday_state="SGR", status="ACTIVE",
                              effective_from=date(2026, 1, 1), effective_to=date(2026, 3, 15), id=1),
              SimpleNamespace(labour_territory="SABAH", holiday_state="SBH", status="ACTIVE",
                              effective_from=date(2026, 3, 16), effective_to=None, id=2)]
-    error = _blocked(ctx(assignment_=moved[1], my_assignments=moved))
+    pending = build_pack(overrides={"my_transfer_split_rule": {"text_value": "PENDING_G1"}})
+    error = _blocked(ctx(pack=pending, assignment_=moved[1], my_assignments=moved))
     assert error.blocked["LABOUR"]["code"] == "MY_TERRITORY_TRANSFER"
-    signed = build_pack(overrides={"my_transfer_split_rule": {"text_value": "TERRITORY_AT_PERIOD_END"}})
-    r = malaysia.calculate(ctx(pack=signed, assignment_=moved[1], my_assignments=moved))["my_result"]
+    # the owner-approved content value (2026-11-25) is TERRITORY_AT_PERIOD_END
+    r = malaysia.calculate(ctx(assignment_=moved[1], my_assignments=moved))["my_result"]
     place = r["trace"]["labour"]["territory"]
     assert place["territory"] == "SABAH" and place["rule"] == "TERRITORY_AT_PERIOD_END"
     assert place["territoriesInPeriod"] == ["PENINSULAR_LABUAN", "SABAH"]
@@ -124,15 +125,19 @@ def test_eligibility_by_wage_and_manual_work(with_pcb):
     assert error.blocked["LABOUR"]["code"] == "MY_FACT_MISSING:manual_worker"
 
 
-def test_unsigned_divisor_or_multiplier_blocks_and_territories_differ(with_pcb):
+def test_pending_divisor_or_empty_multiplier_blocks_and_territories_differ(with_pcb):
     events = [_event("T-1", "WORKDAY", date(2026, 3, 10), "4")]
     pending = build_pack(treatments=OT_TREATMENTS,
                          overrides={"my_ot_rate_divisor_rule__PEN": {"text_value": "PENDING_G1"}})
     assert _blocked(_ot_ctx("75.00", events, pack=pending)).blocked["LABOUR"]["code"] == \
         "MY_POLICY_PENDING:my_ot_rate_divisor_rule__PEN"
-    unsigned = build_pack(treatments=OT_TREATMENTS, unsigned=("my_ot_multiplier_workday__PEN",))
-    assert _blocked(_ot_ctx("75.00", events, pack=unsigned)).blocked["LABOUR"]["code"] == \
-        "MY_PACK_UNSIGNED:my_ot_multiplier_workday__PEN"
+    empty = build_pack(treatments=OT_TREATMENTS, overrides={"my_ot_multiplier_workday__PEN": {"flat_amount": None}})
+    assert _blocked(_ot_ctx("75.00", events, pack=empty)).blocked["LABOUR"]["code"] == \
+        "MY_ROW_MISSING:my_ot_multiplier_workday__PEN"
+    # Gate removal (2026-11-25): a legacy "[PENDING G1]" marker alone no longer blocks.
+    marked = build_pack(treatments=OT_TREATMENTS, unsigned=("my_ot_multiplier_workday__PEN",))
+    out = malaysia.calculate(_ot_ctx("75.00", events, pack=marked))
+    assert out["my_result"]["trace"]["labour"]["overtime"]["status"] == "MATCHED"
     sabah_pack = build_pack(treatments=OT_TREATMENTS, overrides={"my_ot_multiplier_workday__SBH": {"flat_amount": "2"}})
     sabah = malaysia.calculate(_ot_ctx("100.00", events, pack=sabah_pack, assignment_=assignment("SABAH", "SBH")))
     assert sabah["my_result"]["trace"]["labour"]["overtime"]["events"][0]["amount"] == "100.00"
@@ -157,11 +162,13 @@ def test_holiday_calendars_are_national_plus_state():
     for row in slabs:
         if row["rule_type"] == "MY_PUBLIC_HOLIDAY":
             row["rate_label"] += " [PENDING G1]"
-    assert holidays.national_rows(slabs, 2026) == []                              # unsigned is never seeded
-    with pytest.raises(MYCalculationBlockedError, match="MY_PACK_UNSIGNED"):
-        from app.modules.payroll.engine.jurisdictions.malaysia.pack import MyPack
+    # Gate removal (2026-11-25): a legacy marker no longer hides or blocks a holiday; it is stripped from the name.
+    listed = holidays.national_rows(slabs, 2026)
+    assert [h["date"] for h in listed] == ["2026-05-01"] and "[PENDING G1]" not in listed[0]["name"]
+    from app.modules.payroll.engine.jurisdictions.malaysia.pack import MyPack
 
-        holidays.calendar(MyPack({}, slabs, 1, date(2026, 3, 31)), "SGR", 2026)
+    assert sorted(holidays.calendar(MyPack({}, slabs, 1, date(2026, 3, 31)), "SGR", 2026)) == \
+        [date(2026, 5, 1), date(2026, 12, 11)]
     with pytest.raises(MYCalculationBlockedError, match="MY_TABLE_EMPTY"):
         holidays.calendar(_pack(holidays=()), "SGR", 2026)
 

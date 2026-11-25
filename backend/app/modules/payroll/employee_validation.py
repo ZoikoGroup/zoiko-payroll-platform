@@ -2378,6 +2378,35 @@ class NZEmployeeValidation(EmployeeValidationStrategy):
         return super().validate(compliance)
 
 
+class JPEmployeeValidation(EmployeeValidationStrategy):
+    """Japan (ZP-JP-ENG-001) - added with the gate removal (owner decision
+    2026-11-25, P4b) so a Japanese employee can be created through the
+    ordinary employee flow, like Spain.
+
+    Every statutory fact (withholding declaration class, social-insurance
+    enrolment, resident-tax notices) lives in the effective-dated
+    payroll_jp_* records, and the My Number lives ONLY in the encrypted
+    vault (japan_my_number, /api/payroll/japan/employees/{id}/my-number): a
+    compliance field carrying it is refused, never stored, and the refusal
+    never echoes the value.
+    """
+
+    country_code = "JP"
+    SENSITIVE_FIELDS = ("my_number", "tax_number")
+    FIELD_SPECS = {}
+    _VAULT_ONLY = ("my_number", "mynumber", "my_no", "individual_number", "kojin_bango", "tax_number",
+                   "national_id")
+
+    @classmethod
+    def validate(cls, compliance: dict) -> dict:
+        keys = {str(k).strip().lower() for k in (compliance or {})}
+        if keys & set(cls._VAULT_ONLY):
+            raise BadRequestException("The Japanese My Number is held only in the encrypted vault "
+                                      "(/api/payroll/japan/employees/{id}/my-number), never as an "
+                                      "employee field.")
+        return super().validate(compliance)
+
+
 # Strategies built but dormant (Mexico, Phase 4b): consulted only while
 # their country's onboarding flag is on, and never listed in _STRATEGIES —
 # so the "Supported: …" message every other country sees never changes.
@@ -2391,6 +2420,7 @@ _DORMANT_STRATEGIES = {
 # switch, like Spain. Registered here because their classes are defined
 # after _STRATEGIES.
 _STRATEGIES.update({
+    "JP": JPEmployeeValidation,                 # P4b: Japan had no employee validator
     "ZA": ZAEmployeeValidation,
     "NZ": NZEmployeeValidation,
     "PL": PLEmployeeValidation,

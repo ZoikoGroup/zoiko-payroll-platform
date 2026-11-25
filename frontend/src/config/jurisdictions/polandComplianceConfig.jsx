@@ -34,7 +34,7 @@ export function polandExtraTabs() {
     tab("pl-policy", "Scope & rounding", Settings2, "pl-filing", group("policy")),
     tab("pl-earning", "Earning classification", ListChecks, "pl-policy",
       ({ pack, slabs, onReload }) => <PLEarningClassTab pack={pack} slabs={slabs} onReload={onReload} />),
-    tab("pl-signing", "Signing status", Gauge, "pl-earning", ({ pack }) => <PLSigningStatusTab pack={pack} />),
+    tab("pl-signing", "Missing content", Gauge, "pl-earning", ({ pack }) => <PLSigningStatusTab pack={pack} />),
     tab("sources", "Sources", FileCheck2, "pl-signing", () => <SourceEvidencePanel />),
   ];
 }

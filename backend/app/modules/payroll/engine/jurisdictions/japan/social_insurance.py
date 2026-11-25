@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_EVEN, ROUND_HALF_UP, ROUND_UP
+from decimal import (Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_DOWN, ROUND_HALF_EVEN,
+                     ROUND_HALF_UP, ROUND_UP)
 
 from app.modules.payroll.engine.jurisdictions.japan.errors import JapanCalculationBlockedError
 
@@ -23,6 +24,9 @@ _MODES = {
     "HALF_EVEN": ROUND_HALF_EVEN,
     "BANKERS": ROUND_HALF_EVEN,
     "ROUND_HALF_EVEN": ROUND_HALF_EVEN,
+    # Japanese 50-sen rule for the employee share (<= 0.50 yen down, > 0.50 up).
+    "HALF_DOWN": ROUND_HALF_DOWN,
+    "ROUND_HALF_DOWN": ROUND_HALF_DOWN,
 }
 
 
@@ -118,7 +122,7 @@ def _split(pack, key, as_of):
         _block(pack, key, "no split rule is in force")
     value = _upper(_field(row, "text_value"))
     if not value or value == PENDING:
-        _block(pack, key, "employee / employer split is PENDING_G1")
+        _block(pack, key, "employee / employer split value not yet provided")
     if value != "EQUAL":
         _block(pack, key, f"unsupported split rule {value!r}")
     return value
@@ -134,7 +138,7 @@ def _rounder(pack, rounding, key):
         _block(pack, key, "no rounding row is configured")
     text = _upper(_field(round_row, "text_value"))
     if not text or text == PENDING:
-        _block(pack, key, "rounding is PENDING_G1")
+        _block(pack, key, "rounding value not yet provided")
     unit = Decimal("1")
     mode_name = text
     if text.startswith("DOWN_") and text[5:].isdigit():
@@ -232,7 +236,7 @@ def _scheme_rates(enrollment, registration, pack, as_of, date_of_birth, slabs):
             high = _total(pack, "jp_kyokai_health_total_max", as_of)
             if health_total < low or health_total > high:
                 _block(pack, "jp_health_rate",
-                       f"Kyokai Kenpo rate {health_total} is outside the signed bounds {low}-{high}")
+                       f"Kyokai Kenpo rate {health_total} is outside the configured bounds {low}-{high}")
         _split(pack, "jp_health_split_rule", as_of)
         trace["healthRate"] = {"ratePct": str(health_total), "insurerType": insurer_type,
                                "state": str(_field(health_row, "jurisdiction_state") or "")}
@@ -369,7 +373,7 @@ def standard_bonus_amount(bonus, pack, as_of=None):
         # The two rows must describe the same truncation; a mismatch is a
         # misconfiguration, never resolved by picking one.
         _block(pack, "jp_sba_rounding",
-               f"SBA rounding {rule or 'missing'!r} does not match the signed unit {unit}")
+               f"SBA rounding {rule or 'missing'!r} does not match the configured unit {unit}")
     return _rounder(pack, None, "jp_sba_rounding")(bonus)
 
 

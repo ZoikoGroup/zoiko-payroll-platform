@@ -4,9 +4,9 @@ scripts/rollover_malaysia_pack.py
 Creates next tax year's Malaysia pack as a DRAFT copy of an existing one
 (malaysia_service.rollover_malaysia_pack): MY-PAYROLL-2026 -> MY-PAYROLL-2027.
 
-Every copied row is re-marked [PENDING G1] — values are prefilled, but nothing
-calculates until a Super Admin re-signs each row against the new year's
-official source and a distinct approver activates the pack. Public holidays,
+Values are prefilled; since the gate removal (owner decision 2026-11-25) no
+row is re-marked [PENDING G1] (a legacy marker is stripped). A Super Admin
+reviews the values against the new year's official sources before activation. Public holidays,
 PCB tables and authority examples are NOT copied (year-specific: load them
 fresh). Rows that expired before the new year are dropped. The source pack is
 never changed. Refused when the target year's pack already exists.
@@ -44,7 +44,7 @@ def report(plan: dict, out=print) -> None:
     if plan.get("targetPackId"):
         out(f"Roll {plan['sourcePackId']} ({plan['sourceStatus']}) -> {plan['targetPackId']} Draft, "
             f"{plan['effectiveFrom']} to {plan['effectiveTo']}: {plan['rates']} parameter row(s), "
-            f"{plan['slabs']} table row(s), every one PENDING G1.")
+            f"{plan['slabs']} table row(s), values prefilled.")
         out(f"Not copied (load fresh for the new year): {', '.join(plan['notCopied'])}.")
     if plan["refusal"]:
         out(f"BLOCKED: {plan['refusal']}")

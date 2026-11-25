@@ -36,13 +36,12 @@ def test_examples_are_validated(text, message):
         poland_golden.parse_example(text)
 
 
-def test_examples_need_a_reviewed_source_and_replay_exactly(console):
+def test_examples_need_a_reason_and_replay_exactly(console):
     c = console
     add = lambda **d: c.psa.add_golden_example(c.db, c.pack, {"name": "F1", "taxFormula": F1,  # noqa: E731
                                                              "sourceDocumentId": c.source, "reason": "AC-PL-02", **d},
                                                c.editor)
-    with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        add(sourceDocumentId=c.draft_source)
+    # Gate removal (2026-11-25): the source document is optional provenance (no reviewed-source requirement).
     with pytest.raises(BadRequestException, match="change reason"):
         add(reason="")
     with pytest.raises(BadRequestException, match="taxFormula"):
@@ -52,8 +51,9 @@ def test_examples_need_a_reviewed_source_and_replay_exactly(console):
     add()
     with pytest.raises(BadRequestException, match="already has"):
         add()
-    blocked = c.psa.golden_check(c.db, c.pack)
-    assert blocked["examples"] == 1 and blocked["passed"] is False and blocked["results"][0]["error"]  # unsigned pack
+    seeded = c.psa.golden_check(c.db, c.pack)
+    # Gate removal (2026-11-25): the seeded pack carries the approved values, so it already replays F1.
+    assert seeded["examples"] == 1 and seeded["passed"] is True and seeded["results"][0]["error"] is None
     _sign_everything(c)
     out = c.psa.golden_check(c.db, c.pack)
     assert out["passed"] is True and out["results"][0]["failures"] == []

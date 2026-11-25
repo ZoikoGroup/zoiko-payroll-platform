@@ -120,7 +120,7 @@ export default function MYRowEditor({ kind, row, onClose, onSaved }) {
         </button>
         <button type="button" onClick={save} disabled={saving}
           className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-          {saving ? "Saving…" : governance.specialistVerified ? "Save and sign" : "Save (stays pending)"}
+          {saving ? "Saving…" : "Save"}
         </button>
       </div>
     </Modal>

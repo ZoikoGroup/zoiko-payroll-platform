@@ -192,8 +192,8 @@ def test_benefits_in_kind_and_applicable_reductions_block():
         "BE_BENEFIT_IN_KIND_UNSUPPORTED:BENEFIT_IN_KIND"
     applies = build_pack(rates_over={"be_red_structural": rate("be_red_structural", text="SLAB_ROWS")})
     assert _blocked(context(pack=applies)) == "BE_REDUCTION_UNSUPPORTED:be_red_structural"
-    pending = build_pack(rates_over={"be_red_target_group": rate("be_red_target_group", text="NOT_SUPPORTED",
-                                                                 label="x [PENDING G1]")})
+    pending = build_pack(rates_over={"be_red_target_group": rate("be_red_target_group", text=None,
+                                                                 label="x [PENDING G1]")})   # no value
     assert _blocked(context(pack=pending)) == "BE_CONTENT_PENDING:be_red_target_group"
     assert _calc(context()).be_result["trace"]["onss"]["reductions"] == {
         "be_red_structural": "NOT_APPLIED", "be_red_target_group": "NOT_APPLIED"}
@@ -202,17 +202,20 @@ def test_benefits_in_kind_and_applicable_reductions_block():
 # ── pending / NOT_SUPPORTED / missing dimension ────────────────────────────
 @pytest.mark.parametrize("key", ["be_onss_employee_rate", "be_rounding_withholding", "be_onss_wage_moderation"])
 def test_pending_or_not_supported_content_blocks(key):
-    pending = build_pack(rates_over={key: dict(build_pack()[0][key], label="x [PENDING G1]")})
+    pending = build_pack(rates_over={key: dict(build_pack()[0][key], label="x [PENDING G1]", text_value=None,
+                                               employee_rate_pct=None, employer_rate_pct=None, flat_amount=None)})
     assert _blocked(context(pack=pending)) == f"BE_CONTENT_PENDING:{key}"
     refused = build_pack(rates_over={key: rate(key, text="NOT_SUPPORTED")})
     assert _blocked(context(pack=refused)) == f"BE_FEATURE_BLOCKED:{key}"
 
 
-def test_a_pending_slab_row_blocks():
-    rate_map, slabs = build_pack(drop_slabs=("be_wht_annex3_regular_scale",),
-                                 slabs_over=[slab("be_wht_annex3_regular_scale", pct="10.00",
-                                                  label="x [PENDING G1]")])
-    assert _blocked(context(pack=(rate_map, slabs))).startswith("BE_CONTENT_PENDING:BE_WHT_ANNEX3_REGULAR_SCALE")
+def test_a_legacy_pending_label_on_a_slab_row_no_longer_blocks():
+    # Gate removal 2026-11-25: "[PENDING G1]" in a slab label is display text only.
+    plain = build_pack(drop_slabs=("be_wht_annex3_regular_scale",),
+                       slabs_over=[slab("be_wht_annex3_regular_scale", pct="10.00")])
+    legacy = build_pack(drop_slabs=("be_wht_annex3_regular_scale",),
+                        slabs_over=[slab("be_wht_annex3_regular_scale", pct="10.00", label="x [PENDING G1]")])
+    assert _calc(context(pack=legacy)).be_result == _calc(context(pack=plain)).be_result
 
 
 def test_a_missing_employer_dimension_blocks():

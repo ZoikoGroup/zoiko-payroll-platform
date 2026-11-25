@@ -72,17 +72,17 @@ def _reason(data: dict) -> str:
     return reason[:300]
 
 
-def _source(db: Session, data: dict, verify: bool):
+def _source(db: Session, data: dict, verify: bool = False):
+    """The source document of a statutory change - optional provenance since the
+    gate removal, owner decision 2026-11-25: no reviewed-source signing step exists."""
     from app.modules.payroll.models import SourceArtifact
 
     source_id = data.get("sourceDocumentId")
-    source = db.get(SourceArtifact, int(source_id)) if source_id not in (None, "") else None
+    if source_id in (None, ""):
+        return None
+    source = db.get(SourceArtifact, int(source_id))
     if source is None:
-        raise BadRequestException("A statutory change needs the official source document (an existing SourceArtifact).")
-    if verify and not (source.checksum_sha256 and source.file_path and source.reviewer_id
-                       and source.reviewer_id != source.created_by_id and "[UNVERIFIED" not in (source.title or "")):
-        raise BadRequestException("Signing needs a stored, hashed source document reviewed by a Super Admin other "
-                                  "than its uploader (and not itself marked UNVERIFIED).")
+        raise BadRequestException(f"Source document {source_id} does not exist.")
     return source
 
 
@@ -95,12 +95,11 @@ def _decimal(value, name: str) -> Optional[Decimal]:
         raise BadRequestException(f"{name} must be a decimal number.")
 
 
-def _marked(label: Optional[str], signed: bool, limit: int) -> str:
+def _marked(label: Optional[str], signed: bool = True, limit: int = 150) -> str:
+    """The plain label: no row is ever marked "[PENDING G1]" again (gate removal, owner decision 2026-11-25);
+    an old marker on an already-seeded row is stripped on its next edit."""
     mark = _content().PENDING_MARK
-    base = " ".join((label or "").replace(mark, " ").split())
-    if signed:
-        return base[:limit]
-    return (base[:limit - len(mark) - 1] + " " + mark).strip()
+    return " ".join((label or "").replace(mark, " ").split())[:limit]
 
 
 def _finish(db: Session, pack, actor_id, entity_type: str, entity_id: int, old: dict, new: dict, reason: str):
@@ -125,7 +124,7 @@ def rate_view(row) -> dict:
             "employeeRatePct": _safe(row.employee_rate_pct), "employerRatePct": _safe(row.employer_rate_pct),
             "flatAmount": _safe(row.flat_amount), "textValue": row.text_value,
             "effectiveFrom": _safe(row.effective_from), "effectiveTo": _safe(row.effective_to),
-            "sourceDocumentId": row.source_document_id, "signed": content.PENDING_MARK not in (row.label or ""),
+            "sourceDocumentId": row.source_document_id, "signed": True,
             "referenceOnly": False}
     if row.component_key in content.KEYS and content.is_reference_only(row.component_key):
         view.update({"referenceOnly": True, "referenceNote": content.REFERENCE_NOTE})
@@ -139,7 +138,7 @@ def slab_view(row) -> dict:
             "flatAmount": _safe(row.flat_amount), "taxFormula": row.tax_formula,
             "effectiveFrom": _safe(row.effective_from), "effectiveTo": _safe(row.effective_to),
             "sourceDocumentId": row.source_document_id,
-            "signed": _content().PENDING_MARK not in (row.rate_label or "")}
+            "signed": True}
 
 
 # ── vocabulary ────────────────────────────────────────────────────────────
@@ -242,7 +241,7 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id) -> dic
     pack = _pack(db, row.jurisdiction_pack_id)
     _require_editable_pack(pack)
     reason = _reason(data)
-    verify = data.get("specialistVerified") is True
+    verify = False                       # no signing step (gate removal, owner decision 2026-11-25)
     source = _source(db, data, verify)
     if kind == "slab" and row.rule_type == content.AUTHORITY_EXAMPLE_RULE:
         raise BadRequestException("Authority examples are registered, never edited in place.")
@@ -291,15 +290,16 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id) -> dic
         raise BadRequestException(f"{row.component_key} has no value: fill it (or sign NOT_SUPPORTED) before signing.")
     label_col = "label" if kind == "rate" else "rate_label"
     was_signed = content.PENDING_MARK not in (getattr(row, label_col) or "")
-    signed = verify or (was_signed and not changed)
+    signed = True                        # every saved row is in force (no signing)
     setattr(row, label_col, _marked(getattr(row, label_col), signed, 100 if kind == "rate" else 150))
     if kind == "rate":
         # Display columns only; an onss_employer row never shows a total rate.
         row.total = ("REFERENCE ONLY" if content.is_reference_only(row.component_key)
                      else (row.text_value or (str(row.flat_amount) if row.flat_amount is not None else "—")))[:50]
     old["signed"], new["signed"] = was_signed, signed
-    old["sourceDocumentId"], new["sourceDocumentId"] = row.source_document_id, source.id
-    row.source_document_id = source.id
+    if source is not None:
+        old["sourceDocumentId"], new["sourceDocumentId"] = row.source_document_id, source.id
+        row.source_document_id = source.id
     _finish(db, pack, actor_id, f"be_statutory_{kind}", row.id, old, new, reason)
     return rate_view(row) if kind == "rate" else slab_view(row)
 
@@ -373,7 +373,7 @@ def signing_status(db: Session, pack_row_id: int) -> dict:
     rates, slabs = _rows(db, pack)
     kinds = {k: v[1] for k, v in content.KEYS.items()}
     return {"packId": pack.pack_id, "packRowId": pack.id, "version": pack.version, "status": pack.status,
-            "pendingRates": sorted(r.component_key for r in rates if content.PENDING_MARK in (r.label or "")),
+            "pendingRates": [],                  # no signing: only empty values block
             "emptyValues": sorted(r.component_key for r in rates
                                   if bes._row_empty(r, kinds.get(r.component_key, "text-choice"))),
             "unsourced": sorted(r.component_key for r in rates if r.source_document_id is None),
@@ -434,12 +434,13 @@ SLAB_ROW_FIELDS = ("minAmount", "maxAmount", "ratePct", "flatAmount", "formulaTe
 
 
 def _signed_codes(db: Session, pack, key: str) -> set:
-    """The signed code list of `key` in `pack` (refuses when not signed)."""
+    """The code list of `key` in `pack` (refuses while it has no value). No
+    signing step since the gate removal, owner decision 2026-11-25: a saved value is in force."""
     content = _content()
     row = _rate_row(db, pack, key)
     text = (row.text_value or "").strip().upper() if row is not None else ""
-    if row is None or content.PENDING_MARK in (row.label or "") or not text or text == content.NOT_SUPPORTED:
-        raise BadRequestException(f"{key} is not signed yet: sign the supported code list before adding rows "
+    if row is None or not text or text == content.NOT_SUPPORTED:
+        raise BadRequestException(f"{key} has no value yet: set the supported code list before adding rows "
                                   "that reference it.")
     return {p.strip() for p in text.split(",") if p.strip()}
 
@@ -469,7 +470,7 @@ def add_slab_row(db: Session, pack_row_id: int, key: str, data: dict, actor_id) 
     _require_editable_pack(pack)
     data = dict(data or {})
     reason = _reason(data)
-    verify = data.get("specialistVerified") is True
+    verify = False                       # no signing step (gate removal, owner decision 2026-11-25)
     if verify:
         # F-G12-1 (Block F1): the creator of a row is its editor and never signs it.
         raise BadRequestException("Four-eyes: a new Belgian row is always added PENDING; another Super Admin who did "
@@ -526,7 +527,7 @@ def add_slab_row(db: Session, pack_row_id: int, key: str, data: dict, actor_id) 
                   rate_pct=numbers["ratePct"] if numbers["ratePct"] is not None else Decimal("0"),
                   flat_amount=numbers["flatAmount"], formula_expression=formula,
                   tax_formula=name[:150], rate_label=_marked(f"{key}: {name}", verify, 150),
-                  effective_from=start, effective_to=end, source_document_id=source.id, sort_order=0)
+                  effective_from=start, effective_to=end, source_document_id=source.id if source else None, sort_order=0)
     db.add(row)
     db.flush()
     _finish(db, pack, actor_id, "be_statutory_slab", row.id, {}, {**slab_view(row), "action": "added",
@@ -635,7 +636,7 @@ def add_authority_example(db: Session, pack_row_id: int, data: dict, actor_id) -
     row = TaxSlab(jurisdiction_pack_id=pack.id, organization_id=None, jurisdiction_country=BE,
                   rule_type=content.AUTHORITY_EXAMPLE_RULE, min_amount=Decimal("0"), max_amount=None,
                   rate_pct=Decimal("0"), filing_status=name, rate_label=f"Authority example {name}"[:150],
-                  tax_formula=description[:150], formula_expression=case, source_document_id=source.id,
+                  tax_formula=description[:150], formula_expression=case, source_document_id=source.id if source else None,
                   sort_order=9000)
     db.add(row)
     db.flush()

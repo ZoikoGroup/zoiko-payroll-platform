@@ -1,6 +1,7 @@
 """Malaysia (ZP-MY-ENG-001) Phase 1: the 2026 content catalogue, the Draft seed
-and the activation refusal. Values are pinned to the specification; anything
-the specification does not state stays empty / PENDING_G1."""
+and the activation refusal. Values are pinned to the specification plus the
+owner-approved policy / statutory values (2026-11-25, gate-removal inventory
+section B); anything else stays empty / PENDING_G1."""
 from datetime import date
 from decimal import Decimal
 
@@ -93,16 +94,70 @@ def test_territorial_values_stated_by_the_specification(territory):
         assert _row(c.territory_key(base, territory))[4] == value
 
 
-def test_nothing_unstated_is_guessed():
-    for key in ("my_rounding_pcb", "my_pcb_spec_version", "my_epf_direct_calc_rule", "my_hrd_base_rule",
-                "my_epf_due_rule", "my_transfer_split_rule"):
+def test_values_without_an_approved_source_or_reader_stay_blocked():
+    for key in ("my_rounding_pcb", "my_pcb_spec_version", "my_fw_lindung_phase_rule",       # "B" rows
+                "my_min_wage_daily_rule", "my_min_wage_hourly_rule", "my_hrd_base_rule",     # no reader / vocabulary
+                "my_epf_due_rule", "my_socso_due_rule", "my_hrd_due_rule"):
         assert _row(key)[5] == c.PENDING and _row(key)[7] is False, key
     for territory in c.TERRITORIES:
-        for base in ("my_ot_multiplier_workday", "my_ot_multiplier_rest_day", "my_ot_multiplier_public_holiday",
-                     "my_hospitalisation_days"):
-            row = _row(c.territory_key(base, territory))
-            assert row[2:6] == (None, None, None, None) and row[7] is False
-    assert {"my_record_retention_years", "my_reconciliation_tolerance"} <= c.MALAYSIA_EMPTY_BY_DESIGN
+        assert _row(c.territory_key("my_leave_pay_rule", territory))[5] == c.PENDING
+    assert c.MALAYSIA_EMPTY_BY_DESIGN == {"my_reconciliation_tolerance", "my_parallel_materiality_amount"}  # "G"
+
+
+# Owner-approved 2026-11-25 (docs/malaysia/GATE_REMOVAL_INVENTORY.md section B, "P" / "S").
+APPROVED_NATIONAL = {
+    "my_rounding_epf_direct": (5, "RINGGIT_UP"), "my_rounding_socso": (5, "SEN_HALF_UP"),
+    "my_rounding_eis": (5, "SEN_HALF_UP"), "my_rounding_hrd": (5, "SEN_HALF_UP"),
+    "my_epf_direct_calc_rule": (5, "NON_MALAYSIAN_PART_F_ONLY"),
+    "my_epf_age_transition_rule": (5, "FROM_MONTH_AFTER_BIRTHDAY"),
+    "my_eis_age_rule": (5, "AGE_AT_WAGE_MONTH_START"), "my_hrd_non_malaysian_rule": (5, "MALAYSIAN_EMPLOYEES_ONLY"),
+    "my_transfer_split_rule": (5, "TERRITORY_AT_PERIOD_END"), "my_record_retention_years": (4, "7"),
+}
+APPROVED_TERRITORIAL = {
+    "my_ot_multiplier_workday": (4, "1.5"), "my_ot_multiplier_rest_day": (4, "2.0"),
+    "my_ot_multiplier_public_holiday": (4, "3.0"),
+    "my_ot_rate_divisor_rule": (5, "MONTHLY_BASE_DIV_DAYS_DIV_DAILY_HOURS"), "my_ot_rate_days_divisor": (4, "26"),
+    "my_sick_leave_tiers": (5, "0:14,2:18,5:22"), "my_hospitalisation_days": (4, "60"),
+    "my_annual_leave_tiers": (5, "0:8,2:12,5:16"),
+}
+
+
+def test_owner_approved_values_are_filled_in_every_territory():
+    for key, (slot, value) in APPROVED_NATIONAL.items():
+        assert _row(key)[slot] == value and _row(key)[7] is False, key        # not stated by the spec
+    for territory in c.TERRITORIES:
+        for base, (slot, value) in APPROVED_TERRITORIAL.items():
+            assert _row(c.territory_key(base, territory))[slot] == value, (base, territory)
+
+
+def test_owner_approved_values_are_read_by_the_engine_with_its_vocabulary():
+    """The plain content (no TEST overrides) read through the engine's own
+    readers and accepted tokens."""
+    from app.modules.payroll.engine.jurisdictions.malaysia import leave
+    from app.modules.payroll.engine.jurisdictions.malaysia.pack import MyPack
+
+    on = date(2026, 3, 31)
+    rate_map = {row[0]: {"component_key": row[0], "label": row[1], "employee_rate_pct": row[2],
+                         "employer_rate_pct": row[3], "flat_amount": row[4], "text_value": row[5],
+                         "effective_from": row[8], "effective_to": row[9]}
+                for row in c.MALAYSIA_SCALAR_CONTENT}
+    pack = MyPack(rate_map, [], 1, on)
+    for key in ("my_rounding_epf_direct", "my_rounding_socso", "my_rounding_eis", "my_rounding_hrd"):
+        pack.rounder(key)
+    assert pack.rounder("my_rounding_epf_direct")(Decimal("10.01")) == Decimal("11")
+    assert pack.text("my_epf_direct_calc_rule", c.EPF_DIRECT_CALC_RULES) == "NON_MALAYSIAN_PART_F_ONLY"
+    assert pack.text("my_epf_age_transition_rule", c.EPF_AGE_TRANSITION_RULES) == "FROM_MONTH_AFTER_BIRTHDAY"
+    assert pack.text("my_eis_age_rule", c.EIS_AGE_RULES) == "AGE_AT_WAGE_MONTH_START"
+    assert pack.text("my_hrd_non_malaysian_rule", c.HRD_NON_MALAYSIAN_RULES) == "MALAYSIAN_EMPLOYEES_ONLY"
+    assert pack.text("my_transfer_split_rule", c.TRANSFER_SPLIT_RULES) == "TERRITORY_AT_PERIOD_END"
+    assert pack.amount("my_record_retention_years") == Decimal("7")
+    for territory in c.TERRITORIES:
+        assert pack.text("my_ot_rate_divisor_rule", c.OT_RATE_DIVISOR_RULES, territory)
+        assert [pack.amount(f"my_ot_multiplier_{d.lower()}", territory) for d in c.OT_DAY_TYPES] == \
+            [Decimal("1.5"), Decimal("2.0"), Decimal("3.0")]
+        assert pack.amount("my_ot_rate_days_divisor", territory) == Decimal("26")
+        out = leave.entitlements(pack, territory, type("W", (), {"service_start": date(2023, 1, 15)})(), on)
+        assert (out["annualDays"], out["sickDays"], out["hospitalisationDays"]) == ("12", "18", "60")
 
 
 def test_no_poland_content_leaked_in():
@@ -132,7 +187,7 @@ def test_schedules_and_forms_ship_empty():
 
 
 # ── Draft seed and activation refusal ──────────────────────────────────────
-def test_seed_writes_every_row_unsigned_with_its_territory(db):
+def test_seed_writes_every_row_without_the_pending_marker_with_its_territory(db):
     from app.modules.payroll import malaysia_service as mys
     from app.modules.payroll.models import ContributionRate, TaxSlab
 
@@ -140,15 +195,17 @@ def test_seed_writes_every_row_unsigned_with_its_territory(db):
     db.commit()
     rates = db.query(ContributionRate).filter_by(jurisdiction_pack_id=pack.id).all()
     assert len(rates) == len(c.MALAYSIA_SCALAR_CONTENT)
-    assert all(r.label.endswith("[PENDING G1]") and r.source_document_id for r in rates)
+    assert all("[PENDING G1]" not in r.label and r.source_document_id for r in rates)     # gate removal
     by_key = {r.component_key: r for r in rates}
     assert by_key["my_maternity_days__SBH"].jurisdiction_state == "SABAH"
     assert by_key["my_min_wage_monthly"].jurisdiction_state is None
     assert by_key["my_min_wage_monthly"].flat_amount == Decimal("1700")
-    assert by_key["my_hospitalisation_days__PEN"].total == mys.NOT_CONFIGURED
+    assert by_key["my_hospitalisation_days__PEN"].flat_amount == Decimal("60")           # owner-approved
+    assert by_key["my_reconciliation_tolerance"].total == mys.NOT_CONFIGURED
+    assert by_key["my_rounding_hrd"].text_value == "SEN_HALF_UP"
     slabs = db.query(TaxSlab).filter_by(jurisdiction_pack_id=pack.id).all()
     assert {s.rule_type for s in slabs} == {c.MY_EARNING_CLASS_RULE} and len(slabs) == 96
-    assert all("[PENDING G1]" in s.rate_label for s in slabs)
+    assert all("[PENDING G1]" not in s.rate_label for s in slabs)
     assert (pack.status, pack.pack_id, pack.jurisdiction_country) == ("Draft", "MY-PAYROLL-2026", "MY")
     assert mys.seed_malaysia_pack(db).id == pack.id                         # idempotent while Draft
     pack.status = "Active"

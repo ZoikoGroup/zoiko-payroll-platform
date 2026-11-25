@@ -81,7 +81,7 @@ def _national_holidays(db: Session, year: int) -> Optional[set]:
         for row in slabs or []:
             if (row.rule_type or "").upper() != content.NZ_PUBLIC_HOLIDAY_RULE or row.jurisdiction_state:
                 continue
-            if rem.MARK in (row.rate_label or "") or row.effective_from is None or row.effective_from.year != year:
+            if row.effective_from is None or row.effective_from.year != year:
                 continue
             days.add(row.effective_from)
     return days or None

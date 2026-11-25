@@ -156,35 +156,10 @@ def _with_pending_mark(label: Optional[str], width: int) -> str:
 
 
 def be_mark_version_rows_unsigned(db: Session, pack, actor_id=None) -> int:
-    """A new Belgian pack version is pre-populated with its base version's rows
-    (service._clone_pack_rates copies every column, the label included — and
-    in Belgium the label's "[PENDING G1]" marker IS the signed / unsigned
-    state). Mark every copied canonical row and slab row unsigned again, so the
-    new version goes through the governed signing (source + reason, a second
-    Super Admin signs) like any other content change. Values, sources and dates
-    are kept as copied; nothing is signed or activated. One audit row records
-    it. Returns how many rows were marked."""
-    from app.modules.payroll.models import ContributionRate, TaxSlab
-    from app.modules.payroll.service import record_tax_audit
-
-    if (getattr(pack, "jurisdiction_country", None) or "").upper() != BE:
-        return 0
-    marked = 0
-    for model, column, width in ((ContributionRate, "label", 100), (TaxSlab, "rate_label", 150)):
-        for row in db.query(model).filter(model.jurisdiction_pack_id == pack.id, model.organization_id.is_(None)):
-            new = _with_pending_mark(getattr(row, column), width)
-            if new != getattr(row, column):
-                setattr(row, column, new)
-                marked += 1
-    if marked:
-        record_tax_audit(db, actor_id=actor_id, action="update", entity_type="jurisdiction_pack", entity_id=pack.id,
-                         jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference=SPEC,
-                         old_value={"unsignedRows": 0}, new_value={"unsignedRows": marked},
-                         reason=(f"New version {pack.pack_id} v{pack.version}: {marked} copied row(s) set to "
-                                 f"{_content().PENDING_MARK} — a second Super Admin signs them again."),
-                         auto_commit=False)
-    db.commit()
-    return marked
+    """Kept for the shared new-version path (service.py). There is no signing
+    step since the gate removal, owner decision 2026-11-25: the copied rows stay in force as copied, so nothing
+    is marked. Returns 0."""
+    return 0
 
 
 # ── 6. retention_settings (type b + a) ──────────────────────────────────────
@@ -348,15 +323,51 @@ def be_register_evidence_sources(db: Session) -> dict:
     return sources
 
 
+def _be_seed_value_columns(key: str) -> dict:
+    """The value / display columns of the seeded row of `key`: its
+    belgium_content.VALUES entry in the field its kind uses (and its
+    effective_from), or every value field empty ("NOT CONFIGURED")."""
+    from datetime import date
+    from decimal import Decimal
+
+    content = _content()
+    out = {"employee_share": "—", "employer_share": "—", "total": "NOT CONFIGURED", "employee_rate_pct": None,
+           "employer_rate_pct": None, "flat_amount": None, "text_value": None}
+    entry = content.VALUES.get(key)
+    if entry is None:
+        return out
+    name, value, effective_from = entry
+    if name not in content.VALUE_FIELDS.get(content.KEYS[key][1], ()):
+        raise ValueError(f"belgium_content.VALUES[{key!r}] uses {name}, not a field of its kind")
+    if name == "text_value":
+        out["text_value"] = value
+        out["total"] = value
+    else:
+        out[name] = Decimal(value)
+        shown = f"{value}%" if name.endswith("_rate_pct") else value
+        out["total"] = shown
+        if name == "employee_rate_pct":
+            out["employee_share"] = shown
+        elif name == "employer_rate_pct":
+            out["employer_share"] = shown
+    if effective_from:
+        out["effective_from"] = date.fromisoformat(effective_from)
+    return out
+
+
 def seed_belgium_pack(db: Session):
     """Write the belgium_content catalogue into the Draft BE-PAYROLL-2026 pack.
 
       * one SourceArtifact per evidence-register entry (S1-S24) with its title
         and URL and NO checksum (not archived), reused when present;
-      * one canonical ContributionRate row per catalogue key with EVERY value
-        field empty and the label "<label> (spec-proposed: ...) [PENDING G1]"
-        — a spec figure is display text only, never a value;
-      * one BE_EARNING_CLASS row per (obligation, component), REVIEW, pending.
+      * one canonical ContributionRate row per catalogue key, labelled
+        "<label> (spec: ...)" (no "[PENDING G1]" marker since the gate removal
+        of 2026-11-25). A key in belgium_content.VALUES (owner-approved spec
+        figures) gets that value in its kind's field and its effective_from;
+        every other key stays EMPTY, so the engine blocks on it
+        (BE_CONTENT_PENDING: value not yet provided);
+      * one BE_EARNING_CLASS row per (obligation, component), REVIEW (a
+        non-zero REVIEW component blocks in the engine).
 
     Idempotent and create-only: an existing Draft pack only gains the rows it
     lacks (a row edited in the console is never overwritten); a pack that has
@@ -390,9 +401,8 @@ def seed_belgium_pack(db: Session):
         cited = [s.strip() for s in ref.replace(",", " ").split() if s.strip() in sources]
         db.add(ContributionRate(
             organization_id=None, jurisdiction_country=BE, jurisdiction_pack_id=pack.id, component_key=key,
-            label=f"{content.key_label(key)} {content.PENDING_MARK}"[:100], employee_share="—", employer_share="—",
-            total="PENDING G1", employee_rate_pct=None, employer_rate_pct=None, flat_amount=None, text_value=None,
-            source_document_id=sources[cited[0]] if cited else None, sort_order=order))
+            label=content.key_label(key)[:100], source_document_id=sources[cited[0]] if cited else None,
+            sort_order=order, **_be_seed_value_columns(key)))
 
     have_classes = {(s.tax_regime, s.filing_status) for s in db.query(TaxSlab).filter(
         TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None),
@@ -409,7 +419,7 @@ def seed_belgium_pack(db: Session):
                            rule_type=content.EARNING_CLASS_RULE, min_amount=Decimal("0"), max_amount=None,
                            rate_pct=Decimal("0"), tax_regime=obligation, filing_status=component,
                            assessment_basis="REVIEW", tax_formula="",
-                           rate_label=f"{obligation}: {component} — REVIEW {content.PENDING_MARK}"[:150],
+                           rate_label=f"{obligation}: {component} — REVIEW"[:150],
                            sort_order=order))
     db.flush()
     return pack

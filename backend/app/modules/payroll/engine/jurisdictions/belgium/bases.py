@@ -95,7 +95,7 @@ def build(pay: dict, classes: dict, pack: BePack, manual: bool) -> dict:
             treatment = classes.get((obligation, code))
             if treatment is None:
                 pack.block(E.EARNING_CLASS_MISSING, f"{obligation}:{code}",
-                           "no signed earning classification for this component and obligation (BE-006)")
+                           "no earning classification for this component and obligation (BE-006)")
             if treatment == "REVIEW":
                 pack.block(E.EARNING_CLASS_REVIEW, f"{obligation}:{code}",
                            "the earning classification is REVIEW: a specialist must decide it (BE-006)")

@@ -441,7 +441,7 @@ def _totals(result) -> dict:
 def create_jp_correction(db: Session, *, organization_id: int, payslip_item_id: int, reason: str,
                          changes: dict, actor_id: Optional[int]) -> dict:
     """Append-only correction of a committed Japan payslip (JP-006): BLOCKS
-    while jp_correction_policy is not signed as DELTA_PAYSLIP. Otherwise the
+    while jp_correction_policy is not DELTA_PAYSLIP. Otherwise the
     frozen context is replayed (and must reproduce the original), the declared
     inputs are restated, and the difference is booked as a delta payslip in a
     linked PAID correction run. The original is never edited; its bonus report
@@ -473,7 +473,7 @@ def create_jp_correction(db: Session, *, organization_id: int, payslip_item_id: 
     policy = _correction_policy(frozen)
     if policy != "DELTA_PAYSLIP":
         raise BadRequestException(f"Corrections are blocked: jp_correction_policy is {policy or 'not configured'} "
-                                  "(JP-006, signed at G2).")
+                                  "(JP-006, value not yet provided).")
     original = svc.jp_replay(frozen)
     if Decimal(str(original.tds or 0)) != Decimal(str(item.tds or 0)):
         raise BadRequestException("Replaying the frozen context does not reproduce the original payslip; "

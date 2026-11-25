@@ -57,7 +57,7 @@ def _text(pack, key, as_of):
         _block(pack, key, "no configured row is in force")
     value = str(_field(row, "text_value") or "").strip()
     if not value or value.upper() == "PENDING_G1":
-        _block(pack, key, "row has no signed value")
+        _block(pack, key, "value not yet provided")
     return value
 
 

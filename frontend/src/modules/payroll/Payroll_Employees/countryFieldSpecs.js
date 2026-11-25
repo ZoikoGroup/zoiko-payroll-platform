@@ -86,6 +86,12 @@ export const COUNTRIES = [
   { code: "AE", name: "United Arab Emirates" },
   // Spain (docs/spain Phase 6) — mirrors employee_validation.py's ESEmployeeValidation.
   { code: "ES", name: "Spain" },
+  // Japan and New Zealand (gate removal P4b, 2026-11-25) — mirror
+  // JPEmployeeValidation / NZEmployeeValidation: no plain employee field. The
+  // My Number / IRD number live only in their encrypted vaults and every
+  // statutory fact lives on the country's statutory records (employee detail).
+  { code: "JP", name: "Japan" },
+  { code: "NZ", name: "New Zealand" },
 ];
 
 // Spanish NIF / NIE check letter (mirrors ESEmployeeValidation.nif_nie_check_letter_ok):
@@ -691,6 +697,9 @@ export const COUNTRY_FIELD_SPECS = {
     { key: "bank_code", label: "Bank (clearing) code", type: "text", placeholder: "004", pattern: /^\d{3}$/, error: "Hong Kong bank code must be 3 digits." },
     { key: "branch_code", label: "Branch code", type: "text", placeholder: "123", pattern: /^\d{3}$/, error: "Hong Kong branch code must be 3 digits." },
   ],
+  // Japan / New Zealand — vault-only identifiers; no plain employee field.
+  JP: [],
+  NZ: [],
 };
 
 // The one identifier per country that must be unique across employees —

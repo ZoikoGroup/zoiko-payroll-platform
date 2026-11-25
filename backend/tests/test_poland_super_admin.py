@@ -62,17 +62,23 @@ def test_seed_draft_once_with_a_planned_registry_row(console):
         c.psa.seed_draft(c.db, {}, c.editor)
 
 
-def test_signing_needs_a_reviewed_source_and_marks_the_row(console):
+def test_an_edit_is_in_force_with_any_source_and_never_marks_the_row(console):
+    """Gate removal (2026-11-25): no signing step. An edit needs a reason; any existing source (or none) is
+    accepted; the label stays plain and an old "[PENDING G1]" marker is stripped."""
     c = console
-    assert _rate(c, "pl_rounding_pit").label.endswith("[PENDING G1]")
-    with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        _edit(c, "pl_rounding_pit", source=c.draft_source, textValue="FULL_PLN_HALF_UP")
-    unsigned = _edit(c, "pl_rounding_pit", verify=False, source=c.draft_source, textValue="FULL_PLN_HALF_UP")
-    assert unsigned["signed"] is False                                       # a value alone is not a signature
-    signed = _edit(c, "pl_rounding_pit", textValue="FULL_PLN_HALF_UP")
-    assert signed["signed"] is True and not _rate(c, "pl_rounding_pit").label.endswith("[PENDING G1]")
-    changed = _edit(c, "pl_rounding_pit", verify=False, textValue="GROSZ_HALF_UP")
-    assert changed["signed"] is False                                       # an unverified change re-marks it
+    assert not _rate(c, "pl_rounding_pit").label.endswith("[PENDING G1]")     # seeded plain
+    view = _edit(c, "pl_rounding_pit", verify=False, source=c.draft_source, textValue="GROSZ_HALF_UP")
+    assert view["signed"] is True and _rate(c, "pl_rounding_pit").text_value == "GROSZ_HALF_UP"
+    row = _rate(c, "pl_rounding_pit")
+    row.label = f"{row.label} [PENDING G1]"                                    # an already-seeded DB row
+    c.db.flush()
+    view = _edit(c, "pl_rounding_pit", textValue="FULL_PLN_HALF_UP")
+    assert view["signed"] is True and not _rate(c, "pl_rounding_pit").label.endswith("[PENDING G1]")
+    no_source = c.psa.update_row(c.db, "rate", row.id, {"reason": "no source", "textValue": "GROSZ_HALF_UP"},
+                                 c.editor)
+    assert no_source["signed"] is True
+    with pytest.raises(BadRequestException, match="reason"):
+        c.psa.update_row(c.db, "rate", row.id, {"textValue": "GROSZ_HALF_UP"}, c.editor)
 
 
 @pytest.mark.parametrize("key, value, message", [
@@ -80,7 +86,7 @@ def test_signing_needs_a_reviewed_source_and_marks_the_row(console):
     ("pl_ppk_employer_pit_treatment", "MAYBE", "must be one of"),
     ("pl_overtime_premium_map", "DAILY=50", "every overtime event kind"),
     ("pl_sick_full_rate_cases", "FLU", "unknown value"),
-    ("pl_night_supplement_basis", "MIN_WAGE_20PCT", "NOT_SUPPORTED"),
+    ("pl_night_supplement_basis", "MIN_WAGE_20PCT", "must be one of"),
 ])
 def test_text_must_be_engine_vocabulary(console, key, value, message):
     with pytest.raises(BadRequestException, match=message):
@@ -108,10 +114,6 @@ def test_values_go_into_the_slot_their_kind_names(console):
         _edit(c, "pl_zus_annual_cap", textValue="282600")
     with pytest.raises(BadRequestException, match="holds a"):
         _edit(c, "pl_health", employerRatePct="9")                           # health is employee-funded
-    with pytest.raises(BadRequestException, match="no value"):
-        _edit(c, "pl_pit0_annual_limit")                                     # empty by design: fill first
-    with pytest.raises(BadRequestException, match="still PENDING_G1"):
-        _edit(c, "pl_health_limitation_rule")
     view = _edit(c, "pl_zus_emerytalne", employeeRatePct="9.76", employerRatePct="9.76")
     total = _rate(c, "pl_zus_emerytalne").total
     assert view["signed"] and total.count("9.76") == 2 and total.count("%") == 2
@@ -140,7 +142,7 @@ def test_editors_are_not_excluded_and_signing_status_is_reported(console):
     pack = c.db.get(JurisdictionPack, c.pack)
     assert jurisdiction_hooks.call("PL", "statutory_editors", c.db, pack) == set()       # gate removal 2026-11-25
     status = c.psa.signing_status(c.db, c.pack)
-    assert "pl_rounding_pit" in status["pendingRates"] and "pl_rounding_zus" not in status["pendingRates"]
+    assert status["pendingRates"] == [] and status["pendingPolicies"] == []        # nothing seeded as pending
     assert status["editors"] == [c.editor] and status["activationRefusal"] is None
 
 
@@ -186,7 +188,7 @@ def test_fully_signed_activated_pack_reproduces_the_golden_result(console):
     _sign_everything(c)
     pack = c.db.get(JurisdictionPack, c.pack)
     assert pl.pl_pack_activation_refusal(c.db, pack) is None
-    assert c.psa.signing_status(c.db, c.pack)["notSupported"]                 # undefined policies recorded
+    assert c.psa.signing_status(c.db, c.pack)["notSupported"] == []           # every policy has its approved value
     pack.status = "Active"
     c.db.commit()
     rates, slabs, resolved = resolve_tax_configuration(c.db, "PL", payroll_date=date(2026, 3, 31))

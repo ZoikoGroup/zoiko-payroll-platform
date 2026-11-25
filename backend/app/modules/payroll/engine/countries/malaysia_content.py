@@ -15,15 +15,17 @@ threshold, schedule, date rule and classification the Malaysia engine
 Production safety rule (spec, page 1): "No rate, contribution table, relief,
 eligibility condition, filing schema, statutory date, wage floor or
 labour-rule entitlement may exist only as application code or UI logic."
-Every value here reaches calculation only through a signed, effective-dated
-pack. Only values the specification itself states are filled in; anything
-else is EMPTY or "PENDING_G1" — never a guess.
+Every value here reaches calculation only through an effective-dated pack.
+Filled in: values the specification states, plus the policy / statutory
+values the owner approved on 2026-11-25 (docs/malaysia/GATE_REMOVAL_INVENTORY.md
+section B, "P" and "S" rows) where the engine has a reader and vocabulary for
+them. Anything else is EMPTY or "PENDING_G1" — never a guess — and blocks the
+calculation that needs it.
 
-EVERY row is seeded UNSIGNED (label carries "[PENDING G1]"): a value taken
-from a document is "extracted", not verified. A row becomes usable only
-when a Super Admin signs it against a stored, hashed source document
-reviewed by a second Super Admin (spec §16 G1). `spec_value` below only
-records whether the specification states the value.
+Gate removal (owner decision 2026-11-25, Spain model): rows are seeded
+WITHOUT the "[PENDING G1]" label marker and the engine no longer blocks on
+it. `spec_value` below only records whether the specification itself states
+the value (owner-approved values keep spec_value False).
 
 Conventions (the engine must match them):
   * Scalar parameters are ContributionRate rows keyed by component_key:
@@ -143,8 +145,9 @@ TREATMENTS = ("INCLUDED", "EXCLUDED", "REVIEW")
 DATE_BASES = ("CALENDAR_YEAR", "WAGE_MONTH", "CONTRIBUTION_MONTH", "PAYMENT_DATE", "EMPLOYMENT_EVENT")
 ANNUAL_DUE_RULES = ("END_FEBRUARY", "END_MARCH")
 # Rounding vocabulary (unit + mode). WHICH one applies to each obligation is
-# not given by the specification: every my_rounding_* row is PENDING_G1.
-# Engine policies (values PENDING_G1 until signed; vocabulary only).
+# not given by the specification: the EPF-direct / PERKESO / EIS / HRD rules
+# are owner-approved (2026-11-25); my_rounding_pcb stays PENDING_G1.
+# Engine policies (vocabulary only).
 EPF_AGE_TRANSITION_RULES = ("AGE_AT_WAGE_MONTH_START", "FROM_MONTH_AFTER_BIRTHDAY")
 EIS_AGE_RULES = ("AGE_AT_WAGE_MONTH_START", "AGE_AT_WAGE_MONTH_END")
 HRD_NON_MALAYSIAN_RULES = ("LEVY_ON_ALL_COVERED_WAGES", "MALAYSIAN_EMPLOYEES_ONLY")
@@ -301,13 +304,14 @@ _NATIONAL = (
      None, None, None, "CONTRACT_OF_SERVICE", "S2", True, None, None, _EE),
     ("my_rounding_pcb", "PCB statutory rounding (S1 specification)", None, None, None, PENDING, "S1", False,
      None, None, _PD),
-    ("my_rounding_epf_direct", "EPF rounding on the direct-calculation branch", None, None, None, PENDING, "S5",
-     False, None, None, _WM),
-    ("my_rounding_socso", "PERKESO rounding (schedule controls)", None, None, None, PENDING, "S7", False,
+    # Rounding rules below: owner-approved 2026-11-25 (inventory B, "P").
+    ("my_rounding_epf_direct", "EPF rounding on the direct-calculation branch", None, None, None, "RINGGIT_UP",
+     "S5", False, None, None, _WM),
+    ("my_rounding_socso", "PERKESO rounding (schedule controls)", None, None, None, "SEN_HALF_UP", "S7", False,
      None, None, _CM),
-    ("my_rounding_eis", "EIS rounding (schedule controls)", None, None, None, PENDING, "S9", False,
+    ("my_rounding_eis", "EIS rounding (schedule controls)", None, None, None, "SEN_HALF_UP", "S9", False,
      None, None, _CM),
-    ("my_rounding_hrd", "HRD levy rounding", None, None, None, PENDING, "S14", False, None, None, _WM),
+    ("my_rounding_hrd", "HRD levy rounding", None, None, None, "SEN_HALF_UP", "S14", False, None, None, _WM),
     ("my_min_wage_monthly", "Minimum wage per month (RM)", None, None, "1700", None, "S10", True,
      None, None, _WM),
     ("my_min_wage_daily_rule", "Minimum wage daily equivalent rule", None, None, None, PENDING, "S10", False,
@@ -339,9 +343,9 @@ _NATIONAL = (
     ("my_epf_rate_non_malaysian", "EPF non-Malaysian members after 1 Aug 1998 (%)", "2", "2", None, None, "S6",
      True, date(2025, 10, 1), None, _WM),
     ("my_epf_direct_calc_rule", "When EPF may be calculated directly instead of by table", None, None, None,
-     PENDING, "S5", False, None, None, _WM),
+     "NON_MALAYSIAN_PART_F_ONLY", "S5", False, None, None, _WM),  # owner-approved 2026-11-25
     ("my_epf_age_transition_rule", "Which wage month the age-60 EPF class change applies from", None, None, None,
-     PENDING, "S5", False, None, None, _WM),
+     "FROM_MONTH_AFTER_BIRTHDAY", "S5", False, None, None, _WM),  # owner-approved 2026-11-25
     ("my_epf_age_threshold", "EPF age at which the 60-and-over member classes apply", None, None, "60", None,
      "S5", True, None, None, _WM),
     ("my_socso_wage_ceiling", "PERKESO Act 4 / EIS Act 800 contribution wage ceiling (RM)", None, None, "6000",
@@ -351,8 +355,8 @@ _NATIONAL = (
     ("my_eis_rate_ref", "EIS contribution reference (%)", "0.2", "0.2", None, None, "S9", True, None, None, _CM),
     ("my_eis_min_age", "EIS coverage lower age", None, None, "18", None, "S9", True, None, None, _CM),
     ("my_eis_max_age", "EIS coverage upper age", None, None, "60", None, "S9", True, None, None, _CM),
-    ("my_eis_age_rule", "How the EIS age bounds are measured", None, None, None, PENDING, "S9", False,
-     None, None, _CM),
+    ("my_eis_age_rule", "How the EIS age bounds are measured", None, None, None, "AGE_AT_WAGE_MONTH_START", "S9",
+     False, None, None, _CM),  # owner-approved 2026-11-25
     ("my_fw_lindung_employee_rate", "Foreign-worker LINDUNG 24 JAM phase 1 employee component (%)", "0.75",
      None, None, None, "S8", True, date(2026, 6, 1), None, _CM),
     ("my_fw_lindung_phase_rule", "LINDUNG 24 JAM phase boundaries and shares", None, None, None, PENDING, "S8",
@@ -368,7 +372,7 @@ _NATIONAL = (
     ("my_hrd_base_rule", "HRD levy base inclusions / exclusions", None, None, None, PENDING, "S14", False,
      None, None, _WM),
     ("my_hrd_non_malaysian_rule", "Whether non-Malaysian employees' wages are in the HRD levy base", None, None,
-     None, PENDING, "S14", False, None, None, _WM),
+     None, "MALAYSIAN_EMPLOYEES_ONLY", "S14", False, None, None, _WM),  # owner-approved 2026-11-25
     ("my_cp22_days_after_start", "CP22 within days after employment starts", None, None, "30", None, "S2", True,
      None, None, _EE),
     ("my_cp22a_days_before_cessation", "CP22A at least days before cessation", None, None, "30", None, "S2",
@@ -388,9 +392,9 @@ _NATIONAL = (
     ("my_hrd_due_rule", "HRD levy payment due-date rule", None, None, None, PENDING, "S14", False,
      None, None, _CM),
     ("my_transfer_split_rule", "Pay-period split when a worker changes labour territory", None, None, None,
-     PENDING, "S11", False, None, None, _EE),
-    ("my_record_retention_years", "Payroll / filing record retention (years)", None, None, None, None, "S2",
-     False, None, None, _CY),
+     "TERRITORY_AT_PERIOD_END", "S11", False, None, None, _EE),  # owner-approved 2026-11-25
+    ("my_record_retention_years", "Payroll / filing record retention (years)", None, None, "7", None, "S2",
+     False, None, None, _CY),  # owner-approved 2026-11-25 ("S")
     ("my_reconciliation_tolerance", "Statutory reconciliation tolerance (RM)", None, None, None, None, "S2",
      False, None, None, _CM),
     ("my_parallel_materiality_amount", "Parallel-cycle materiality per employee per concept (RM)", None, None,
@@ -400,20 +404,26 @@ _NATIONAL = (
 # Territorial labour rows: base key -> (label, flat, text, spec_value, date_basis).
 # The specification states 45 hours, RM4,000, 98 and 7 days for all three
 # territories (§9: Peninsular/Labuan and the updated Sabah/Sarawak frameworks).
+# Overtime multipliers, the ordinary-rate divisor rule and days divisor,
+# hospitalisation days and the leave tiers ("YEARS:DAYS", completed years of
+# service -> days; leave.parse_tiers) are owner-approved values (2026-11-25,
+# inventory B "P" / "S"), the same for all three territories; spec_value
+# stays False. my_leave_pay_rule stays PENDING_G1 (no reader / vocabulary).
 _TERRITORIAL = {
     "my_weekly_hours_max": ("Statutory weekly working hours", "45", None, True, _WM),
     "my_ot_exclusion_wage": ("Non-manual employees above this monthly wage (RM) excluded from overtime",
                              "4000", None, True, _WM),
-    "my_ot_multiplier_workday": ("Overtime multiplier, normal working day", None, None, False, _WM),
-    "my_ot_multiplier_rest_day": ("Overtime multiplier, rest day", None, None, False, _WM),
-    "my_ot_multiplier_public_holiday": ("Overtime multiplier, public holiday", None, None, False, _WM),
-    "my_ot_rate_divisor_rule": ("Ordinary / hourly rate divisor rule", None, PENDING, False, _WM),
-    "my_ot_rate_days_divisor": ("Days divisor for the ordinary rate of pay", None, None, False, _WM),
+    "my_ot_multiplier_workday": ("Overtime multiplier, normal working day", "1.5", None, False, _WM),
+    "my_ot_multiplier_rest_day": ("Overtime multiplier, rest day", "2.0", None, False, _WM),
+    "my_ot_multiplier_public_holiday": ("Overtime multiplier, public holiday", "3.0", None, False, _WM),
+    "my_ot_rate_divisor_rule": ("Ordinary / hourly rate divisor rule", None, "MONTHLY_BASE_DIV_DAYS_DIV_DAILY_HOURS",
+                                False, _WM),
+    "my_ot_rate_days_divisor": ("Days divisor for the ordinary rate of pay", "26", None, False, _WM),
     "my_maternity_days": ("Maternity leave (days)", "98", None, True, _EE),
     "my_paternity_days": ("Paternity leave (days)", "7", None, True, _EE),
-    "my_sick_leave_tiers": ("Sick leave days by service tier", None, PENDING, False, _CY),
-    "my_hospitalisation_days": ("Hospitalisation leave (days)", None, None, False, _CY),
-    "my_annual_leave_tiers": ("Annual leave days by service tier", None, PENDING, False, _CY),
+    "my_sick_leave_tiers": ("Sick leave days by service tier", None, "0:14,2:18,5:22", False, _CY),
+    "my_hospitalisation_days": ("Hospitalisation leave (days)", "60", None, False, _CY),
+    "my_annual_leave_tiers": ("Annual leave days by service tier", None, "0:8,2:12,5:16", False, _CY),
     "my_leave_pay_rule": ("Leave remuneration rule", None, PENDING, False, _WM),
 }
 
