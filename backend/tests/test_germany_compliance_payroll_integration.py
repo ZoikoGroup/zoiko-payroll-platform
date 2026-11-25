@@ -143,7 +143,7 @@ def _make_de_2026_pack(db, maker=901, checker=902):
         ), actor_id=maker,
     )
     service.set_jurisdiction_pack_approver(db, pack.id, actor_id=checker)
-    return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker)
+    return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker + 1)  # four-eyes for DE (owner decision 2026-11-25): the approver may not activate
 
 
 # ══════════════════════════════════════════════════════════════════════════

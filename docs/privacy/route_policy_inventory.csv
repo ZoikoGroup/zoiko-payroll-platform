@@ -1321,6 +1321,7 @@ POST,/api/super-admin/compliance/germany/church-tax-exceptions,platform,create,c
 POST,/api/super-admin/compliance/germany/church-tax-exceptions/{id}/approve,platform,approve,approve,super_admin,platform,,,,no,
 PUT,/api/super-admin/compliance/germany/church-tax-exceptions/{id}/status,platform,update,status,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/germany/compliance-pack/{pack_id}/completeness,platform,read,completeness,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/germany/compliance-pack/{pack_id}/contributions,platform,read,contributions,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/germany/contribution-ceilings,platform,read,contribution-ceilings,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/germany/contribution-ceilings,platform,create,contribution-ceilings,super_admin,platform,,,,no,
 GET,/api/super-admin/compliance/germany/contribution-ceilings/resolve,platform,read,resolve,super_admin,platform,,,,no,
@@ -1391,6 +1392,7 @@ GET,/api/super-admin/compliance/germany/pv-configurations/resolve,platform,read,
 GET,/api/super-admin/compliance/germany/pv-configurations/{id},platform,read,pv-configurations,super_admin,platform,,,,no,
 PUT,/api/super-admin/compliance/germany/pv-configurations/{id}/approve,platform,update,approve,super_admin,platform,,,,no,
 PUT,/api/super-admin/compliance/germany/pv-configurations/{id}/status,platform,update,status,super_admin,platform,,,,no,
+GET,/api/super-admin/compliance/germany/wage-tax-tariff,platform,read,wage-tax-tariff,super_admin,platform,,,,no,
 POST,/api/super-admin/compliance/hong-kong/calculation-preview,platform,create,calculation-preview,super_admin,platform,,,,yes,verified synthetic: preview computes from inline synthetic facts; no employee fields returned
 GET,/api/super-admin/compliance/hong-kong/configuration/compare,platform,read,compare,super_admin,platform,,,,yes,verified config: returns statutory pack row diffs only
 GET,/api/super-admin/compliance/hong-kong/configuration/earning-codes,platform,read,earning-codes,super_admin,platform,,,,no,

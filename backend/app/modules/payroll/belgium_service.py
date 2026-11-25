@@ -344,6 +344,7 @@ def be_statutory_summary(db: Session) -> dict:
     return {"country": BE, "jurisdiction": BE, "spec": SPEC,
             "status": "CERTIFIED" if readiness["allPassed"] else "NOT_CERTIFIED", "available": False,
             "packs": out, "gates": gates, "gateDetails": readiness["gates"],
+            "readinessWarnings": readiness["warnings"],
             "launchEmployers": readiness["launchEmployers"]}
 
 

@@ -31,6 +31,7 @@ runbook names them there first).
 from __future__ import annotations
 
 from datetime import date
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -76,12 +77,66 @@ def check_actor(key: str) -> str:
     return "sign-off"                 # an evidence tag (BE-CONNECTIVITY-*, BE-SIGNOFF-*, BE-OWNER-*, ...)
 
 
-def _be_canonical_pack(db: Session):
+def _today() -> date:
+    return date.today()
+
+
+def _covers(pack, day: date) -> bool:
+    return ((pack.effective_from is None or pack.effective_from <= day)
+            and (pack.effective_to is None or pack.effective_to >= day))
+
+
+def _be_tax_packs(db: Session) -> list:
+    """Belgian tax packs, latest start date first (ties: newest row first)."""
     from app.modules.payroll.models import JurisdictionPack
 
-    packs = (db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == "BE")
-             .order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).all())
-    return next((p for p in packs if p.status == "Active"), packs[0] if packs else None)
+    return (db.query(JurisdictionPack)
+            .filter(JurisdictionPack.jurisdiction_country == "BE", JurisdictionPack.pack_type == "tax")
+            .order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).all())
+
+
+def be_g1_overlap_warning(db: Session, today: Optional[date] = None) -> Optional[str]:
+    """A warning when more than one non-Active Belgian tax pack covers today
+    (gate G1 then judges the one with the latest start date), or None. Active
+    packs cannot overlap: activation refuses it."""
+    day = today or _today()
+    covering = [p for p in _be_tax_packs(db) if p.status != "Active" and _covers(p, day)]
+    if len(covering) <= 1:
+        return None
+    listed = ", ".join(f"{p.pack_id} v{p.version} ({p.status}, from {p.effective_from})" for p in covering)
+    return (f"{len(covering)} non-Active Belgian packs cover today: {listed}. Gate G1 judges the one with the "
+            f"latest start date, {covering[0].pack_id} v{covering[0].version}. Overlapping packs should be resolved "
+            "— adjust their effective dates so that only one covers any day.")
+
+
+def be_g1_pack(db: Session, today: Optional[date] = None) -> tuple:
+    """(pack, why) — the Belgian tax pack gate G1 judges, in this order:
+      1. the Active pack (the one in force today if several are Active);
+      2. otherwise the pack whose effective dates include today — if several
+         non-Active packs cover today, the one with the LATEST start date
+         (be_g1_overlap_warning then flags the overlap on Readiness);
+      3. only if neither exists, the next upcoming pack (earliest future start);
+      4. otherwise (only past, non-Active packs) the most recent one.
+    A future pack is never preferred over one that covers today — an empty
+    next-year Draft used to shadow the current pack. The choice only decides
+    WHICH pack G1 judges; that pack still fails G1 when its catalogue is
+    incomplete, unsigned or unsourced."""
+    day = today or _today()
+    packs = _be_tax_packs(db)
+    active = [p for p in packs if p.status == "Active"]
+    if active:
+        in_force = [p for p in active if _covers(p, day)]
+        return (in_force or active)[0], "the Active pack" + (" (in force today)" if in_force else "")
+    current = [p for p in packs if _covers(p, day)]
+    if current:
+        return current[0], "in force today"
+    upcoming = sorted((p for p in packs if p.effective_from and p.effective_from > day),
+                      key=lambda p: (p.effective_from, p.id))
+    if upcoming:
+        return upcoming[0], f"no pack is in force today; the next upcoming pack (starts {upcoming[0].effective_from})"
+    if packs:
+        return packs[0], "no pack is in force today or upcoming; the most recent pack"
+    return None, "no Belgian tax pack exists"
 
 
 def be_launch_organizations() -> frozenset:
@@ -105,12 +160,12 @@ def _be_evidence_check(db: Session, tag: str) -> tuple:
     return False, f"{tag} {'submitted, not reviewed' if submitted or pending else 'missing'}"
 
 
-def _be_g1(db, pack, add):
+def _be_g1(db, pack, add, why: str = ""):
     from app.modules.payroll import belgium_golden
     from app.modules.payroll.engine.countries import belgium_content as content
     from app.modules.payroll.models import ContributionRate, TaxSlab
 
-    add("pack_seeded", pack is not None, f"{pack.pack_id} {pack.version} ({pack.status})" if pack
+    add("pack_seeded", pack is not None, f"Judging {pack.pack_id} v{pack.version} ({pack.status}): {why}" if pack
         else "no canonical Belgium pack is seeded")
     if pack is None:
         for key in ("catalogue_complete", "no_pending_rows", "authority_examples_match", "golden_certification"):
@@ -137,9 +192,9 @@ def _be_g1(db, pack, add):
     add("authority_examples_match", golden["passed"],
         f"{golden['examples']} example(s); " + ("all replay exactly" if golden["passed"] else
                                                 "none registered" if not golden["examples"] else f"{bad} do not"))
-    run = belgium_golden.be_latest_certification(db)
-    add("golden_certification", bool(run and run.status == "PASS"),
-        f"latest BE certification run: {getattr(run, 'status', 'none')}")
+    run, why = belgium_golden.be_certification_for(db, pack)
+    add("golden_certification", why is None,
+        why or f"certification run #{run.id} PASS for {pack.pack_id} v{pack.version}, content unchanged since")
 
 
 def _be_g2(db, launch, add):
@@ -230,9 +285,9 @@ def be_code_checks(db: Session) -> dict:
             checks[gate].append({"key": key, "ok": bool(ok), "detail": detail, "actor": check_actor(key)})
         return add
 
-    pack = _be_canonical_pack(db)
+    pack, why = be_g1_pack(db)
     launch = be_launch_organizations()
-    _be_g1(db, pack, adder("G1"))
+    _be_g1(db, pack, adder("G1"), why)
     _be_g2(db, launch, adder("G2"))
     _be_g3(db, adder("G3"))
     ok, detail = belgium_parallel.be_g4_state(db, launch)
@@ -253,7 +308,9 @@ def be_readiness(db: Session) -> dict:
              for key, label, owner in GATES]
     decisions = be.owner_decisions(db)
     blocking = [d for d in decisions if d["blocksLaunch"]]
+    warning = be_g1_overlap_warning(db)
     return {"jurisdiction": "BE", "gates": gates, "decisions": decisions,
+            "warnings": [warning] if warning else [],
             "launchEmployers": sorted(be_launch_organizations()),
             "allPassed": all(g["passed"] for g in gates) and all(d["state"] == "RECORDED" for d in blocking)}
 

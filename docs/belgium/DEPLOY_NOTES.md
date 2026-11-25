@@ -136,6 +136,13 @@ Belgian code. Existing Belgian data stays intact and auditable.
 
 A change that breaks switching Belgium off fails CI before it can deploy.
 
+**Known intermittent failure (observed 2026-11-25, not yet explained).** In the full local backend run on the
+`origin/main` merge commit (c225fd27), `tests/test_belgium_dormancy_proof.py` reported `1 failed, 4 passed` once. Run on
+its own on the same commit right after, it passed (`5 passed`), and no code changed in between. Which of its five tests
+failed was not captured (the run kept only each file's summary line). The test itself is unchanged. If it fails in CI,
+re-run the job once; if it fails again, or the same test keeps failing, treat it as a real rollback-proof failure and
+investigate before deploying. Next time, capture the full output (`pytest -rA tests/test_belgium_dormancy_proof.py`).
+
 ### 4.2 Fix forward
 
 A Belgian defect is fixed by a normal change on top: a targeted fix, CI, merge, deploy. Belgian behaviour is behind

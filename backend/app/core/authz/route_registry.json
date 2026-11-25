@@ -25046,6 +25046,22 @@
   },
   {
    "method": "GET",
+   "path": "/api/super-admin/compliance/germany/compliance-pack/{pack_id}/contributions",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "contributions",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
    "path": "/api/super-admin/compliance/germany/contribution-ceilings",
    "data_class": "platform",
    "action": "read",
@@ -26154,6 +26170,22 @@
    "data_class": "platform",
    "action": "update",
    "resource": "status",
+   "principals": [
+    "super_admin"
+   ],
+   "scope_level": "platform",
+   "field_classes": [],
+   "retired_reason": null,
+   "note": null,
+   "scan_worker_tables": [],
+   "overridden": false
+  },
+  {
+   "method": "GET",
+   "path": "/api/super-admin/compliance/germany/wage-tax-tariff",
+   "data_class": "platform",
+   "action": "read",
+   "resource": "wage-tax-tariff",
    "principals": [
     "super_admin"
    ],

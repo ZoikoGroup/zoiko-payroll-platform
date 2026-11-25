@@ -3758,6 +3758,53 @@ def get_germany_pack_completeness(
     return result
 
 
+# ── Germany: read-only views for the shared pack layout ─────────────────────
+# The Contributions rows (registries + the engine's fallback constants, read
+# from the constants themselves) and the section 32a tariff zones read from
+# engine/jurisdictions/germany/tax.py. Read-only (payroll/germany_overview.py).
+
+@router.get(
+    "/compliance/germany/compliance-pack/{pack_id}/contributions", response_model=dict,
+    summary="Germany pack Contributions view: registry rows and engine fallback constants (read-only)",
+)
+def get_germany_pack_contributions(
+    pack_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from fastapi import HTTPException
+
+    from app.modules.payroll import germany_overview
+    from app.modules.payroll.models import JurisdictionPack
+
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_id).first()
+    if pack is None or (pack.jurisdiction_country or "").upper() != "DE":
+        raise HTTPException(status_code=404, detail="No German pack with that id.")
+    return germany_overview.germany_contribution_rows(db, pack)
+
+
+@router.get(
+    "/compliance/germany/wage-tax-tariff", response_model=dict,
+    summary="Germany section 32a wage-tax tariff zones built into the engine (read-only, not BMF-certified)",
+)
+def get_germany_wage_tax_tariff(
+    pack_id: Optional[int] = Query(None, description="Mark the tariff that applies to this German pack (by its tax year)"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from fastapi import HTTPException
+
+    from app.modules.payroll import germany_overview
+    from app.modules.payroll.models import JurisdictionPack
+
+    pack = None
+    if pack_id is not None:
+        pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_id).first()
+        if pack is None or (pack.jurisdiction_country or "").upper() != "DE":
+            raise HTTPException(status_code=404, detail="No German pack with that id.")
+    return germany_overview.germany_wage_tax_tariff(pack=pack)
+
+
 @router.get(
     "/compliance/germany/contribution-ceilings/{id}", response_model=GermanyContributionCeilingResponse,
     response_model_by_alias=True, summary="Get a single Germany contribution ceiling record",

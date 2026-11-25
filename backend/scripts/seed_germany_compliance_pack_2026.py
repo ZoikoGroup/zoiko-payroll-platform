@@ -25,7 +25,12 @@ there as an "obviously-fake" placeholder convention. This version instead
 REQUIRES --maker-id/--checker-id on the command line and validates both
 resolve to real, active `User` rows with role=super_admin (see
 scripts/_actor_authorization.py) before doing anything else. No other
-logic was changed from the validated nikhil version. Also confirmed this
+logic was changed from the validated nikhil version.
+
+2026-11-25: Germany is on the four-eyes lists (the Super Admin who approved
+a pack may not activate it), so this also REQUIRES --activator-id: a real,
+active Super Admin distinct from the maker and the checker, validated
+before anything is touched (_actor_authorization.resolve_and_authorize_activator). Also confirmed this
 phase (8DF) against main's current `upsert_jurisdiction_pack` /
 `set_jurisdiction_pack_approver` / `set_jurisdiction_pack_status`: main
 has since grown a "policy" pack type and a US-only tax-pack activation
@@ -64,7 +69,7 @@ existing SourceArtifact evidence chain those scripts already populate.
 Usage (against an isolated SQLite file ONLY — never the shared/remote DB):
 
     PAYROLL_DATABASE_URL=sqlite:///./phase8ci_local_isolated.sqlite3 \
-        python -m scripts.seed_germany_compliance_pack_2026 --maker-id 12 --checker-id 34
+        python -m scripts.seed_germany_compliance_pack_2026 --maker-id 12 --checker-id 34 --activator-id 56
 """
 
 import argparse
@@ -75,7 +80,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts._local_db_guard import assert_local_database, describe_target, is_local_database
-from scripts._actor_authorization import resolve_and_authorize_maker_checker
+from scripts._actor_authorization import resolve_and_authorize_activator, resolve_and_authorize_maker_checker
 
 SCRIPT_NAME = "seed_germany_compliance_pack_2026"
 
@@ -89,6 +94,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--maker-id", type=int, required=True, help="Real, active Super Admin user id (maker).")
     parser.add_argument("--checker-id", type=int, required=True, help="Real, active Super Admin user id (checker). Must differ from --maker-id.")
+    parser.add_argument("--activator-id", type=int, required=True,
+                        help="Real, active Super Admin user id that activates the approved pack. Must differ from "
+                             "--maker-id and --checker-id (Germany: the approver may not activate).")
     return parser.parse_args()
 
 
@@ -123,6 +131,7 @@ def main() -> None:
         # resolve to real, active, distinct Super Admin users, or this
         # refuses to run before touching the pack.
         maker, checker = resolve_and_authorize_maker_checker(db, args.maker_id, args.checker_id)
+        activator = resolve_and_authorize_activator(db, args.activator_id, maker.id, checker.id)
         print(f"[{SCRIPT_NAME}] maker={maker.id} ({maker.email}), checker={checker.id} ({checker.email}) "
               "— both verified active Super Admin users.")
 
@@ -145,7 +154,7 @@ def main() -> None:
                 pack = service.set_jurisdiction_pack_approver(db, pack.id, actor_id=checker.id)
                 print(f"[{SCRIPT_NAME}] Approved by actor_id={checker.id} -> status={pack.status}.")
             if pack.status == "Approved":
-                pack = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker.id)
+                pack = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=activator.id)
                 print(f"[{SCRIPT_NAME}] Activated -> status={pack.status}, "
                       f"effective {pack.effective_from} to {pack.effective_to}.")
             entries = service.list_tax_configuration_audit(db, jurisdiction_pack_id=pack.id)
@@ -196,7 +205,7 @@ def main() -> None:
         approved = service.set_jurisdiction_pack_approver(db, pack.id, actor_id=checker.id)
         print(f"[{SCRIPT_NAME}] Approved by actor_id={checker.id} -> status={approved.status}.")
 
-        activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker.id)
+        activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=activator.id)
         print(f"[{SCRIPT_NAME}] Activated -> status={activated.status}, "
               f"effective {activated.effective_from} to {activated.effective_to}.")
 

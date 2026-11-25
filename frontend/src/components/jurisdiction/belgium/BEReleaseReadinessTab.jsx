@@ -1,5 +1,6 @@
 import { getBeSummary, listBeGateEvidence } from "../../../service/superAdminService";
 import Collapsible from "../Collapsible";
+import Notice from "../Notice";
 import { card, useLoad } from "../japan/jpFormat";
 import { ErrorNote } from "../new_zealand/nzShared";
 import BEActivationReadinessTab from "./BEActivationReadinessTab";
@@ -57,6 +58,9 @@ function GateCard({ gate, met, detail, evidence, onChange }) {
   const checks = detail?.checks || [];
   const failing = checks.filter((c) => !c.ok);
   const passing = checks.filter((c) => c.ok);
+  // Which pack this gate is judging and why (the backend's selection: Active,
+  // else in force today, else the next upcoming pack).
+  const judging = checks.find((c) => typeof c.detail === "string" && c.detail.startsWith("Judging "))?.detail || null;
   return (
     <Collapsible
       testId={`be-gate-${gate}`}
@@ -65,6 +69,11 @@ function GateCard({ gate, met, detail, evidence, onChange }) {
       summary={checkSummary(checks)}
     >
       <div className="space-y-3 text-[12px]">
+        {judging && (
+          <p className="rounded border border-border bg-surface-muted px-2 py-1 text-foreground" data-testid="be-gate-judging">
+            {judging}
+          </p>
+        )}
         {detail?.owner && (
           <p className="text-foreground-secondary" data-testid="be-gate-owner">
             <span className="font-semibold text-foreground">Who acts:</span> {detail.owner}
@@ -104,6 +113,9 @@ export default function BEReleaseReadinessTab({ pack }) {
   const onEvidenceChange = () => { reloadEvidence(); reload(); };
   return (
     <div className="space-y-3" data-testid="be-release-readiness">
+      {(summary.readinessWarnings || []).map((w) => (
+        <Notice key={w} tone="warning" title="Overlapping packs" testId="be-readiness-warning">{w}</Notice>
+      ))}
       <div className={card} data-testid="be-engine-status">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-[14px] font-semibold text-foreground">Belgium engine — {summary.spec}</h3>
