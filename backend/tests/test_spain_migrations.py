@@ -120,7 +120,11 @@ def test_deploy_drift_filter_explains_the_column():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
+    from tests._mx_lifecycle_pending import CERT_RUN_PACK_COLUMNS
+
     assert tables == set()
+    # e4b7c2a9d1f3 (certification runs tied to a pack) is also pending on PARENT (sibling branch, merge c8d2f6a4e1b9).
+    assert {t: columns.pop(t, None) for t in CERT_RUN_PACK_COLUMNS} == CERT_RUN_PACK_COLUMNS
     assert columns == {"payslip_items": {COLUMN}}
 
 
@@ -132,7 +136,8 @@ def test_revision_is_the_single_child_of_the_previous_head_and_the_head():
     assert (module.revision, module.down_revision) == (REVISION, PARENT)
     children = [p.name for p in VERSIONS.glob("*.py")
                 if re.search(rf'down_revision[^\n]*"{PARENT}"', p.read_text(encoding="utf-8"))]
-    assert children == [FILENAME]
+    # Spain and e4b7c2a9d1f3 (certification runs tied to a pack) are PARENT's two children, joined by c8d2f6a4e1b9.
+    assert sorted(children) == sorted([FILENAME, "e4b7c2a9d1f3_tie_certification_runs_to_a_pack.py"])
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
     # e4b7c2a9d1f3 (certification runs tied to a pack) also grows from b5f3e8a1c6d9; merge c8d2f6a4e1b9 joins them.
     assert list(script.get_heads()) == ["c8d2f6a4e1b9"]

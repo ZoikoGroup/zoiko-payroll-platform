@@ -124,7 +124,6 @@ def test_deploy_drift_filter_explains_the_column():
 
     assert tables == set()
     assert {t: columns.pop(t, None) for t in CERT_RUN_PACK_COLUMNS} == CERT_RUN_PACK_COLUMNS  # + e4b7c2a9d1f3
-    assert columns == {"payslip_items": {COLUMN}}
     assert columns == {"payslip_items": {COLUMN, "es_calculation_snapshot"}}   # + Spain 86f1ec062709 after the merge
 
 
