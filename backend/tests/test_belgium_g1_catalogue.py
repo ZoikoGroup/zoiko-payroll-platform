@@ -68,18 +68,85 @@ def test_the_seeded_catalogue_is_complete_but_still_unsigned(db):
     assert not gate["passed"]
 
 
-def test_an_empty_newer_pack_no_longer_passes_no_pending_rows(db):
-    """The production case: BE-PAYROLL-2026 seeded, an empty BE-PAYROLL-2027 Draft created beside it."""
+def _on(monkeypatch, day):
+    from app.modules.payroll import belgium_readiness as r
+
+    monkeypatch.setattr(r, "_today", lambda: day)
+
+
+def test_a_current_pack_is_judged_before_an_empty_future_pack(db, monkeypatch):
+    """The production case: BE-PAYROLL-2026 seeded (in force), an empty BE-PAYROLL-2027 Draft beside it."""
     from app.modules.payroll import belgium_service as be
 
     be.seed_belgium_pack(db)
     db.commit()
-    _empty_pack(db, "BE-PAYROLL-2027", date(2027, 1, 1), date(2027, 12, 31))   # latest effective date -> judged
+    _empty_pack(db, "BE-PAYROLL-2027", date(2027, 1, 1), date(2027, 12, 31))
+    _on(monkeypatch, date(2026, 11, 25))
     gate, checks = _g1(db)
-    assert checks["pack_seeded"]["detail"].startswith("BE-PAYROLL-2027")
-    assert checks["catalogue_complete"]["ok"] is False
-    assert checks["no_pending_rows"]["ok"] is False                   # used to read "every row signed"
+    assert checks["pack_seeded"]["detail"] == "Judging BE-PAYROLL-2026 v1.0 (Draft): in force today"
+    assert checks["catalogue_complete"]["ok"] is True
+    assert checks["no_pending_rows"]["ok"] is False                   # still fails: every row unsigned
     assert not gate["passed"]
+
+
+def test_an_empty_current_pack_is_judged_and_fails(db, monkeypatch):
+    from app.modules.payroll import belgium_service as be
+
+    _empty_pack(db, "BE-EMPTY-NOW", date(2026, 1, 1), date(2026, 12, 31))
+    be.seed_belgium_pack(db)                                          # seeded 2026 window too
+    db.commit()
+    _empty_pack(db, "BE-FUTURE", date(2027, 1, 1), date(2027, 12, 31))
+    _on(monkeypatch, date(2026, 6, 1))
+    gate, checks = _g1(db)
+    assert "in force today" in checks["pack_seeded"]["detail"] and "BE-FUTURE" not in checks["pack_seeded"]["detail"]
+    assert not gate["passed"]
+
+
+def test_only_a_future_pack_is_judged(db, monkeypatch):
+    _empty_pack(db, "BE-PAYROLL-2027", date(2027, 1, 1), date(2027, 12, 31))
+    _on(monkeypatch, date(2026, 11, 25))
+    gate, checks = _g1(db)
+    assert checks["pack_seeded"]["detail"] == ("Judging BE-PAYROLL-2027 v1.0 (Draft): no pack is in force today; "
+                                               "the next upcoming pack (starts 2027-01-01)")
+    assert checks["catalogue_complete"]["ok"] is False and not gate["passed"]          # empty: still fails
+
+
+def test_the_earliest_upcoming_pack_is_judged(db, monkeypatch):
+    from app.modules.payroll import belgium_readiness as r
+
+    _empty_pack(db, "BE-PAYROLL-2028", date(2028, 1, 1), date(2028, 12, 31))
+    _empty_pack(db, "BE-PAYROLL-2027", date(2027, 1, 1), date(2027, 12, 31))
+    pack, why = r.be_g1_pack(db, today=date(2026, 11, 25))
+    assert pack.pack_id == "BE-PAYROLL-2027" and why.startswith("no pack is in force today")
+
+
+def test_an_active_pack_is_judged_first(db, monkeypatch):
+    from app.modules.payroll import belgium_service as be
+
+    pack = be.seed_belgium_pack(db)
+    db.commit()
+    _empty_pack(db, "BE-NEWER", date(2026, 6, 1), date(2026, 12, 31))   # also in force, later start
+    pack.status = "Active"                                            # (set directly: activation is refused)
+    db.commit()
+    _on(monkeypatch, date(2026, 11, 25))
+    gate, checks = _g1(db)
+    assert checks["pack_seeded"]["detail"] == "Judging BE-PAYROLL-2026 v1.0 (Active): the Active pack (in force today)"
+    assert checks["no_pending_rows"]["ok"] is False and not gate["passed"]   # Active but unsigned: still fails
+
+
+def test_only_past_packs_judge_the_most_recent(db):
+    from app.modules.payroll import belgium_readiness as r
+
+    _empty_pack(db, "BE-PAYROLL-2024", date(2024, 1, 1), date(2024, 12, 31))
+    _empty_pack(db, "BE-PAYROLL-2025", date(2025, 1, 1), date(2025, 12, 31))
+    pack, why = r.be_g1_pack(db, today=date(2026, 11, 25))
+    assert pack.pack_id == "BE-PAYROLL-2025" and why == "no pack is in force today or upcoming; the most recent pack"
+
+
+def test_no_pack_at_all(db):
+    from app.modules.payroll import belgium_readiness as r
+
+    assert r.be_g1_pack(db, today=date(2026, 11, 25)) == (None, "no Belgian tax pack exists")
 
 
 # ── Release Readiness: who acts on each check ────────────────────────────────

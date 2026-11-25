@@ -105,6 +105,8 @@ check("activation readiness, signing status and owner decisions are sections of 
     && /c\.detail/.test(release), "each gate lists what is Missing and what is Done");
   assert(release.includes("<ActorBadge actor={c.actor} />") && release.includes('data-testid="be-gate-owner"')
     && release.includes('"sign-off": "Sign-off"'), "who acts: the backend's actor per check + the gate owner");
+  assert(release.includes('data-testid="be-gate-judging"') && release.includes('c.detail.startsWith("Judging ")'),
+    "G1 shows which pack it judges and why");
   for (const old of ["be-activation", "be-signing", "be-decisions"]) assert(!new RegExp(`tab\\("${old}"`).test(beConfig), `${old} still a tab`);
 });
 
