@@ -20,18 +20,18 @@ function countStats(view, tariff) {
   const employee = rows.filter((r) => r.employeeRatePct != null);
   const employer = rows.filter((r) => r.employerRatePct != null);
   const parameters = rows.filter((r) => r.employeeRatePct == null && r.employerRatePct == null);
-  const current = tariff?.versions?.find((v) => v.inForceToday);
+  const current = tariff?.versions?.find((v) => v.appliesToPack);
   return [
     { label: "Employee deductions", value: employee.length, hint: `${engine(employee)} built into the engine` },
     { label: "Employer contributions", value: employer.length, hint: `${engine(employer)} built into the engine` },
     { label: "Parameters & thresholds", value: parameters.length, hint: `${engine(parameters)} built into the engine` },
-    { label: "Tax zones", value: current ? current.zones.length : "—", hint: current ? `§32a ${current.taxYear}, not BMF-certified` : "no tariff in force" },
+    { label: "Tax zones", value: current ? current.zones.length : "—", hint: current ? `§32a ${current.taxYear}, not BMF-certified` : "no tariff for this pack's tax year" },
   ];
 }
 
 export default function DEOverviewTab({ pack, refreshKey, onNavigateTab }) {
   const [view] = useLoad(() => getGermanyPackContributions(pack.id));
-  const [tariff] = useLoad(getGermanyWageTaxTariff);
+  const [tariff] = useLoad(() => getGermanyWageTaxTariff(pack.id));
   const [warning] = useLoad(loadPapWarning);
   return (
     <div className="mb-5 space-y-5" data-testid="de-overview">

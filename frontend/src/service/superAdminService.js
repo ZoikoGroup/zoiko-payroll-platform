@@ -673,7 +673,9 @@ export const getGermanyPackCompleteness = (packId, asOf) =>
 // section 32a tariff zones built into the engine (not BMF-certified).
 export const getGermanyPackContributions = (packId) =>
   apiFetch(`/api/super-admin/compliance/germany/compliance-pack/${packId}/contributions`);
-export const getGermanyWageTaxTariff = () => apiFetch("/api/super-admin/compliance/germany/wage-tax-tariff");
+// packId (optional): marks the tariff that applies to that pack (by its tax year).
+export const getGermanyWageTaxTariff = (packId) =>
+  apiFetch("/api/super-admin/compliance/germany/wage-tax-tariff", { params: packId ? { packId } : {} });
 
 // PV configurations
 export const listPvConfigurations = (childCategory, isSaxony) =>

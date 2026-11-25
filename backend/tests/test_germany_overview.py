@@ -101,3 +101,45 @@ def test_soli_engine_parameters_are_the_constants():
     params = {p["key"]: p for p in g.germany_wage_tax_tariff()["engineParameters"]}
     assert params["_DE_SOLI_RATE"]["value"] == str(hardcoded_defaults._DE_SOLI_RATE)
     assert params["SOLI_MILDERUNGSZONE_RATE"]["value"] == str(tax.SOLI_MILDERUNGSZONE_RATE)
+
+
+def _applies(view):
+    return [v["taxYear"] for v in view["versions"] if v["appliesToPack"]]
+
+
+def test_the_tariff_marked_for_a_pack_is_the_one_the_engine_resolves(db):
+    from decimal import Decimal as D
+
+    for year in (2026, 2025, 2024):
+        pack = _pack(db, f"DE-PAYROLL-T{year}", date(year, 1, 1), date(year, 12, 31))
+        view = g.germany_wage_tax_tariff(pack=pack)
+        engine = tax.InternalGermanyWageTaxCalculator(soli_threshold_single=D(0), soli_rate_pct=D(0),
+                                                      payroll_date=date(year, 6, 30))
+        assert _applies(view) == [engine._tariff["tax_year"]], year
+        assert view["pack"]["appliesTaxYear"] == engine._tariff["tax_year"]
+
+
+def test_other_tariffs_are_marked_not_used_and_earlier_ones_historical(db):
+    view = g.germany_wage_tax_tariff(pack=_pack(db, "DE-PAYROLL-T2026", date(2026, 1, 1), date(2026, 12, 31)))
+    by_year = {v["taxYear"]: v for v in view["versions"]}
+    current = next(v for v in view["versions"] if v["appliesToPack"])
+    for v in view["versions"]:
+        if v is not current:
+            assert v["appliesToPack"] is False
+            assert v["endsBeforePack"] is (v["effectiveToExclusive"] is not None
+                                           and v["effectiveToExclusive"] <= current["effectiveFrom"])
+    assert len(by_year) == len(tax._TARIFF_VERSIONS)
+
+
+def test_a_pack_before_every_tariff_has_none_and_says_why(db):
+    first = tax._TARIFF_VERSIONS[0]["effective_from"]
+    pack = _pack(db, "DE-PAYROLL-EARLY", date(first.year - 1, 1, 1), date(first.year - 1, 12, 31))
+    view = g.germany_wage_tax_tariff(pack=pack)
+    assert _applies(view) == [] and view["pack"]["appliesTaxYear"] is None
+    assert view["pack"]["note"]
+
+
+def test_without_a_pack_nothing_is_marked_and_the_stale_constant_is_named_as_such():
+    view = g.germany_wage_tax_tariff()
+    assert all(v["appliesToPack"] is None for v in view["versions"]) and view["pack"] is None
+    assert view["provenanceConstant"] == tax.PROVENANCE_VERSION

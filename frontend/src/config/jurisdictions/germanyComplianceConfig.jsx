@@ -35,7 +35,7 @@ export const germanyExtraTabs = (() => {
       <DEContributionsTab key={pack.id} pack={pack} rates={rates}
         onAddRate={onAddRate} onEditRate={onEditRate} onDeleteRate={onDeleteRate} />
     )),
-    tab("de-slabs", "Tax Slabs", ScrollText, "de-rates", () => <DETaxSlabsTab />),
+    tab("de-slabs", "Tax Slabs", ScrollText, "de-rates", ({ pack }) => <DETaxSlabsTab key={pack.id} pack={pack} />),
     tab("de-policy", "Policy", Settings2, "de-slabs", ({ pack }) => <DEPolicyTab key={pack.id} pack={pack} />),
     tab("de-readiness", "Readiness", Gauge, "de-policy", ({ pack }) => <DEReadinessTab key={pack.id} pack={pack} />),
     // ── "More" menu ──

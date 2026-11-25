@@ -1,3 +1,4 @@
+import Collapsible from "../../../../components/jurisdiction/Collapsible";
 import Notice from "../../../../components/jurisdiction/Notice";
 import { TaxSlabsTable } from "../../../../components/jurisdiction/PackRowTables";
 import { useLoad } from "../../../../components/jurisdiction/japan/jpFormat";
@@ -51,15 +52,36 @@ function ParameterTable({ title, rows, testId }) {
   );
 }
 
-export default function DETaxSlabsTab() {
-  const [tariff, error] = useLoad(getGermanyWageTaxTariff);
+const periodLabel = (v) => `${v.taxYear} · from ${v.effectiveFrom}${v.effectiveToExclusive ? ` until ${v.effectiveToExclusive} (exclusive)` : " · open-ended"}`;
+
+function TariffZones({ version }) {
+  return (
+    <>
+      <TaxSlabsTable
+        sections={[{
+          key: version.taxYear, label: periodLabel(version),
+          rows: version.zones.map((z) => ({ ...z, id: `${version.taxYear}-${z.zone}`, rateLabel: `Zone ${z.zone}: ${z.label}` })),
+        }]}
+        hideColumns={["state", "filingStatus"]}
+        extraColumns={[{ key: "formula", label: "Formula", cellClass: "px-3 py-2 font-mono text-[11px] text-foreground-secondary", render: (z) => z.formula }]}
+      />
+      <ParameterTable testId={`de-tariff-params-${version.taxYear}`} title={`Tariff parameters · ${version.taxYear}`}
+        rows={version.parameters.map((p) => ({ ...p, status: `Built into engine (tax.py), ${version.taxYear}` }))} />
+    </>
+  );
+}
+
+export default function DETaxSlabsTab({ pack }) {
+  const [tariff, error] = useLoad(() => getGermanyWageTaxTariff(pack.id));
+  const applies = tariff?.versions?.find((v) => v.appliesToPack) || null;
+  const others = (tariff?.versions || []).filter((v) => v !== applies);
   return (
     <div className="space-y-4" data-testid="de-tax-slabs">
       <DEWageTaxWarning />
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-[13px] font-semibold text-foreground">Section 32a EStG tariff zones</h3>
+          <h3 className="text-[13px] font-semibold text-foreground">Section 32a EStG tariff for this pack</h3>
           {tariff && (
             <span className="rounded-full border border-warning/40 bg-warning/10 px-2.5 py-0.5 text-[11px] font-semibold text-warning"
               data-testid="de-tariff-status">{tariff.status}</span>
@@ -69,21 +91,20 @@ export default function DETaxSlabsTab() {
         {!tariff && !error && <p className="text-xs text-foreground-muted">Loading…</p>}
         {tariff && (
           <>
-            <p className="text-xs text-foreground-muted">
-              Read-only, read from {tariff.sourceFile.split("/").slice(-3).join("/")} ({tariff.provenance}). {tariff.note}
+            <p className="text-xs text-foreground-muted" data-testid="de-tariff-basis">
+              {applies
+                ? <>The engine applies the <strong>{applies.taxYear}</strong> tariff to payslips of {pack.packId} ({tariff.pack?.basis}),
+                  as tax.py resolves it from each payslip&apos;s pay date.</>
+                : <>No tariff in tax.py covers {pack.packId}: {tariff.pack?.note}</>}
+              {" "}Read-only, read from {tariff.sourceFile.split("/").slice(-3).join("/")}. {tariff.note}
             </p>
-            <TaxSlabsTable
-              sections={tariff.versions.map((v) => ({
-                key: v.taxYear,
-                label: `${v.taxYear} · from ${v.effectiveFrom}${v.effectiveToExclusive ? ` until ${v.effectiveToExclusive} (exclusive)` : " · open-ended"}${v.inForceToday ? " · in force today" : ""}`,
-                rows: v.zones.map((z) => ({ ...z, id: `${v.taxYear}-${z.zone}`, rateLabel: `Zone ${z.zone}: ${z.label}` })),
-              }))}
-              hideColumns={["state", "filingStatus"]}
-              extraColumns={[{ key: "formula", label: "Formula", cellClass: "px-3 py-2 font-mono text-[11px] text-foreground-secondary", render: (z) => z.formula }]}
-            />
-            {tariff.versions.map((v) => (
-              <ParameterTable key={v.taxYear} testId={`de-tariff-params-${v.taxYear}`} title={`Tariff parameters · ${v.taxYear}`}
-                rows={v.parameters.map((p) => ({ ...p, status: `Built into engine (tax.py), ${v.taxYear}` }))} />
+            {applies && <TariffZones version={applies} />}
+            {others.map((v) => (
+              <Collapsible key={v.taxYear} testId={`de-tariff-other-${v.taxYear}`}
+                title={`${v.endsBeforePack ? "Historical" : "Other tariff"}: not used for this pack`}
+                summary={periodLabel(v)}>
+                <TariffZones version={v} />
+              </Collapsible>
             ))}
             <ParameterTable testId="de-engine-tax-params" title="Solidarity surcharge and lump sums (engine constants)" rows={tariff.engineParameters} />
           </>

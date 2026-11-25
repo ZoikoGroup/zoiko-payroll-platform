@@ -204,13 +204,38 @@ def _pct(fraction: Decimal) -> str:
     return str(fraction * 100)
 
 
-def germany_wage_tax_tariff(today: Optional[date] = None) -> dict:
+def _pack_reference_date(pack) -> tuple:
+    """(date, basis) the tariff for `pack` is resolved on: 1 January of its tax
+    year (Germany's tax year is the calendar year), else its effective-from
+    date; (None, reason) when neither is usable."""
+    year = (getattr(pack, "tax_year", None) or "").strip()[:4]
+    if year.isdigit():
+        return date(int(year), 1, 1), f"tax year {pack.tax_year}"
+    if getattr(pack, "effective_from", None):
+        return pack.effective_from, f"effective from {pack.effective_from.isoformat()} (tax year not a calendar year)"
+    return None, "the pack has neither a calendar tax year nor an effective-from date"
+
+
+def germany_wage_tax_tariff(today: Optional[date] = None, pack=None) -> dict:
     """Every section 32a EStG tariff version the engine holds, as zones read from
-    tax._TARIFF_VERSIONS, plus the Soli fallback constants. Read-only."""
+    tax._TARIFF_VERSIONS, plus the Soli fallback constants. With `pack`, marks
+    the version that applies to it: the one tax.resolve_income_tax_tariff (the
+    engine's own resolver, given a payslip's pay date) returns for the pack's
+    tax year. Read-only."""
     from app.modules.payroll import hardcoded_defaults
     from app.modules.payroll.engine.jurisdictions.germany import tax
 
     today = today or date.today()
+    applies, basis, pack_note = None, None, None
+    if pack is not None:
+        reference, basis = _pack_reference_date(pack)
+        if reference is not None:
+            try:
+                applies = tax.resolve_income_tax_tariff(reference)
+            except tax.GermanyInternalTariffNotAvailableError as exc:
+                pack_note = str(getattr(exc, "message", exc))
+        else:
+            pack_note = basis
     versions = []
     for v in tax._TARIFF_VERSIONS:
         gfb, z2, z3, z4 = v["grundfreibetrag"], v["zone2_upper"], v["zone3_upper"], v["zone4_upper"]
@@ -233,6 +258,9 @@ def germany_wage_tax_tariff(today: Optional[date] = None) -> dict:
             "taxYear": v["tax_year"], "effectiveFrom": _iso(v["effective_from"]),
             # tax.py's effective_to is exclusive (the day the next version starts).
             "effectiveToExclusive": _iso(v["effective_to"]), "inForceToday": in_force,
+            "appliesToPack": (v is applies) if pack is not None else None,
+            "endsBeforePack": bool(pack is not None and applies is not None and v["effective_to"] is not None
+                                   and v["effective_to"] <= applies["effective_from"]),
             "source": v["source"], "zones": zones,
             "parameters": [
                 {"key": "grundfreibetrag", "label": "Grundfreibetrag (annual)", "value": _s(gfb)},
@@ -246,7 +274,12 @@ def germany_wage_tax_tariff(today: Optional[date] = None) -> dict:
         "certified": False,
         "warning": UNCERTIFIED_TARIFF_WARNING,
         "status": "Built into engine (tax.py), not BMF-certified",
-        "provenance": tax.PROVENANCE_VERSION,
+        # tax.py's module constant; it still names 2023 although payslips record the
+        # resolved version's year (InternalGermanyWageTaxCalculator.execute).
+        "provenanceConstant": tax.PROVENANCE_VERSION,
+        "pack": None if pack is None else {
+            "packId": pack.pack_id, "version": pack.version, "taxYear": pack.tax_year, "basis": basis,
+            "appliesTaxYear": applies["tax_year"] if applies else None, "note": pack_note},
         "sourceFile": TARIFF_FILE,
         "note": "zvE = taxable income (zu versteuerndes Einkommen), annual, rounded down to the euro. "
                 "Zone bounds: a zone applies above its lower bound up to and including its upper bound.",

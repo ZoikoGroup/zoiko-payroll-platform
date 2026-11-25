@@ -3788,11 +3788,21 @@ def get_germany_pack_contributions(
     summary="Germany section 32a wage-tax tariff zones built into the engine (read-only, not BMF-certified)",
 )
 def get_germany_wage_tax_tariff(
+    pack_id: Optional[int] = Query(None, description="Mark the tariff that applies to this German pack (by its tax year)"),
     current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
 ):
-    from app.modules.payroll import germany_overview
+    from fastapi import HTTPException
 
-    return germany_overview.germany_wage_tax_tariff()
+    from app.modules.payroll import germany_overview
+    from app.modules.payroll.models import JurisdictionPack
+
+    pack = None
+    if pack_id is not None:
+        pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_id).first()
+        if pack is None or (pack.jurisdiction_country or "").upper() != "DE":
+            raise HTTPException(status_code=404, detail="No German pack with that id.")
+    return germany_overview.germany_wage_tax_tariff(pack=pack)
 
 
 @router.get(

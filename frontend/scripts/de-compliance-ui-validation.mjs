@@ -94,6 +94,16 @@ check("/germany/registries redirects to the tab holding its default (PAP) sectio
   assert(/pap: "de-slabs"/.test(shared), "pap lives in Tax Slabs");
 });
 
+check("Tax Slabs shows the tariff that applies to the pack; any other is collapsed and labelled not used", () => {
+  const tab = read(`${DIR}/DETaxSlabsTab.jsx`);
+  assert(tab.includes("getGermanyWageTaxTariff(pack.id)"), "tariff loaded for the selected pack");
+  assert(tab.includes("v.appliesToPack") && tab.includes("<TariffZones version={applies} />"), "applying tariff shown open");
+  assert(tab.includes('"Historical" : "Other tariff"}: not used for this pack') && /<Collapsible key=\{v\.taxYear\}/.test(tab),
+    "other tariffs collapsed and labelled");
+  assert(!/inForceToday|tariff.provenance/.test(tab), "not chosen by today's date or the module provenance constant");
+  assert(read(`${DIR}/DEOverviewTab.jsx`).includes("v.appliesToPack"), "overview counts the pack's tariff");
+});
+
 check("every registry editor stays reachable from a tab", () => {
   const all = [config, ...NEW_FILES.map(read)].join("\n");
   for (const name of ["PapTab", "HealthFundsTab", "ContributionCeilingsTab", "PvConfigTab", "MinijobMidijobParametersTab",
