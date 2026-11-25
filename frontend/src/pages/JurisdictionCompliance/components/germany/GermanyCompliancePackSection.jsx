@@ -298,7 +298,7 @@ function OrganizationsPanel({ pack }) {
 // PAP/ELStAM/ELSTER/DEÜV as required components (per that function's own
 // documented scope) since none of those are live functionality in this
 // project.
-function CompletenessPanel({ packId }) {
+export function CompletenessPanel({ packId }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 

@@ -668,6 +668,12 @@ export const setContributionCeilingStatus = (id, statusValue) =>
 // computes — the frontend never invents or re-derives these counts itself.
 export const getGermanyPackCompleteness = (packId, asOf) =>
   apiFetch(`/api/super-admin/compliance/germany/compliance-pack/${packId}/completeness`, { params: asOf ? { asOf } : {} });
+// Read-only views for the shared pack layout (payroll/germany_overview.py):
+// the Contributions rows (registries + engine fallback constants) and the
+// section 32a tariff zones built into the engine (not BMF-certified).
+export const getGermanyPackContributions = (packId) =>
+  apiFetch(`/api/super-admin/compliance/germany/compliance-pack/${packId}/contributions`);
+export const getGermanyWageTaxTariff = () => apiFetch("/api/super-admin/compliance/germany/wage-tax-tariff");
 
 // PV configurations
 export const listPvConfigurations = (childCategory, isSaxony) =>

@@ -68,6 +68,7 @@ const inputCls = "w-full rounded-[10px] border border-border bg-surface px-3 py-
 const btnPrimary = "rounded-[10px] bg-primary px-3 py-1.5 text-[12px] font-bold text-white transition-colors hover:bg-primary-hover disabled:opacity-50";
 const btnSecondary = "rounded-[10px] border border-border bg-surface-muted px-3 py-1.5 text-[12px] font-semibold text-foreground-muted transition-colors hover:border-primary disabled:opacity-50";
 
+// Same table look as the shared pack tables (PackRowTables.jsx).
 function Th({ children }) {
   return <th className="px-3 py-2 text-left font-semibold text-foreground-muted">{children}</th>;
 }
@@ -223,12 +224,12 @@ export function PapTab() {
         <ErrorBanner message={assetsError} />
         {assets && assets.length === 0 && <p className="text-[12px] text-foreground-muted">No PAP asset has ever been ingested in this environment.</p>}
         {assets && assets.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12px]">
-              <thead><tr><Th>Version</Th><Th>Effective</Th><Th>Status</Th><Th>Hash</Th><Th>Actions</Th></tr></thead>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-xs">
+              <thead className="bg-background text-left text-foreground-muted"><tr><Th>Version</Th><Th>Effective</Th><Th>Status</Th><Th>Hash</Th><Th>Actions</Th></tr></thead>
               <tbody>
                 {assets.map((a) => (
-                  <tr key={a.id} className="border-t border-border">
+                  <tr key={a.id} className="border-t border-border-light">
                     <Td>{a.papVersion}</Td>
                     <Td>{a.effectiveFrom} → {a.effectiveTo || "open"}</Td>
                     <Td><StatusPill value={a.status} /></Td>
@@ -432,9 +433,9 @@ function LifecycleRegistryTab({
       <ErrorBanner message={error} />
       {rows && rows.length === 0 && <p className="text-[12px] text-foreground-muted">No records yet.</p>}
       {rows && rows.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-[12px]">
-            <thead><tr>{columns.map((c) => <Th key={c.key}>{c.label}</Th>)}<Th>Status</Th><Th>Source</Th><Th>Pack</Th><Th>Actions</Th></tr></thead>
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full text-xs">
+            <thead className="bg-background text-left text-foreground-muted"><tr>{columns.map((c) => <Th key={c.key}>{c.label}</Th>)}<Th>Status</Th><Th>Source</Th><Th>Pack</Th><Th>Actions</Th></tr></thead>
             <tbody>
               {rows.map((row) => {
                 const notEditable = !LIFECYCLE_EDITABLE_STATUSES.has(row.status);
@@ -443,7 +444,7 @@ function LifecycleRegistryTab({
                 const backwardTarget = LIFECYCLE_BACKWARD_TARGET[row.status];
                 return (
                 <React.Fragment key={row.id}>
-                <tr className="border-t border-border">
+                <tr className="border-t border-border-light">
                   {columns.map((c) => <Td key={c.key}>{c.render ? c.render(row) : row[c.key]}</Td>)}
                   <Td><StatusPill value={row.status} /></Td>
                   <Td>{row.authoritySourceId ? `#${row.authoritySourceId}` : <span className="text-warning">missing</span>}</Td>
@@ -1105,12 +1106,12 @@ export function SourceEvidenceTab() {
           A checkmark means a source-artifact row citing that evidence exists below — never inferred from the
           document&apos;s own reference table alone. An unchecked row is genuinely <strong>SOURCE_REQUIRED</strong>.
         </p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-[12px]">
-            <thead><tr><Th>ID</Th><Th>Requirement</Th><Th>Status</Th></tr></thead>
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full text-xs">
+            <thead className="bg-background text-left text-foreground-muted"><tr><Th>ID</Th><Th>Requirement</Th><Th>Status</Th></tr></thead>
             <tbody>
               {DE_SRC_REFERENCE.map(([id, label, hint]) => (
-                <tr key={id} className="border-t border-border">
+                <tr key={id} className="border-t border-border-light">
                   <Td>{id}</Td>
                   <Td>{label}</Td>
                   <Td>
@@ -1146,12 +1147,12 @@ export function SourceEvidenceTab() {
         {loading && <p className="text-[12px] text-foreground-muted">Loading…</p>}
         <ErrorBanner message={error} />
         {artifacts && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12px]">
-              <thead><tr><Th>Agency</Th><Th>Title</Th><Th>Reviewed</Th><Th>Actions</Th></tr></thead>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-xs">
+              <thead className="bg-background text-left text-foreground-muted"><tr><Th>Agency</Th><Th>Title</Th><Th>Reviewed</Th><Th>Actions</Th></tr></thead>
               <tbody>
                 {artifacts.map((a) => (
-                  <tr key={a.id} className="border-t border-border">
+                  <tr key={a.id} className="border-t border-border-light">
                     <Td>{a.agency}</Td>
                     <Td className="max-w-md truncate">{a.title}</Td>
                     <Td>{a.reviewerApprovedAt ? new Date(a.reviewerApprovedAt).toLocaleDateString() : "—"}</Td>
@@ -1193,12 +1194,12 @@ export function AuditTab() {
       {rows && rows.length === 0 && <p className="text-[12px] text-foreground-muted">No audit events for this filter.</p>}
       {rows && rows.length > 0 && (
         <div className="max-h-[32rem] overflow-y-auto">
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12px]">
-              <thead><tr><Th>When</Th><Th>Actor</Th><Th>Action</Th><Th>Entity</Th><Th>Reason</Th></tr></thead>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-xs">
+              <thead className="bg-background text-left text-foreground-muted"><tr><Th>When</Th><Th>Actor</Th><Th>Action</Th><Th>Entity</Th><Th>Reason</Th></tr></thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className="border-t border-border">
+                  <tr key={r.id} className="border-t border-border-light">
                     <Td>{r.createdAt ? new Date(r.createdAt).toLocaleString() : "—"}</Td>
                     <Td>{r.actorId ?? "system"}</Td>
                     <Td>{r.action}</Td>
