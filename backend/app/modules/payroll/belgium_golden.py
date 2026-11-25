@@ -176,9 +176,37 @@ def be_golden_check(db: Session, pack) -> dict:
             "passed": bool(examples) and all(r["ok"] for r in results), "results": results}
 
 
+# Columns of a pack's rows that make up its certified content (ids, row
+# timestamps, authorship and sort order excluded): values, sources, dates and
+# labels - a label carries the "[PENDING G1]" signed / unsigned marker, so a
+# signature or an unsigning changes the fingerprint too.
+_FINGERPRINT_RATE = ("component_key", "label", "employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value",
+                     "employee_share", "employer_share", "jurisdiction_state", "filing_status", "effective_from",
+                     "effective_to", "source_document_id")
+_FINGERPRINT_SLAB = ("rule_type", "rate_label", "min_amount", "max_amount", "rate_pct", "flat_amount",
+                     "adjustment_amount", "tax_formula", "formula_expression", "filing_status", "tax_regime",
+                     "assessment_basis", "employer_rate_pct", "jurisdiction_state", "effective_from", "effective_to",
+                     "source_document_id")
+
+
+def be_pack_fingerprint(db: Session, pack) -> str:
+    """SHA-256 of `pack`'s certified content - every canonical row and slab row
+    (earning classes and authority examples included) the golden check reads.
+    Any row created, edited, signed, unsigned or removed changes it."""
+    import hashlib
+    import json
+
+    rates, slabs = _be_golden_pack_rows(db, pack)
+    norm = lambda v: None if v is None else str(v)  # noqa: E731
+    items = sorted(json.dumps(["rate"] + [norm(getattr(r, c, None)) for c in _FINGERPRINT_RATE]) for r in rates.values())
+    items += sorted(json.dumps(["slab"] + [norm(getattr(s, c, None)) for c in _FINGERPRINT_SLAB]) for s in slabs)
+    return hashlib.sha256("\n".join(items).encode("utf-8")).hexdigest()
+
+
 def record_be_golden_certification(db: Session, pack, actor_id=None):
     """Run the check and store it as the shared TestCertificationRun of BE
-    (PASS / FAIL / NO_REAL_CASES)."""
+    (PASS / FAIL / NO_REAL_CASES), recording the pack it certified and the
+    fingerprint of that pack's content at run time."""
     from app.modules.payroll.models import TestCertificationRun
 
     check = be_golden_check(db, pack)
@@ -189,16 +217,51 @@ def record_be_golden_certification(db: Session, pack, actor_id=None):
     status = "NO_REAL_CASES" if total == 0 else ("PASS" if not failures else "FAIL")
     run = TestCertificationRun(triggered_by_id=actor_id, jurisdiction_country="BE", real_case_count=total,
                                total_cases=total, passed_cases=total - len(failures), failed_cases=len(failures),
-                               status=status, failure_details=failures or None)
+                               status=status, failure_details=failures or None,
+                               jurisdiction_pack_id=pack.id, content_fingerprint=be_pack_fingerprint(db, pack))
     db.add(run)
     db.flush()
     return run, check
 
 
-def be_latest_certification(db: Session):
+def _pack_name(db: Session, pack_row_id) -> str:
+    from app.modules.payroll.models import JurisdictionPack
+
+    other = db.get(JurisdictionPack, pack_row_id) if pack_row_id else None
+    return f"{other.pack_id} v{other.version}" if other else f"pack #{pack_row_id}"
+
+
+def _when(run) -> str:
+    return run.run_at.date().isoformat() if getattr(run, "run_at", None) else "date unknown"
+
+
+def be_certification_for(db: Session, pack) -> tuple:
+    """(run, None) when `pack` holds a current PASS certification, else (run or
+    None, reason). A run counts only when it was recorded against THIS pack
+    (pack ID and version: the pack row) with status PASS, and its content
+    fingerprint still equals the pack's content now - no row, slab row or
+    earning class created, edited, signed, unsigned or removed since. Runs
+    recorded before runs were tied to packs count for no pack. Reads only."""
     from app.modules.payroll.models import TestCertificationRun as T
 
-    return (db.query(T).filter(T.jurisdiction_country == "BE").order_by(T.run_at.desc(), T.id.desc()).first())
+    name = f"{pack.pack_id} v{pack.version}"
+    latest_any = (db.query(T).filter(T.jurisdiction_country == "BE").order_by(T.run_at.desc(), T.id.desc()).first())
+    mine = (db.query(T).filter(T.jurisdiction_country == "BE", T.jurisdiction_pack_id == pack.id)
+            .order_by(T.run_at.desc(), T.id.desc()).first())
+    if mine is None:
+        if latest_any is None:
+            return None, f"the certification run is missing: no run has been recorded for {name}"
+        if latest_any.jurisdiction_pack_id is None:
+            return None, (f"the certification run is missing for {name}: the last run ({_when(latest_any)}) is not "
+                          "tied to any pack - record a new run")
+        return None, (f"the certification run is missing for {name}: the last certification run was for "
+                      f"{_pack_name(db, latest_any.jurisdiction_pack_id)} ({_when(latest_any)})")
+    if mine.status != "PASS":
+        return mine, f"the last certification run for {name} ({_when(mine)}) is {mine.status}"
+    if not mine.content_fingerprint or mine.content_fingerprint != be_pack_fingerprint(db, pack):
+        return mine, (f"content changed after the last certification run for {name} ({_when(mine)}) - "
+                      "record a new run")
+    return mine, None
 
 
 def be_golden_refusal(db: Session, pack) -> Optional[str]:
@@ -208,8 +271,7 @@ def be_golden_refusal(db: Session, pack) -> Optional[str]:
         bad = [r["example"] for r in check["results"] if not r["ok"]]
         return (f"Belgium pack {pack.pack_id}: the authority examples do not replay exactly "
                 + (f"({', '.join(bad[:5])})" if bad else "(none is registered)") + " — gate G1.")
-    run = be_latest_certification(db)
-    if run is None or run.status != "PASS":
-        return (f"Belgium pack {pack.pack_id}: the latest Belgian golden-vector certification run is "
-                f"{getattr(run, 'status', 'missing')}; run the certification first.")
+    _run, why = be_certification_for(db, pack)
+    if why:
+        return f"Belgium pack {pack.pack_id}: {why}."
     return None

@@ -266,11 +266,17 @@ def test_all_13_hooks_resolve():
     from app.modules.payroll import belgium_service, jurisdiction_hooks, poland_service
 
     assert jurisdiction_hooks._MODULES["BE"] == "app.modules.payroll.belgium_service"
-    assert set(belgium_service.JURISDICTION_HOOKS) == set(HOOK_NAMES) == set(poland_service.JURISDICTION_HOOKS)
-    for name in HOOK_NAMES:
+    # Owner decision 2026-11-25: Belgium also declares the three optional review /
+    # approval hooks (catalogue complete for QA / In Review / Approved; every row
+    # valued, sourced and signed to approve).
+    be_optional = {"before_pack_status", "pack_approval_refusal", "pack_upsert_status_refusal"}
+    assert set(belgium_service.JURISDICTION_HOOKS) == set(HOOK_NAMES) | be_optional
+    assert set(HOOK_NAMES) == set(poland_service.JURISDICTION_HOOKS)
+    for name in (*HOOK_NAMES, *be_optional):
         assert callable(jurisdiction_hooks.get("BE", name)), name
-    for optional in ("before_pack_status", "pack_approval_refusal", "evidence_review_refusal"):
-        assert not jurisdiction_hooks.declares("BE", optional)
+    for optional in be_optional:
+        assert jurisdiction_hooks.declares("BE", optional)
+    assert not jurisdiction_hooks.declares("BE", "evidence_review_refusal")
 
 
 def test_type_a_hooks_fail_closed(db):
@@ -288,7 +294,7 @@ def test_type_a_hooks_fail_closed(db):
         jh.call("BE", "statutory_profile_values", db, None, None, None)
     # Phase 3A: an unseeded BE pack is refused; editors are a set (see test_belgium_super_admin.py).
     pack = _be_pack(db, pack_id="BE-EMPTY")
-    assert "no statutory content" in jh.call("BE", "pack_activation_refusal", db, pack)
+    assert "no Belgian statutory rows yet" in jh.call("BE", "pack_activation_refusal", db, pack)
     assert jh.call("BE", "template_activation_refusal", db, SimpleNamespace(jurisdiction_country="BE"), 1) is None
     assert jh.call("BE", "statutory_editors", db, pack) == set()
     # Block B3 (D13): Belgian payslips leave the generic bank file; they are paid

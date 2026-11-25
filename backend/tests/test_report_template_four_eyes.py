@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 OPT_IN = "SE"        # in _APPROVER_NOT_ACTIVATOR_COUNTRIES (R3 applies); PL left the lists (gate removal 2026-11-25)
-OTHER = "DE"         # not in it: the checker may approve and activate (owner decision 2026-09-28)
+OTHER = "CA"         # not in it: the checker may approve and activate (owner decision 2026-09-28)
 
 
 def _user(db, email):

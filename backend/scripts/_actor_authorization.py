@@ -7,6 +7,10 @@ Germany statutory activation script that performs a maker-checker action
 
 WHY THIS EXISTS
 
+(2026-11-25: Germany's pack approver may not activate the pack, so the two
+Germany pack seed scripts also take --activator-id, checked by
+resolve_and_authorize_activator below.)
+
 `publish_seeded_germany_registries.py` and
 `seed_germany_compliance_pack_2026.py` (as validated on the `nikhil`
 branch) both called their maker-checker service functions with hardcoded
@@ -99,3 +103,16 @@ def resolve_and_authorize_maker_checker(db, maker_id: int, checker_id: int) -> t
     maker = require_super_admin_actor(db, maker_id, "maker")
     checker = require_super_admin_actor(db, checker_id, "checker")
     return maker, checker
+
+
+def resolve_and_authorize_activator(db, activator_id: int, maker_id: int, checker_id: int) -> User:
+    """For countries whose pack approver may not activate it
+    (service._APPROVER_NOT_ACTIVATOR_COUNTRIES, e.g. Germany): the activator
+    must be a real, active Super Admin distinct from the maker and the
+    checker. Fails before any pack is touched."""
+    if activator_id in (maker_id, checker_id):
+        raise ActorAuthorizationError(
+            f"REFUSING TO RUN — the activator ({activator_id}) must differ from the maker ({maker_id}) and the "
+            f"checker ({checker_id}): the Super Admin who approved a pack may not also activate it."
+        )
+    return require_super_admin_actor(db, activator_id, "activator")

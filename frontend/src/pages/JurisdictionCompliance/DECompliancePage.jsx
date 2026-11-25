@@ -1,119 +1,28 @@
-import { useSearchParams } from "react-router-dom";
-import {
-  LayoutDashboard, FileCheck2, HeartPulse, Percent, ShieldCheck, Layers, Clock3, Gauge,
-  Landmark, Church, RefreshCcw, Send, FileSearch, History, BarChart3, Radio, Banknote, FileStack,
-} from "lucide-react";
-import DEOverviewDashboard from "./components/germany/DEOverviewDashboard";
-import WorkerDataLocked from "../../components/WorkerDataLocked";
-import GermanyDeuvTab from "./components/germany/GermanyDeuvTab";
-import GermanyCompliancePackSection from "./components/germany/GermanyCompliancePackSection";
-import {
-  PapTab, HealthFundsTab, ContributionCeilingsTab, PvConfigTab, MinijobMidijobParametersTab, EarningTaxabilityTab,
-  OvertimePremiumCategoriesTab, OvertimeGrundlohnCapsTab, EmployerLeviesTab, ChurchTaxTab,
-  ElstamBatchesTab, ElsterTab, SourceEvidenceTab, AuditTab,
-} from "./GermanyStatutoryRegistriesPage";
+import { Navigate, useSearchParams } from "react-router-dom";
+import JurisdictionLayout from "../../components/jurisdiction/JurisdictionLayout";
+import { germanyComplianceConfig, germanyExtraTabs } from "../../config/jurisdictions/germanyComplianceConfig";
+import { GERMANY_PAGE, GERMANY_TAB_ALIASES } from "./components/germany/deShared";
 
-// Germany country compliance workspace — the primary landing page for
-// Compliance -> Germany. Germany has no Land (federal state)-level tax
-// packs in this codebase (church tax is an employee-level opt-in flag
-// consumed directly by engine/countries/germany.py, not a jurisdiction/
-// pack-level construct — see germanyComplianceConfig.jsx, kept for
-// reference), so this page does NOT wrap the pack-based JurisdictionLayout
-// component every other country here uses — the same reasoning that
-// already led USACompliancePage.jsx to stop using it for its own
-// non-pack-scoped sections (SUI, Reciprocity, Locality, Source Evidence).
+// Germany country compliance page — the shared pack layout every other
+// country uses (left-column pack list, standard pack header and actions,
+// Overview | Contributions | Tax Slabs | Policy | Readiness | Organizations |
+// Versions | Audit, "More" for the rest). See germanyComplianceConfig.jsx for
+// where every earlier Germany section now lives; each one is reused unchanged.
 //
-// Every section below reuses the EXISTING Germany statutory registry tab
-// components straight from GermanyStatutoryRegistriesPage.jsx (now named
-// exports) — the same backend calls, the same maker-checker forms, the
-// same state. There is exactly one implementation of each registry; this
-// page only adds a country-level Overview and promotes every tab that
-// page already had to its own top-level nav item, so all of it is
-// discoverable from Compliance -> Germany without needing to know the
-// /super-admin/compliance/germany/registries deep link (which still
-// renders the identical GermanyStatutoryRegistriesPage component and
-// remains a valid compatibility route).
-const SECTIONS = [
-  { key: "overview", label: "Overview", icon: LayoutDashboard },
-  { key: "compliance-pack", label: "Compliance Pack", icon: FileStack },
-  { key: "pap", label: "PAP / Releases", icon: FileCheck2 },
-  { key: "health-funds", label: "Health Funds", icon: HeartPulse },
-  { key: "ceilings", label: "Contribution Ceilings", icon: Percent },
-  { key: "pv", label: "PV Configuration", icon: ShieldCheck },
-  { key: "minijob-midijob", label: "Minijob/Midijob Parameters", icon: Banknote },
-  { key: "earning-taxability", label: "Earning Taxability", icon: Layers },
-  { key: "overtime-premium-categories", label: "Overtime Premium Categories", icon: Clock3 },
-  { key: "overtime-grundlohn-caps", label: "Overtime Grundlohn Caps", icon: Gauge },
-  { key: "employer-levies", label: "Employer Levies (Accident Insurance)", icon: Landmark },
-  { key: "church-tax", label: "Church Tax", icon: Church },
-  { key: "elstam-batches", label: "ELStAM Change-List Batches", icon: RefreshCcw },
-  { key: "elster", label: "ELSTER", icon: Send },
-  { key: "deuv", label: "DEÜV", icon: Radio },
-  { key: "payroll-summary", label: "Payroll Summary", icon: BarChart3 },
-  { key: "source-evidence", label: "Source Evidence", icon: FileSearch },
-  { key: "audit", label: "Audit / History", icon: History },
-];
-
+// Links to the earlier layout (?section=<key>, from bookmarks or other pages)
+// are rewritten to ?tab=<the tab that now holds that section>.
 export default function DECompliancePage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const sectionFromUrl = searchParams.get("section");
-  // Derived from the URL, so Back/Forward and selectSection stay in sync.
-  const section = sectionFromUrl || "overview";
-
-  function selectSection(key) {
-    // Push (not replace) — each section change is its own history entry.
-    setSearchParams(key === "overview" ? {} : { section: key });
+  const [searchParams] = useSearchParams();
+  const section = searchParams.get("section");
+  if (section) {
+    const tab = GERMANY_TAB_ALIASES[section] || section;
+    return <Navigate replace to={tab === "overview" ? GERMANY_PAGE : `${GERMANY_PAGE}?tab=${encodeURIComponent(tab)}`} />;
   }
-
   return (
-    <div>
-      <div className="mb-2">
-        <h1 className="text-lg font-bold text-foreground">Germany Payroll Compliance</h1>
-        <p className="text-xs text-foreground-muted">
-          Manage Germany&apos;s statutory payroll configuration — the versioned Compliance Pack (tax year), PAP, health
-          funds, contribution ceilings, PV configuration, church tax, overtime treatment, employer levies, ELStAM
-          change-list batches, ELSTER transmission, DEÜV social insurance reporting, the source evidence backing each
-          of them, and the Germany payroll summary.
-        </p>
-      </div>
-
-      <div className="mb-5 flex flex-wrap items-center gap-1 rounded-lg border border-border bg-surface-muted p-1">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.key}
-            onClick={() => selectSection(s.key)}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-              section === s.key ? "bg-surface text-primary shadow-sm" : "text-foreground-muted hover:text-foreground"
-            }`}
-          >
-            <s.icon size={13} />
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      {section === "overview" && <DEOverviewDashboard onSelectSection={selectSection} />}
-      {section === "compliance-pack" && <GermanyCompliancePackSection />}
-      {section === "pap" && <PapTab />}
-      {section === "health-funds" && <HealthFundsTab />}
-      {section === "ceilings" && <ContributionCeilingsTab />}
-      {section === "pv" && <PvConfigTab />}
-      {section === "minijob-midijob" && <MinijobMidijobParametersTab />}
-      {section === "earning-taxability" && <EarningTaxabilityTab />}
-      {section === "overtime-premium-categories" && <OvertimePremiumCategoriesTab />}
-      {section === "overtime-grundlohn-caps" && <OvertimeGrundlohnCapsTab />}
-      {section === "employer-levies" && <EmployerLeviesTab />}
-      {section === "church-tax" && <ChurchTaxTab />}
-      {section === "elstam-batches" && <ElstamBatchesTab />}
-      {section === "elster" && <ElsterTab />}
-      {section === "deuv" && <GermanyDeuvTab />}
-      {section === "payroll-summary" && (
-        // ZP-PRIV: the payroll summary aggregates one organization's payslips
-        // (tenant route /api/payroll/germany/reports/summary); not shown here.
-        <WorkerDataLocked variant="tenant" title="The payroll summary is the organization's own report" />
-      )}
-      {section === "source-evidence" && <SourceEvidenceTab />}
-      {section === "audit" && <AuditTab />}
-    </div>
+    <JurisdictionLayout
+      country="DE" countryName="Germany"
+      extraTabs={germanyExtraTabs}
+      {...germanyComplianceConfig}
+    />
   );
 }

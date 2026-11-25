@@ -665,6 +665,14 @@ export const setContributionCeilingStatus = (id, statusValue) =>
 // computes — the frontend never invents or re-derives these counts itself.
 export const getGermanyPackCompleteness = (packId, asOf) =>
   apiFetch(`/api/super-admin/compliance/germany/compliance-pack/${packId}/completeness`, { params: asOf ? { asOf } : {} });
+// Read-only views for the shared pack layout (payroll/germany_overview.py):
+// the Contributions rows (registries + engine fallback constants) and the
+// section 32a tariff zones built into the engine (not BMF-certified).
+export const getGermanyPackContributions = (packId) =>
+  apiFetch(`/api/super-admin/compliance/germany/compliance-pack/${packId}/contributions`);
+// packId (optional): marks the tariff that applies to that pack (by its tax year).
+export const getGermanyWageTaxTariff = (packId) =>
+  apiFetch("/api/super-admin/compliance/germany/wage-tax-tariff", { params: packId ? { packId } : {} });
 
 // PV configurations
 export const listPvConfigurations = (childCategory, isSaxony) =>
@@ -1175,6 +1183,10 @@ export const getBeSummary = () => apiFetch("/api/super-admin/compliance/jurisdic
 export const listBePacks = () => apiFetch(`${BE_SA}/packs`);
 export const getBeConfiguration = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/configuration`);
 export const getBeSigningStatus = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/signing-status`);
+// "Set up Belgian catalogue": the standard catalogue (approved spec values, other rows empty) into a
+// Draft pack that lacks it. Reason required; audited; never copies or invents a value.
+export const setUpBeCatalogue = (packRowId, reason) =>
+  apiFetch(`${BE_SA}/packs/${packRowId}/catalogue-setup`, { method: "POST", body: { reason } });
 export const updateBeRow = (kind, rowId, payload) =>
   apiFetch(`${BE_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
 export const seedBeDraftPack = (reason) => apiFetch(`${BE_SA}/seed-draft`, { method: "POST", body: { reason } });

@@ -14,7 +14,7 @@ docs/SINGAPORE_FINAL_IMPLEMENTATION_STATUS.md §17). No database is touched.
 
 import re
 from pathlib import Path
-from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
+from tests._mx_lifecycle_pending import CERT_RUN_PACK_COLUMNS, MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES  # noqa: E402
 
 _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy_migrate.sh"
 
@@ -96,8 +96,10 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         tables, columns = _pending_objects(stamp)
         assert MX_LIFECYCLE_TABLES <= tables
         assert {table: columns.get(table) for table in MX_LIFECYCLE_COLUMNS} == MX_LIFECYCLE_COLUMNS
+        # e4b7c2a9d1f3 (certification runs tied to a pack) is pending on top of every stamp checked here.
+        assert {table: columns.get(table) for table in CERT_RUN_PACK_COLUMNS} == CERT_RUN_PACK_COLUMNS
         return tables - MX_LIFECYCLE_TABLES, {table: value for table, value in columns.items()
-                                               if table not in MX_LIFECYCLE_COLUMNS}
+                                               if table not in MX_LIFECYCLE_COLUMNS and table not in CERT_RUN_PACK_COLUMNS}
 
     here = os.getcwd()
     os.chdir(Path(__file__).resolve().parents[1])

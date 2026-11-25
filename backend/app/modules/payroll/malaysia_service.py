@@ -153,7 +153,7 @@ def my_pack_activation_refusal(db: Session, pack, actor_id: Optional[int] = None
              .filter(ContributionRate.jurisdiction_pack_id == pack.id,
                      ContributionRate.organization_id.is_(None)).count())
     if not rates:
-        return "Malaysia pack has no statutory content - seed it from malaysia_content.py first."
+        return "This pack has no Malaysian statutory rows yet. Set up the catalogue and load values first."
     return None
 
 

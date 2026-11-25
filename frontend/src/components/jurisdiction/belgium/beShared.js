@@ -57,6 +57,12 @@ export function specProposal(label) {
   return text.slice(at + SPEC_PROPOSED.length).trim() || null;
 }
 
+// True when the pack holds no catalogue row at all (e.g. created with "New Tax"):
+// the tabs then show the catalogue set-up instead of empty tables.
+export function hasNoCatalogue(config) {
+  return Boolean(config) && Object.values(config.groups || {}).every((g) => !(g?.rows || []).length);
+}
+
 export function loadConfiguration(pack) {
   return pack ? getBeConfiguration(pack.id) : Promise.resolve(null);
 }

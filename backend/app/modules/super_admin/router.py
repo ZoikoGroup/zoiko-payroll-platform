@@ -3758,6 +3758,53 @@ def get_germany_pack_completeness(
     return result
 
 
+# ── Germany: read-only views for the shared pack layout ─────────────────────
+# The Contributions rows (registries + the engine's fallback constants, read
+# from the constants themselves) and the section 32a tariff zones read from
+# engine/jurisdictions/germany/tax.py. Read-only (payroll/germany_overview.py).
+
+@router.get(
+    "/compliance/germany/compliance-pack/{pack_id}/contributions", response_model=dict,
+    summary="Germany pack Contributions view: registry rows and engine fallback constants (read-only)",
+)
+def get_germany_pack_contributions(
+    pack_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from fastapi import HTTPException
+
+    from app.modules.payroll import germany_overview
+    from app.modules.payroll.models import JurisdictionPack
+
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_id).first()
+    if pack is None or (pack.jurisdiction_country or "").upper() != "DE":
+        raise HTTPException(status_code=404, detail="No German pack with that id.")
+    return germany_overview.germany_contribution_rows(db, pack)
+
+
+@router.get(
+    "/compliance/germany/wage-tax-tariff", response_model=dict,
+    summary="Germany section 32a wage-tax tariff zones built into the engine (read-only, not BMF-certified)",
+)
+def get_germany_wage_tax_tariff(
+    pack_id: Optional[int] = Query(None, description="Mark the tariff that applies to this German pack (by its tax year)"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from fastapi import HTTPException
+
+    from app.modules.payroll import germany_overview
+    from app.modules.payroll.models import JurisdictionPack
+
+    pack = None
+    if pack_id is not None:
+        pack = db.query(JurisdictionPack).filter(JurisdictionPack.id == pack_id).first()
+        if pack is None or (pack.jurisdiction_country or "").upper() != "DE":
+            raise HTTPException(status_code=404, detail="No German pack with that id.")
+    return germany_overview.germany_wage_tax_tariff(pack=pack)
+
+
 @router.get(
     "/compliance/germany/contribution-ceilings/{id}", response_model=GermanyContributionCeilingResponse,
     response_model_by_alias=True, summary="Get a single Germany contribution ceiling record",
@@ -5166,6 +5213,18 @@ def belgium_seed_draft(payload: dict = Body(...), current_user=Depends(get_curre
     from app.modules.payroll import be_super_admin
 
     result = be_super_admin.seed_draft(db, payload, current_user.id)
+    db.commit()
+    return result
+
+
+@router.post("/compliance/belgium/packs/{pack_row_id}/catalogue-setup",
+             summary="Set up the standard Belgian catalogue in a Draft pack that lacks it (approved spec "
+                     "values, other rows empty; reason; audited)")
+def belgium_catalogue_setup(pack_row_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
+                            db: Session = Depends(get_db)):
+    from app.modules.payroll import belgium_service
+
+    result = belgium_service.be_set_up_catalogue(db, pack_row_id, current_user.id, (payload or {}).get("reason"))
     db.commit()
     return result
 

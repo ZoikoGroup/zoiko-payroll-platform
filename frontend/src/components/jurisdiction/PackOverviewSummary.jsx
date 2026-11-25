@@ -31,8 +31,10 @@ function Flag({ ok, children }) {
 // `extraFlags` (optional): extra chips a country appends to the status row
 // (Belgium: engine certification). `stats` (optional): the four summary cards
 // [{ label, value, hint }] counted from the country's own data shape
-// (Belgium: its configuration API). Every other country passes neither.
-export default function PackOverviewSummary({ pack, refreshKey, extraFlags = null, stats = null }) {
+// (Belgium: its configuration API). `attention` (optional): extra lines for
+// the "Needs attention" box (Germany: the uncertified wage-tax warning).
+// Every other country passes none of these.
+export default function PackOverviewSummary({ pack, refreshKey, extraFlags = null, stats = null, attention = null }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
@@ -53,6 +55,7 @@ export default function PackOverviewSummary({ pack, refreshKey, extraFlags = nul
 
   const { lifecycle, contributions, taxSlabs, regions, missingMetadata, registrationBlockedReason } = data;
   const pending = contributions.pendingSignOff + taxSlabs.pendingSignOff;
+  const extraAttention = (attention || []).filter(Boolean);
 
   return (
     <div className="mb-5 space-y-4">
@@ -115,12 +118,13 @@ export default function PackOverviewSummary({ pack, refreshKey, extraFlags = nul
         </div>
       </div>
 
-      {(pending > 0 || missingMetadata.length > 0 || registrationBlockedReason) && (
-        <div className="space-y-1.5 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-xs text-warning">
+      {(pending > 0 || missingMetadata.length > 0 || registrationBlockedReason || extraAttention.length > 0) && (
+        <div className="space-y-1.5 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-xs text-warning" data-testid="pack-needs-attention">
           <p className="flex items-center gap-1.5 font-semibold"><FileWarning size={13} aria-hidden="true" /> Needs attention</p>
           {pending > 0 && <p>{pending} value{pending === 1 ? "" : "s"} still awaiting sign-off from an authoritative source.</p>}
           {missingMetadata.length > 0 && <p>Not filled in: {missingMetadata.join(", ")}.</p>}
           {registrationBlockedReason && <p>Organisations cannot register for this country yet: {registrationBlockedReason}</p>}
+          {extraAttention.map((line) => <p key={line} className="font-semibold">{line}</p>)}
         </div>
       )}
     </div>

@@ -4,10 +4,11 @@ import { retireBeSlabRow } from "../../../service/superAdminService";
 import { useLoad } from "../japan/jpFormat";
 import { ErrorNote } from "../new_zealand/nzShared";
 import { ContributionRatesTable, PackTableHeader, TaxSlabsTable } from "../PackRowTables";
+import BECatalogueNotice from "./BECatalogueNotice";
 import BEEmptyRows from "./BEEmptyRows";
 import BERowEditor from "./BERowEditor";
 import { AddRowForm } from "./BESlabRowsSection";
-import { TAB_GROUPS, cleanLabel, isDraftPack, isEditablePack, loadConfiguration, slabRowsFor } from "./beShared";
+import { TAB_GROUPS, cleanLabel, hasNoCatalogue, isDraftPack, isEditablePack, loadConfiguration, slabRowsFor } from "./beShared";
 
 // Belgium "Contribution Rates" and "Tax Slabs" tabs, in the same tables every
 // other country uses (PackRowTables.jsx). Rows come from the Belgium
@@ -168,6 +169,7 @@ function Loading({ error, loading, config }) {
 function RatesLoaded({ pack, onImport }) {
   const [config, error, loading, reload] = useConfiguration(pack);
   if (error || !config) return <Loading error={error} loading={loading} config={config} />;
+  if (hasNoCatalogue(config)) return <BECatalogueNotice pack={pack} onDone={reload} />;
   const groups = [...TAB_GROUPS.onssEmployee, ...TAB_GROUPS.onssEmployer];
   const bands = slabKeys(config, groups);
   return (
@@ -186,6 +188,7 @@ function RatesLoaded({ pack, onImport }) {
 function SlabsLoaded({ pack, onImport }) {
   const [config, error, loading, reload] = useConfiguration(pack);
   if (error || !config) return <Loading error={error} loading={loading} config={config} />;
+  if (hasNoCatalogue(config)) return <BECatalogueNotice pack={pack} onDone={reload} />;
   const groups = TAB_GROUPS.withholding;
   const bands = slabKeys(config, groups);
   const parameters = scalarSections(config, groups);

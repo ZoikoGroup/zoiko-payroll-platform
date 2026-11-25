@@ -381,6 +381,10 @@ def signing_status(db: Session, pack_row_id: int) -> dict:
             "reviewClasses": sum(1 for s in slabs if s.rule_type == content.EARNING_CLASS_RULE
                                  and s.assessment_basis == "REVIEW"),
             "editors": sorted(statutory_editors(db, pack)),
+            # How many catalogue keys the pack holds (a pack created empty holds none:
+            # the Readiness tab then offers the catalogue set-up instead).
+            "catalogue": {"rows": sum(1 for r in rates if r.component_key in content.KEYS),
+                          "keys": len(content.KEYS)},
             "activationRefusal": bes.be_pack_activation_refusal(db, pack)}
 
 

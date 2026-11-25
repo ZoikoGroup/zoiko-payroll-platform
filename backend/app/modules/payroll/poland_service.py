@@ -163,7 +163,7 @@ def pl_pack_activation_refusal(db: Session, pack, actor_id: Optional[int] = None
              .filter(ContributionRate.jurisdiction_pack_id == pack.id,
                      ContributionRate.organization_id.is_(None)).count())
     if not rates:
-        return "Poland pack has no statutory content - seed it from poland_content.py first."
+        return "This pack has no Polish statutory rows yet. Set up the catalogue and load values first."
     slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
                                       TaxSlab.organization_id.is_(None)).all())
     if not any(s.rule_type == "PL_PIT_BAND" for s in slabs):
