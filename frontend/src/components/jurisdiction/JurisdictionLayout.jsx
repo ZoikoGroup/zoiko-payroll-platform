@@ -57,7 +57,7 @@ const NOOP = () => {};
 
 const BASE_TABS = [
   { key: "overview", label: "Overview", icon: ShieldCheck },
-  { key: "rates", label: "Contribution Rates", icon: ScrollText },
+  { key: "rates", label: "Contributions", icon: ScrollText },
   { key: "slabs", label: "Tax Slabs", icon: ScrollText },
   { key: "organizations", label: "Organizations", icon: Users },
   { key: "versions", label: "Versions", icon: History },
@@ -104,12 +104,6 @@ export default function JurisdictionLayout({
   // Opt-in: { oldKey: newKey } for tab keys a country renamed or merged, so a
   // request for an old key (onNavigateTab) lands on its replacement.
   tabAliases = null,
-  // Opt-in (Belgium, with adaptiveTabs): below 1760px the pack list becomes a
-  // row of pack chips above the detail panel and the tab row drops its icons,
-  // so a long core tab set stays on one row from 1280px. From 1760px (where
-  // the side column plus icons fits) the layout is the usual side column. Off by default — every other country's
-  // layout is unchanged.
-  compactUntilWide = false,
 }) {
   const { addToast } = useToast() || {};
   const navigate = useNavigate();
@@ -348,18 +342,18 @@ export default function JurisdictionLayout({
         </button>
       </div>
 
-      <div className={compactUntilWide ? "grid grid-cols-1 gap-4 min-[1760px]:grid-cols-[280px_1fr]" : "grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]"}>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[240px_1fr]">
         <div className="rounded-xl border border-border bg-surface p-2">
           {loadingPacks ? (
             <p className="py-8 text-center text-xs text-foreground-disabled">Loading…</p>
           ) : packs.length === 0 ? (
             <p className="py-8 text-center text-xs text-foreground-disabled">No {packType} packs for this jurisdiction yet.</p>
           ) : (
-            <div className={compactUntilWide ? "flex flex-wrap gap-1 min-[1760px]:block min-[1760px]:space-y-1" : "space-y-1"}>
+            <div className="space-y-1">
               {packs.map((p) => (
                 <button
                   key={p.id} onClick={() => setSelectedPack(p)}
-                  className={`flex ${compactUntilWide ? "w-auto min-[1760px]:w-full" : "w-full"} flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left text-xs ${
+                  className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left text-xs ${
                     selectedPack?.id === p.id ? "bg-primary/10 text-primary" : "text-foreground-secondary hover:bg-surface-muted"
                   }`}
                 >
@@ -509,7 +503,7 @@ export default function JurisdictionLayout({
               </div>
 
               <PackTabBar
-                tabs={tabs} overflowTabs={overflowTabs} adaptive={adaptiveTabs} iconsWhenWide={compactUntilWide}
+                tabs={tabs} overflowTabs={overflowTabs} adaptive={adaptiveTabs}
                 activeKey={tab} onSelect={setTab} labelFor={tabLabel}
               />
 

@@ -75,6 +75,21 @@ check("rate form converts on load and save with the same unit flag",
   && rateForm.includes("window.confirm("));
 check("fraction country list", ["PR", "BS", "BB", "KY", "DO", "GY", "JM"].join() === c.FRACTION_RATE_COUNTRIES.join());
 
+// Tax year vs. dates: the form's rule against the SAME case table the backend
+// test uses (backend/tests/data/tax_year_cases.json), so server and form agree.
+const ty = await import(pathToFileURL(resolve(SRC, "components/jurisdiction/taxYear.js")).href);
+const tyCases = JSON.parse(readFileSync(resolve(SRC, "..", "..", "backend", "tests", "data", "tax_year_cases.json"), "utf-8")).cases;
+const tyWrong = tyCases.filter((k) => (ty.taxYearDateProblem(k.taxYear, k.from, k.to) === null) !== k.ok);
+check(`tax year rule matches the shared backend case table (${tyCases.length} cases)`, tyCases.length >= 20 && tyWrong.length === 0);
+check("tax year message names the fix", ty.taxYearDateProblem("2027-2028", "2027-01-01", "2027-12-31")
+  === `Tax year "2027-2028" spans two years, but this pack's dates (2027-01-01 → 2027-12-31) fall within 2027. Use the single year 2027.`);
+for (const modal of ["NewPackModal", "EditOverviewModal"]) {
+  const src = read(`components/jurisdiction/${modal}.jsx`);
+  check(`${modal}: shows the tax-year problem and blocks saving`, src.includes("taxYearDateProblem(form.taxYear, form.effectiveFrom, form.effectiveTo)")
+    && src.includes('data-testid="tax-year-problem"') && src.includes("disabled={saving || Boolean(taxYearProblem)}"));
+}
+check("EditOverviewModal checks only when the tax year or a date changed",
+  read("components/jurisdiction/EditOverviewModal.jsx").includes("datesOrYearChanged ? taxYearDateProblem("));
 const layout = read("components/jurisdiction/JurisdictionLayout.jsx");
 const modal = read("components/jurisdiction/NewPackModal.jsx");
 const landing = read("pages/CompliancePage.jsx");

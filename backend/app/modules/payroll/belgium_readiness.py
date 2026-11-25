@@ -50,6 +50,32 @@ SECURITY_TAGS = ("BE-SIGNOFF-SECURITY", "BE-SIGNOFF-PRIVACY")
 OWNER_TAGS = tuple(f"BE-OWNER-{o}" for o in ("CONTENT", "PAYROLL-OPS", "INCIDENT", "CHANGE-CALENDAR", "SPECIALIST"))
 
 
+# Who acts on a failing check — shown on the Release Readiness tab as Done /
+# Missing / Who acts. "code" = engineering work; "data" = content or
+# configuration someone must supply (rows, schemas, launch employers, keys);
+# "sign-off" = a human approval or accepted evidence (signing, certification,
+# owner / security sign-offs). Keys not listed: evidence tags are sign-offs.
+CHECK_ACTORS = {
+    "pack_seeded": "data", "catalogue_complete": "data", "no_pending_rows": "sign-off",
+    "authority_examples_match": "data", "golden_certification": "sign-off",
+    "launch_employers_named": "data", "sector_coverage": "data", "no_special_regimes": "data",
+    "transmission_adapter": "code",
+    "parallel_cycles": "data",
+    "accepted_dimona": "data", "accepted_dmfa": "data", "reconciled_obligation": "data",
+    "be_identifier_keyring": "data", "be_identifier_fingerprint_key": "data",
+    "retention_decided": "sign-off",
+}
+ACTORS = ("code", "data", "sign-off")
+
+
+def check_actor(key: str) -> str:
+    if key in CHECK_ACTORS:
+        return CHECK_ACTORS[key]
+    if key.startswith("schema_"):
+        return "data"                 # an authority schema to archive
+    return "sign-off"                 # an evidence tag (BE-CONNECTIVITY-*, BE-SIGNOFF-*, BE-OWNER-*, ...)
+
+
 def _be_canonical_pack(db: Session):
     from app.modules.payroll.models import JurisdictionPack
 
@@ -87,16 +113,25 @@ def _be_g1(db, pack, add):
     add("pack_seeded", pack is not None, f"{pack.pack_id} {pack.version} ({pack.status})" if pack
         else "no canonical Belgium pack is seeded")
     if pack is None:
-        for key in ("no_pending_rows", "authority_examples_match", "golden_certification"):
+        for key in ("catalogue_complete", "no_pending_rows", "authority_examples_match", "golden_certification"):
             add(key, False, "no pack")
         return
-    pending = ([r.component_key for r in db.query(ContributionRate).filter(
-        ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))
-        if content.PENDING_MARK in (r.label or "")]
-        + [s.rule_type for s in db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
-                                                         TaxSlab.organization_id.is_(None))
-           if content.PENDING_MARK in (s.rate_label or "")])
-    add("no_pending_rows", not pending, f"{len(pending)} row(s) PENDING G1" if pending else "every row signed")
+    rates = db.query(ContributionRate).filter(
+        ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None)).all()
+    # An empty (or partly seeded) pack has nothing pending — that must not read
+    # as "every row signed": the catalogue itself has to be present first.
+    missing = sorted(set(content.KEYS) - {r.component_key for r in rates})
+    add("catalogue_complete", not missing,
+        "every catalogue key has a row" if not missing else
+        f"{len(missing)} of {len(content.KEYS)} catalogue row(s) missing (e.g. {', '.join(missing[:5])})")
+    pending = ([r.component_key for r in rates if content.PENDING_MARK in (r.label or "")]
+               + [s.rule_type for s in db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                                                TaxSlab.organization_id.is_(None))
+                  if content.PENDING_MARK in (s.rate_label or "")])
+    if not rates:
+        add("no_pending_rows", False, "no catalogue rows to sign")
+    else:
+        add("no_pending_rows", not pending, f"{len(pending)} row(s) PENDING G1" if pending else "every row signed")
     golden = belgium_golden.be_golden_check(db, pack)
     bad = sum(1 for r in golden["results"] if not r["ok"])
     add("authority_examples_match", golden["passed"],
@@ -192,7 +227,7 @@ def be_code_checks(db: Session) -> dict:
 
     def adder(gate):
         def add(key, ok, detail):
-            checks[gate].append({"key": key, "ok": bool(ok), "detail": detail})
+            checks[gate].append({"key": key, "ok": bool(ok), "detail": detail, "actor": check_actor(key)})
         return add
 
     pack = _be_canonical_pack(db)

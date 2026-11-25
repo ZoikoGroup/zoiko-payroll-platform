@@ -112,3 +112,18 @@ special contribution (B2 code 855: 1.60 % + 0.09 %) — key `be_onss_special_160
   additional_compensation) and POLICY_ALLOWANCE (allowance key) to the BE component vocabulary.
 - (Block B) G-22: no salaried-vs-hourly field exists on payroll_employees (only HK's hk_pay_basis), so
   pay_basis was added to payroll_be_worker_profiles.
+
+## Future items (recorded 2026-11-24, not built)
+
+- **BE-SIGNED-STATUS — signed state as a real field.** A Belgian row's signed / unsigned state is stored
+  as the `[PENDING G1]` marker inside its label (`ContributionRate.label`, `TaxSlab.rate_label`; present =
+  unsigned). Every reader relies on it: the signing console, the activation gate, readiness G1, the
+  new-version clone (which re-adds the marker to copied rows) and the Overview counts. It should become a
+  real status field (e.g. `signed_by_id`, `signed_at`, `status`) with a migration that converts the
+  marker. Tagged `TODO(BE-SIGNED-STATUS)` in `belgium_content.py`. Not changed now.
+- **Copy rows from a previous pack.** "New Version" copies rows only within the same pack ID
+  (BE-PAYROLL-2026 v1.0 -> v1.1). Creating a new pack ID (e.g. a 2027 pack) starts empty; copying from a
+  previous pack (as unsigned rows, like a new version) is a future item.
+- **Read-only inventory.** `scripts/readonly/be_pack_inventory.sql` (SELECTs only) lists what each
+  Belgian pack holds: rows per catalogue group, signed vs pending, with a value / source, slab rows per key.
+

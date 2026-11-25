@@ -3,6 +3,7 @@ import Modal from "../Modal";
 import { useToast } from "../../context/ToastContext";
 import { upsertCompliancePolicy, getSourceArtifacts } from "../../service/superAdminService";
 import { inputClass, labelClass } from "./constants";
+import { taxYearDateProblem } from "./taxYear";
 
 // Tax packs' Overview tab was read-only — no way to fix a typo in
 // Regulatory Authority, correct the Tax Year, etc. after creation without
@@ -33,7 +34,17 @@ export default function EditOverviewModal({ pack, onClose, onSaved }) {
   }, []);
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
+  // Same rule as the server: checked only when the tax year or a date is
+  // changed here — an existing value is never flagged on an unrelated edit.
+  const datesOrYearChanged = (form.taxYear || "") !== (pack.taxYear || "")
+    || (form.effectiveFrom || "") !== (pack.effectiveFrom || "") || (form.effectiveTo || "") !== (pack.effectiveTo || "");
+  const taxYearProblem = datesOrYearChanged ? taxYearDateProblem(form.taxYear, form.effectiveFrom, form.effectiveTo) : null;
+
   async function save() {
+    if (taxYearProblem) {
+      addToast?.(taxYearProblem, "error");
+      return;
+    }
     setSaving(true);
     try {
       const updated = await upsertCompliancePolicy({
@@ -60,7 +71,12 @@ export default function EditOverviewModal({ pack, onClose, onSaved }) {
   return (
     <Modal title={`Edit ${pack.packId} — Overview`} onClose={onClose} maxWidth="max-w-2xl">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div><label className={labelClass}>Tax Year</label><input className={inputClass} value={form.taxYear} onChange={set("taxYear")} placeholder="2026-27" /></div>
+        <div>
+          <label className={labelClass} htmlFor="pack-tax-year">Tax Year</label>
+          <input id="pack-tax-year" className={inputClass} value={form.taxYear} onChange={set("taxYear")} placeholder="2026 or 2026-27"
+            aria-invalid={taxYearProblem ? true : undefined} aria-describedby={taxYearProblem ? "pack-tax-year-problem" : undefined} />
+          {taxYearProblem && <p id="pack-tax-year-problem" role="alert" data-testid="tax-year-problem" className="mt-1 text-[11px] text-error">{taxYearProblem}</p>}
+        </div>
         <div><label className={labelClass}>Tax Regime</label><input className={inputClass} value={form.taxRegime} onChange={set("taxRegime")} placeholder="Old / New" /></div>
         <div><label className={labelClass}>Currency</label><input className={inputClass} value={form.currency} onChange={set("currency")} placeholder="INR" /></div>
         <div><label className={labelClass}>Effective From</label><input type="date" className={inputClass} value={form.effectiveFrom} onChange={set("effectiveFrom")} /></div>
@@ -87,7 +103,7 @@ export default function EditOverviewModal({ pack, onClose, onSaved }) {
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm text-foreground-secondary hover:bg-surface-muted">Cancel</button>
-        <button onClick={save} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+        <button onClick={save} disabled={saving || Boolean(taxYearProblem)} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
       </div>
     </Modal>
   );

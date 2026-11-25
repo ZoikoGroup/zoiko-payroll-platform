@@ -25,12 +25,32 @@ function GateBadge({ met }) {
   );
 }
 
+// Who acts on a check, as the backend classifies it (belgium_readiness.check_actor):
+// "code" = engineering work, "data" = content / configuration someone supplies,
+// "sign-off" = a human approval or accepted evidence.
+const ACTOR_LABEL = { code: "Code", data: "Data", "sign-off": "Sign-off" };
+const ACTOR_TONE = {
+  code: "border-info/40 bg-info/10 text-info",
+  data: "border-warning/40 bg-warning/10 text-warning",
+  "sign-off": "border-primary/40 bg-primary/10 text-primary",
+};
+
+function ActorBadge({ actor }) {
+  if (!actor) return null;
+  return (
+    <span className={`mr-1.5 inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold ${ACTOR_TONE[actor] || "border-border"}`}
+      data-testid="be-check-actor">{ACTOR_LABEL[actor] || actor}</span>
+  );
+}
+
 function checkSummary(checks) {
   if (!checks.length) return "No checks reported.";
-  const passing = checks.filter((c) => c.ok).length;
-  if (passing === checks.length) return `All ${checks.length} checks pass.`;
-  const open = checks.length - passing;
-  return `${passing} of ${checks.length} checks pass · ${open} item${open === 1 ? "" : "s"} outstanding.`;
+  const missing = checks.filter((c) => !c.ok);
+  if (!missing.length) return `Done — all ${checks.length} checks pass.`;
+  const by = {};
+  for (const c of missing) by[c.actor || "other"] = (by[c.actor || "other"] || 0) + 1;
+  const parts = Object.entries(by).map(([a, n]) => `${n} ${(ACTOR_LABEL[a] || a).toLowerCase()}`);
+  return `${checks.length - missing.length} of ${checks.length} done · missing: ${parts.join(", ")}.`;
 }
 
 function GateCard({ gate, met, detail, evidence, onChange }) {
@@ -45,19 +65,26 @@ function GateCard({ gate, met, detail, evidence, onChange }) {
       summary={checkSummary(checks)}
     >
       <div className="space-y-3 text-[12px]">
+        {detail?.owner && (
+          <p className="text-foreground-secondary" data-testid="be-gate-owner">
+            <span className="font-semibold text-foreground">Who acts:</span> {detail.owner}
+          </p>
+        )}
         {failing.length > 0 && (
           <div>
-            <p className="mb-1 font-semibold text-foreground">Outstanding</p>
-            <ul className="list-disc space-y-1 pl-5 text-foreground-secondary" data-testid="be-gate-details">
-              {failing.map((c, i) => <li key={`f${i}`} className="break-words">{c.detail}</li>)}
+            <p className="mb-1 font-semibold text-foreground">Missing</p>
+            <ul className="space-y-1 text-foreground-secondary" data-testid="be-gate-details">
+              {failing.map((c, i) => (
+                <li key={`f${i}`} className="break-words"><ActorBadge actor={c.actor} />{c.detail}</li>
+              ))}
             </ul>
           </div>
         )}
         {passing.length > 0 && (
           <div>
-            <p className="mb-1 font-semibold text-foreground">Passing</p>
-            <ul className="list-disc space-y-1 pl-5 text-success">
-              {passing.map((c, i) => <li key={`p${i}`} className="break-words">{c.detail}</li>)}
+            <p className="mb-1 font-semibold text-foreground">Done</p>
+            <ul className="space-y-1 text-success" data-testid="be-gate-done">
+              {passing.map((c, i) => <li key={`p${i}`} className="break-words">✓ {c.detail}</li>)}
             </ul>
           </div>
         )}

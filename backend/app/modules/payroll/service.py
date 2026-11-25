@@ -787,6 +787,20 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         raise BadRequestException(
             "Effective To date cannot be before Effective From date — this pack would never resolve for any calculation."
         )
+    # Tax year vs. dates (tax_year_rules, generic and date-based): checked on
+    # create, and on an edit only when the tax year or a date changes — an
+    # existing record is never refused for a value it already holds.
+    from app.modules.payroll import tax_year_rules
+
+    sent_fields = data.model_fields_set
+    tax_year = data.taxYear if not existing or "taxYear" in sent_fields else existing.tax_year
+    if not existing or any(
+            name in sent_fields and getattr(data, name) != getattr(existing, column)
+            for name, column in (("taxYear", "tax_year"), ("effectiveFrom", "effective_from"),
+                                 ("effectiveTo", "effective_to"))):
+        refusal = tax_year_rules.tax_year_date_refusal(tax_year, eff_from, eff_to)
+        if refusal:
+            raise BadRequestException(refusal)
     # Real bypass this closes: set_jurisdiction_pack_status's overlap
     # guard, inverted-date guard, and distinct-approver maker-checker gate
     # (below) only ever run when THAT function is the one making a pack
@@ -898,6 +912,13 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
         # which would just push Super Admins back toward editing Active
         # packs in place — defeating the guard's purpose.
         _clone_pack_rates(db, source_pack_id=(base or previous).id, target_pack_id=row.id)
+        if row.jurisdiction_country == "BE":
+            # Belgium's signed state lives in the row label ("[PENDING G1]"), which
+            # the clone copies: a new version's rows start UNSIGNED and are signed
+            # again through the governed console (ZP-BE-ENG-001 §17).
+            from app.modules.payroll import belgium_service
+
+            belgium_service.be_mark_version_rows_unsigned(db, row, actor_id)
     record_tax_audit(
         db, actor_id=actor_id, action="create", entity_type="jurisdiction_pack", entity_id=row.id,
         jurisdiction_pack_id=row.id, tax_version=row.version, legal_reference=row.source_references,
