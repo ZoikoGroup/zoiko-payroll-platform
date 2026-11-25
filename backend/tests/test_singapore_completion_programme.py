@@ -94,6 +94,10 @@ def test_sg_pack_review_stages_move_freely_and_carry_the_reason(db):
     pack = _raw_pack(db, "SG", "Draft")
     for target in ("In Review", "QA", "Draft", "Approved", "In Review"):
         assert service.set_jurisdiction_pack_status(db, pack.id, target, actor_id=A, reason=f"to {target}").status == target
+        if target == "In Review" and pack.approved_by_id is None:
+            # Approved only once an approver is recorded through the Approve action (every
+            # country, 2026-11-25); approving while In Review keeps the status.
+            service.set_jurisdiction_pack_approver(db, pack.id, actor_id=B)
     changes = _audits(db, "jurisdiction_pack", pack.id, "status_change")
     assert [c.reason for c in changes] == ["to In Review", "to QA", "to Draft", "to Approved", "to In Review"]
 

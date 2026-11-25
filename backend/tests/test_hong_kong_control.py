@@ -282,8 +282,14 @@ def test_one_version_through_the_whole_lifecycle_with_every_gate(db, hk):
     for status in ("In Review", "QA"):
         service.set_jurisdiction_pack_status(db, draft.id, status, actor_id=SA_A.id)
         assert db.get(JurisdictionPack, draft.id).status == status
-    service.set_jurisdiction_pack_status(db, draft.id, "Approved", actor_id=SA_A.id)
+    # Approved only through the Approve action (every country, 2026-11-25): the status
+    # list refuses it while no approver is recorded ...
+    with pytest.raises(BadRequestException, match="use the Approve button"):
+        service.set_jurisdiction_pack_status(db, draft.id, "Approved", actor_id=SA_A.id)
+    db.rollback()
     service.set_jurisdiction_pack_approver(db, draft.id, actor_id=SA_B.id)            # approver ≠ maker, last step
+    service.set_jurisdiction_pack_status(db, draft.id, "Approved", actor_id=SA_A.id)   # ... and allows it once recorded
+    assert db.get(JurisdictionPack, draft.id).status == "Approved"
     with pytest.raises(BadRequestException, match="overlap"):                          # never two in force
         service.set_jurisdiction_pack_status(db, draft.id, "Active", actor_id=SA_A.id)
     db.rollback()

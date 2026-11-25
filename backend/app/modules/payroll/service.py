@@ -817,6 +817,16 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
             "Activate action, which enforces the overlap/date/maker-checker checks "
             "set_jurisdiction_pack_status requires before any pack goes live."
         )
+    # Every country (2026-11-25): nor approved through a plain create / edit. A
+    # pack becomes Approved only through the Approve action (recorded approver,
+    # four-eyes, country checks); an edit that keeps an Approved pack's status
+    # unchanged is still allowed (and clears the approval, below).
+    if (data.packType == "tax" and data.status == "Approved"
+            and (existing is None or ("status" in data.model_fields_set and existing.status != "Approved"))):
+        raise BadRequestException(
+            "A tax pack cannot be set to Approved through create or edit — use the Approve button: approval "
+            "records the approver and runs the four-eyes and country checks."
+        )
     if existing:
         # A tax pack's own metadata (effective_from/to, tax_year, ...) is
         # part of what makes a published release resolvable for a given
@@ -9219,6 +9229,18 @@ def _set_jurisdiction_pack_status(
                 + (f"allowed: {', '.join(allowed)}." if allowed else
                    f"{row.status} is final; create a new pack version instead.")
             )
+
+    # Every country (2026-11-25): a tax pack becomes Approved only through the
+    # Approve action (set_jurisdiction_pack_approver), which records the approver
+    # and runs self-approval / four-eyes / the country's own approval checks.
+    # The status dropdown used to set "Approved" with no approver and none of
+    # those checks. A pack whose approver is already recorded may still move to
+    # Approved here (e.g. In Review -> Approve -> Approved).
+    if status == "Approved" and row.pack_type == "tax" and row.status != "Approved" and row.approved_by_id is None:
+        raise BadRequestException(
+            f"Pack {row.pack_id} v{row.version} cannot be set to Approved from the status list — use the Approve "
+            "button: approval records the approver and runs the four-eyes and country checks."
+        )
 
     if status == "Active" and row.pack_type == "tax":
         # No source artifact / no effective date -> cannot publish
