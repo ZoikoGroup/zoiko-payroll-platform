@@ -3768,8 +3768,16 @@ class TestCertificationRun(Base):
 
     failure_details   = Column(JSON, nullable=True)  # [{"case": "...", "field": "...", "expected": ..., "actual": ...}, ...]
 
+    # The pack a run certified and a SHA-256 fingerprint of that pack's content
+    # at run time (Belgium: belgium_golden.be_pack_fingerprint). A run counts
+    # only for the SAME pack while the fingerprint still matches; NULL (every
+    # run recorded before this existed) counts for no pack. Migration e4b7c2a9d1f3.
+    jurisdiction_pack_id = Column(Integer, ForeignKey("payroll_jurisdiction_packs.id"), nullable=True)
+    content_fingerprint  = Column(String(64), nullable=True)
+
     __table_args__ = (
         Index("ix_test_cert_run_at", "run_at"),
+        Index("ix_test_cert_run_pack", "jurisdiction_pack_id"),
     )
 
     def __repr__(self):

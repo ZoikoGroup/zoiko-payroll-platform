@@ -9,3 +9,7 @@ MX_LIFECYCLE_COLUMNS = {
                                   "cancel_outcome", "employer_profile_id"},
     "payroll_mx_cfdi_schema_releases": {"effective_from", "effective_to"},
 }
+
+# Migration e4b7c2a9d1f3 (certification runs tied to a pack): the pack a run
+# certified and its content fingerprint - pending on top of every earlier stamp.
+CERT_RUN_PACK_COLUMNS = {"payroll_test_certification_runs": {"jurisdiction_pack_id", "content_fingerprint"}}

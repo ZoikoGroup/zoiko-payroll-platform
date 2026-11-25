@@ -192,9 +192,9 @@ def _be_g1(db, pack, add, why: str = ""):
     add("authority_examples_match", golden["passed"],
         f"{golden['examples']} example(s); " + ("all replay exactly" if golden["passed"] else
                                                 "none registered" if not golden["examples"] else f"{bad} do not"))
-    run = belgium_golden.be_latest_certification(db)
-    add("golden_certification", bool(run and run.status == "PASS"),
-        f"latest BE certification run: {getattr(run, 'status', 'none')}")
+    run, why = belgium_golden.be_certification_for(db, pack)
+    add("golden_certification", why is None,
+        why or f"certification run #{run.id} PASS for {pack.pack_id} v{pack.version}, content unchanged since")
 
 
 def _be_g2(db, launch, add):

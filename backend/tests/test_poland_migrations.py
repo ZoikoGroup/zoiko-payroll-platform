@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._mx_lifecycle_pending import MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES
+from tests._mx_lifecycle_pending import CERT_RUN_PACK_COLUMNS, MX_LIFECYCLE_COLUMNS, MX_LIFECYCLE_TABLES
 import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
@@ -229,6 +229,7 @@ def test_deploy_drift_filter_explains_every_pl_object():
     my_be_shared = {"payslip_items": {"my_calculation_snapshot", "be_calculation_snapshot", "ae_calculation_snapshot", "template_version_id"},
                     "payroll_runs": {"my_approval_fingerprint", "be_approval_fingerprint"}}  # + MY P2, BE P2
     assert {t: columns.pop(t, None) for t in MX_LIFECYCLE_COLUMNS} == MX_LIFECYCLE_COLUMNS
+    assert {t: columns.pop(t, None) for t in CERT_RUN_PACK_COLUMNS} == CERT_RUN_PACK_COLUMNS  # + e4b7c2a9d1f3
     assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
     # Malaysia P2 / Belgium P2 shared columns, payslip templates and Mexico m21 on the same chain.
     assert columns == {**{t: SHARED[t] | my_be_shared[t] for t in SHARED}, **MX_M21}

@@ -120,7 +120,10 @@ def test_deploy_drift_filter_explains_the_column():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
+    from tests._mx_lifecycle_pending import CERT_RUN_PACK_COLUMNS
+
     assert tables == set()
+    assert {t: columns.pop(t, None) for t in CERT_RUN_PACK_COLUMNS} == CERT_RUN_PACK_COLUMNS  # + e4b7c2a9d1f3
     assert columns == {"payslip_items": {COLUMN}}
 
 
@@ -138,7 +141,7 @@ def test_single_head():
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert list(script.get_heads()) == ["b5f3e8a1c6d9"]   # merge of REVISION + d7a3f1c9e5b2
+    assert list(script.get_heads()) == ["e4b7c2a9d1f3"]   # on merge b5f3e8a1c6d9 (REVISION + d7a3f1c9e5b2)
     assert set(script.get_revision("b5f3e8a1c6d9").down_revision) == {REVISION, "d7a3f1c9e5b2"}
 
 
