@@ -185,6 +185,103 @@ def _be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[st
     return be_pack_activation_refusal(db, pack, actor_id)
 
 
+# ── 5b. review / approval refusals (2026-11-25, owner decision) ──────────────
+# A Belgian pack may not move to QA, In Review or Approved while any catalogue
+# key is missing, and may not be approved (Approve action, or Approved on the
+# status list) until every catalogue row is valued, sourced and signed. Stricter
+# only; a pack's current status is never changed retroactively.
+BE_REVIEW_STATUSES = ("QA", "In Review", "Approved")
+BE_NO_CATALOGUE = "This pack has no Belgian statutory rows yet. Set up the catalogue and load values first."
+
+
+def be_catalogue_refusal(db: Session, pack) -> Optional[str]:
+    """Why the pack's catalogue is not complete (any catalogue key absent), or None.
+    `pack` None (a pack being created) has no rows."""
+    from app.modules.payroll.models import ContributionRate
+
+    content = _content()
+    have = set() if pack is None or getattr(pack, "id", None) is None else {
+        k for (k,) in db.query(ContributionRate.component_key).filter(
+            ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))}
+    missing = [k for k in content.KEYS if k not in have]
+    if not missing:
+        return None
+    if len(missing) == len(content.KEYS):
+        return BE_NO_CATALOGUE
+    return (f"This pack is missing {len(missing)} of {len(content.KEYS)} Belgian statutory rows. "
+            "Set up the catalogue and load values first.")
+
+
+def be_approval_content_refusal(db: Session, pack) -> Optional[str]:
+    """Why the pack cannot be approved yet, or None: the catalogue must be
+    complete and every row valued, sourced and signed (the same row rules as
+    gate G1 at activation, without the certification run and the activator
+    check). Each problem is counted on its own, e.g. "12 rows empty, 40 unsigned"."""
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    refusal = be_catalogue_refusal(db, pack)
+    if refusal:
+        return refusal
+    content = _content()
+    rates = {r.component_key: r for r in db.query(ContributionRate).filter(
+        ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))}
+    slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None)).all()
+    empty = unsigned = unsourced = slab_keys = 0
+    for key, (_group, kind, _ref, _label) in content.KEYS.items():
+        row = rates[key]
+        empty += _row_empty(row, kind)
+        unsigned += content.PENDING_MARK in (row.label or "")
+        unsourced += row.source_document_id is None
+        if kind in content.SLAB_KINDS and (row.text_value or "").upper() == content.SLAB_ROWS:
+            mine = [s for s in slabs if s.rule_type == content.RULE_TYPES[key]]
+            slab_keys += (not mine or any(content.PENDING_MARK in (s.rate_label or "") for s in mine))
+    classes = [s for s in slabs if s.rule_type == content.EARNING_CLASS_RULE]
+    classes_unsigned = sum(1 for s in classes if content.PENDING_MARK in (s.rate_label or ""))
+    parts = [text for n, text in (
+        (empty, f"{empty} rows empty"), (unsigned, f"{unsigned} unsigned"), (unsourced, f"{unsourced} without a source"),
+        (slab_keys, f"{slab_keys} band / formula / table keys with rows missing or unsigned"),
+        (classes_unsigned, f"{classes_unsigned} earning classifications unsigned")) if n]
+    if not classes:
+        parts.append("no earning classifications")
+    if not parts:
+        return None
+    return (f"This pack cannot be approved yet: {', '.join(parts)}. "
+            "Every Belgian statutory row must be valued, sourced and signed first.")
+
+
+def be_pack_status_refusal(db: Session, pack, status: str) -> Optional[str]:
+    """The Belgian check for a move to `status` (QA / In Review / Approved), or None."""
+    if status not in BE_REVIEW_STATUSES:
+        return None
+    if status == "Approved":
+        return be_approval_content_refusal(db, pack)
+    return be_catalogue_refusal(db, pack)
+
+
+def _be_tax_pack(pack) -> bool:
+    return (getattr(pack, "jurisdiction_country", None) or "").upper() == BE and getattr(pack, "pack_type", None) == "tax"
+
+
+def _be_before_pack_status(db: Session, pack, status: str, actor_id: Optional[int] = None) -> None:
+    """Status list (PUT .../status): refuse QA / In Review / Approved per be_pack_status_refusal.
+    The shared wrapper audits the refusal."""
+    if _be_tax_pack(pack) and status != pack.status:
+        refusal = be_pack_status_refusal(db, pack, status)
+        if refusal:
+            raise BadRequestException(refusal)
+
+
+def _be_pack_approval_refusal(db: Session, pack, actor_id: Optional[int] = None) -> Optional[str]:
+    """Approve action (PUT .../approve): complete catalogue, every row valued, sourced and signed."""
+    return be_approval_content_refusal(db, pack) if _be_tax_pack(pack) else None
+
+
+def _be_pack_upsert_status_refusal(db: Session, pack, status: str) -> Optional[str]:
+    """Create / edit setting a review status (QA / In Review): the same catalogue check.
+    `pack` is None for a pack being created."""
+    return be_pack_status_refusal(db, pack, status)
+
+
 def _with_pending_mark(label: Optional[str], width: int) -> str:
     """`label` ending in the "[PENDING G1]" marker, the marker never truncated."""
     mark = _content().PENDING_MARK
@@ -545,6 +642,9 @@ JURISDICTION_HOOKS = {
     "statutory_profile_errors": "_be_statutory_profile_errors",
     "statutory_profile_values": "_be_profile_values",
     "pack_activation_refusal": "_be_pack_activation_refusal",
+    "pack_approval_refusal": "_be_pack_approval_refusal",
+    "before_pack_status": "_be_before_pack_status",
+    "pack_upsert_status_refusal": "_be_pack_upsert_status_refusal",
     "retention_settings": "_be_retention_settings",
     "service_registry_transition": "_be_service_registry_transition",
     "statutory_summary": "be_statutory_summary",       # be_-unique: the callgraph links by simple name

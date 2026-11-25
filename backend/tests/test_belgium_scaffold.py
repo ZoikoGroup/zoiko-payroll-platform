@@ -322,11 +322,17 @@ def test_all_13_hooks_resolve():
     from app.modules.payroll import belgium_service, jurisdiction_hooks, poland_service
 
     assert jurisdiction_hooks._MODULES["BE"] == "app.modules.payroll.belgium_service"
-    assert set(belgium_service.JURISDICTION_HOOKS) == set(HOOK_NAMES) == set(poland_service.JURISDICTION_HOOKS)
-    for name in HOOK_NAMES:
+    # Owner decision 2026-11-25: Belgium also declares the three optional review /
+    # approval hooks (catalogue complete for QA / In Review / Approved; every row
+    # valued, sourced and signed to approve).
+    be_optional = {"before_pack_status", "pack_approval_refusal", "pack_upsert_status_refusal"}
+    assert set(belgium_service.JURISDICTION_HOOKS) == set(HOOK_NAMES) | be_optional
+    assert set(HOOK_NAMES) == set(poland_service.JURISDICTION_HOOKS)
+    for name in (*HOOK_NAMES, *be_optional):
         assert callable(jurisdiction_hooks.get("BE", name)), name
-    for optional in ("before_pack_status", "pack_approval_refusal", "evidence_review_refusal"):
-        assert not jurisdiction_hooks.declares("BE", optional)
+    for optional in be_optional:
+        assert jurisdiction_hooks.declares("BE", optional)
+    assert not jurisdiction_hooks.declares("BE", "evidence_review_refusal")
 
 
 def test_type_a_hooks_fail_closed(db):

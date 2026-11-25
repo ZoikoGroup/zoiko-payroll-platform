@@ -827,6 +827,17 @@ def upsert_jurisdiction_pack(db: Session, data: "JurisdictionPackUpsert", actor_
             "A tax pack cannot be set to Approved through create or edit — use the Approve button: approval "
             "records the approver and runs the four-eyes and country checks."
         )
+    # Optional per-country check of a review status set through create / edit
+    # (Belgium: QA / In Review need the full catalogue). Only a country that
+    # declares the hook is checked; every other country is unchanged.
+    if (data.packType == "tax" and jurisdiction_hooks.declares(data.jurisdictionCountry, "pack_upsert_status_refusal")
+            and (existing is None or ("status" in data.model_fields_set and data.status != existing.status))):
+        refusal = jurisdiction_hooks.call(data.jurisdictionCountry, "pack_upsert_status_refusal", db, existing,
+                                          data.status)
+        if refusal:
+            if existing is not None:
+                _audit_refusal(db, JurisdictionPack, "jurisdiction_pack", existing.id, data.status, actor_id, refusal)
+            raise BadRequestException(refusal)
     if existing:
         # A tax pack's own metadata (effective_from/to, tax_year, ...) is
         # part of what makes a published release resolvable for a given
