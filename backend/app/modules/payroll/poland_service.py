@@ -165,7 +165,7 @@ def pl_pack_activation_refusal(db: Session, pack, actor_id: Optional[int] = None
              .filter(ContributionRate.jurisdiction_pack_id == pack.id,
                      ContributionRate.organization_id.is_(None)).all())
     if not rates:
-        return "Poland pack has no statutory content — seed it from poland_content.py first."
+        return "This pack has no Polish statutory rows yet. Set up the catalogue and load values first."
     unsigned = sorted(r.component_key for r in rates
                       if (r.label or "").endswith(PENDING_G1_SUFFIX.strip()) or r.total == NOT_CONFIGURED
                       or (r.text_value or "") == "PENDING_G1")

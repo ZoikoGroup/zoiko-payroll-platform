@@ -150,7 +150,7 @@ def be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[str
     slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
                                       TaxSlab.organization_id.is_(None)).all())
     if not rates:
-        return "Belgium pack has no statutory content — seed it from belgium_content.py first."
+        return BE_NO_CATALOGUE
     problems = []
     for key, (_group, kind, _ref, _label) in content.KEYS.items():
         row = rates.get(key)

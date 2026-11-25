@@ -350,7 +350,7 @@ def test_type_a_hooks_fail_closed(db):
         jh.call("BE", "statutory_profile_values", db, None, None, None)
     # Phase 3A: an unseeded BE pack is refused; editors are a set (see test_belgium_super_admin.py).
     pack = _be_pack(db, pack_id="BE-EMPTY")
-    assert "no statutory content" in jh.call("BE", "pack_activation_refusal", db, pack)
+    assert "no Belgian statutory rows yet" in jh.call("BE", "pack_activation_refusal", db, pack)
     assert jh.call("BE", "template_activation_refusal", db, SimpleNamespace(jurisdiction_country="BE"), 1)
     assert jh.call("BE", "statutory_editors", db, pack) == set()
     # Block B3 (D13): Belgian payslips leave the generic bank file; they are paid
