@@ -84,15 +84,24 @@ def _bootstrap_test_actors():
             role=UserRole.SUPER_ADMIN, first_name="Phase8DL", last_name="TestChecker",
             phone="", is_active=True, is_verified=True,
         )
-        db.add_all([maker, checker])
+        # Germany: the Super Admin who approved a pack may not activate it
+        # (service._APPROVER_NOT_ACTIVATOR_COUNTRIES) - a third actor activates.
+        activator = User(
+            email="phase8dl-test-activator@example.invalid",
+            hashed_password=hash_password("test-only-not-a-real-credential-3"),
+            role=UserRole.SUPER_ADMIN, first_name="Phase8DL", last_name="TestActivator",
+            phone="", is_active=True, is_verified=True,
+        )
+        db.add_all([maker, checker, activator])
         db.commit()
-        db.refresh(maker); db.refresh(checker)
-        return maker.id, checker.id
+        db.refresh(maker); db.refresh(checker); db.refresh(activator)
+        return maker.id, checker.id, activator.id
     finally:
         db.close()
 
 
-def _create_and_activate_pack(pack_id: str, version: str, maker_id: int, checker_id: int, effective_from: str, effective_to: str) -> int:
+def _create_and_activate_pack(pack_id: str, version: str, maker_id: int, checker_id: int, effective_from: str, effective_to: str,
+                              activator_id: int) -> int:
     """Runs seed_germany_compliance_pack_2026 as a real subprocess; since
     that script only knows the hardcoded packId "DE-PAYROLL-CY2026-V1",
     for the V1/V2 switching test (which needs two DIFFERENT test pack
@@ -131,7 +140,7 @@ def _create_and_activate_pack(pack_id: str, version: str, maker_id: int, checker
             ), actor_id=maker_id,
         )
         pack = service.set_jurisdiction_pack_approver(db, pack.id, actor_id=checker_id)
-        pack = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker_id)
+        pack = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=activator_id)
         return pack.id
     finally:
         db.close()
@@ -140,7 +149,7 @@ def _create_and_activate_pack(pack_id: str, version: str, maker_id: int, checker
 def main() -> None:
     print(f"=== Phase 8DL full reconciled-toolchain lifecycle test — {_DB_FILE} ===\n")
 
-    maker_id, checker_id = _bootstrap_test_actors()
+    maker_id, checker_id, activator_id = _bootstrap_test_actors()
     print(f"Bootstrapped test actors: maker={maker_id}, checker={checker_id}\n")
 
     def _run_forward_sequence(pass_label: str, pack_id: int):
@@ -164,7 +173,7 @@ def main() -> None:
 
     print("--- seed_germany_compliance_pack_2026 (real script, real DE-PAYROLL-CY2026-V1) ---")
     p = _run_module("scripts.seed_germany_compliance_pack_2026", [
-        "--maker-id", str(maker_id), "--checker-id", str(checker_id),
+        "--maker-id", str(maker_id), "--checker-id", str(checker_id), "--activator-id", str(activator_id),
     ])
     _check("pack creation script exits 0", p.returncode == 0, p.stderr[-800:])
     print(p.stdout[-800:])
@@ -253,7 +262,8 @@ def main() -> None:
     # ═══════════════ STEP 15: idempotency (run twice) ═══════════════
     print("\n############ STEP 15: IDEMPOTENCY (SECOND PASS) ############\n")
     _run_forward_sequence("pass2", real_pack_id)
-    p = _run_module("scripts.seed_germany_compliance_pack_2026", ["--maker-id", str(maker_id), "--checker-id", str(checker_id)])
+    p = _run_module("scripts.seed_germany_compliance_pack_2026", ["--maker-id", str(maker_id), "--checker-id", str(checker_id),
+                                                                  "--activator-id", str(activator_id)])
     _check("STEP 15: re-running pack creation exits 0 (no-op)", p.returncode == 0, p.stderr[-500:])
 
     counts2, linked2, minijob2, minijob_linked2, sources2 = _snapshot(real_pack_id)
@@ -285,8 +295,8 @@ def main() -> None:
     print(f"(DE-PAYROLL-CY2026-V1, id={real_pack_id}, superseded to isolate the V1/V2 comparison below — "
           "its own functionality was already fully proven in STEP 13/15.)")
 
-    v1_id = _create_and_activate_pack("DE-TEST-8DL-V1", "8dl-v1", maker_id, checker_id, "2026-01-01", "2026-06-30")
-    v2_id = _create_and_activate_pack("DE-TEST-8DL-V2", "8dl-v2", maker_id, checker_id, "2026-07-01", "2026-12-31")
+    v1_id = _create_and_activate_pack("DE-TEST-8DL-V1", "8dl-v1", maker_id, checker_id, "2026-01-01", "2026-06-30", activator_id)
+    v2_id = _create_and_activate_pack("DE-TEST-8DL-V2", "8dl-v2", maker_id, checker_id, "2026-07-01", "2026-12-31", activator_id)
 
     from app.modules.payroll.schemas import GermanyContributionCeilingCreate
     db = SessionLocal()
@@ -441,7 +451,7 @@ def main() -> None:
     overlap_pack = service.set_jurisdiction_pack_approver(db, overlap_pack.id, actor_id=checker_id)
     raised = False
     try:
-        service.set_jurisdiction_pack_status(db, overlap_pack.id, "Active", actor_id=checker_id)
+        service.set_jurisdiction_pack_status(db, overlap_pack.id, "Active", actor_id=activator_id)
     except Exception:
         raised = True
     _check("16.15 overlapping active version rejected", raised)
@@ -468,7 +478,7 @@ def main() -> None:
         status="Draft", effectiveFrom=_date(2027, 1, 1), effectiveTo=_date(2027, 12, 31), taxYear="2027-TEST",
     ), actor_id=maker_id)
     future_pack = service.set_jurisdiction_pack_approver(db, future_pack.id, actor_id=checker_id)
-    future_pack = service.set_jurisdiction_pack_status(db, future_pack.id, "Active", actor_id=checker_id)
+    future_pack = service.set_jurisdiction_pack_status(db, future_pack.id, "Active", actor_id=activator_id)
     resolved_2026 = service.resolve_applicable_germany_pack(db, as_of=_date(2026, 12, 15))
     _check("16.18 future pack (2027) does not resolve for a 2026 date",
            resolved_2026 is None or resolved_2026.id != future_pack.id)

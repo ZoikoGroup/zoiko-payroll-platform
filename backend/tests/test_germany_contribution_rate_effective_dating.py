@@ -191,7 +191,7 @@ def _make_de_tax_pack(
         ), actor_id=maker,
     )
     service.set_jurisdiction_pack_approver(db, pack.id, actor_id=checker)
-    return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker)
+    return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker + 1)  # four-eyes for DE (owner decision 2026-11-25): the approver may not activate
 
 
 def _opt_in(db, org_id, pack, actor_id=102):
@@ -328,7 +328,7 @@ def test_overlapping_active_tax_packs_for_germany_rejected(db):
         ), actor_id=101,
     )
     service.set_jurisdiction_pack_approver(db, pack_a.id, actor_id=102)
-    service.set_jurisdiction_pack_status(db, pack_a.id, "Active", actor_id=102)
+    service.set_jurisdiction_pack_status(db, pack_a.id, "Active", actor_id=103)
 
     pack_b = service.upsert_jurisdiction_pack(
         db, JurisdictionPackUpsert(
@@ -344,7 +344,7 @@ def test_overlapping_active_tax_packs_for_germany_rejected(db):
     )
     service.set_jurisdiction_pack_approver(db, pack_b.id, actor_id=102)
     with pytest.raises(BadRequestException, match="overlap"):
-        service.set_jurisdiction_pack_status(db, pack_b.id, "Active", actor_id=102)
+        service.set_jurisdiction_pack_status(db, pack_b.id, "Active", actor_id=103)
 
 
 # ══════════════════════════════════════════════════════════════════════════

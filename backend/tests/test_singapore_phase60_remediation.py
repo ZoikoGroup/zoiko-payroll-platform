@@ -275,12 +275,12 @@ def test_f2_opt_in_is_singapore_only():
     under ZP-BR-ENG-001 (fail-closed) and South Africa under
     ZP-ZA-ENG-001 Phase 5 (fail-closed/four-eyes) and Poland under
     ZP-PL-ENG-001 Phase 4, Malaysia under ZP-MY-ENG-001 Phase 5 and Belgium
-    under ZP-BE-ENG-001 Phase 1 (fail-closed/four-eyes). No other country is
-    silently widened."""
+    under ZP-BE-ENG-001 Phase 1 (fail-closed/four-eyes) and Germany (owner
+    decision 2026-11-25, four-eyes). No other country is silently widened."""
     from app.modules.payroll.service import _APPROVER_NOT_ACTIVATOR_COUNTRIES
 
     assert _APPROVER_NOT_ACTIVATOR_COUNTRIES == (
-        "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")
+        "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE", "DE")
 
 
 # ══ F3 — 2026 / 2027 pack effective periods ════════════════════════════════

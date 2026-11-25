@@ -371,8 +371,11 @@ def test_governance_opt_in_tuples_gain_only_mexico():
         # + Brazil (ZP-BR-ENG-001) at the venu/main merge and + South Africa
         # (ZP-ZA-ENG-001 Phase 5) and + Poland (ZP-PL-ENG-001 Phase 4) and +
         # Malaysia (ZP-MY-ENG-001 Phase 5) and + Belgium (ZP-BE-ENG-001 Phase 1),
-        # all opt-in with the same four-eyes/fail-closed rules.
-        assert getattr(service, name) == _BEFORE + ("MX", "BR", "ZA", "PL", "MY", "BE"), name
+        # all opt-in with the same four-eyes/fail-closed rules; + Germany in the
+        # two four-eyes lists only (owner decision 2026-11-25).
+        four_eyes = name in ("_APPROVER_NOT_ACTIVATOR_COUNTRIES", "_SELF_APPROVAL_REFUSED_COUNTRIES")
+        expected = _BEFORE + ("MX", "BR", "ZA", "PL", "MY", "BE") + (("DE",) if four_eyes else ())
+        assert getattr(service, name) == expected, name
     assert service._GATED_PACK_COUNTRY_NAMES["MX"] == "Mexico"
     assert set(service._GATED_PACK_COUNTRY_NAMES) == {
         "US", "DE", "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE"}

@@ -51,6 +51,8 @@ from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_
 from app.modules.payroll.models import CompanyComplianceDetails, JurisdictionPack, TaxConfigurationAudit
 from app.modules.payroll.schemas import JurisdictionPackUpsert
 
+ACTIVATOR = 303  # four-eyes for DE (owner decision 2026-11-25): the approver may not activate
+
 
 def _upsert(db, pack_id, version, status, effective_from, effective_to=None, tax_year=None, actor_id=101, **extra):
     return service.upsert_jurisdiction_pack(
@@ -64,7 +66,7 @@ def _upsert(db, pack_id, version, status, effective_from, effective_to=None, tax
 
 def _approve_and_activate(db, pack, checker_id=202):
     service.set_jurisdiction_pack_approver(db, pack.id, actor_id=checker_id)
-    return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker_id)
+    return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=ACTIVATOR)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -108,7 +110,7 @@ def test_self_approval_blocked_before_activation(db):
 def test_distinct_approver_then_activation_succeeds(db):
     pack = _upsert(db, "DE-PAYROLL-CY2026-MC2", "1.0", "Draft", date(2026, 1, 1), actor_id=101)
     service.set_jurisdiction_pack_approver(db, pack.id, actor_id=202)
-    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=202)
+    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=ACTIVATOR)
     assert activated.status == "Active"
     assert activated.approved_by_id == 202
 
@@ -191,7 +193,7 @@ def test_overlapping_active_de_packs_rejected(db):
     overlapping = _upsert(db, "DE-PAYROLL-CY2026-OVERLAP-B", "1.0", "Draft", date(2026, 6, 1), None)
     service.set_jurisdiction_pack_approver(db, overlapping.id, actor_id=202)
     with pytest.raises(BadRequestException):
-        service.set_jurisdiction_pack_status(db, overlapping.id, "Active", actor_id=202)
+        service.set_jurisdiction_pack_status(db, overlapping.id, "Active", actor_id=ACTIVATOR)
 
 
 # ══════════════════════════════════════════════════════════════════════════

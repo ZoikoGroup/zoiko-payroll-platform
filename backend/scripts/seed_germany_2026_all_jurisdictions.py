@@ -67,7 +67,7 @@ service.record_tax_audit).
 Usage:
     PAYROLL_DATABASE_URL=sqlite:///./germany_local.sqlite3 \\
         python -m scripts.seed_germany_2026_all_jurisdictions \\
-        --maker-id 12 --checker-id 34 --federal-pack-id 130
+        --maker-id 12 --checker-id 34 --activator-id 56 --federal-pack-id 130
 """
 
 import argparse
@@ -78,7 +78,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts._local_db_guard import assert_local_database, describe_target, is_local_database
-from scripts._actor_authorization import resolve_and_authorize_maker_checker
+from scripts._actor_authorization import resolve_and_authorize_activator, resolve_and_authorize_maker_checker
 
 SCRIPT_NAME = "seed_germany_2026_all_jurisdictions"
 
@@ -120,6 +120,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--maker-id", type=int, required=True, help="Real, active Super Admin user id (maker).")
     parser.add_argument("--checker-id", type=int, required=True, help="Real, active Super Admin user id (checker). Must differ from --maker-id.")
+    parser.add_argument("--activator-id", type=int, required=True,
+                        help="Real, active Super Admin user id that activates the approved pack. Must differ from "
+                             "--maker-id and --checker-id (Germany: the approver may not activate).")
     parser.add_argument(
         "--federal-pack-id", type=int, default=None,
         help=f"payroll_jurisdiction_packs.id of the existing federal {FEDERAL_PACK_ID_STR} pack. "
@@ -165,7 +168,8 @@ def _resolve_federal_pack(db, federal_pack_id):
     return pack
 
 
-def _seed_one_land(db, service, JurisdictionPackUpsert, land_code: str, land_name: str, federal_pack, maker, checker) -> dict:
+def _seed_one_land(db, service, JurisdictionPackUpsert, land_code: str, land_name: str, federal_pack, maker, checker,
+                   activator) -> dict:
     from app.modules.payroll.models import JurisdictionPack
 
     pack_id_str = _land_pack_id(land_code)
@@ -226,7 +230,7 @@ def _seed_one_land(db, service, JurisdictionPackUpsert, land_code: str, land_nam
         pack = service.set_jurisdiction_pack_approver(db, pack.id, actor_id=checker.id)
         print(f"[{SCRIPT_NAME}] {land_name}: approved -> status={pack.status}.")
     if pack.status == "Approved":
-        pack = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=checker.id)
+        pack = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=activator.id)
         print(f"[{SCRIPT_NAME}] {land_name}: activated -> status={pack.status}.")
 
     return {"land_code": land_code, "land_name": land_name, "pack_id": pack.pack_id, "id": pack.id, "status": pack.status}
@@ -254,6 +258,7 @@ def main() -> None:
     db = SessionLocal()
     try:
         maker, checker = resolve_and_authorize_maker_checker(db, args.maker_id, args.checker_id)
+        activator = resolve_and_authorize_activator(db, args.activator_id, maker.id, checker.id)
         print(f"[{SCRIPT_NAME}] maker={maker.id} ({maker.email}), checker={checker.id} ({checker.email}) "
               "— both verified active Super Admin users.")
 
@@ -262,7 +267,8 @@ def main() -> None:
 
         results = []
         for land_code, land_name in GERMAN_LAENDER:
-            result = _seed_one_land(db, service, JurisdictionPackUpsert, land_code, land_name, federal_pack, maker, checker)
+            result = _seed_one_land(db, service, JurisdictionPackUpsert, land_code, land_name, federal_pack, maker, checker,
+                                    activator)
             # Prove centralization, not just record existence: a Land pack
             # must never win over the federal pack for real tax/slab
             # resolution (Phase 5's "federal calculation stays centralized"

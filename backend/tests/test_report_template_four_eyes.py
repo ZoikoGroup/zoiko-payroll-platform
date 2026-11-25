@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 OPT_IN = "PL"        # in _APPROVER_NOT_ACTIVATOR_COUNTRIES (R3 applies)
-OTHER = "DE"         # not in it: the checker may approve and activate (owner decision 2026-09-28)
+OTHER = "CA"         # not in it: the checker may approve and activate (owner decision 2026-09-28)
 
 
 def _user(db, email):

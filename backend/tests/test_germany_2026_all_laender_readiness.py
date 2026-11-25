@@ -31,6 +31,7 @@ from scripts import seed_germany_2026_all_jurisdictions as land_seed
 
 MAKER = SimpleNamespace(id=101)
 CHECKER = SimpleNamespace(id=202)
+ACTIVATOR = SimpleNamespace(id=303)  # four-eyes for DE (owner decision 2026-11-25): the approver may not activate
 
 
 def _make_federal_pack(db, pack_id="DE-PAYROLL-CY2026-V1"):
@@ -42,12 +43,12 @@ def _make_federal_pack(db, pack_id="DE-PAYROLL-CY2026-V1"):
         ), actor_id=MAKER.id,
     )
     service.set_jurisdiction_pack_approver(db, pack.id, actor_id=CHECKER.id)
-    return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=CHECKER.id)
+    return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=ACTIVATOR.id)
 
 
 def _seed_all_laender(db, federal_pack):
     return [
-        land_seed._seed_one_land(db, service, JurisdictionPackUpsert, code, name, federal_pack, MAKER, CHECKER)
+        land_seed._seed_one_land(db, service, JurisdictionPackUpsert, code, name, federal_pack, MAKER, CHECKER, ACTIVATOR)
         for code, name in land_seed.GERMAN_LAENDER
     ]
 
@@ -101,7 +102,7 @@ def test_overlapping_active_land_packs_rejected(db):
     )
     service.set_jurisdiction_pack_approver(db, dup.id, actor_id=CHECKER.id)
     with pytest.raises(BadRequestException):
-        service.set_jurisdiction_pack_status(db, dup.id, "Active", actor_id=CHECKER.id)
+        service.set_jurisdiction_pack_status(db, dup.id, "Active", actor_id=ACTIVATOR.id)
 
 
 def test_no_duplicate_active_pack_per_land(db):
@@ -157,7 +158,7 @@ def test_land_pack_lifecycle_requires_distinct_approver(db):
         service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=MAKER.id)  # self-approval
 
     service.set_jurisdiction_pack_approver(db, pack.id, actor_id=CHECKER.id)
-    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=CHECKER.id)
+    activated = service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=ACTIVATOR.id)
     assert activated.status == "Active"
 
 
@@ -238,7 +239,7 @@ def test_non_germany_packs_unaffected_by_land_seeding(db):
         ), actor_id=MAKER.id,
     )
     service.set_jurisdiction_pack_approver(db, other.id, actor_id=CHECKER.id)
-    other = service.set_jurisdiction_pack_status(db, other.id, "Active", actor_id=CHECKER.id)
+    other = service.set_jurisdiction_pack_status(db, other.id, "Active", actor_id=ACTIVATOR.id)
 
     federal = _make_federal_pack(db)
     _seed_all_laender(db, federal)

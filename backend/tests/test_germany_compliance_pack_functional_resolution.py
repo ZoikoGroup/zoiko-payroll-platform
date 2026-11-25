@@ -31,6 +31,7 @@ from app.modules.payroll.schemas import (
 )
 
 MAKER, CHECKER = 1, 2
+ACTIVATOR = 3  # four-eyes for DE (owner decision 2026-11-25): the approver may not activate
 
 
 def _make_source(db):
@@ -52,7 +53,7 @@ def _make_pack(db, pack_id, version, effective_from, effective_to):
         actor_id=MAKER,
     )
     pack = service.set_jurisdiction_pack_approver(db, pack.id, actor_id=CHECKER)
-    return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=CHECKER)
+    return service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=ACTIVATOR)
 
 
 def _publish_ceiling_for_pack(db, branch, monthly, annual, effective_from, effective_to, pack_id):
@@ -407,7 +408,7 @@ def test_13_overlapping_active_versions_for_same_country_rejected(db):
     )
     overlapping = service.set_jurisdiction_pack_approver(db, overlapping.id, actor_id=CHECKER)
     with pytest.raises(Exception):
-        service.set_jurisdiction_pack_status(db, overlapping.id, "Active", actor_id=CHECKER)
+        service.set_jurisdiction_pack_status(db, overlapping.id, "Active", actor_id=ACTIVATOR)
 
 
 def test_17_missing_required_registry_fails_closed_not_fabricated(db):
