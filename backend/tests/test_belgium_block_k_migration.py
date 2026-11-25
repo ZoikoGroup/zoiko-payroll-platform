@@ -106,6 +106,7 @@ def test_literal_names_manifest_single_child_and_single_head():
     assert sorted(children) == sorted([FILENAME, "d6b2e8f4a1c9_merge_mexico_and_malaysia_heads.py"])
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
     assert script.get_heads() == ["e4b7c2a9d1f3"]   # on merge b5f3e8a1c6d9 (UAE + content editor)
+    assert script.get_heads() == ["86f1ec062709"]   # Spain column on merge b5f3e8a1c6d9 (UAE + content editor)
     assert script.get_revision("ad01fc67ce44").down_revision == "c3e8a1d5f7b2"
     assert script.get_revision("c3e8a1d5f7b2").down_revision == "a4c7e1f9b3d8"
     assert script.get_revision("a4c7e1f9b3d8").down_revision == "e9c4b7a2d6f3"

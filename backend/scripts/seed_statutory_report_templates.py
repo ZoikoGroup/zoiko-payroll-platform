@@ -3086,8 +3086,59 @@ def seed_united_arab_emirates(db):
     return _seed_country(db, "AE", "2026", "MOHRE / GPSSA / ADPF", "ZP-AE-ENG-001 v1.0", _ae_templates())
 
 
+# Spain ──────────────────────────────────────────────────────────────────────
+# engine/countries/spain.py `es_result`. IRPF, the employee Social Security total
+# (incl. solidarity), employer Social Security, AT/EP and the short-contract
+# surcharge are read from the scalar columns; bases, per-family lines and the
+# solidarity tranches only exist in the snapshot.
+_es = _json("es_calculation_snapshot.")
+_ES_FAMILY_LABELS = (("common_contingencies", "Common Contingencies"), ("mei", "MEI"),
+                     ("unemployment", "Unemployment"), ("training", "Training"), ("overtime", "Overtime Contribution"))
+
+
+def _es_templates():
+    tax_label = "NIF"
+    bases = [_es("common_base", "Common-Contingency Base", "bases.common"),
+             _es("at_ep_base", "AT/EP Base", "bases.at_ep"),
+             _es("excess_over_maximum", "Remuneration above the Maximum Base", "bases.excess_over_maximum")]
+    employee_ss = _col("social_security", "Social Security (Employee, incl. solidarity)", "social_security")
+    irpf = _col("irpf", "IRPF Withheld", "tds")
+    employer = [_col("employer_social_security", "Social Security (Employer, incl. solidarity)",
+                     "employer_social_security"),
+                _col("at_ep", "AT/EP (Employer)", "employer_occupational_hazard"),
+                _col("short_contract_surcharge", "Short-Contract Surcharge (Employer)", "employer_payroll_tax")]
+    family_employee = [_es(f"{f}_employee", f"{label} (Employee)", f"social_security.lines[family={f}].employee")
+                       for f, label in _ES_FAMILY_LABELS]
+    family_employer = [_es(f"{f}_employer", f"{label} (Employer)", f"social_security.lines[family={f}].employer")
+                       for f, label in _ES_FAMILY_LABELS + (("fogasa", "FOGASA"),)]
+    return {
+        **_register("ES", "Spain", tax_label, earnings=bases, deductions=[employee_ss, irpf], employer_cost=employer,
+                    employee_extra=[_es("contract_type", "Contract Type", "inputs.contract_type", "text"),
+                                    _es("contribution_group", "Contribution Group", "inputs.contribution_group",
+                                        "text")]),
+        **_run_summary("ES", "SS-SUMMARY", "Spain Social Security summary", "ES_SS_SUMMARY",
+                       "Run totals of the contribution bases and each Social Security family (employee and employer "
+                       "shares), the solidarity contribution, AT/EP and the short-contract surcharge, to reconcile "
+                       "against the TGSS liquidation (RLC). Not a SILTRA / SLD file.",
+                       tax_label, earnings=bases,
+                       contributions=family_employee + [_es("solidarity_employee", "Solidarity Contribution (Employee)",
+                                                            "solidarity.employee_total")],
+                       employer_cost=family_employer + [_es("solidarity_employer", "Solidarity Contribution (Employer)",
+                                                            "solidarity.employer_total")] + employer[1:]),
+        **_run_summary("ES", "IRPF-SUMMARY", "Spain IRPF withholding summary", "ES_IRPF_SUMMARY",
+                       "Run totals of gross pay and IRPF withheld, as the working figures for the employer's "
+                       "Modelo 111 self-assessment. Not an AEAT filing file.",
+                       tax_label, tax=[irpf]),
+    }
+
+
+def seed_spain(db):
+    print("Seeding Spain report templates (ZP-ES-ENG-001, Draft)...")
+    return _seed_country(db, "ES", "2026", "TGSS / AEAT", "ZP-ES-ENG-001 v1.0", _es_templates())
+
+
 SEED_COMING_SOON_COUNTRIES = (seed_belgium, seed_france, seed_italy, seed_japan, seed_malaysia, seed_new_zealand,
-                              seed_poland, seed_saudi_arabia, seed_united_arab_emirates)
+                              seed_poland, seed_saudi_arabia, seed_united_arab_emirates, seed_spain)
 
 
 if __name__ == "__main__":

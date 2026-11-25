@@ -58,6 +58,8 @@ const INCOME_TAX_LABELS = {
   // Belgium — professional withholding (Annex III), ZP-BE-ENG-001 §5. Never a
   // flat rate and never derived from the annual income-tax brackets.
   BE: "Professional withholding (précompte professionnel / bedrijfsvoorheffing)",
+  // Spain — IRPF withholding on employment income (AEAT algorithm), ZP-ES-ENG-001 §6.
+  ES: "IRPF (retención)",
 };
 
 // Jurisdictions with NO payroll income-tax withholding at all — the payslip

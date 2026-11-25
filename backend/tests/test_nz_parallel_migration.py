@@ -171,7 +171,7 @@ def test_drift_filter_explains():
     assert {t: columns.pop(t, None) for t in MX_LIFECYCLE_COLUMNS} == MX_LIFECYCLE_COLUMNS
     assert {t: columns.pop(t, None) for t in CERT_RUN_PACK_COLUMNS} == CERT_RUN_PACK_COLUMNS  # + e4b7c2a9d1f3
     assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
-    assert columns == {"payslip_items": {"pl_calculation_snapshot", "my_calculation_snapshot", "be_calculation_snapshot", "ae_calculation_snapshot",
+    assert columns == {"payslip_items": {"pl_calculation_snapshot", "my_calculation_snapshot", "be_calculation_snapshot", "ae_calculation_snapshot", "es_calculation_snapshot",
                                          "template_version_id"},
                        "payroll_runs": {"pl_approval_fingerprint", "my_approval_fingerprint", "be_approval_fingerprint"},
                        **MX_M21}

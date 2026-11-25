@@ -2059,6 +2059,11 @@ class PayslipItem(Base):
     # pension / gratuity / savings / overtime lines and the pack values used);
     # NULL for non-AE payslips (ad01fc67ce44). Never an Emirates ID.
     ae_calculation_snapshot = Column(JSON, nullable=True)
+    # Spain (ZP-ES-ENG-001, docs/spain): the calculation breakdown (inputs,
+    # contribution bases, Social Security families, solidarity tranches, IRPF
+    # algorithm version / rate and the pack values used); NULL for non-ES
+    # payslips (86f1ec062709). Never a NIF/NIE or NAF.
+    es_calculation_snapshot = Column(JSON, nullable=True)
     # Payslip templates (f3a9c1d7e2b4): the organisation's published template
     # version this payslip is shown with, frozen when its run is approved so a
     # later template change never alters an issued payslip. NULL = the

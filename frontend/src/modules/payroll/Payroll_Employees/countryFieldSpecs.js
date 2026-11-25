@@ -84,7 +84,18 @@ export const COUNTRIES = [
   // AEEmployeeValidation: the UAE IBAN only. The Emirates ID, nationality
   // category and pension fund arrive with the UAE employee record (Phase 5).
   { code: "AE", name: "United Arab Emirates" },
+  // Spain (docs/spain Phase 6) — mirrors employee_validation.py's ESEmployeeValidation.
+  { code: "ES", name: "Spain" },
 ];
+
+// Spanish NIF / NIE check letter (mirrors ESEmployeeValidation.nif_nie_check_letter_ok):
+// the 8-digit number (NIE: X/Y/Z -> 0/1/2) mod 23 indexes the official letter table.
+function nifNieCheckLetterOk(value) {
+  const v = String(value || "").toUpperCase();
+  if (!/^([0-9]{8}|[XYZ][0-9]{7})[A-Z]$/.test(v)) return false;
+  const number = ({ X: "0", Y: "1", Z: "2" }[v[0]] ?? v[0]) + v.slice(1, -1);
+  return "TRWAGMYFPDXBNJZSQVHLCKE"[Number(number) % 23] === v[v.length - 1];
+}
 
 // ISO 13616 IBAN check digits (mirrors employee_validation.py's
 // iban_checksum_ok): move the first 4 characters to the end, letters -> 10..35,
@@ -620,6 +631,55 @@ export const COUNTRY_FIELD_SPECS = {
     // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.AE).
     { key: "iban", label: "IBAN", type: "text", placeholder: "AE + 21 digits", upper: true, strip: " ", pattern: /^AE\d{21}$/, check: ibanPassesMod97, error: "UAE IBAN must be AE followed by 21 digits with a valid check digit." },
   ],
+  // Spain — mirrors backend ESEmployeeValidation exactly (the server also
+  // checks the NIF/NIE mod-23 check letter). Statutory values live in the ES
+  // pack; these are the routing facts and Modelo 145 facts only.
+  ES: [
+    { key: "nif_nie", label: "NIF / NIE", type: "text", placeholder: "12345678Z or X1234567L", upper: true, strip: "- ",
+      pattern: /^([0-9]{8}|[XYZ][0-9]{7})[A-Z]$/i, check: nifNieCheckLetterOk,
+      error: "NIF/NIE must be 8 digits + letter (DNI) or X/Y/Z + 7 digits + letter (NIE) with a valid check letter." },
+    { key: "naf_nuss", label: "Social Security number (NAF / NUSS)", type: "text", placeholder: "12 digits", strip: "/- ",
+      pattern: /^\d{12}$/, error: "The Social Security number (NAF/NUSS) must be 12 digits." },
+    { key: "contract_type", label: "Contract type", type: "select", required: true, upper: true,
+      choices: ["INDEFINITE", "TEMPORARY"], aliases: { indefinido: "INDEFINITE", temporal: "TEMPORARY" },
+      error: "Contract type must be INDEFINITE or TEMPORARY." },
+    { key: "contract_end_date", label: "Contract end date", type: "date",
+      showWhen: (cf) => cf?.contract_type === "TEMPORARY", error: "Contract end date must be YYYY-MM-DD." },
+    { key: "short_contract_exception", label: "Short-contract surcharge exception", type: "select", upper: true,
+      choices: ["YES", "NO"], showWhen: (cf) => cf?.contract_type === "TEMPORARY",
+      error: "Short-contract exception must be YES or NO." },
+    { key: "contribution_group", label: "Contribution group (1–11)", type: "select", required: true,
+      choices: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
+      error: "Contribution group must be 1 to 11." },
+    { key: "work_pattern", label: "Work pattern", type: "select", upper: true, choices: ["FULL_TIME", "PART_TIME"],
+      aliases: { full: "FULL_TIME", part: "PART_TIME" }, error: "Work pattern must be FULL_TIME or PART_TIME." },
+    { key: "extra_pay_policy", label: "Extra payments (pagas extra)", type: "select", required: true, upper: true,
+      choices: ["PRORATED_12", "SEPARATE_14"], error: "Extra payments must be PRORATED_12 or SEPARATE_14." },
+    { key: "extra_pay_annual_amount", label: "Extra payments per year (EUR)", type: "text", placeholder: "4000.00",
+      strip: ", ", pattern: /^\d{1,9}(\.\d{1,2})?$/, showWhen: (cf) => cf?.extra_pay_policy === "SEPARATE_14",
+      error: "Extra payments per year must be an amount in EUR (up to 2 decimals)." },
+    { key: "extra_pay_months", label: "Extra payment months", type: "text", placeholder: "6,12", strip: " ",
+      pattern: /^\d{1,2}(,\d{1,2})*$/, showWhen: (cf) => cf?.extra_pay_policy === "SEPARATE_14",
+      error: "Extra payment months must be month numbers such as 6,12." },
+    { key: "overtime_kind", label: "Overtime kind", type: "select", upper: true, choices: ["OTHER", "FORCE_MAJEURE"],
+      error: "Overtime kind must be OTHER or FORCE_MAJEURE." },
+    { key: "at_ep_rate", label: "AT/EP premium rate (fraction, e.g. 0.015)", type: "text", placeholder: "0.015",
+      pattern: /^0(\.\d{1,6})?$/, error: "AT/EP rate must be a fraction such as 0.015 (1.5%)." },
+    { key: "family_situation", label: "Family situation (Modelo 145)", type: "select", choices: ["1", "2", "3"],
+      error: "Family situation must be 1, 2 or 3." },
+    { key: "children_count", label: "Children (Modelo 145)", type: "text", placeholder: "0", pattern: /^\d{1,2}$/,
+      error: "Children must be a whole number." },
+    { key: "children_under_3", label: "Children under 3", type: "text", placeholder: "0", pattern: /^\d{1,2}$/,
+      error: "Children under 3 must be a whole number." },
+    { key: "ascendants_count", label: "Ascendants (Modelo 145)", type: "text", placeholder: "0", pattern: /^\d{1,2}$/,
+      error: "Ascendants must be a whole number." },
+    { key: "disability_degree", label: "Disability degree", type: "select", upper: true,
+      choices: ["NONE", "33_TO_64", "65_PLUS"], error: "Disability degree must be NONE, 33_TO_64 or 65_PLUS." },
+    { key: "irpf_voluntary_rate", label: "Voluntary higher IRPF rate (%)", type: "text", placeholder: "15",
+      pattern: /^\d{1,2}(\.\d{1,2})?$/, error: "Voluntary IRPF rate must be a percentage such as 15 or 15.5." },
+    // Salary bank routing (backend bank_routing.py ROUTING_FIELDS.ES).
+    { key: "iban", label: "IBAN", type: "text", placeholder: "ES + 22 digits", upper: true, strip: " ", pattern: /^ES\d{22}$/, check: ibanPassesMod97, error: "Spanish IBAN must be ES followed by 22 digits with a valid check digit." },
+  ],
   // Hong Kong — mirrors backend HKEmployeeValidation (the server also checks
   // the HKID check digit). Collected only for IR56 forms / eMPF (HK-022).
   HK: [
@@ -639,7 +699,7 @@ export const COUNTRY_FIELD_SPECS = {
 export const DUPLICATE_ID_FIELDS = {
   US: "ssn", UK: "nino", AU: "tfn", CA: "sin", DE: "steuer_id", IE: "ppsn", SG: "nric_fin",
   HK: "hkid", SE: "swedish_id_number", IT: "codice_fiscale", CH: "ahv_number", SA: "national_id_iqama",
-  NL: "bsn", MX: "curp", BR: "cpf", PL: "passport_number", MY: "passport_number",
+  NL: "bsn", MX: "curp", BR: "cpf", PL: "passport_number", MY: "passport_number", ES: "nif_nie",
 };
 
 // Every jurisdiction's compliance field, flattened into one list — used to
@@ -713,7 +773,33 @@ export function normalizeComplianceFields(countryCode, complianceFields) {
   return out;
 }
 
+// Spain — mirrors ESEmployeeValidation._validate_combination (the identifier
+// shapes and check letter are in the field specs above).
+function validateSpainCombinations(complianceFields) {
+  const v = normalizeComplianceFields("ES", complianceFields);
+  const errors = [];
+  if (v.contract_type === "TEMPORARY" && !v.contract_end_date) {
+    errors.push("contract_end_date is required for a TEMPORARY contract.");
+  }
+  if (v.short_contract_exception && v.contract_type !== "TEMPORARY") {
+    errors.push("short_contract_exception applies only to TEMPORARY contracts.");
+  }
+  if (v.extra_pay_policy === "SEPARATE_14") {
+    if (!v.extra_pay_annual_amount) errors.push("extra_pay_annual_amount is required when extra payments are paid separately.");
+    if (!v.extra_pay_months) errors.push("extra_pay_months (for example 6,12) is required when extra payments are paid separately.");
+  }
+  const months = String(v.extra_pay_months || "").replace(/\s/g, "");
+  if (months && /^\d{1,2}(,\d{1,2})*$/.test(months) && months.split(",").some((m) => Number(m) < 1 || Number(m) > 12)) {
+    errors.push("extra_pay_months must be between 1 and 12.");
+  }
+  if (v.children_under_3 && Number(v.children_under_3) > Number(v.children_count || 0)) {
+    errors.push("children_under_3 cannot exceed children_count.");
+  }
+  return errors;
+}
+
 export function validateComplianceCombinations(countryCode, complianceFields) {
+  if (countryCode === "ES") return validateSpainCombinations(complianceFields);
   if (countryCode !== "AE") return [];
   const v = normalizeComplianceFields("AE", complianceFields);
   const errors = [];

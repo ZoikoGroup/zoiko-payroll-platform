@@ -125,6 +125,7 @@ def test_deploy_drift_filter_explains_the_column():
     assert tables == set()
     assert {t: columns.pop(t, None) for t in CERT_RUN_PACK_COLUMNS} == CERT_RUN_PACK_COLUMNS  # + e4b7c2a9d1f3
     assert columns == {"payslip_items": {COLUMN}}
+    assert columns == {"payslip_items": {COLUMN, "es_calculation_snapshot"}}   # + Spain 86f1ec062709 after the merge
 
 
 def test_revision_is_the_single_child_of_the_previous_head():
@@ -142,6 +143,7 @@ def test_single_head():
 
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
     assert list(script.get_heads()) == ["e4b7c2a9d1f3"]   # on merge b5f3e8a1c6d9 (REVISION + d7a3f1c9e5b2)
+    assert list(script.get_heads()) == ["86f1ec062709"]   # Spain column on merge b5f3e8a1c6d9 (REVISION + d7a3f1c9e5b2)
     assert set(script.get_revision("b5f3e8a1c6d9").down_revision) == {REVISION, "d7a3f1c9e5b2"}
 
 

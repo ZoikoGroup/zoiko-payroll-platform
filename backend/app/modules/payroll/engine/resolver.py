@@ -207,6 +207,16 @@ def calculate_payroll(
             "United Arab Emirates payroll cannot use simple calculation mode; use standard or enterprise.",
         )
 
+    if (ctx.country or "").upper() == "ES" and key == "simple":
+        # Spain (ZP-ES-ENG-001): simple mode would silently skip Social Security,
+        # solidarity and IRPF. Fail-closed: countries/spain.py.
+        from app.modules.payroll.engine.countries.spain import ESCalculationBlockedError
+
+        raise ESCalculationBlockedError(
+            "ES_SIMPLE_MODE_UNSUPPORTED",
+            "Spain payroll cannot use simple calculation mode; use standard or enterprise.",
+        )
+
     strategy = resolve_strategy(calculation_mode)
     try:
         result = strategy.calculate(ctx)
@@ -483,6 +493,11 @@ def build_context_from_employee(
         ae_facts=({**(getattr(employee, "compliance_fields", None) or {}),
                    "work_state": getattr(employee, "work_state", None)}
                   if (country or "").upper() == "AE" else None),
+        # Spain (ZP-ES-ENG-001): contract type, contribution group, extra-pay
+        # policy, AT/EP rate, Modelo 145 facts ... from the employee's own fields.
+        es_facts=({**(getattr(employee, "compliance_fields", None) or {}),
+                   "work_state": getattr(employee, "work_state", None)}
+                  if (country or "").upper() == "ES" else None),
         employment_type=getattr(employee, "employment_type", None),
         # Singapore CPF cohort facts — dedicated columns fed from
         # compliance_fields via SGEmployeeValidation.FIELD_COLUMN_MAP.
