@@ -52,6 +52,7 @@ check("the page renders the shared layout with the Germany config", () => {
   assert(page.includes("extraTabs={germanyExtraTabs}") && page.includes("{...germanyComplianceConfig}"), "config spread");
   assert(/hiddenTabs: \["rates", "slabs"\]/.test(config), "generic rates / slabs hidden");
   assert(/adaptiveTabs: true/.test(config), "adaptive tab row (More menu)");
+  assert(/hideHotfixActivate: true/.test(config), "Hotfix Activate hidden (four-eyes; same as Belgium and Mexico)");
 });
 
 const PRIMARY = ["de-rates", "de-slabs", "de-policy", "de-readiness"];

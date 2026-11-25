@@ -61,5 +61,10 @@ export const germanyComplianceConfig = {
   },
   hiddenTabs: ["rates", "slabs"],
   adaptiveTabs: true,
+  // Hotfix activation self-approves (it bypasses the distinct-approver check),
+  // and Germany refuses self-approval and approver-activation (four-eyes;
+  // service._SELF_APPROVAL_REFUSED_COUNTRIES / _APPROVER_NOT_ACTIVATOR_COUNTRIES)
+  // — same opt-out as Belgium and Mexico.
+  hideHotfixActivate: true,
   tabAliases: GERMANY_TAB_ALIASES,
 };
