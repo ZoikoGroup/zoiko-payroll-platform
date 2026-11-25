@@ -35,7 +35,8 @@ python -m scripts.seed_belgium_verified_values --pack BE-PAYROLL-2026 --file ver
    Super Admin console and signs it. Use Readiness → Signing status → *Select pending cells* to bulk-sign. Each row
    needs its own reviewed, archived source. Signing removes `[PENDING G1]`.
 2. **Certify:** once no row is pending and the authority examples replay exactly, use **Record certification run**
-   (Readiness → Golden certification). Activation needs a **PASS** run.
+   (Readiness → Golden certification). Activation needs a **PASS** run recorded for this pack, with its content
+   unchanged since: any later edit, signature or unsigning means a new run must be recorded.
 3. **Approve:** a Super Admin who neither edited nor signed this version records the approval (**Approve** in the
    pack header). Belgium refuses self-approval.
 4. **Activate:** a **different** Super Admin from the approver sets the pack Active. That Super Admin must also not
