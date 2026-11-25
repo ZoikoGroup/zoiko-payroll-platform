@@ -516,9 +516,7 @@ def seed_belgium_pack(db: Session):
     Idempotent and create-only: an existing Draft pack only gains the rows it
     lacks (a row edited in the console is never overwritten); a pack that has
     left Draft is refused. Creates no Joint Committee pack."""
-    from decimal import Decimal
-
-    from app.modules.payroll.models import ContributionRate, JurisdictionPack, SourceArtifact, TaxSlab
+    from app.modules.payroll.models import JurisdictionPack
 
     content = _content()
     pack_id, window_from, window_to = content.BE_2026
@@ -537,6 +535,25 @@ def seed_belgium_pack(db: Session):
         db.add(pack)
         db.flush()
 
+    be_write_catalogue_rows(db, pack, sources)
+    return pack
+
+
+def be_write_catalogue_rows(db: Session, pack, sources: dict) -> dict:
+    """Write the belgium_content catalogue into `pack` (any Belgian pack id): one
+    canonical ContributionRate row per catalogue key with EVERY value field
+    empty and the label "<label> (spec-proposed: ...) [PENDING G1]" (a spec
+    figure is display text only, never a value), and one BE_EARNING_CLASS row
+    per (obligation, component), REVIEW, pending. Create-only: a key or class
+    the pack already holds is skipped, never overwritten. `sources` maps the
+    evidence-register codes to their SourceArtifact ids. Returns the counts
+    written. Shared by seed_belgium_pack and be_set_up_catalogue."""
+    from decimal import Decimal
+
+    from app.modules.payroll.models import ContributionRate, TaxSlab
+
+    content = _content()
+    added_rows = added_classes = 0
     existing = {r.component_key for r in db.query(ContributionRate.component_key).filter(
         ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))}
     for order, (key, (_group, _kind, ref, _label)) in enumerate(content.KEYS.items()):
@@ -548,6 +565,7 @@ def seed_belgium_pack(db: Session):
             label=f"{content.key_label(key)} {content.PENDING_MARK}"[:100], employee_share="—", employer_share="—",
             total="PENDING G1", employee_rate_pct=None, employer_rate_pct=None, flat_amount=None, text_value=None,
             source_document_id=sources[cited[0]] if cited else None, sort_order=order))
+        added_rows += 1
 
     have_classes = {(s.tax_regime, s.filing_status) for s in db.query(TaxSlab).filter(
         TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.organization_id.is_(None),
@@ -566,8 +584,45 @@ def seed_belgium_pack(db: Session):
                            assessment_basis="REVIEW", tax_formula="",
                            rate_label=f"{obligation}: {component} — REVIEW {content.PENDING_MARK}"[:150],
                            sort_order=order))
+            added_classes += 1
     db.flush()
-    return pack
+    return {"rows": added_rows, "earningClasses": added_classes}
+
+
+def be_set_up_catalogue(db: Session, pack_row_id: int, actor_id, reason) -> dict:
+    """"Set up Belgian catalogue" (Super Admin, 2026-11-25): write the standard
+    catalogue into a Draft Belgian pack that lacks it — the same rows as the seed
+    (be_write_catalogue_rows: every value empty, [PENDING G1]), nothing copied
+    from another pack, no value invented. Create-only (rows the pack holds are
+    never touched), Draft only, reason required, audited (who, when, reason,
+    counts). Flushes; the caller commits."""
+    from app.modules.payroll.models import ContributionRate, JurisdictionPack
+    from app.modules.payroll.service import record_tax_audit
+
+    pack = db.get(JurisdictionPack, pack_row_id)
+    if pack is None or not _be_tax_pack(pack):
+        raise NotFoundException("Belgian pack", pack_row_id)
+    if pack.status != "Draft":
+        raise BadRequestException(f"{pack.pack_id} v{pack.version} is {pack.status}: the catalogue is set up in a "
+                                  "Draft pack only.")
+    reason = (reason or "").strip()
+    if not reason:
+        raise BadRequestException("A reason is required to set up the catalogue.")
+    if be_catalogue_refusal(db, pack) is None:
+        raise BadRequestException(f"{pack.pack_id} v{pack.version} already holds the full Belgian catalogue.")
+    before = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                               ContributionRate.organization_id.is_(None)).count()
+    added = be_write_catalogue_rows(db, pack, be_register_evidence_sources(db))
+    record_tax_audit(
+        db, actor_id=actor_id, action="catalogue_setup", entity_type="jurisdiction_pack", entity_id=pack.id,
+        jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference=SPEC,
+        old_value={"catalogueRows": before},
+        new_value={"catalogueRowsAdded": added["rows"], "earningClassesAdded": added["earningClasses"],
+                   "values": "none (every row empty, [PENDING G1])"},
+        reason=reason, auto_commit=False,
+    )
+    db.flush()
+    return {"packRowId": pack.id, "packId": pack.pack_id, "version": pack.version, **added}
 
 
 # ── shared-flow guards (BE-guarded branches call these) ─────────────────────

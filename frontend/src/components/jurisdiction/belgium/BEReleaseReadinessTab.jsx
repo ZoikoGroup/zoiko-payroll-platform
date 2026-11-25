@@ -107,10 +107,10 @@ function GateCard({ gate, met, detail, evidence, onChange }) {
 // The pack's own sections, or — for a pack holding no catalogue rows — the calm
 // catalogue notice instead of per-row reports that would only say "missing".
 function PackSections({ pack }) {
-  const [status, error] = useLoad(() => getBeSigningStatus(pack.id));
+  const [status, error, , reload] = useLoad(() => getBeSigningStatus(pack.id));
   if (error) return <ErrorNote message={error} />;
   if (!status) return <p className="text-[12px] text-foreground-muted">Loading…</p>;
-  if (status.catalogue && status.catalogue.rows === 0) return <BECatalogueNotice pack={pack} />;
+  if (status.catalogue && status.catalogue.rows === 0) return <BECatalogueNotice pack={pack} onDone={reload} />;
   return (
     <>
       <Collapsible title="Golden certification (gate G1)" testId="be-section-golden"

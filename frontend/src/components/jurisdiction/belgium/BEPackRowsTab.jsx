@@ -3,9 +3,10 @@ import { card, useLoad } from "../japan/jpFormat";
 import { Table } from "../japan/jpShared";
 import { EditButton } from "../new_zealand/NZPackRowsTab";
 import { ErrorNote, SignedPill } from "../new_zealand/nzShared";
+import BECatalogueNotice from "./BECatalogueNotice";
 import BERowEditor from "./BERowEditor";
 import BESlabRowsSection from "./BESlabRowsSection";
-import { cleanLabel, displayValue, isEditablePack, loadConfiguration } from "./beShared";
+import { cleanLabel, displayValue, hasNoCatalogue, isEditablePack, loadConfiguration } from "./beShared";
 
 // One console tab of the Belgium pack: the rows of its catalogue groups, read
 // from the configuration API (labels, kinds, references, vocabularies and the
@@ -65,6 +66,7 @@ function Loaded({ pack, groups, title, description, onImport }) {
   if (loading && !config) return <p className="text-[12px] text-foreground-muted">Loading…</p>;
   if (error) return <ErrorNote message={error} />;
   if (!config) return null;
+  if (hasNoCatalogue(config)) return <BECatalogueNotice pack={pack} onDone={reload} />;
   return (
     <div className="space-y-4" data-testid="be-pack-rows">
       {(title || description) && (
