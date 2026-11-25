@@ -1,5 +1,6 @@
 import { getBeSummary, listBeGateEvidence } from "../../../service/superAdminService";
 import Collapsible from "../Collapsible";
+import Notice from "../Notice";
 import { card, useLoad } from "../japan/jpFormat";
 import { ErrorNote } from "../new_zealand/nzShared";
 import BEActivationReadinessTab from "./BEActivationReadinessTab";
@@ -112,6 +113,9 @@ export default function BEReleaseReadinessTab({ pack }) {
   const onEvidenceChange = () => { reloadEvidence(); reload(); };
   return (
     <div className="space-y-3" data-testid="be-release-readiness">
+      {(summary.readinessWarnings || []).map((w) => (
+        <Notice key={w} tone="warning" title="Overlapping packs" testId="be-readiness-warning">{w}</Notice>
+      ))}
       <div className={card} data-testid="be-engine-status">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-[14px] font-semibold text-foreground">Belgium engine — {summary.spec}</h3>

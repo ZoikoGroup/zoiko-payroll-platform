@@ -162,3 +162,34 @@ def test_every_readiness_check_names_who_acts(db):
     assert by_key["be-signoff-security"] == "sign-off" and by_key["be-owner-content"] == "sign-off"
     assert all(by_key[k] == "data" for k in by_key if k.startswith("schema_"))
     assert all(g["owner"] for g in gates)                                  # the gate's owner is shown too
+
+
+# ── overlapping packs that cover today ───────────────────────────────────────
+def test_overlapping_current_packs_judge_the_latest_start_and_warn(db, monkeypatch):
+    from app.modules.payroll import belgium_readiness as r
+
+    _empty_pack(db, "BE-OVERLAP-EARLY", date(2026, 1, 1), date(2026, 12, 31))
+    _empty_pack(db, "BE-OVERLAP-LATE", date(2026, 6, 1), date(2026, 12, 31))
+    _on(monkeypatch, date(2026, 11, 25))
+    pack, why = r.be_g1_pack(db)
+    assert pack.pack_id == "BE-OVERLAP-LATE" and why == "in force today"
+    warning = r.be_g1_overlap_warning(db)
+    assert warning.startswith("2 non-Active Belgian packs cover today: BE-OVERLAP-LATE v1.0")
+    assert "BE-OVERLAP-EARLY v1.0" in warning and "latest start date, BE-OVERLAP-LATE v1.0" in warning
+    state = r.be_readiness(db)
+    assert state["warnings"] == [warning]
+    gate = next(g for g in state["gates"] if g["gate"] == "G1")
+    assert not gate["passed"]                                         # the judged (empty) pack still fails
+
+
+def test_a_single_current_pack_has_no_overlap_warning(db, monkeypatch):
+    from app.modules.payroll import belgium_readiness as r
+    from app.modules.payroll import belgium_service as be
+
+    be.seed_belgium_pack(db)
+    db.commit()
+    _empty_pack(db, "BE-PAYROLL-2027", date(2027, 1, 1), date(2027, 12, 31))   # future: not overlapping today
+    _on(monkeypatch, date(2026, 11, 25))
+    assert r.be_g1_overlap_warning(db) is None and r.be_readiness(db)["warnings"] == []
+    summary = be.be_statutory_summary(db)
+    assert summary["readinessWarnings"] == []

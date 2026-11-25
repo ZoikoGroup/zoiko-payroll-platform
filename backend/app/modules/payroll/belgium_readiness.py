@@ -86,22 +86,43 @@ def _covers(pack, day: date) -> bool:
             and (pack.effective_to is None or pack.effective_to >= day))
 
 
+def _be_tax_packs(db: Session) -> list:
+    """Belgian tax packs, latest start date first (ties: newest row first)."""
+    from app.modules.payroll.models import JurisdictionPack
+
+    return (db.query(JurisdictionPack)
+            .filter(JurisdictionPack.jurisdiction_country == "BE", JurisdictionPack.pack_type == "tax")
+            .order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).all())
+
+
+def be_g1_overlap_warning(db: Session, today: Optional[date] = None) -> Optional[str]:
+    """A warning when more than one non-Active Belgian tax pack covers today
+    (gate G1 then judges the one with the latest start date), or None. Active
+    packs cannot overlap: activation refuses it."""
+    day = today or _today()
+    covering = [p for p in _be_tax_packs(db) if p.status != "Active" and _covers(p, day)]
+    if len(covering) <= 1:
+        return None
+    listed = ", ".join(f"{p.pack_id} v{p.version} ({p.status}, from {p.effective_from})" for p in covering)
+    return (f"{len(covering)} non-Active Belgian packs cover today: {listed}. Gate G1 judges the one with the "
+            f"latest start date, {covering[0].pack_id} v{covering[0].version}. Overlapping packs should be resolved "
+            "— adjust their effective dates so that only one covers any day.")
+
+
 def be_g1_pack(db: Session, today: Optional[date] = None) -> tuple:
     """(pack, why) — the Belgian tax pack gate G1 judges, in this order:
       1. the Active pack (the one in force today if several are Active);
-      2. otherwise the pack whose effective dates include today;
+      2. otherwise the pack whose effective dates include today — if several
+         non-Active packs cover today, the one with the LATEST start date
+         (be_g1_overlap_warning then flags the overlap on Readiness);
       3. only if neither exists, the next upcoming pack (earliest future start);
       4. otherwise (only past, non-Active packs) the most recent one.
     A future pack is never preferred over one that covers today — an empty
     next-year Draft used to shadow the current pack. The choice only decides
     WHICH pack G1 judges; that pack still fails G1 when its catalogue is
     incomplete, unsigned or unsourced."""
-    from app.modules.payroll.models import JurisdictionPack
-
     day = today or _today()
-    packs = (db.query(JurisdictionPack)
-             .filter(JurisdictionPack.jurisdiction_country == "BE", JurisdictionPack.pack_type == "tax")
-             .order_by(JurisdictionPack.effective_from.desc(), JurisdictionPack.id.desc()).all())
+    packs = _be_tax_packs(db)
     active = [p for p in packs if p.status == "Active"]
     if active:
         in_force = [p for p in active if _covers(p, day)]
@@ -287,7 +308,9 @@ def be_readiness(db: Session) -> dict:
              for key, label, owner in GATES]
     decisions = be.owner_decisions(db)
     blocking = [d for d in decisions if d["blocksLaunch"]]
+    warning = be_g1_overlap_warning(db)
     return {"jurisdiction": "BE", "gates": gates, "decisions": decisions,
+            "warnings": [warning] if warning else [],
             "launchEmployers": sorted(be_launch_organizations()),
             "allPassed": all(g["passed"] for g in gates) and all(d["state"] == "RECORDED" for d in blocking)}
 
