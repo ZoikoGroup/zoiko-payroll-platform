@@ -370,6 +370,9 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
         # a8cde2482ef0: rugvedh's Mexico CFDI lifecycle (b5e1c7d9a3f2) and main's Poland
         # chain (1ee3bbde33bb) both grow from it; rejoined by merge 2defe5c4edd6.
         "a8cde2482ef0",
+        # b5f3e8a1c6d9: Spain foundation 86f1ec062709 (main) and certification runs tied to a pack
+        # e4b7c2a9d1f3 (nikhil) both grow from it; rejoined by merge c8d2f6a4e1b9.
+        "b5f3e8a1c6d9",
         "b6c7d8e9f0a1",
         # b8bd939fffca: Google OAuth and New Zealand leave-pay both descend
         # from Japan P9; merge 5739c5ccf50c rejoins their heads.
