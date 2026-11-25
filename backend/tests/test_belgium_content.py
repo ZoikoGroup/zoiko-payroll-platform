@@ -189,18 +189,11 @@ _STRUCTURAL_NUMBERS = {
         16: "Belgian IBAN SHAPE (BE + 14)", 100: "source name width", 300: "note width",
         1024: "bytes per KiB (file size limit)", 5000: "maximum rows per import (operational limit)",
     },
-    "belgium_readiness.py": {0: "zero / none", 1: "one / any", 5: "items shown in a detail"},
     "belgium_demo.py": {
         0: "zero / first sheet row", 1: "first day / header", 4: "repository root (parents index)",
         10: "YYYY-MM-DD width", 100: "label width", 150: "slab label / formula width",
         2025: "DEMO employees' illustrative hire year", 2026: "DEMO month year", 9: "DEMO month (September)",
         30: "DEMO month end day",
-    },
-    "belgium_governance.py": {
-        0: "first tuple element / first sheet row", 1: "tuple index / header row", 2: "sheet column (proposal)",
-        3: "sheet column (sources) / register cell (state text) / minimum register cells",
-        4: "repository root (parents index)", 300: "reference / question / reason column width",
-        500: "note column width", 4000: "proposal / sources / decided value text width",
     },
     "belgium_reports.py": {
         0: "zero / first tuple element / table origin", 1: "first day / tuple index / last cell (-1)",
@@ -220,7 +213,6 @@ _STRUCTURAL_NUMBERS = {
                                50: "source form-number width", 200: "source agency width", 300: "source title width"},
     "belgium_payment_service.py": {0: "list index / zero amount", 1: "batch sequence (+1)",
                                    100: "idempotency key / column width 100", 200: "return reason column width"},
-    "belgium_activation_readiness.py": {1: "inclusive last year of the pack window (range end + 1)"},
     "belgium_onss_rates.py": {
         0: "first file / zero id fallback", 1: "at most one file per pay date (slice [:1]) / first day / quarter 1",
         2: "calendar quarter 2", 3: "months per quarter (calendar) / quarter 3",

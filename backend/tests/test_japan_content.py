@@ -282,50 +282,7 @@ def test_japan_resolves_to_jp(value):
     from app.core.jurisdiction import REGISTRATION_COUNTRIES, get_jurisdiction_code
 
     assert get_jurisdiction_code(value) == "JP"
-    assert "Japan" not in REGISTRATION_COUNTRIES                      # never registrable while dormant
-
-
-def test_entering_japan_is_refused_while_dormant(monkeypatch):
-    from app.config import settings
-    from app.modules.payroll import japan_dormancy as d
-
-    assert settings.JP_TENANT_ONBOARDING_ENABLED is False
-    assert d.entering_japan_refusal("India", "Japan") == d.DORMANT_MESSAGE
-    assert d.entering_japan_refusal("JP", "Japan") is None                      # already Japanese
-    assert d.entering_japan_refusal("India", "Brazil") is None                  # not Japan
-    monkeypatch.setattr(settings, "JP_TENANT_ONBOARDING_ENABLED", True)
-    assert d.entering_japan_refusal("India", "Japan") is None
-
-
-def test_country_change_into_japan_is_blocked(db):
-    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
-
-    assert "Japan is not open" in get_jurisdiction_change_block_reason(db, "India", "Japan")
-
-
-@pytest.mark.parametrize("value", ["JP", "Japan"])
-def test_company_jurisdiction_cannot_become_japan(db, value):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll import service
-    from app.modules.payroll.schemas import CompanyDetailsUpdate
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="JP Test Org", code="JPTEST", country=None)
-    service.get_company_details(db, t.org.id)
-    with pytest.raises(BadRequestException, match="Japan is not open"):
-        service.update_company_details(db, t.org.id, CompanyDetailsUpdate(jurisdictionCountry=value))
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("JP", "Japan")
-
-
-def test_backfill_never_makes_an_org_japanese(db):
-    from app.modules.organizations.models import Organization
-    from app.modules.payroll import service
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="JP Backfill Org", code="JPBACK", country=None)
-    db.get(Organization, t.org.id).country = "Japan"
-    db.commit()
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("JP", "Japan")
+    assert "Japan" in REGISTRATION_COUNTRIES                          # registrable since the gate removal
 
 
 def test_japan_dispatch_is_fail_closed():

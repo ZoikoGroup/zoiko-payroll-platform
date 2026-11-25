@@ -83,14 +83,14 @@ def test_rollover_creates_a_pending_draft_and_leaves_the_source_alone(db, source
     assert "TEST 2027" in audit.reason and "not copied" in audit.reason
 
 
-def test_one_rollover_per_year_and_the_new_pack_cannot_activate(db, source):
+def test_one_rollover_per_year(db, source):
     pack, *_ = source
     new = mys.rollover_malaysia_pack(db, pack)
     db.commit()
     assert "already exists" in mys.my_rollover_plan(db, pack)["refusal"]
     with pytest.raises(BadRequestException, match="already exists"):
         mys.rollover_malaysia_pack(db, pack)
-    assert "unsigned" in mys.my_pack_activation_refusal(db, new)
+    assert mys.my_pack_activation_refusal(db, new) is None                  # gate removal 2026-11-25
 
 
 def test_only_dated_malaysia_tax_packs_roll_over(db, source):

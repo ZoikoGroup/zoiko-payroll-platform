@@ -95,7 +95,8 @@ def test_signing_alone_does_not_make_the_signer_an_editor(db, seeded):
     assert be_super_admin.be_row_editors(db, "rate", row.id) == {EDITOR}
 
 
-def test_activation_still_refuses_every_editor_and_signer(db, seeded):
+def test_editors_and_signers_may_activate(db, seeded):
+    """No editor / signer exclusion at activation any more (gate removal 2026-11-25)."""
     from app.modules.payroll import belgium_service
 
     src = _verified_source(db)
@@ -103,7 +104,7 @@ def test_activation_still_refuses_every_editor_and_signer(db, seeded):
     _update(db, "rate", row.id, EDITOR, flatAmount="10", reason="edit", sourceDocumentId=src.id)
     _update(db, "rate", row.id, SIGNER, reason="sign", sourceDocumentId=src.id, specialistVerified=True)
     for actor in (EDITOR, SIGNER):
-        assert "cannot also activate" in belgium_service.be_pack_activation_refusal(db, seeded, actor_id=actor)
+        assert belgium_service.be_pack_activation_refusal(db, seeded, actor_id=actor) is None
 
 
 def test_other_countries_consoles_are_unchanged():

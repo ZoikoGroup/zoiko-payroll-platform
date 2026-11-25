@@ -283,10 +283,12 @@ def test_brs_mapping_blocks_while_the_catalogue_is_empty_and_never_guesses(db, o
     assert art.status == "DRAFT" and any(e["code"] == "ZA_BRS_BLOCKED" for e in art.validation_errors)
 
 
-def test_irp5_and_emp501_templates_cannot_be_activated_without_the_catalogue():
+def test_irp5_and_emp501_templates_are_not_gated_by_the_catalogue():
+    """Templates follow the normal governance (gate removal 2026-11-25); the exports themselves
+    still refuse to guess BRS codes while the catalogue is empty."""
     from types import SimpleNamespace
 
-    assert "BRS" in svc.template_activation_refusal(None, SimpleNamespace(report_type="ZA_IRP5_PREVIEW"), 1)
+    assert svc.template_activation_refusal(None, SimpleNamespace(report_type="ZA_IRP5_PREVIEW"), 1) is None
     assert svc.template_activation_refusal(None, SimpleNamespace(report_type="ZA_PAYROLL_REGISTER"), 1) is None
 
 

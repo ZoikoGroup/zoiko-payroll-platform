@@ -64,10 +64,10 @@ const PRIMARY_TABS = ["be-rates", "be-slabs", "be-policy", "be-release"];
 const MORE_TABS = ["be-holiday-pay", "be-wages-time", "be-absence", "be-public-holidays", "be-earning",
   "be-joint-committees", "be-sources"];
 
-check("primary tabs: Overview | Contributions | Tax Slabs | Policy | Readiness (+ shared tabs)", () => {
+check("primary tabs: Overview | Contributions | Tax Slabs | Policy | Pack status (+ shared tabs)", () => {
   const keys = [...beConfig.matchAll(/\btab\("(be-[a-z-]+)", "([^"]+)"[^,]*, [^,]*, "([a-z-]+)"/g)];
   assert(keys.map((m) => m[1]).join() === PRIMARY_TABS.join(), `primary tab keys: ${keys.map((m) => m[1]).join(", ")}`);
-  assert(keys.map((m) => m[2]).join() === "Contributions,Tax Slabs,Policy,Readiness",
+  assert(keys.map((m) => m[2]).join() === "Contributions,Tax Slabs,Policy,Pack status",
     `labels: ${keys.map((m) => m[2]).join(", ")}`);
   // each anchors after the previous one, starting after Overview
   assert(keys.map((m) => m[3]).join() === ["overview", ...PRIMARY_TABS.slice(0, -1)].join(), "anchors");
@@ -95,17 +95,13 @@ check("data tabs live in the More menu and the tab row never scrolls sideways", 
     "More shows the selected tab's name");
 });
 
-check("activation readiness, signing status and owner decisions are sections of Release Readiness", () => {
+check("Pack status holds signing status only: no gates, evidence, activation readiness or decisions (2026-11-25)", () => {
   const release = read("components/jurisdiction/belgium/BEReleaseReadinessTab.jsx");
-  for (const name of ["BEActivationReadinessTab", "BESigningStatusTab", "BEOwnerDecisionsTab", "GoldenCertification", "GateEvidence"]) {
-    assert(release.includes(`<${name}`), `${name} rendered`);
+  assert(release.includes("<BESigningStatusTab"), "signing status rendered");
+  for (const gone of ["BEActivationReadinessTab", "BEOwnerDecisionsTab", "GateEvidence", "GoldenCertification", "be-gate-"]) {
+    assert(!release.includes(gone), `${gone} still on the tab`);
   }
-  assert((release.match(/<Collapsible/g) || []).length >= 5, "gate cards and sections are collapsible");
-  assert(release.includes('data-testid="be-gate-details"') && release.includes('data-testid="be-gate-done"')
-    && /c\.detail/.test(release), "each gate lists what is Missing and what is Done");
-  assert(release.includes("<ActorBadge actor={c.actor} />") && release.includes('data-testid="be-gate-owner"')
-    && release.includes('"sign-off": "Sign-off"'), "who acts: the backend's actor per check + the gate owner");
-  for (const old of ["be-activation", "be-signing", "be-decisions"]) assert(!new RegExp(`tab\\("${old}"`).test(beConfig), `${old} still a tab`);
+  for (const old of ["be-activation", "be-signing", "be-decisions"]) assert(!beConfig.includes(`tab("${old}"`), `${old} still a tab`);
 });
 
 check("old tab keys redirect to the tab that now holds them", () => {
@@ -169,15 +165,17 @@ check("Overview is the shared pack summary plus the engine chip; shared country-
   assert(!/countryLevelLabel/.test(beConfig), "uses the shared Country-level (no state) label");
 });
 
-check("the activation readiness tab is read-only", () => {
-  const tab = read("components/jurisdiction/belgium/BEActivationReadinessTab.jsx");
-  const imports = (tab.match(/import \{([^}]*)\} from "\.\.\/\.\.\/\.\.\/service\/superAdminService"/) || [])[1] || "";
-  assert(imports.trim() === "getBeActivationReadiness", `service imports: ${imports}`);
-  assert(!/\b(apiFetch|fetch|axios)\s*\(/.test(tab), "the tab makes no direct request (only the read-only GET above)");
+check("no activation-readiness, gate-evidence or decision-record API remains (gate removal 2026-11-25)", () => {
   const service = read("service/superAdminService.js");
-  assert(/getBeActivationReadiness = \(packRowId\) =>\s*apiFetch\(`\$\{BE_SA\}\/packs\/\$\{packRowId\}\/activation-readiness`\)/.test(service), "GET only");
+  for (const path of ["${BE_SA}/packs/${packRowId}/activation-readiness", "${BE_SA}/gate-evidence", "${BE_SA}/decision-records",
+    "${BE_SA}/readiness", "${BE_SA}/decisions"]) {
+    assert(!service.includes(path), `client still calls ${path}`);
+  }
   const router = readFileSync(resolve(BACKEND, "modules/super_admin/router.py"), "utf-8");
-  assert(router.includes('@router.get("/compliance/belgium/packs/{pack_row_id}/activation-readiness"'), "backend GET route");
+  for (const path of ["/compliance/belgium/packs/{pack_row_id}/activation-readiness", "/compliance/belgium/gate-evidence",
+    "/compliance/belgium/decision-records", "/compliance/belgium/readiness", "/compliance/belgium/decisions"]) {
+    assert(!router.includes(`"${path}"`), `backend still serves ${path}`);
+  }
 });
 
 check("with no Belgian pack the page offers the governed seed, not only the generic form", () => {

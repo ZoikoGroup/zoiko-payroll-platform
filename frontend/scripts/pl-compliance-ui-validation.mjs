@@ -219,25 +219,15 @@ check("the filing screen never transmits and never computes", () => {
   assert(!/pesel|iban/i.test(panel.replace(/masked identifiers/g, "")), "identifier wording in the filing screen");
 });
 
-// ── Phase 9: release gates, golden check, parallel cycles ──────────────────
-check("the release-gates tab is on the Super Admin page and calls the governed routes", () => {
+// ── Phase 9: parallel cycles (no release-gate tab since the gate removal, 2026-11-25) ──
+check("there is no release-gate tab on the Super Admin page", () => {
   const config = read("config/jurisdictions/polandComplianceConfig.jsx");
-  assert(/tab\("pl-readiness", "Release gates"/.test(config) && config.includes("<PLReadinessTab pack={pack} />"),
-    "release-gates tab");
-  const service = read("service/superAdminService.js");
-  assert(service.includes("${PL_SA}/packs/${packRowId}/golden-check")
-    && service.includes("${PL_SA}/packs/${packRowId}/authority-examples"), "golden-check / example client calls");
-  const saRouter = readFileSync(resolve(BACKEND, "../super_admin/router.py"), "utf-8");
-  ["/compliance/poland/packs/{pack_row_id}/golden-check", "/compliance/poland/packs/{pack_row_id}/authority-examples"]
-    .forEach((path) => assert(saRouter.includes(`"${path}"`), `no backend route ${path}`));
-  const tab = read("components/jurisdiction/poland/PLReadinessTab.jsx");
-  assert(!/passed\s*=\s*true|allPassed\s*=/.test(tab), "the UI must never decide a gate");
-  assert(/pack\.status === "Draft" && <AddExample/.test(tab), "examples are added to a Draft pack only");
+  assert(!/pl-readiness|PLReadinessTab/.test(config), "release-gates tab still mounted");
 });
 check("the parallel-cycle screen is wired and names the Polish identifiers it refuses", () => {
   const centre = read("modules/payroll/Compliances/PLComplianceCentreTab.jsx");
-  assert(centre.includes("<PLParallelCyclesSection />") && centre.includes('data-testid="pl-gates-passed"'),
-    "parallel section / gate count");
+  assert(centre.includes("<PLParallelCyclesSection />") && !centre.includes("pl-gates-passed"),
+    "parallel section / no gate count");
   const section = read("modules/payroll/Compliances/PLParallelCyclesSection.jsx");
   assert(/PESEL/.test(section) && !/IRD|KiwiSaver|PAYE/.test(section), "wording copied from New Zealand");
   const backend = readFileSync(resolve(BACKEND, "poland_parallel.py"), "utf-8");

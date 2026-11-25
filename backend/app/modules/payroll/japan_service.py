@@ -752,13 +752,9 @@ def before_run_transition(db: Session, run, next_status, actor_id: Optional[int]
         from app.modules.payroll import japan_year_end
 
         japan_year_end.require_cases_reflected(db, run)
-        open_items = [e for e in lifecycle.jp_run_exceptions(db, run) if not e["approved"]]
-        if open_items:
-            listing = "; ".join(f"{e['code']} ({'employee #' + str(e['employeeId']) if e['employeeId'] else 'run'})"
-                                for e in open_items)
-            raise HTTPException(http_status.HTTP_409_CONFLICT, detail=(
-                f"Japan: {len(open_items)} exception(s) need a second person's approval "
-                f"before the run is approved: {listing}"))
+        # Run exceptions (first / last payroll, bonus, YEA difference, ...) stay
+        # listed for review but no longer need a second person's approval before
+        # the run is approved (gate removal, owner decision 2026-11-25).
         run.jp_approval_fingerprint = jp_approval_fingerprint(db, run)
         return
     if next_status in (PayrollStatus.AUTHORIZED, PayrollStatus.PAID):
@@ -821,24 +817,18 @@ def _jp_profile_values(db: Session, employee, data, previous) -> dict:
 # Pack / service-registry / retention / summary hooks
 # ---------------------------------------------------------------------
 def _jp_pack_activation_refusal(db: Session, pack, actor_id: Optional[int]) -> Optional[str]:
+    """Structural check only (gate removal, owner decision 2026-11-25): no signing gate. Rows without a value
+    block only the calculations that need them, at calculation time."""
     from app.modules.payroll.models import ContributionRate, TaxSlab
 
     if pack is None or (pack.jurisdiction_country or "").upper() != JP:
         return None
-    marker = f"%{PENDING_G1_SUFFIX.strip()}%"
-    pending_rates = (db.query(ContributionRate)
-                     .filter(ContributionRate.jurisdiction_pack_id == pack.id,
-                             ContributionRate.organization_id.is_(None),
-                             ContributionRate.label.like(marker))
-                     .count())
-    pending_slabs = (db.query(TaxSlab)
-                     .filter(TaxSlab.jurisdiction_pack_id == pack.id,
-                             TaxSlab.organization_id.is_(None),
-                             TaxSlab.rate_label.like(marker))
-                     .count())
-    if pending_rates or pending_slabs:
-        return (f"{pending_rates + pending_slabs} Japan pack row(s) are still PENDING G1 - "
-                "they must be signed at gate G1 before the pack can be activated")
+    rates = (db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                               ContributionRate.organization_id.is_(None)).count())
+    slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                      TaxSlab.organization_id.is_(None)).count())
+    if not rates and not slabs:
+        return "Japan pack has no statutory content - seed it from japan_content.py first."
     return None
 
 
@@ -860,14 +850,9 @@ def _jp_pack_holidays(db: Session, year: int) -> list:
 
 
 def _jp_template_activation_refusal(db: Session, template, actor_id: Optional[int]) -> Optional[str]:
-    country = (getattr(template, "jurisdiction_country", None) or "").upper()
-    report_type = str(getattr(template, "report_type", "") or "").upper()
-    if country != JP and not report_type.startswith("JP_"):
-        return None
-    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
-
-    return ActivationRefusal("Japan filing and payment-report templates stay inactive until the official "
-                             "form revision and the JP-1 evidence decision are recorded.", JURISDICTION_GATE)
+    """Report templates follow the normal template governance, like every other
+    country (gate removal, owner decision 2026-11-25): no jurisdiction gate refuses them."""
+    return None
 
 
 def _jp_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:
@@ -978,6 +963,8 @@ def _jp_retention_settings():
 
 
 def statutory_summary(db: Session) -> dict:
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
+
     m = _jp_models()
     from app.modules.payroll.models import JurisdictionPack
 
@@ -997,7 +984,7 @@ def statutory_summary(db: Session) -> dict:
                       .filter(m.PayrollJpSocialInsuranceEvent.submission_status == "CREATED")
                       .count())
     return {
-        "jurisdiction": JP, "spec": SPEC, "available": False,
+        "jurisdiction": JP, "spec": SPEC, "available": get_jurisdiction_onboarding_block_reason(db, JP) is None,
         "packs": [{"id": p.id, "packId": p.pack_id, "version": p.version,
                    "status": p.status,
                    "effectiveFrom": p.effective_from.isoformat() if p.effective_from else None,
@@ -1008,10 +995,8 @@ def statutory_summary(db: Session) -> dict:
         "activeSocialInsuranceEnrollments": enrollments,
         "approvedResidentTaxNotices": notices,
         "pendingSocialInsuranceEvents": pending_events,
-        "decisions": owner_decisions(db),
-        "readiness": _jp_readiness_overview(db),
-        "note": ("Japan remains PLANNED; the official values and JP-1 evidence "
-                 "decisions are not yet recorded."),
+        "note": ("Japan opens like Spain once an Active pack exists (no release gates since "
+                 "2026-11-25); authority tables not yet loaded block only the calculations that need them."),
     }
 
 
@@ -1021,13 +1006,9 @@ def _jp_service_registry_transition(db: Session, target: str, reason: str,
     from app.modules.payroll import service
 
     def readiness():
-        # Re-derived at this moment: every release gate G0-G8 and every owner
-        # decision must be met before Japan opens (japan_readiness).
-        from app.modules.payroll import japan_readiness
-
-        unmet = japan_readiness.jp_unmet_requirements(db)
-        return unmet, {"gates": [{"gate": g["gate"], "passed": g["passed"]}
-                                 for g in japan_readiness.jp_readiness(db)["gates"]]}
+        # No release gates, evidence or owner decisions (gate removal, owner
+        # decision 2026-11-25): only the reason and a named Super Admin remain.
+        return [], None
 
     return service.transition_service_registry(
         db, JP, target, reason, actor_id, label="Japan", readiness=readiness,
@@ -1613,13 +1594,6 @@ def rotate_my_number_keys(db: Session, *, dry_run: bool = True) -> dict:
         record_tax_audit(db, actor_id=None, action="rotated", entity_type="jp_my_number_vault", entity_id=0,
                          new_value={k: v for k, v in out.items() if k != "dryRun"}, auto_commit=False)
     return out
-
-
-def _jp_readiness_overview(db: Session) -> dict:
-    from app.modules.payroll import japan_readiness
-
-    state = japan_readiness.jp_readiness(db)
-    return {"allPassed": state["allPassed"], "gates": state["gates"]}
 
 
 def list_my_numbers(db: Session, organization_id: int, employee_id: Optional[int] = None):

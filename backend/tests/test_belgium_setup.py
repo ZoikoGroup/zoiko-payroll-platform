@@ -356,26 +356,6 @@ def test_vault_refuses_without_keys_and_unknown_types(world, monkeypatch):
 
 
 # ── organisation router: dormant, Belgium only, masked ─────────────────────
-def test_router_is_dormant_and_belgium_only(world, monkeypatch):
-    from app.config import settings
-    from app.modules.payroll.be_org_router import require_be_tenant
-    from tests._mx_employer_helpers import make_org, principal
-
-    w = world
-    monkeypatch.setattr(settings, "BE_TENANT_ONBOARDING_ENABLED", False)
-    monkeypatch.setattr(settings, "BE_CANARY_ORG_IDS", "")
-    with pytest.raises(NotFoundException, match="not open"):
-        require_be_tenant(principal(w.org), w.db)
-    monkeypatch.setattr(settings, "BE_CANARY_ORG_IDS", str(w.org))
-    assert require_be_tenant(principal(w.org), w.db) is None
-    monkeypatch.setattr(settings, "BE_CANARY_ORG_IDS", "")
-    monkeypatch.setattr(settings, "BE_TENANT_ONBOARDING_ENABLED", True)
-    assert require_be_tenant(principal(w.org), w.db) is None
-    other = make_org(w.db, name="Other", code="BEOTHER", country="NL")
-    with pytest.raises(NotFoundException, match="only available"):
-        require_be_tenant(principal(other.org.id), w.db)
-
-
 def test_router_is_mounted_and_every_route_is_guarded():
     from app.modules.payroll.be_org_router import require_be_tenant, router
     from app.modules.payroll.router import payroll_router

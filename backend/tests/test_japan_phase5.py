@@ -149,13 +149,7 @@ def test_run_approval_binds_every_frozen_japan_snapshot(db, organization, employ
     db.add(slip)
     db.commit()
 
-    # Phase 8: the run's exceptions need a second person's approval first.
-    from app.modules.payroll import japan_lifecycle
-    with pytest.raises(HTTPException):
-        jp.before_run_transition(db, run, PayrollStatus.APPROVED, 1)
-    for exception in japan_lifecycle.jp_run_exceptions(db, run):
-        japan_lifecycle.approve_jp_run_exception(
-            db, organization_id=organization.id, run_id=run.id, key=exception["key"], approver_id=2)
+    # Run exceptions no longer need a second person's approval (gate removal 2026-11-25).
     jp.before_run_transition(db, run, PayrollStatus.APPROVED, 1)
     assert run.jp_approval_fingerprint
 
@@ -182,29 +176,12 @@ def test_missing_snapshot_blocks_japan_approval(db, organization, employee):
     assert "no frozen JP calculation snapshot" in excinfo.value.detail
 
 
-def test_japan_router_is_dormant_until_onboarding_is_enabled(db, organization, monkeypatch):
-    from app.modules.payroll import japan_dormancy, japan_org_router, service
-
-    user = SimpleNamespace(id=1, organization_id=organization.id)
-    monkeypatch.setattr(japan_dormancy, "onboarding_enabled", lambda: False)
-    with pytest.raises(NotFoundException):
-        japan_org_router.require_japan_tenant(user, db)
-
-    monkeypatch.setattr(japan_dormancy, "onboarding_enabled", lambda: True)
-    monkeypatch.setattr(service, "_resolve_org_country", lambda _db, _org: "US")
-    with pytest.raises(NotFoundException):
-        japan_org_router.require_japan_tenant(user, db)
-
-    monkeypatch.setattr(service, "_resolve_org_country", lambda _db, _org: "JP")
-    assert japan_org_router.require_japan_tenant(user, db) is None
-
-
 def test_summary_and_template_hooks_stay_fail_closed(db):
     summary = jp.statutory_summary(db)
     assert summary["available"] is False
     assert summary["jurisdiction"] == "JP"
     assert jp._jp_template_activation_refusal(
-        db, SimpleNamespace(jurisdiction_country="JP", report_type="WITHHOLDING"), 1)
+        db, SimpleNamespace(jurisdiction_country="JP", report_type="WITHHOLDING"), 1) is None   # gate removal 2026-11-25
     assert jp._jp_template_activation_refusal(
         db, SimpleNamespace(jurisdiction_country="US", report_type="W2"), 1) is None
 

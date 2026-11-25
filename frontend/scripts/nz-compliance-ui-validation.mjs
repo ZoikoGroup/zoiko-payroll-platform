@@ -68,7 +68,6 @@ const NZ_FILES = [
   "modules/payroll/Compliances/NZFilingRemittanceSection.jsx",
   "modules/payroll/PayRollRuns/NZRunFilingPanel.jsx",
   // P9 — release gates and parallel cycles
-  "components/jurisdiction/new_zealand/NZReadinessTab.jsx",
   "modules/payroll/Compliances/NZParallelCyclesSection.jsx",
 ];
 const files = Object.fromEntries(NZ_FILES.map((f) => [f, read(f)]));
@@ -78,7 +77,7 @@ const config = files["config/jurisdictions/newZealandComplianceConfig.jsx"];
 // ── Super Admin client ↔ backend routes ─────────────────────────────────────
 const superAdminService = read("service/superAdminService.js");
 const nzBlock = superAdminService.slice(superAdminService.indexOf('const NZ_SA = "/api/super-admin/compliance/new-zealand";'));
-const nzClient = nzBlock.slice(0, nzBlock.indexOf("export const getZaReadiness"));
+const nzClient = nzBlock.slice(0, nzBlock.indexOf("export const listBrOrganizations"));
 const saRouter = readBackend("app/modules/super_admin/router.py");
 const saRoutes = new Set(
   [...saRouter.matchAll(/@router\.(get|post|put|patch|delete)\(\s*"([^"]+)"/g)]
@@ -114,19 +113,12 @@ check("The signing status shows the activation checklist in order", () => {
     `order ${order}`);
 });
 
-// ── P9: release gates and parallel cycles ───────────────────────────────────
-check("The release-gate tab and the parallel-cycle section are mounted", () => {
-  assert(/tab\("nz-readiness", "Release gates", BadgeCheck, "nz-signing", \(\{ pack \}\) => <NZReadinessTab pack=\{pack\} \/>\)/
-    .test(config), "Super Admin tab");
+// ── P9: parallel cycles (no release-gate tab since the gate removal, 2026-11-25) ──
+check("No release-gate tab or gate line; the parallel-cycle section is mounted", () => {
+  assert(!/nz-readiness|NZReadinessTab/.test(config), "no release-gate tab");
   const centreText = read("modules/payroll/Compliances/NZComplianceCentreTab.jsx");
-  assert(centreText.includes("<NZParallelCyclesSection />") && centreText.includes('data-testid="nz-gates-passed"'),
+  assert(centreText.includes("<NZParallelCyclesSection />") && !centreText.includes("nz-gates-passed"),
     "compliance centre");
-});
-check("The readiness tab only reads the server's gates (nothing ticked in the browser)", () => {
-  const tab = files["components/jurisdiction/new_zealand/NZReadinessTab.jsx"];
-  assert(/getNzStatutorySummary\(\)/.test(tab) && /summary\?\.readiness/.test(tab), "reads the summary readiness");
-  assert(!/useState\(\s*\{[^}]*passed/.test(tab) && !/passed:\s*true/.test(tab), "no client-side pass");
-  assert(/runNzGoldenCheck\(pack\.id\)/.test(tab), "golden check runs against the selected pack");
 });
 check("Parallel concepts are exactly the backend's and no identifier column is offered", () => {
   const section = files["modules/payroll/Compliances/NZParallelCyclesSection.jsx"];

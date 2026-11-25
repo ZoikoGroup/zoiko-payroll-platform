@@ -157,24 +157,14 @@ def test_seed_writes_every_row_unsigned_with_its_territory(db):
         mys.seed_malaysia_pack(db)
 
 
-def test_activation_is_refused_until_everything_is_signed_and_loaded(db):
+def test_activation_needs_only_seeded_content(db):
+    """Structural check only (gate removal 2026-11-25): unsigned rows and empty schedules block
+    the calculations that need them, not the activation."""
     from app.modules.payroll import malaysia_service as mys
-    from app.modules.payroll.models import ContributionRate, TaxSlab
 
     pack = mys.seed_malaysia_pack(db)
     db.commit()
-    assert "unsigned or unconfigured" in mys.my_pack_activation_refusal(db, pack)
-    for r in db.query(ContributionRate).filter_by(jurisdiction_pack_id=pack.id):   # simulate full signing
-        r.label = r.label.replace(" [PENDING G1]", "")
-        if r.total == mys.NOT_CONFIGURED or r.text_value == c.PENDING:
-            r.text_value, r.flat_amount, r.total = None, Decimal("1"), "1"
-    db.commit()
-    assert "unsigned table row" in mys.my_pack_activation_refusal(db, pack)
-    for s in db.query(TaxSlab).filter_by(jurisdiction_pack_id=pack.id):
-        s.rate_label = s.rate_label.replace(" [PENDING G1]", "")
-    db.commit()
-    refusal = mys.my_pack_activation_refusal(db, pack)
-    assert "MY_EPF_SCHEDULE" in refusal and "MY_PUBLIC_HOLIDAY" in refusal   # schedules are legal content
+    assert mys.my_pack_activation_refusal(db, pack) is None
     assert mys.my_pack_activation_refusal(db, type("P", (), {"jurisdiction_country": "PL"})()) is None
 
 

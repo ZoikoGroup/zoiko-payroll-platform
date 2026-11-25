@@ -308,7 +308,7 @@ def test_ppk_and_fep_follow_the_pension_base():
 _LITERALS = ("4806", "282600", "282,600", "9.76", "120000", "10800", "31.40")
 
 
-@pytest.mark.parametrize("path", ["app/modules/payroll/poland_service.py", "app/modules/payroll/poland_dormancy.py",
+@pytest.mark.parametrize("path", ["app/modules/payroll/poland_service.py",
                                   "app/modules/payroll/engine/countries/poland.py"])
 def test_no_statutory_value_outside_content(path):
     tree = ast.parse((BACKEND / path).read_text(encoding="utf-8"))
@@ -404,32 +404,27 @@ def test_seed_only_writes_draft(db):
 
 
 # ── activation refusal (becomes the pack_activation_refusal hook in P4) ────
-def test_activation_is_refused_while_any_row_is_unsigned(db):
+def test_unsigned_rows_no_longer_block_activation(db):
+    """Structural check only (gate removal 2026-11-25)."""
     from app.modules.payroll import poland_service as svc
 
     pack = svc.seed_poland_pack(db)
-    refusal = svc.pl_pack_activation_refusal(db, pack)
-    assert refusal and "unsigned or unconfigured" in refusal and "G1" in refusal
+    assert svc.pl_pack_activation_refusal(db, pack) is None
 
 
-def test_activation_refusal_clears_only_when_every_row_is_signed_and_configured(db):
+def test_activation_still_needs_content_and_a_pit_scale(db):
+    """Unsourced rows no longer block; a missing PIT scale still does (gate removal 2026-11-25)."""
     from app.modules.payroll import poland_service as svc
-    from app.modules.payroll.models import ContributionRate
+    from app.modules.payroll.models import ContributionRate, TaxSlab
 
     pack = svc.seed_poland_pack(db)
     rows = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).all()
-    # Simulate a fully signed pack (what the G1 console does in Phase 7).
-    for r in rows:
-        r.label = r.label.replace(svc.PENDING_G1_SUFFIX, "")
-        if r.total == svc.NOT_CONFIGURED:
-            r.flat_amount, r.total = Decimal("1"), "1"
-        if r.text_value == "PENDING_G1":
-            r.text_value = "SIGNED"
-    db.flush()
-    assert svc.pl_pack_activation_refusal(db, pack) is None
     rows[0].source_document_id = None
     db.flush()
-    assert "without a source document" in svc.pl_pack_activation_refusal(db, pack)
+    assert svc.pl_pack_activation_refusal(db, pack) is None
+    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.rule_type == "PL_PIT_BAND").delete()
+    db.flush()
+    assert "no PIT scale" in svc.pl_pack_activation_refusal(db, pack)
 
 
 def test_activation_refusal_ignores_other_countries(db):

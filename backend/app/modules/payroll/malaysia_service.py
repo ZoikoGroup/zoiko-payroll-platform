@@ -140,44 +140,18 @@ def seed_malaysia_pack(db: Session, *, effective_from: date = date(2026, 1, 1),
 def my_pack_activation_refusal(db: Session, pack, actor_id: Optional[int] = None) -> Optional[str]:
     """Why a Malaysian pack must NOT be activated, or None.
 
-    Refused while ANY canonical row is unsigned ([PENDING G1]), NOT
-    CONFIGURED or PENDING_G1, while a row has no source document, or while a
-    required table (EPF / PERKESO / EIS / foreign-worker schedules, public
-    holidays) holds no rows (spec §16 G1: NO-GO if a supported result relies
-    on guessed or uncited content; MY-005 schedules are legal content)."""
-    from app.modules.payroll.models import ContributionRate, TaxSlab
+    Structural check only (gate removal, owner decision 2026-11-25): the pack holds content. No
+    signing / source-document / schedule-completeness gate: a missing value
+    or schedule blocks only the calculation that needs it."""
+    from app.modules.payroll.models import ContributionRate
 
     if (getattr(pack, "jurisdiction_country", None) or "").upper() != MY:
         return None
-    content = _content()
-    marker = PENDING_G1_SUFFIX.strip()
     rates = (db.query(ContributionRate)
              .filter(ContributionRate.jurisdiction_pack_id == pack.id,
-                     ContributionRate.organization_id.is_(None)).all())
+                     ContributionRate.organization_id.is_(None)).count())
     if not rates:
-        return "Malaysia pack has no statutory content — seed it from malaysia_content.py first."
-    unsigned = sorted(r.component_key for r in rates
-                      if marker in (r.label or "") or r.total == NOT_CONFIGURED
-                      or (r.text_value or "") == content.PENDING)
-    if unsigned:
-        shown = ", ".join(unsigned[:8]) + (f" (+{len(unsigned) - 8} more)" if len(unsigned) > 8 else "")
-        return (f"Malaysia pack {pack.pack_id} still has {len(unsigned)} unsigned or unconfigured row(s): "
-                f"{shown}. Gate G1 must sign them before activation (ZP-MY-ENG-001 §16).")
-    unsourced = sorted(r.component_key for r in rates if r.source_document_id is None)
-    if unsourced:
-        return f"Malaysia pack {pack.pack_id} has rows without a source document: {', '.join(unsourced[:8])}."
-    slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
-                                      TaxSlab.organization_id.is_(None)).all())
-    unsigned_slabs = [s for s in slabs if marker in (s.rate_label or "")]
-    if unsigned_slabs:
-        kinds = sorted({s.rule_type for s in unsigned_slabs})
-        return (f"Malaysia pack {pack.pack_id} still has {len(unsigned_slabs)} unsigned table row(s) "
-                f"({', '.join(kinds)}).")
-    present = {s.rule_type for s in slabs}
-    missing = [rule for rule in content.REQUIRED_TABLES if rule not in present]
-    if missing:
-        return (f"Malaysia pack {pack.pack_id} has no rows for: {', '.join(missing)} — load them from the "
-                "official schedules (MY-005).")
+        return "Malaysia pack has no statutory content - seed it from malaysia_content.py first."
     return None
 
 
@@ -1460,22 +1434,15 @@ def _my_pack_holidays(db: Session, year: int) -> list:
 
 
 def _my_template_activation_refusal(db: Session, template, actor_id=None) -> Optional[str]:
-    country = (getattr(template, "jurisdiction_country", None) or "").upper()
-    report_type = str(getattr(template, "report_type", "") or "").upper()
-    if country != MY and not report_type.startswith("MY_"):
-        return None
-    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
-
-    return ActivationRefusal("Malaysia statutory form templates stay inactive until the official authority layouts are "
-                             "archived and the filing path is certified (gate G3, MY-022).", JURISDICTION_GATE, gate="G3")
+    """Report templates follow the normal template governance, like every other
+    country (gate removal, owner decision 2026-11-25): no jurisdiction gate refuses them."""
+    return None
 
 
 def _my_statutory_editors(db: Session, pack) -> set:
-    """Super Admins who edited or signed a statutory row of this pack version:
-    the pack approval refuses every one of them."""
-    from app.modules.payroll import my_super_admin
-
-    return my_super_admin.statutory_editors(db, pack)
+    """No extra editor exclusion (gate removal, owner decision 2026-11-25): the platform-wide rule that the
+    approver is not the pack's last editor still applies."""
+    return set()
 
 
 MY_RETENTION_CATEGORIES = (
@@ -1568,21 +1535,6 @@ def _my_retention_settings():
         has_statutory_profile=_has_statutory_profile, report_matches=_is_report)
 
 
-def my_unmet_requirements(db: Session) -> list:
-    """[{key, label, detail}] of every unmet release gate G1-G7 and launch-
-    blocking owner decision, re-derived now (malaysia_readiness, Phase 10)."""
-    from app.modules.payroll import malaysia_readiness
-
-    return malaysia_readiness.my_unmet_requirements(db)
-
-
-def _my_readiness_overview(db: Session) -> dict:
-    from app.modules.payroll import malaysia_readiness
-
-    state = malaysia_readiness.my_readiness(db)
-    return {"allPassed": state["allPassed"], "gates": state["gates"]}
-
-
 def my_vault_stale_rows(db: Session) -> Optional[int]:
     """ACTIVE vault rows not under the newest key version, or None when no
     keyring is configured (presence only; no key is read into a result)."""
@@ -1599,6 +1551,7 @@ def my_vault_stale_rows(db: Session) -> Optional[int]:
 
 
 def statutory_summary(db: Session) -> dict:
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
     from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSlab
 
     m = _models()
@@ -1615,7 +1568,7 @@ def statutory_summary(db: Session) -> dict:
         return db.query(model).filter(model.status == STATUS_ACTIVE).count()
 
     return {
-        "jurisdiction": MY, "spec": SPEC, "available": False,
+        "jurisdiction": MY, "spec": SPEC, "available": get_jurisdiction_onboarding_block_reason(db, MY) is None,
         "packs": [{"id": p.id, "packId": p.pack_id, "version": p.version, "status": p.status,
                    "effectiveFrom": p.effective_from.isoformat() if p.effective_from else None,
                    "effectiveTo": p.effective_to.isoformat() if p.effective_to else None} for p in packs],
@@ -1628,10 +1581,7 @@ def statutory_summary(db: Session) -> dict:
         "activeWorkAssignments": active(m.PayrollMyWorkAssignment),
         "approvedDeclarations": db.query(m.PayrollMyTaxDeclaration).filter(
             m.PayrollMyTaxDeclaration.status == "APPROVED").count(),
-        "decisions": owner_decisions(db),
-        "readiness": _my_readiness_overview(db),
-        "unmet": my_unmet_requirements(db),
-        "note": "Malaysia stays PLANNED until every release gate G1-G7 and owner decision passes.",
+        "note": "Malaysia opens like Spain once an Active pack exists (no release gates since 2026-11-25).",
     }
 
 
@@ -1639,7 +1589,9 @@ def _my_service_registry_transition(db: Session, target: str, reason: str, actor
     from app.modules.payroll import service
 
     def readiness():
-        return my_unmet_requirements(db), {}
+        # No release gates, evidence or owner decisions (gate removal, owner
+        # decision 2026-11-25): only the reason and a named Super Admin remain.
+        return [], None
 
     return service.transition_service_registry(
         db, MY, target, reason, actor_id, label="Malaysia", readiness=readiness,

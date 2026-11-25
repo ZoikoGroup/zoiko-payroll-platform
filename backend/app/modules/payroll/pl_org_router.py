@@ -5,9 +5,9 @@ Organisation API for Poland statutory setup (ZP-PL-ENG-001 Phase 4), mounted
 inside payroll_router as /api/payroll/poland. Same house rules as the New
 Zealand organisation router:
 
-  * Dormancy: the router-level guard refuses EVERY route with 404 while
-    PL_TENANT_ONBOARDING_ENABLED is off, or when the caller's payroll
-    jurisdiction is not Poland (PL-001). Poland is dormant, not forbidden.
+  * Scope: the router-level guard refuses EVERY route with 404 when the
+    caller's payroll jurisdiction is not Poland. There is no onboarding
+    switch (gate removal, owner decision 2026-11-25).
   * The organisation is always the caller's own; no route takes an org id,
     and every child id is checked against that organisation in the service.
   * Reads need a payroll operator; writes need an org admin and a reason;
@@ -31,14 +31,14 @@ from app.modules.payroll import poland_service as pl
 
 
 def require_pl_tenant(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
-    from app.modules.payroll import poland_dormancy, service
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.payroll import service
 
     org_id = getattr(current_user, "organization_id", None)
-    if not poland_dormancy.onboarding_enabled(org_id):
-        raise NotFoundException(poland_dormancy.DORMANT_MESSAGE)
     if org_id is None:
         return
-    if not poland_dormancy.is_poland(service._resolve_org_country(db, org_id)):
+    country = service._resolve_org_country(db, org_id)
+    if not country or get_jurisdiction_code(country) != "PL":
         raise NotFoundException("The Poland API is only available to organisations whose payroll "
                                 "jurisdiction is Poland.")
 

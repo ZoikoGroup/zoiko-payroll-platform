@@ -57,7 +57,7 @@ def test_apply_seeds_a_draft_pack_and_registry_and_is_repeatable(db, run):
     main = summary["packs"][0]
     assert main["rates"] == summary["content"]["rates"] and main["slabs"] == summary["content"]["slabs"]
     assert main["pending"] == main["rates"] + main["slabs"]                 # every row PENDING G1
-    assert main["activationRefusal"] and summary["registry"] == "PLANNED" and summary["blockers"] == []
+    assert main["activationRefusal"] is None and summary["registry"] == "PLANNED" and summary["blockers"] == []
     code, _ = run("--apply")                                                 # untouched Draft: safe re-run
     assert code == 0 and mys.my_seed_summary(db)["packs"] == summary["packs"]
 

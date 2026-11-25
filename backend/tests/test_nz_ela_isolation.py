@@ -55,7 +55,7 @@ def test_ela_pack_activation_refused(db, packs):
     for today in (date(2026, 11, 4), date(2028, 8, 5)):
         refusal = nzs.nz_pack_activation_refusal(db, ela, today=today)
         assert refusal and "2028-08-06" in refusal
-    assert "no signed content" in nzs.nz_pack_activation_refusal(db, ela, today=date(2028, 8, 6))
+    assert "no statutory content" in nzs.nz_pack_activation_refusal(db, ela, today=date(2028, 8, 6))
 
 
 def test_holidays_act_rules_still_used_on_2028_08_05():

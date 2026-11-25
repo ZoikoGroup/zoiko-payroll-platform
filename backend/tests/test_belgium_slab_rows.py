@@ -208,9 +208,7 @@ def test_slab_editors_cannot_approve_and_edits_invalidate_approval(db, seeded, s
     _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="0", ratePct="1")
     db.refresh(seeded)
     assert seeded.approved_by_id is None                          # shared _invalidate_pack_approval_on_edit
-    assert EDITOR in jurisdiction_hooks.call("BE", "statutory_editors", db, seeded)
-    with pytest.raises(BadRequestException):
-        service.set_jurisdiction_pack_approver(db, seeded.id, actor_id=EDITOR)
+    assert jurisdiction_hooks.call("BE", "statutory_editors", db, seeded) == set()      # gate removal 2026-11-25
 
 
 def test_retire_is_draft_only_with_a_full_before_image(db, seeded, source):
@@ -265,28 +263,16 @@ def _sign_everything(db, pack, source_id):
     db.commit()
 
 
-def test_activation_refused_while_a_band_key_has_no_signed_rows(db, seeded, source):
+def test_a_band_key_without_signed_rows_no_longer_blocks_activation(db, seeded, source):
+    """Structural activation check only (gate removal 2026-11-25): missing slab rows block the
+    calculation that needs them, not the activation."""
     from app.modules.payroll import belgium_service
 
     _sign_everything(db, seeded, source.id)
     marker = _rate(db, seeded, "be_red_social_work_bonus")
     marker.text_value = "SLAB_ROWS"
     db.commit()
-    assert "be_red_social_work_bonus (slab rows missing or unsigned)" in \
-        belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER)
-    _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="0", ratePct="1")
-    assert "be_red_social_work_bonus (slab rows missing or unsigned)" in \
-        belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER)   # added but unsigned
-    added = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="10",
-                 ratePct="1")
-    _sign_slab(db, added["id"], source.id)
-    from app.modules.payroll.models import TaxSlab
-
-    for s in db.query(TaxSlab).filter(TaxSlab.rule_type == "BE_RED_SOCIAL_WORK_BONUS"):
-        s.rate_label = s.rate_label.replace(_c().PENDING_MARK, "").strip()
-    db.commit()
-    # content complete: what remains is the Block C2 golden gate (no authority example yet)
-    assert "the authority examples do not replay exactly" in belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER)
+    assert belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER) is None
 
 
 # ── BePack over slab rows ──────────────────────────────────────────────────

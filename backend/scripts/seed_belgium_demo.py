@@ -16,8 +16,7 @@ pass two EXISTING, DIFFERENT user ids (four-eyes stays exactly as built):
 Refused when BE_DEMO_PACKS_ENABLED is not true, in a production environment, or
 against a non-local database (_local_db_guard). The demo organisation is
 recognised by BE_DEMO_ORG_IDS: the script sets it for its own run and prints the
-value to add to the environment (and to BE_CANARY_ORG_IDS to open the Belgium
-screens for it).
+value to add to the environment.
 """
 import argparse
 import sys
@@ -72,8 +71,7 @@ def main() -> None:
         out = seed_demo(db, args.preparer, args.approver)
         db.commit()
         print(f"DEMO seeded: {out}")
-        print(f"Add to the environment: BE_DEMO_ORG_IDS={out['organizationId']} "
-              f"(and BE_CANARY_ORG_IDS={out['organizationId']} to open the Belgium screens).")
+        print(f"Add to the environment: BE_DEMO_ORG_IDS={out['organizationId']}")
     except Exception:
         db.rollback()
         raise

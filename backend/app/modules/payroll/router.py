@@ -205,14 +205,14 @@ from app.modules.payroll.jurisdictions_router import router as jurisdictions_rou
 payroll_router.include_router(jurisdictions_router)
 # Brazil employer onboarding (/payroll/brazil/...) — own module, not this file.
 payroll_router.include_router(brazil_org_router)
-# Japan statutory setup (/payroll/japan/...) ? dormant (404) until JP onboarding is enabled.
+# Japan statutory setup (/payroll/japan/...); 404 unless the org's jurisdiction is Japan.
 payroll_router.include_router(japan_org_router)
 payroll_router.include_router(nz_org_router)
-# Poland (ZP-PL-ENG-001 Phase 4): /api/payroll/poland, dormant (404) until PL_TENANT_ONBOARDING_ENABLED.
+# Poland (ZP-PL-ENG-001 Phase 4): /api/payroll/poland; 404 unless the org's jurisdiction is Poland.
 payroll_router.include_router(pl_org_router)
-# Malaysia (ZP-MY-ENG-001 Phase 5): /api/payroll/malaysia, dormant (404) until MY onboarding is enabled.
+# Malaysia (ZP-MY-ENG-001 Phase 5): /api/payroll/malaysia; 404 unless the org's jurisdiction is Malaysia.
 payroll_router.include_router(my_org_router)
-# Belgium (ZP-BE-ENG-001 Block A1): /api/payroll/belgium, dormant (404) unless belgium_dormancy admits the org.
+# Belgium (ZP-BE-ENG-001 Block A1): /api/payroll/belgium; 404 unless the org's jurisdiction is Belgium.
 payroll_router.include_router(be_org_router)
 # Mexico Phase 10f: the tenant-run master-data transfer (its own guards, not /mexico's).
 payroll_router.include_router(mexico_transfer_router)

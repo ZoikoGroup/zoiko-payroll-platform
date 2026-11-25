@@ -152,14 +152,16 @@ def test_run_exceptions_need_a_second_person_and_follow_the_payload(db, organiza
     assert not next(e for e in lifecycle.jp_run_exceptions(db, run) if e["key"] == key)["approved"]
 
 
-def test_approval_is_refused_while_an_exception_is_open(db, organization, employee):
+def test_approval_proceeds_while_an_exception_is_open(db, organization, employee):
+    """Exceptions stay listed but need no second person's approval (gate removal 2026-11-25)."""
+    from app.modules.payroll import japan_lifecycle
     from app.modules.payroll.models import PayrollStatus
 
     run = _run(db, organization, date(2026, 6, 25), status="Review")
     _payslip(db, organization, employee, run)
-    with pytest.raises(HTTPException) as exc:
-        jp.before_run_transition(db, run, PayrollStatus.APPROVED, 1)
-    assert exc.value.status_code == 409 and "exception" in exc.value.detail
+    assert [e for e in japan_lifecycle.jp_run_exceptions(db, run) if not e["approved"]]
+    jp.before_run_transition(db, run, PayrollStatus.APPROVED, 1)
+    assert run.jp_approval_fingerprint
 
 
 # ── corrections (JP-006) ────────────────────────────────────────────────────

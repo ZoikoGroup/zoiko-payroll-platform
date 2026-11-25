@@ -45,6 +45,9 @@ export const REGISTRATION_COUNTRIES = [
   // Spain (ZP-ES-ENG-001, docs/spain) — registration opens once an Active ES
   // canonical pack with rates exists (mirrors backend REGISTRATION_COUNTRIES).
   "Spain",
+  // Gate removal (2026-11-25): ordinary countries like Spain - registration
+  // opens once an Active canonical pack with rates exists.
+  "Japan", "New Zealand", "Poland", "Malaysia", "South Africa", "Belgium",
 ];
 
 const STATES_BY_COUNTRY = {
@@ -318,6 +321,7 @@ const TIMEZONES_BY_COUNTRY = {
   "Italy": ["Europe/Rome"],
   "Spain": ["Europe/Madrid", "Atlantic/Canary"],
   "Belgium": ["Europe/Brussels"],
+  "Poland": ["Europe/Warsaw"],
   "Austria": ["Europe/Vienna"],
   "Finland": ["Europe/Helsinki"],
   "Portugal": ["Europe/Lisbon", "Atlantic/Azores", "Atlantic/Madeira"],

@@ -153,18 +153,14 @@ def _sign_everything(db, pack, source, actor):
     sign_with_test_values(db, pack, source, actor)
 
 
-def test_editors_cannot_approve_and_activation_waits_for_everything(db, pack, sources, admins):
+def test_editors_are_not_excluded_and_activation_checks_structure_only(db, pack, sources, admins):
+    """No NZ editor exclusion and no signing gate at activation (gate removal 2026-11-25)."""
     maker, checker, third = admins
     row = _rate(db, pack, "nz_acc_earner_levy_rate")
     console.update_row(db, "rate", row.id, _ask(sources[0], specialistVerified=True), maker)
     db.commit()
-    assert nzs._nz_statutory_editors(db, pack) == {maker}
-    with pytest.raises(BadRequestException, match="maker-checker"):
-        service.set_jurisdiction_pack_approver(db, pack.id, maker)
-    assert "PENDING G1" in console.signing_status(db, pack.id)["activationRefusal"]
-    service.set_jurisdiction_pack_approver(db, pack.id, checker)
-    with pytest.raises(BadRequestException, match="PENDING G1"):
-        service.set_jurisdiction_pack_status(db, pack.id, "Active", actor_id=third)
+    assert nzs._nz_statutory_editors(db, pack) == set()
+    assert console.signing_status(db, pack.id)["activationRefusal"] is None
 
 
 def test_activated_super_admin_values_drive_the_calculation(db, pack, sources, admins):

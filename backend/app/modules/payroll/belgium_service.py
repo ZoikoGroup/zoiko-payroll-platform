@@ -118,14 +118,12 @@ def _row_empty(row, kind: str) -> bool:
 
 
 def be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[str]:
-    """Why a Belgian pack must NOT be activated, or None (ZP-BE-ENG-001 §17 G1).
+    """Why a Belgian pack must NOT be activated, or None.
 
-    Refused while ANY required catalogue row is missing, empty, unsourced or
-    unsigned ("[PENDING G1]"). A row signed NOT_SUPPORTED is a decided, signed
-    row (the feature stays blocked at calculation time), as in Poland. A band /
-    formula / table key signed SLAB_ROWS needs at least one signed slab row of
-    its rule type; every earning-classification row must be signed. Four-eyes
-    approval is enforced separately by the shared approval lists."""
+    Structural checks only (gate removal, owner decision 2026-11-25): a DEMO pack is never activated
+    through the governed path, and a pack must hold content. No signing,
+    sourcing, catalogue-completeness, golden-certification or editor gate: a
+    row without a value blocks only the calculation that needs it."""
     from app.modules.payroll.models import ContributionRate, TaxSlab
 
     if (getattr(pack, "jurisdiction_country", None) or "").upper() != BE:
@@ -135,50 +133,13 @@ def be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[str
     if belgium_demo.be_is_demo_pack(pack):
         return (f"{pack.pack_id} is a {belgium_demo.DEMO_LABEL} pack: it is activated only by the demo seed in a "
                 "non-production environment, never through the governed activation.")
-    if actor_id is not None:
-        # Four-eyes, completing the shared rules (editors never approve; the
-        # approver never activates; the LAST editor never activates): nobody who
-        # edited or signed a row of this version may activate it.
-        from app.modules.payroll import be_super_admin
-
-        if actor_id in be_super_admin.statutory_editors(db, pack):
-            return (f"Belgium pack {pack.pack_id}: a Super Admin who edited or signed a row of this version cannot "
-                    "also activate it (four-eyes).")
-    content = _content()
-    rates = {r.component_key: r for r in db.query(ContributionRate).filter(
-        ContributionRate.jurisdiction_pack_id == pack.id, ContributionRate.organization_id.is_(None))}
+    rates = (db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                               ContributionRate.organization_id.is_(None)).count())
     slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
-                                      TaxSlab.organization_id.is_(None)).all())
-    if not rates:
-        return "Belgium pack has no statutory content — seed it from belgium_content.py first."
-    problems = []
-    for key, (_group, kind, _ref, _label) in content.KEYS.items():
-        row = rates.get(key)
-        if row is None:
-            problems.append(f"{key} (missing)")
-        elif content.PENDING_MARK in (row.label or ""):
-            problems.append(f"{key} (unsigned)")
-        elif _row_empty(row, kind):
-            problems.append(f"{key} (empty)")
-        elif row.source_document_id is None:
-            problems.append(f"{key} (unsourced)")
-        elif kind in content.SLAB_KINDS and (row.text_value or "").upper() == content.SLAB_ROWS:
-            rule = content.RULE_TYPES[key]
-            mine = [s for s in slabs if s.rule_type == rule]
-            if not mine or any(content.PENDING_MARK in (s.rate_label or "") for s in mine):
-                problems.append(f"{key} (slab rows missing or unsigned)")
-    classes = [s for s in slabs if s.rule_type == content.EARNING_CLASS_RULE]
-    if not classes or any(content.PENDING_MARK in (s.rate_label or "") for s in classes):
-        problems.append(f"{content.EARNING_CLASS_RULE} (missing or unsigned)")
-    if problems:
-        shown = ", ".join(problems[:8]) + (f" (+{len(problems) - 8} more)" if len(problems) > 8 else "")
-        return (f"Belgium pack {pack.pack_id} cannot be activated: {len(problems)} required row(s) are missing, "
-                f"empty, unsourced or unsigned: {shown}. Gate G1 must sign them (ZP-BE-ENG-001 §17).")
-    # Block C2: the authority examples replay exactly and the shared BE golden-
-    # vector certification run passed (belgium_golden).
-    from app.modules.payroll import belgium_golden
-
-    return belgium_golden.be_golden_refusal(db, pack)
+                                      TaxSlab.organization_id.is_(None)).count())
+    if not rates and not slabs:
+        return "Belgium pack has no statutory content - seed it from belgium_content.py first."
+    return None
 
 
 def _be_pack_activation_refusal(db: Session, pack, actor_id=None) -> Optional[str]:
@@ -278,20 +239,13 @@ def _be_retention_settings():
 
 
 # ── 7. service_registry_transition (type a) ─────────────────────────────────
-def be_unmet_requirements(db: Session) -> list:
-    """Block C2: every red release gate (G1-G7, computed from real evidence by
-    belgium_readiness) and every open launch-blocking owner decision. PLANNED ->
-    AVAILABLE is refused while this list is not empty."""
-    from app.modules.payroll import belgium_readiness
-
-    return belgium_readiness.be_unmet(db)
-
-
 def _be_service_registry_transition(db: Session, target: str, reason: str, actor_id=None, as_of=None):
     from app.modules.payroll import service
 
     def readiness():
-        return be_unmet_requirements(db), {}
+        # No release gates, evidence or owner decisions (gate removal, owner
+        # decision 2026-11-25): only the reason and a named Super Admin remain.
+        return [], None
 
     return service.transition_service_registry(
         db, BE, target, reason, actor_id, label="Belgium", readiness=readiness,
@@ -321,9 +275,9 @@ RELEASE_GATES = ("G1", "G2", "G3", "G4", "G5", "G6", "G7")
 
 
 def be_statutory_summary(db: Session) -> dict:
-    """Pack + signing status and the REAL release-gate states (Block C2,
-    belgium_readiness): MET only when every check of the gate passes."""
-    from app.modules.payroll import belgium_readiness
+    """Pack + row status. No release gates since the gate removal (owner
+    decision 2026-11-25): Belgium opens like Spain once an Active pack exists."""
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
     from app.modules.payroll.models import ContributionRate, JurisdictionPack
 
     content = _content()
@@ -339,12 +293,8 @@ def be_statutory_summary(db: Session) -> dict:
                     "rows": len(rates),
                     "pendingRows": sum(1 for r in rates if content.PENDING_MARK in (r.label or "")),
                     "activationRefusal": be_pack_activation_refusal(db, p)})
-    readiness = belgium_readiness.be_readiness(db)
-    gates = {g["gate"]: "MET" if g["passed"] else "NOT MET" for g in readiness["gates"]}
     return {"country": BE, "jurisdiction": BE, "spec": SPEC,
-            "status": "CERTIFIED" if readiness["allPassed"] else "NOT_CERTIFIED", "available": False,
-            "packs": out, "gates": gates, "gateDetails": readiness["gates"],
-            "launchEmployers": readiness["launchEmployers"]}
+            "available": get_jurisdiction_onboarding_block_reason(db, BE) is None, "packs": out}
 
 
 def _evidence(db: Session, tag: str):
@@ -359,30 +309,23 @@ def _evidence(db: Session, tag: str):
 
 def owner_decisions(db: Session) -> list:
     """Owner / specialist decisions (gaps register): OPEN until reviewed
-    evidence tagged BE-DECISION-<key> exists (uploader != reviewer)."""
-    from app.modules.payroll import belgium_governance as gov
-
+    evidence tagged BE-DECISION-<key> exists (uploader != reviewer). Not a
+    go-live gate since 2026-11-25; still read by the retention rule."""
     out = []
     for key, label, blocks in _content().OWNER_DECISIONS:
         tag = f"BE-DECISION-{key}"
         accepted, submitted = _evidence(db, tag)
-        decided = gov.be_current_decision(db, key)              # K3: a DECIDED record (proposer != decider)
-        proposed = db.query(gov._models().PayrollBeDecision.id).filter_by(gap_key=key, status="PROPOSED").first()
         out.append({"key": key, "label": label, "blocksLaunch": blocks, "evidenceTag": tag,
-                    "state": "RECORDED" if (accepted or decided) else
-                    ("SUBMITTED" if (submitted or proposed) else "OPEN"),
-                    "artifactId": accepted.id if accepted else None,
-                    "decisionId": decided.id if decided else None})
+                    "state": "RECORDED" if accepted else ("SUBMITTED" if submitted else "OPEN"),
+                    "artifactId": accepted.id if accepted else None})
     return out
 
 
 # ── 9. statutory_editors (type a) ───────────────────────────────────────────
 def _be_statutory_editors(db: Session, pack) -> set:
-    """Super Admins who edited or signed a BE row of this pack version: the
-    shared pack approval refuses every one of them (four-eyes)."""
-    from app.modules.payroll import be_super_admin
-
-    return be_super_admin.statutory_editors(db, pack)
+    """No extra editor exclusion (gate removal, owner decision 2026-11-25): the platform-wide rule that the
+    approver is not the pack's last editor still applies."""
+    return set()
 
 
 # ── Draft pack seed (scripts/seed_belgium_canonical_packs.py, Super Admin) ──
@@ -502,11 +445,9 @@ def be_pack_assignment_refusal(pack, organization_ids=None) -> Optional[str]:
 
 # ── 10. template_activation_refusal (type a) ────────────────────────────────
 def _be_template_activation_refusal(db: Session, template, actor_id=None) -> Optional[str]:
-    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
-
-    return ActivationRefusal("Belgium form templates (Dimona, DmfA, 281.10, payslip) stay inactive until the authority "
-                             "schemas are archived and the filing path is certified (gate G3).",
-                             JURISDICTION_GATE, gate="G3")
+    """Report templates follow the normal template governance, like every other
+    country (gate removal, owner decision 2026-11-25): no jurisdiction gate refuses them."""
+    return None
 
 
 # ── 11. pack_holidays (type a) ──────────────────────────────────────────────

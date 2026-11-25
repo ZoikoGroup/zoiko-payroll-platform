@@ -89,41 +89,6 @@ def test_golden_check_is_exact_once_pcb_is_built(db, with_pcb):
 
 
 # ── release gates ──────────────────────────────────────────────────────────
-def test_every_gate_fails_closed_on_a_fresh_platform(db):
-    from app.modules.payroll import malaysia_readiness
-
-    state = malaysia_readiness.my_readiness(db)
-    assert [g["gate"] for g in state["gates"]] == ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
-    assert state["allPassed"] is False and not any(g["passed"] for g in state["gates"])
-    g1 = {c["key"]: c for c in state["gates"][0]["checks"]}
-    assert g1["pack_seeded"]["detail"] == "no canonical Malaysia pack is seeded"
-    g3 = {c["key"]: c for c in state["gates"][2]["checks"]}
-    assert "PCB_MONTHLY" in g3["form_layouts_archived"]["detail"]
-    g7 = state["gates"][6]
-    assert [e["tag"] for e in g7["evidence"]] == ["MY-GATE-G7", "MY-SIGNOFF-PRODUCT", "MY-SIGNOFF-COMPLIANCE",
-                                                  "MY-SIGNOFF-ENGINEERING", "MY-SIGNOFF-COMMERCIAL"]
-    unmet = {u["key"] for u in malaysia_readiness.my_unmet_requirements(db)}
-    assert {"G1", "G2", "G3", "G4", "G5", "G6", "G7", "MY-DECISION-D-8"} <= unmet
-
-
-def test_gate_g1_needs_pcb_even_when_every_other_example_matches(db):
-    from app.modules.payroll import malaysia_readiness
-
-    _pack_with_examples(db, ["G=5000;D=2026-03-31 => epfEe=550;epfEr=650"])
-    g1 = {c["key"]: c for c in malaysia_readiness.my_readiness(db)["gates"][0]["checks"]}
-    assert g1["pack_seeded"]["ok"] and g1["authority_examples_match"]["ok"] and g1["no_pending_rows"]["ok"]
-    assert g1["MY_EPF_SCHEDULE"]["ok"] and g1["pcb_proven"]["ok"] is False
-
-
-def test_malaysia_cannot_be_opened_and_the_summary_carries_the_gates(world):
-    from app.modules.payroll import jurisdiction_hooks
-
-    with pytest.raises(Exception):
-        jurisdiction_hooks.call("MY", "service_registry_transition", world.db, "AVAILABLE", "launch", world.a)
-    summary = jurisdiction_hooks.call("MY", "statutory_summary", world.db)
-    assert summary["readiness"]["allPassed"] is False and len(summary["readiness"]["gates"]) == 7
-
-
 # ── parallel cycles (gate G5) ──────────────────────────────────────────────
 def _paid_run(w):
     from app.modules.payroll import malaysia_service as my

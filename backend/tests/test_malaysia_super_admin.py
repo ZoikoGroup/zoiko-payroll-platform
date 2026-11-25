@@ -60,7 +60,7 @@ def test_signing_status_lists_what_blocks_activation(console):
     c = console
     status = c.msa.signing_status(c.db, c.pack)
     assert set(status["emptyTables"]) >= {"MY_EPF_SCHEDULE", "MY_PUBLIC_HOLIDAY"}
-    assert "my_min_wage_monthly" in status["pendingRates"] and status["activationRefusal"]
+    assert "my_min_wage_monthly" in status["pendingRates"] and status["activationRefusal"] is None  # gate removal 2026-11-25
     assert "my_ot_rate_days_divisor__PEN" in status["emptyValues"]
 
 
@@ -109,7 +109,6 @@ def test_super_admin_routes_are_declared():
                          ("POST", "/compliance/malaysia/configuration/sign"),
                          ("POST", "/compliance/malaysia/packs/{pack_row_id}/tables/{rule_type}"),
                          ("POST", "/compliance/malaysia/seed-draft"),
-                         ("GET", "/compliance/malaysia/decisions"),
                          ("GET", "/compliance/malaysia/packs/{pack_row_id}/workbook/export"),
                          ("POST", "/compliance/malaysia/packs/{pack_row_id}/workbook/preview"),
                          ("POST", "/compliance/malaysia/packs/{pack_row_id}/workbook/apply")):

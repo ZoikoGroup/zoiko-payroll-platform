@@ -196,7 +196,6 @@ def test_notice_narrative_and_bank_account_never_reach_a_new_zealand_surface(db,
 def nz_world(world, monkeypatch, keys, _codes):
     from app.modules.payroll.models import CompanyComplianceDetails
 
-    monkeypatch.setattr(settings, "NZ_TENANT_ONBOARDING_ENABLED", True)
     db = world.db
     for key in ("A", "B"):
         world.orgs[key].country = "New Zealand"

@@ -430,10 +430,6 @@ def list_packs(db: Session) -> list:
              "approvedById": p.approved_by_id, "updatedById": p.updated_by_id} for p in packs]
 
 
-def decisions(db: Session) -> list:
-    return nzs.owner_decisions(db)
-
-
 def golden_check(db: Session, pack_row_id: int) -> dict:
     """Replay the pack's Inland Revenue examples through the engine (read-only)."""
     from app.modules.payroll import nz_golden

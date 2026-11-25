@@ -299,27 +299,12 @@ def test_seed_only_writes_draft(db):
         svc.seed_nz_pack(db, status="Active")
 
 
-def test_activation_is_refused_while_rows_are_pending(db):
+def test_pending_rows_no_longer_block_activation(db):
+    """Structural check only (gate removal 2026-11-25)."""
     from app.modules.payroll import new_zealand_service as svc
 
     pack = svc.seed_nz_pack(db)
-    assert "PENDING G1" in svc.nz_pack_activation_refusal(db, pack)
-
-
-def test_activation_is_refused_while_authority_tables_are_empty(db):
-    from app.modules.payroll import new_zealand_service as svc
-    from app.modules.payroll.models import ContributionRate, TaxSlab
-
-    pack = svc.seed_nz_pack(db)
-    for row in db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id):
-        row.label = row.label.replace(svc.PENDING_G1_SUFFIX, "")
-    for row in db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id):
-        row.rate_label = row.rate_label.replace(svc.PENDING_G1_SUFFIX, "")
-    db.flush()
-    refusal = svc.nz_pack_activation_refusal(db, pack)
-    assert "authority tables are empty" in refusal
-    assert "paye_main_method" in refusal and "public_holidays" in refusal
-    assert "acc_employer_classifications" not in refusal                # employer content, not national
+    assert svc.nz_pack_activation_refusal(db, pack) is None
 
 
 @pytest.mark.parametrize("today", [date(2026, 11, 3), date(2028, 8, 5)])
@@ -338,7 +323,7 @@ def test_ela_2028_pack_cannot_activate_empty_even_after_its_date(db):
 
     svc.seed_nz_pack(db)
     ela = db.query(JurisdictionPack).filter(JurisdictionPack.pack_id == "NZ-ELA-2028").one()
-    assert "holds no signed content" in svc.nz_pack_activation_refusal(db, ela, today=date(2028, 8, 6))
+    assert "holds no statutory content" in svc.nz_pack_activation_refusal(db, ela, today=date(2028, 8, 6))
 
 
 def test_activation_refusal_ignores_other_countries(db):

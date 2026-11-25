@@ -1,11 +1,11 @@
 """Belgium (ZP-BE-ENG-001) Block L1: the rollback guarantee — dormancy + fix-forward (owner decision 2026-11-16).
 
-The Belgian schema is permanent (main's migrations build on it), so rolling Belgium back means switching it OFF:
-BE_TENANT_ONBOARDING_ENABLED unset, BE_CANARY_ORG_IDS empty, demo packs off, identifier keys unset, no Active
-Belgian pack, the registry row PLANNED or absent. With the full schema present (25 payroll_be_* tables) and that
-state, this proves:
+The Belgian schema is permanent (main's migrations build on it), so rolling Belgium back means taking it out of
+service: demo packs off, identifier keys unset, no Active Belgian pack, the registry row PLANNED or absent. There is
+no dormancy switch or canary list any more (gate removal, owner decision 2026-11-25). With the full schema present
+(25 payroll_be_* tables) and that state, this proves:
 
-  * every /api/payroll/belgium/* route answers 404;
+  * every /api/payroll/belgium/* route answers 404 to an organisation that is not Belgian;
   * calculate_payroll for BE raises its blocked error in every calculation mode, and a Belgian preview is refused;
   * the Super Admin Belgium console loads read-only and writes nothing;
   * other countries' payroll is identical whether the Belgian tables are empty or hold the full Draft pack and
@@ -29,11 +29,10 @@ BE_TABLES = 25                   # 19 tenant / worker + 6 platform (Block K, Blo
 
 @pytest.fixture
 def dormant(monkeypatch):
-    """Belgium switched off by every setting (the rollback state)."""
+    """Every remaining Belgian setting unset (the rollback state)."""
     from app.config import settings
 
-    for name, value in (("BE_TENANT_ONBOARDING_ENABLED", False), ("BE_CANARY_ORG_IDS", ""),
-                        ("BE_DEMO_PACKS_ENABLED", False), ("BE_DEMO_ORG_IDS", ""),
+    for name, value in (("BE_DEMO_PACKS_ENABLED", False), ("BE_DEMO_ORG_IDS", ""),
                         ("BE_IDENTIFIER_KEYRING", ""), ("BE_IDENTIFIER_FINGERPRINT_KEY", "")):
         monkeypatch.setattr(settings, name, value)
     return settings
@@ -47,7 +46,7 @@ def _belgian_tables(db):
 
 def _fill_belgium(db, monkeypatch, settings):
     """The full Draft pack and Belgian test data in every kind of Belgian record (keys only while writing)."""
-    from app.modules.payroll import belgium_governance as gov, belgium_service as be
+    from app.modules.payroll import belgium_service as be
     from app.modules.payroll.models import PayrollEmployee
     from scripts.seed_belgium_canonical_packs import seed_belgium
     from tests._mx_employer_helpers import make_org
@@ -79,8 +78,6 @@ def _fill_belgium(db, monkeypatch, settings):
     monkeypatch.setattr(settings, "BE_IDENTIFIER_FINGERPRINT_KEY", "")
     be.record_be_holiday_certificate(db, t.org.id, employee.id, {"direction": "OUT", "service_year": 2025}, a,
                                      "TEST ONLY")
-    gov.be_record_gate_evidence(db, {"gate": "G7", "evidenceType": "BE-OWNER-CONTENT", "reference": "TEST ONLY"}, a)
-    gov.be_import_decision_proposals(db, a)
     db.commit()
     return t
 
@@ -90,10 +87,11 @@ def test_every_belgian_route_answers_404_with_the_full_schema(db, dormant, monke
     import re
 
     from app.main import app
-    from tests._mx_employer_helpers import http, principal
+    from tests._mx_employer_helpers import http, make_org, principal
 
     assert len(_belgian_tables(db)) == BE_TABLES
-    t = _fill_belgium(db, monkeypatch, dormant)
+    _fill_belgium(db, monkeypatch, dormant)
+    t = make_org(db, name="Not Belgian Ltd", code="AUNOTBE", admins=1, country="AU")
     routes = sorted({(m, r.path) for r in app.routes if getattr(r, "path", "").startswith("/api/payroll/belgium")
                      for m in (getattr(r, "methods", None) or ()) if m != "HEAD"})
     assert len(routes) >= 20
@@ -143,8 +141,7 @@ def test_the_super_admin_console_loads_read_only(db, dormant, monkeypatch):
     try:
         with http(db, SUPER_ADMIN) as client:
             base = "/api/super-admin/compliance/belgium"
-            for path in ("/packs", "/decisions", "/joint-committees", "/readiness", "/gate-evidence",
-                         "/decision-records"):
+            for path in ("/packs", "/joint-committees"):
                 res = client.get(base + path)
                 assert res.status_code == 200, (path, res.status_code, res.text[:200])
     finally:
@@ -203,7 +200,7 @@ def test_other_countries_are_identical_with_empty_or_full_belgian_tables(db, org
     import sqlalchemy as sa
 
     filled = [t for t in _belgian_tables(db) if db.execute(sa.text(f'SELECT count(*) FROM "{t}"')).scalar()]
-    assert len(filled) >= 8                                                         # Belgian data really present
+    assert len(filled) >= 6        # Belgian data really present (no gate evidence / decisions since 2026-11-25)
     full = {"AU": _au_payslip(db, organization.id, "AU-E2"), "PL": _engine_result("PL"), "MY": _engine_result("MY")}
     assert full == empty
     assert empty["AU"]["status"] and "blocked" not in empty["PL"] and "blocked" not in empty["MY"]

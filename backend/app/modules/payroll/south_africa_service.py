@@ -809,12 +809,12 @@ def _za_before_run_transition(db: Session, run, next_status, actor_id) -> None:
 
 def transition_za_service_registry(db: Session, target: str, reason: str,
                                    actor_id: Optional[int] = None, as_of: Optional[date] = None):
-    from app.modules.payroll import service, south_africa_readiness
+    from app.modules.payroll import service
 
     def readiness():
-        unmet = south_africa_readiness.ga_preconditions(db)
-        unmet_list = [u for u in unmet if not u.get("met")]
-        return unmet_list, {u["key"]: u["detail"] for u in unmet_list}
+        # No release gates, evidence or owner decisions (gate removal, owner
+        # decision 2026-11-25): only the reason and a named Super Admin remain.
+        return [], None
 
     return service.transition_service_registry(
         db, ZA, target, reason, actor_id, label="South Africa", readiness=readiness,
@@ -914,23 +914,16 @@ def retention_settings():
 
 
 def za_activation_evidence_refusal(db: Session, pack) -> Optional[str]:
+    """Structural check only (gate removal, owner decision 2026-11-25): no signing gate. A row without a
+    value blocks only the calculation that needs it."""
     from app.modules.payroll.models import ContributionRate, TaxSlab
 
-    marker = "%[PENDING G1]%"
-    pending_rates = (db.query(ContributionRate)
-                     .filter(ContributionRate.jurisdiction_pack_id == pack.id,
-                             ContributionRate.organization_id.is_(None),
-                             or_(ContributionRate.label.like(marker),
-                                 ContributionRate.text_value == "PENDING_G1"))
-                     .count())
-    pending_slabs = (db.query(TaxSlab)
-                     .filter(TaxSlab.jurisdiction_pack_id == pack.id,
-                             TaxSlab.organization_id.is_(None),
-                             TaxSlab.rate_label.like(marker))
-                     .count())
-    if pending_rates or pending_slabs:
-        return (f"{pending_rates + pending_slabs} South Africa pack row(s) are still PENDING G1 - "
-                "they must be signed at gate G1 before the pack can be activated")
+    rates = (db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
+                                               ContributionRate.organization_id.is_(None)).count())
+    slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
+                                      TaxSlab.organization_id.is_(None)).count())
+    if not rates and not slabs:
+        return "South Africa pack has no statutory content - seed it from south_africa_content.py first."
     return None
 
 
@@ -939,20 +932,8 @@ def statutory_editors(db: Session, pack) -> set:
 
 
 def template_activation_refusal(db: Session, template, actor_id: Optional[int]) -> Optional[str]:
-    """Phase 8 (ZA-015/018): a template that would feed a SARS reconciliation or
-    certificate export cannot go live while the BRS source-code catalogue for
-    the configured version is empty — the export would have to guess codes."""
-    from app.modules.payroll.engine.countries import south_africa_content as content
-
-    report_type = str(getattr(template, "report_type", "") or "").upper()
-    if not (report_type.startswith("ZA_EMP501") or report_type.startswith("ZA_IRP5")):
-        return None
-    version = next((row[5] for row in content.ZA_SCALAR_CONTENT if row[0] == "za_brs_version"), None)
-    if not (content.ZA_BRS_CATALOG.get(version) or {}).get("source_codes"):
-        from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
-
-        return ActivationRefusal(f"South Africa: SARS PAYE BRS v{version} source-code catalogue is not archived "
-                                 f"(evidence S4) - {report_type} templates stay inactive until it is.", JURISDICTION_GATE)
+    """Report templates follow the normal template governance, like every other
+    country (gate removal, owner decision 2026-11-25): no jurisdiction gate refuses them."""
     return None
 
 
@@ -971,7 +952,7 @@ def _za_payslip_hold_view(item) -> Optional[dict]:
 
 
 def statutory_summary(db: Session) -> dict:
-    from app.modules.payroll import south_africa_readiness
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
     from app.modules.payroll.models import (JurisdictionPack, PayrollZaEtiLedgerEntry,
                                             PayrollZaEmployerRegistration, PayrollZaTaxDirective)
 
@@ -985,26 +966,15 @@ def statutory_summary(db: Session) -> dict:
                   .filter(PayrollZaTaxDirective.status == "APPROVED").count())
     eti_entries = (db.query(PayrollZaEtiLedgerEntry)
                    .filter(PayrollZaEtiLedgerEntry.status.in_(ETI_LEDGER_STATUSES)).count())
-    gates = south_africa_readiness.gate_states(db)
-    signed_gates = sum(1 for g in gates if g.get("state") == "SIGNED")
     return {
-        "jurisdiction": ZA, "spec": SPEC, "available": False,
+        "jurisdiction": ZA, "spec": SPEC, "available": get_jurisdiction_onboarding_block_reason(db, ZA) is None,
         "packs": [{"id": p.id, "packId": p.pack_id, "version": p.version, "status": p.status,
                    "effectiveFrom": _iso_date(p.effective_from), "effectiveTo": _iso_date(p.effective_to)}
                   for p in packs],
         "activeEmployerRegistrations": registrations,
         "approvedDirectives": directives,
         "liveEtiEntries": eti_entries,
-        "decisions": owner_decisions(db),
-        "gates": gates,
-        "signedGates": signed_gates,
-        "gateChecklists": south_africa_readiness.gate_checklists(db),
-        "gaPreconditions": south_africa_readiness.ga_preconditions(db),
-        "codeChecks": south_africa_readiness.code_check_rows(db),
-        "noGo": list(south_africa_readiness.NO_GO),
-        "openPoints": south_africa_readiness.open_points(),
-        "documents": {"releaseGates": "docs/south-africa/release-gates/README.md"},
-        "note": f"South Africa remains PLANNED; activation gates G0–G7 are not yet evidenced ({signed_gates}/8 signed).",
+        "note": "South Africa opens like Spain once an Active pack exists (no release gates since 2026-11-25).",
     }
 
 

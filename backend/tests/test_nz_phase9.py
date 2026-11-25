@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.core.exceptions import BadRequestException
 from app.modules.payroll import new_zealand_service as nzs
-from app.modules.payroll import nz_dormancy, nz_golden, nz_parallel, nz_readiness
+from app.modules.payroll import nz_golden, nz_parallel
 from app.modules.payroll import nz_ird_number as ird
 from app.modules.payroll import nz_super_admin as console
 from app.modules.payroll.engine.countries import new_zealand as engine
@@ -30,8 +30,6 @@ KEY1, KEY2 = "a" * 32, "b" * 32
 def keys(monkeypatch):
     monkeypatch.setattr(settings, "NZ_IRD_KEYRING", json.dumps({"1": KEY1}))
     monkeypatch.setattr(settings, "NZ_IRD_FINGERPRINT_KEY", "f" * 32)
-    monkeypatch.setattr(settings, "NZ_CANARY_ORG_IDS", "")
-    monkeypatch.setattr(settings, "NZ_TENANT_ONBOARDING_ENABLED", False)
 
 
 def _user(db, email):
@@ -49,10 +47,6 @@ def _evidence(db, tag, creator, reviewer):
                           checksum_sha256="e" * 64, file_path=f"gates/{tag}.pdf", created_by_id=creator,
                           reviewer_id=reviewer))
     db.commit()
-
-
-def _checks(db, gate):
-    return {c["key"]: c for c in nz_readiness.nz_code_checks(db)[gate]}
 
 
 # ── golden check (G1) ───────────────────────────────────────────────────────
@@ -99,7 +93,9 @@ def test_golden_check_on_a_signed_pack_passes_and_reports_a_mismatch(db):
 def test_console_refuses_a_malformed_example(db):
     nzs.seed_nz_pack(db)
     db.commit()
-    pack = nz_readiness._pack_rows(db)[0]
+    from app.modules.payroll.models import JurisdictionPack
+
+    pack = db.query(JurisdictionPack).filter(JurisdictionPack.jurisdiction_country == "NZ").first()
     a, b = _user(db, "nz-p9-a@zoikotest.example.com"), _user(db, "nz-p9-b@zoikotest.example.com")
     source = SourceArtifact(agency="Inland Revenue", title="TEST", retrieved_at=datetime(2026, 11, 1),
                             checksum_sha256="c" * 64, file_path="nz/x.pdf", created_by_id=a, reviewer_id=b)
@@ -112,73 +108,6 @@ def test_console_refuses_a_malformed_example(db):
 
 
 # ── gates and evidence ──────────────────────────────────────────────────────
-def test_nothing_passes_on_an_empty_platform(db):
-    state = nz_readiness.nz_readiness(db)
-    assert [g["gate"] for g in state["gates"]] == ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
-    assert not state["allPassed"] and not any(g["passed"] for g in state["gates"])
-    assert _checks(db, "G1")["pack_seeded"]["detail"] == "no canonical New Zealand pack is seeded"
-
-
-def test_signed_pack_meets_g1_and_reports_what_g2_g3_still_need(db):
-    demo.build_demo_pack(db)
-    g1 = _checks(db, "G1")
-    assert all(c["ok"] for c in g1.values()), {k: c["detail"] for k, c in g1.items() if not c["ok"]}
-    g2 = _checks(db, "G2")
-    assert not g2["national_public_holidays"]["ok"] and "2027" in g2["national_public_holidays"]["detail"]
-    assert not g2["regional_anniversary_days"]["ok"]
-    assert all(c["ok"] for k, c in g2.items() if k.startswith("nz_hol_"))
-    g3 = _checks(db, "G3")
-    assert not g3["export_schemas"]["ok"] and g3["nz_working_day_rule"]["ok"]
-
-
-def test_g4_keys_and_rotation_state(db, organization, monkeypatch):
-    assert all(c["ok"] for c in _checks(db, "G4").values())
-    employee = PayrollEmployee(organization_id=organization.id, employee_code="NZ-1", name="A", country_code="NZ")
-    db.add(employee)
-    db.commit()
-    nzs.create_nz_ird_number(db, organization.id, "EMPLOYEE", IRD, 1, employee_id=employee.id)
-    db.commit()
-    monkeypatch.setattr(settings, "NZ_IRD_KEYRING", json.dumps({"1": KEY1, "2": KEY2}))
-    assert not _checks(db, "G4")["vault_on_newest_key"]["ok"]
-    monkeypatch.setattr(settings, "NZ_IRD_KEYRING", "")
-    g4 = _checks(db, "G4")
-    assert not g4["nz_ird_keyring"]["ok"] and g4["vault_on_newest_key"]["detail"] == "no keyring"
-
-
-def test_evidence_needs_a_reviewer_other_than_its_uploader(db):
-    a, b = _user(db, "nz-ev-a@zoikotest.example.com"), _user(db, "nz-ev-b@zoikotest.example.com")
-    gate = lambda: next(g for g in nz_readiness.nz_readiness(db)["gates"] if g["gate"] == "G6")  # noqa: E731
-    assert gate()["evidence"][0]["state"] == "OPEN"
-    _evidence(db, "NZ-GATE-G6", a, a)
-    assert gate()["evidence"][0]["state"] == "SUBMITTED" and not gate()["passed"]
-    _evidence(db, "NZ-GATE-G6", a, b)
-    assert gate()["evidence"][0]["state"] == "RECORDED" and gate()["passed"]          # G6 is evidence only
-    g7 = next(g for g in nz_readiness.nz_readiness(db)["gates"] if g["gate"] == "G7")
-    assert [e["tag"] for e in g7["evidence"]][1:] == [f"NZ-SIGNOFF-{s}" for s in nz_readiness.SIGNOFFS]
-    assert not _checks(db, "G7")["retention_tax_records"]["ok"]
-
-
-def test_registry_refuses_available_until_every_gate_passes(db, monkeypatch):
-    from app.modules.billing.models import JurisdictionServiceRegistry
-
-    nzs.ensure_nz_service_registry_row(db)
-    db.commit()
-    with pytest.raises(BadRequestException, match="cannot be made AVAILABLE") as exc:
-        nzs._nz_service_registry_transition(db, "AVAILABLE", "open New Zealand", 1)
-    assert "Parallel cycles accepted" in str(exc.value.detail)
-    unmet = nzs.nz_unmet_requirements(db)
-    assert {u["key"] for u in unmet} >= {"G1", "G2", "G3", "G5", "G6", "G7", "D-7"}
-    monkeypatch.setattr(nz_readiness, "nz_unmet_requirements", lambda db: [])
-    nzs._nz_service_registry_transition(db, "AVAILABLE", "every gate passed (TEST)", 1)
-    db.commit()
-    assert db.query(JurisdictionServiceRegistry).filter_by(country="NZ").one().availability == "AVAILABLE"
-
-
-def test_statutory_summary_carries_the_readiness(db):
-    summary = nzs.statutory_summary(db)
-    assert summary["readiness"]["allPassed"] is False and len(summary["readiness"]["gates"]) == 7
-
-
 # ── parallel cycles (G5) ────────────────────────────────────────────────────
 def _paid_run(db, organization, pay_date=date(2026, 10, 9), code="NZ-1", status=PayrollStatus.PAID):
     employee = (db.query(PayrollEmployee).filter_by(organization_id=organization.id, employee_code=code).first()
@@ -334,24 +263,6 @@ def test_rotation_script_refuses_a_remote_database(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         rotate_nz_ird_keys.main(["--apply"])
     assert exc.value.code == 2
-
-
-# ── Option 3 canary ─────────────────────────────────────────────────────────
-def test_canary_allow_list(monkeypatch):
-    from app.modules.payroll import employee_validation
-
-    assert nz_dormancy.onboarding_enabled(5) is False
-    assert employee_validation.is_supported_employee_country("NZ") is False
-    monkeypatch.setattr(settings, "NZ_CANARY_ORG_IDS", " 5, x ,7")
-    assert nz_dormancy.canary_organization_ids() == {5, 7}
-    assert nz_dormancy.onboarding_enabled(5) and not nz_dormancy.onboarding_enabled(6)
-    assert not nz_dormancy.onboarding_enabled()
-    assert nz_dormancy.entering_nz_refusal("AU", "NZ", 5) is None
-    assert nz_dormancy.entering_nz_refusal("AU", "NZ", 6) == nz_dormancy.DORMANT_MESSAGE
-    assert employee_validation.is_supported_employee_country("NZ")
-    monkeypatch.setattr(settings, "NZ_CANARY_ORG_IDS", "")
-    monkeypatch.setattr(settings, "NZ_TENANT_ONBOARDING_ENABLED", True)
-    assert nz_dormancy.onboarding_enabled(6) and nz_dormancy.entering_nz_refusal("AU", "NZ", 6) is None
 
 
 def test_vault_rows_never_store_plaintext(db, vault_row):

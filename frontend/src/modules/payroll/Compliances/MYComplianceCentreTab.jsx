@@ -42,9 +42,6 @@ function SetupStatus() {
         ({summary.verifiedEmployerRegistrations ?? 0} verified), {summary.activeWorkerProfiles ?? 0} worker profile(s),{" "}
         {summary.activeWorkAssignments ?? 0} work assignment(s), {summary.approvedDeclarations ?? 0} declaration(s).
       </p>
-      {(summary.unmet || []).length > 0 && (
-        <p className="mt-1">Not yet met: {summary.unmet.map((u) => u.label).join("; ")}. Malaysia opens only when all pass.</p>
-      )}
     </div>
   );
 }

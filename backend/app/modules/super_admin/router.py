@@ -4787,13 +4787,6 @@ def new_zealand_seed_draft(payload: dict = Body(...), current_user=Depends(get_c
     return result
 
 
-@router.get("/compliance/new-zealand/decisions", summary="New Zealand owner decisions D-1 to D-7")
-def new_zealand_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import nz_super_admin
-
-    return nz_super_admin.decisions(db)
-
-
 # ── Poland signing console (ZP-PL-ENG-001 Phase 7a; spec §12 statutory content console) ──
 # Same governance as New Zealand: governed edit / sign with a source and a
 # reason, a distinct approver (editors refused), activation still refused while
@@ -4843,13 +4836,6 @@ def poland_seed_draft(payload: dict = Body(...), current_user=Depends(get_curren
     result = pl_super_admin.seed_draft(db, payload, current_user.id)
     db.commit()
     return result
-
-
-@router.get("/compliance/poland/decisions", summary="Poland owner decisions D-1 to D-7")
-def poland_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import poland_service
-
-    return poland_service.owner_decisions(db)
 
 
 @router.post("/compliance/poland/packs/{pack_row_id}/authority-examples",
@@ -4987,13 +4973,6 @@ def malaysia_golden_check(pack_row_id: int, current_user=Depends(get_current_sup
     return my_super_admin.golden_check(db, pack_row_id)
 
 
-@router.get("/compliance/malaysia/decisions", summary="Malaysia owner decisions D-1 to D-8")
-def malaysia_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import malaysia_service
-
-    return malaysia_service.owner_decisions(db)
-
-
 @router.get("/compliance/malaysia/packs/{pack_row_id}/workbook/export",
             summary="Download the Malaysia statutory workbook template with the pack's current values")
 def malaysia_workbook_export(pack_row_id: int, current_user=Depends(get_current_super_admin),
@@ -5049,16 +5028,6 @@ def belgium_configuration(pack_row_id: int, current_user=Depends(get_current_sup
     return be_super_admin.configuration(db, pack_row_id)
 
 
-@router.get("/compliance/belgium/packs/{pack_row_id}/activation-readiness",
-            summary="Belgium pack activation readiness: every blocking row / condition, why, and who clears it "
-                    "(read-only)")
-def belgium_activation_readiness_report(pack_row_id: int, current_user=Depends(get_current_super_admin),
-                                       db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_activation_readiness
-
-    return belgium_activation_readiness.be_activation_readiness(db, pack_row_id)
-
-
 @router.get("/compliance/belgium/packs/{pack_row_id}/signing-status",
             summary="What still blocks activation of a Belgium pack (pending, empty, unsourced, editors)")
 def belgium_signing_status(pack_row_id: int, current_user=Depends(get_current_super_admin),
@@ -5096,74 +5065,7 @@ def belgium_seed_report_templates(payload: dict = Body(...), current_user=Depend
 
 
 # ── Block K2: release-gate evidence (four-eyes; never marks a gate met by itself) ──
-@router.get("/compliance/belgium/gate-evidence", summary="Belgium gate evidence per gate (required tags + history)")
-def belgium_gate_evidence_list(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_governance
-
-    return belgium_governance.be_list_gate_evidence(db)
-
-
-@router.post("/compliance/belgium/gate-evidence", summary="Record evidence for a Belgian release gate (PENDING)")
-def belgium_gate_evidence_record(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
-                                 db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_governance
-
-    row = belgium_governance.be_record_gate_evidence(db, payload, current_user.id)
-    db.commit()
-    return belgium_governance.be_gate_evidence_view(row)
-
-
-@router.post("/compliance/belgium/gate-evidence/{evidence_id}/decide",
-             summary="Accept or reject gate evidence (a Super Admin other than the recorder)")
-def belgium_gate_evidence_decide(evidence_id: int, payload: dict = Body(...),
-                                 current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_governance
-
-    row = belgium_governance.be_decide_gate_evidence(db, evidence_id, (payload or {}).get("outcome"),
-                                                     (payload or {}).get("reason"), current_user.id)
-    db.commit()
-    return belgium_governance.be_gate_evidence_view(row)
-
-
 # ── Block K3: owner / specialist decision records (proposer != decider; superseded, never overwritten) ──
-@router.get("/compliance/belgium/decision-records", summary="Belgium decision records per gap (current + history)")
-def belgium_decision_records(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_governance
-
-    return belgium_governance.be_list_decisions(db)
-
-
-@router.post("/compliance/belgium/decision-records", summary="Propose a decision for a Belgian gap (PROPOSED)")
-def belgium_decision_propose(payload: dict = Body(...), current_user=Depends(get_current_super_admin),
-                             db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_governance
-
-    row = belgium_governance.be_propose_decision(db, payload, current_user.id)
-    db.commit()
-    return belgium_governance.be_decision_view(db, row)
-
-
-@router.post("/compliance/belgium/decision-records/import-proposals",
-             summary="Create PROPOSED records from the drafted decision proposals (nothing is decided)")
-def belgium_decision_import(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_governance
-
-    rows = belgium_governance.be_import_decision_proposals(db, current_user.id)
-    db.commit()
-    return {"created": [r.gap_key for r in rows]}
-
-
-@router.post("/compliance/belgium/decision-records/{decision_id}/decide",
-             summary="Decide a proposal (a Super Admin other than the proposer; supersedes the previous decision)")
-def belgium_decision_decide(decision_id: int, payload: dict = Body(...), current_user=Depends(get_current_super_admin),
-                            db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_governance
-
-    row = belgium_governance.be_decide(db, decision_id, payload, current_user.id)
-    db.commit()
-    return belgium_governance.be_decision_view(db, row)
-
-
 # ── Block M-ECWC: the ONSS rate table (file attested + rows signed, each four-eyes) ──────────────────────────
 @router.get("/compliance/belgium/packs/{pack_row_id}/onss-rate-files", summary="Belgium ONSS rate files of a pack")
 def belgium_onss_rate_files_list(pack_row_id: int, current_user=Depends(get_current_super_admin),
@@ -5280,13 +5182,6 @@ def belgium_seed_draft(payload: dict = Body(...), current_user=Depends(get_curre
     return result
 
 
-@router.get("/compliance/belgium/decisions", summary="Belgium owner / specialist decisions (gaps register)")
-def belgium_decisions(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_service
-
-    return belgium_service.owner_decisions(db)
-
-
 @router.post("/compliance/belgium/packs/{pack_row_id}/authority-examples",
              summary="Register an official / independent worked example on a Belgium pack (reviewed source; G1)")
 def belgium_add_authority_example(pack_row_id: int, payload: dict = Body(...),
@@ -5359,13 +5254,6 @@ def belgium_golden_certification(pack_row_id: int, current_user=Depends(get_curr
                                                                getattr(current_user, "id", None))
     db.commit()
     return {"runId": run.id, "status": run.status, "check": check}
-
-
-@router.get("/compliance/belgium/readiness", summary="Belgium release gates G1-G7 computed from evidence")
-def belgium_readiness_view(current_user=Depends(get_current_super_admin), db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_readiness
-
-    return belgium_readiness.be_readiness(db)
 
 
 # ── Belgium Block D3: content intake workbook and bulk signing ──────────────
@@ -5877,26 +5765,3 @@ def south_africa_compliance_summary(current_user=Depends(get_current_super_admin
     return south_africa_service.statutory_summary(db)
 
 
-@router.get("/compliance/south-africa/readiness",
-            summary="South Africa release gates G0-G7 (read-only)")
-def south_africa_compliance_readiness(current_user=Depends(get_current_super_admin),
-                                      db: Session = Depends(get_db)):
-    from app.modules.payroll import south_africa_readiness, south_africa_service
-
-    return {
-        "gates": south_africa_readiness.gate_states(db),
-        "codeChecks": south_africa_readiness.code_check_rows(db),
-        "gaPreconditions": south_africa_readiness.ga_preconditions(db),
-        "decisions": south_africa_service.owner_decisions(db),
-        "noGo": list(south_africa_readiness.NO_GO),
-        "openPoints": south_africa_readiness.open_points(),
-    }
-
-
-@router.get("/compliance/south-africa/readiness/gate-checklists",
-            summary="South Africa gate checklists (read-only)")
-def south_africa_compliance_gate_checklists(current_user=Depends(get_current_super_admin),
-                                            db: Session = Depends(get_db)):
-    from app.modules.payroll import south_africa_readiness
-
-    return south_africa_readiness.gate_checklists(db)

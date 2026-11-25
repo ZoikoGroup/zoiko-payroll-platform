@@ -131,17 +131,17 @@ def test_earning_class_treatment_is_governed(console):
                          c.editor)
 
 
-def test_editors_are_recorded_and_refused_as_approvers(console):
+def test_editors_are_not_excluded_and_signing_status_is_reported(console):
     from app.modules.payroll import jurisdiction_hooks
     from app.modules.payroll.models import JurisdictionPack
 
     c = console
     _edit(c, "pl_rounding_zus", textValue="GROSZ_HALF_UP")
     pack = c.db.get(JurisdictionPack, c.pack)
-    assert jurisdiction_hooks.call("PL", "statutory_editors", c.db, pack) == {c.editor}
+    assert jurisdiction_hooks.call("PL", "statutory_editors", c.db, pack) == set()       # gate removal 2026-11-25
     status = c.psa.signing_status(c.db, c.pack)
     assert "pl_rounding_pit" in status["pendingRates"] and "pl_rounding_zus" not in status["pendingRates"]
-    assert status["editors"] == [c.editor] and status["activationRefusal"]
+    assert status["editors"] == [c.editor] and status["activationRefusal"] is None
 
 
 def test_the_generic_editor_refuses_poland_rows():

@@ -224,34 +224,27 @@ def test_signing_status_and_configuration(db, seeded):
     status = be_super_admin.signing_status(db, seeded.id)
     assert sorted(status["pendingRates"]) == sorted(c.KEYS) == sorted(status["emptyValues"])
     assert status["reviewClasses"] == len(c.OBLIGATIONS) * len(c.COMPONENTS) and status["editors"] == []
-    assert "cannot be activated" in status["activationRefusal"]
+    assert status["activationRefusal"] is None                       # structural check only (gate removal 2026-11-25)
     config = be_super_admin.configuration(db, seeded.id)
     assert set(config["groups"]) == set(c.GROUPS)
     assert sum(len(g["rows"]) for g in config["groups"].values()) == len(c.KEYS)
 
 
 # ── four-eyes ───────────────────────────────────────────────────────────────
-def test_an_editor_or_signer_can_never_approve(db, seeded):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll import jurisdiction_hooks, service
+def test_editors_and_signers_are_no_longer_excluded(db, seeded):
+    """No Belgian editor exclusion (gate removal 2026-11-25); the platform-wide approver rules still apply."""
+    from app.modules.payroll import jurisdiction_hooks
 
     src = _verified_source(db)
-    _update(db, "rate", _rate(db, seeded, "be_bssc_pending").id, EDITOR, textValue="NOT_SUPPORTED",
-            reason="r", sourceDocumentId=src.id)
     _update(db, "rate", _rate(db, seeded, "be_wage_rmmmg").id, EDITOR, flatAmount="10", reason="r",
             sourceDocumentId=src.id)
     _update(db, "rate", _rate(db, seeded, "be_wage_rmmmg").id, SIGNER, reason="r", sourceDocumentId=src.id,
             specialistVerified=True)
-    assert jurisdiction_hooks.call("BE", "statutory_editors", db, seeded) == {EDITOR, SIGNER}
-    for actor in (EDITOR, SIGNER):
-        with pytest.raises(BadRequestException):
-            service.set_jurisdiction_pack_approver(db, seeded.id, actor_id=actor)
-        db.rollback()
-    db.refresh(seeded)
-    assert seeded.approved_by_id is None
+    assert jurisdiction_hooks.call("BE", "statutory_editors", db, seeded) == set()
 
 
-def test_the_same_person_cannot_sign_and_activate(db, seeded):
+def test_the_signer_may_also_activate(db, seeded):
+    """No four-eyes exclusion at activation any more (gate removal 2026-11-25)."""
     from app.modules.payroll import belgium_service
 
     src = _verified_source(db)
@@ -259,20 +252,14 @@ def test_the_same_person_cannot_sign_and_activate(db, seeded):
             sourceDocumentId=src.id)
     _update(db, "rate", _rate(db, seeded, "be_wage_rmmmg").id, SIGNER, reason="r", sourceDocumentId=src.id,
             specialistVerified=True)
-    refusal = belgium_service.be_pack_activation_refusal(db, seeded, actor_id=SIGNER)
-    assert "cannot also activate" in refusal
-    assert "cannot also activate" not in belgium_service.be_pack_activation_refusal(db, seeded, actor_id=ACTIVATOR)
+    assert belgium_service.be_pack_activation_refusal(db, seeded, actor_id=SIGNER) is None
 
 
-def test_activation_through_the_shared_path_is_refused_while_rows_are_pending(db, seeded):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll import service
+def test_pending_rows_no_longer_block_activation(db, seeded):
+    """Seeded rows still carry no value, but activation only checks structure (gate removal 2026-11-25)."""
+    from app.modules.payroll import belgium_service
 
-    with pytest.raises(BadRequestException, match="cannot be activated"):
-        service.set_jurisdiction_pack_status(db, seeded.id, "Active", actor_id=ACTIVATOR)
-    db.rollback()
-    db.refresh(seeded)
-    assert seeded.status != "Active"
+    assert belgium_service.be_pack_activation_refusal(db, seeded, actor_id=ACTIVATOR) is None
 
 
 def _sign_everything(db, pack, source_id):
@@ -287,38 +274,6 @@ def _sign_everything(db, pack, source_id):
     for s in db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id):
         s.rate_label, s.assessment_basis = s.rate_label.replace(c.PENDING_MARK, "").strip(), "EXCLUDED"
     db.commit()
-
-
-def test_activation_refusal_accepts_signed_not_supported_and_refuses_unsigned(db, seeded):
-    from app.modules.payroll import belgium_service
-
-    c = _c()
-    src = _verified_source(db)
-    _sign_everything(db, seeded, src.id)
-    # content complete: what remains is the Block C2 golden gate (no authority example yet)
-    assert "the authority examples do not replay exactly" in belgium_service.be_pack_activation_refusal(db, seeded, actor_id=ACTIVATOR)
-    row = _rate(db, seeded, "be_wage_rmmmg")
-    row.label = f"{row.label} {c.PENDING_MARK}"                     # one unsigned row
-    db.commit()
-    assert "be_wage_rmmmg (unsigned)" in belgium_service.be_pack_activation_refusal(db, seeded)
-    row.label, row.source_document_id = row.label.replace(c.PENDING_MARK, "").strip(), None
-    db.commit()
-    assert "be_wage_rmmmg (unsourced)" in belgium_service.be_pack_activation_refusal(db, seeded)
-    row.source_document_id, row.text_value = src.id, None             # signed but empty
-    db.commit()
-    assert "be_wage_rmmmg (empty)" in belgium_service.be_pack_activation_refusal(db, seeded)
-
-
-def test_a_slab_rows_key_needs_signed_slab_rows(db, seeded):
-    from app.modules.payroll import belgium_service
-
-    src = _verified_source(db)
-    _sign_everything(db, seeded, src.id)
-    row = _rate(db, seeded, "be_public_holidays")
-    row.text_value = "SLAB_ROWS"
-    db.commit()
-    assert "be_public_holidays (slab rows missing or unsigned)" in belgium_service.be_pack_activation_refusal(
-        db, seeded)
 
 
 # ── generic editor, assignment, Joint Committees ───────────────────────────
@@ -401,7 +356,7 @@ def test_owner_decisions_and_summary(db, seeded):
     decisions = belgium_service.owner_decisions(db)
     assert {d["key"] for d in decisions} >= {"G-11", "G-16", "G-21"} and {d["state"] for d in decisions} == {"OPEN"}
     summary = belgium_service.be_statutory_summary(db)
-    assert summary["status"] == "NOT_CERTIFIED" and set(summary["gates"].values()) == {"NOT MET"}
+    assert summary["available"] is False and "gates" not in summary            # no gates since 2026-11-25
     assert summary["packs"][0]["pendingRows"] == len(_c().KEYS)
 
 
@@ -431,7 +386,7 @@ def test_belgium_console_routes_are_super_admin_only(db, seeded):
         assert c.get("/api/super-admin/compliance/belgium/packs").json()[0]["packId"] == "BE-PAYROLL-2026"
         assert c.get(f"/api/super-admin/compliance/belgium/packs/{seeded.id}/signing-status").status_code == 200
         assert c.get(f"/api/super-admin/compliance/belgium/packs/{seeded.id}/configuration").status_code == 200
-        assert len(c.get("/api/super-admin/compliance/belgium/decisions").json()) == len(_c().OWNER_DECISIONS)
+        assert c.get("/api/super-admin/compliance/belgium/decisions").status_code == 404   # removed 2026-11-25
     with http(db, principal(1)) as c:
         assert c.get("/api/super-admin/compliance/belgium/packs").status_code == 403
 
@@ -456,8 +411,8 @@ def test_even_a_signed_active_assigned_pack_leaves_onboarding_refused_and_calcul
     db.commit()
     out = service.assign_pack_to_organizations(db, seeded.id, [organization.id], actor_id=ACTIVATOR)
     assert out["updated"] == 1
-    assert get_jurisdiction_onboarding_block_reason(db, "Belgium")
-    assert get_jurisdiction_change_block_reason(db, "India", "Belgium")
+    assert get_jurisdiction_onboarding_block_reason(db, "Belgium")              # the PLANNED registry row
+    assert get_jurisdiction_change_block_reason(db, "India", "Belgium") is None  # like Spain since 2026-11-25
     for mode in ("standard", "enterprise"):
         with pytest.raises(BECalculationBlockedError, match="Belgium calculation blocked"):
             calculate_payroll(PayrollContext(gross=Decimal("1000"), basic=Decimal("1000"), country="BE"), mode)

@@ -96,15 +96,12 @@ def test_strategy_map_and_message_unchanged():
     from app.modules.payroll.employee_validation import _DORMANT_STRATEGIES, _STRATEGIES
 
     # + United Arab Emirates (ZP-AE-ENG-001): an ordinary (not dormant) country.
+    # + ZA, NZ, PL, MY, BE: ordinary since the gate removal (owner decision 2026-11-25).
     assert list(_STRATEGIES) == ["IN", "US", "UK", "AU", "CA", "DE", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR",
-                                 "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL", "AE", "ES"]
-    # Brazil (ZP-BR-ENG-001 Phase 3) and South Africa (ZP-ZA-ENG-001 Phase 5)
-    # are dormant like Mexico, each behind its own flag.
-    # + New Zealand (ZP-NZ-ENG-001 Phase 4), dormant behind NZ_TENANT_ONBOARDING_ENABLED.
-    # + Poland (ZP-PL-ENG-001 Phase 0), dormant behind PL_TENANT_ONBOARDING_ENABLED.
-    # + Malaysia (ZP-MY-ENG-001 Phase 0), dormant behind MY_TENANT_ONBOARDING_ENABLED.
-    # + Belgium (ZP-BE-ENG-001 Phase 1), dormant behind BE_TENANT_ONBOARDING_ENABLED.
-    assert list(_DORMANT_STRATEGIES) == ["MX", "BR", "ZA", "NZ", "PL", "MY", "BE"]
+                                 "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL", "AE", "ES",
+                                 "ZA", "NZ", "PL", "MY", "BE"]
+    # Brazil (ZP-BR-ENG-001 Phase 3) is dormant like Mexico, behind its own flag.
+    assert list(_DORMANT_STRATEGIES) == ["MX", "BR"]
     assert all(not getattr(cls, "MASK_DUPLICATE_VALUE", False) for cls in _STRATEGIES.values())
 
 
@@ -133,12 +130,11 @@ def test_sensitive_field_set_only_gains_mexican_keys():
     before = frozenset(f for cls in _STRATEGIES.values() for f in cls.SENSITIVE_FIELDS)
     # + Brazil (ZP-BR-ENG-001 Phases 3–4): its validator is dormant too, so its
     # CPF / PIS / PIX / bank-account keys come only from there.
+    # South Africa's national_id / tax_number, New Zealand's ird_number and
+    # Malaysia's bank_account are ordinary since the gate removal (2026-11-25),
+    # so they are in `before`.
     assert SENSITIVE_COMPLIANCE_FIELDS - before == {
-        "rfc", "curp", "nss", "clabe", "cpf", "pis_nis", "pix_key", "bank_account",
-        "national_id", "tax_number",
-        # + New Zealand (Phase 4): an IRD number is refused as an employee field and
-        # masked if ever supplied - it lives only in the encrypted IRD vault.
-        "ird_number"}
+        "rfc", "curp", "nss", "clabe", "cpf", "pis_nis", "pix_key"}
     for cls in _STRATEGIES.values():                                     # no other country uses these keys
         assert not {"rfc", "curp", "nss", "clabe"} & set(cls.FIELD_SPECS), cls.country_code
 

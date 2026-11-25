@@ -256,11 +256,12 @@ def nz_pack_activation_refusal(db: Session, pack, actor_id: Optional[int] = None
                                today: Optional[date] = None) -> Optional[str]:
     """Why a New Zealand pack may not be activated, or None.
 
+    Structural checks only (gate removal, owner decision 2026-11-25): no signing gate and no
+    authority-table completeness gate (an empty table blocks only the
+    calculation that needs it).
     * NZ-ELA-2028 (Employment Leave Act 2026): never before 6 August 2028
-      (AC-NZ-08), and never while it holds no signed content.
-    * Any NZ pack: refused while a canonical row is still PENDING G1, or while
-      an authority table the engine needs (content.NZ_EMPTY_TABLES) has no
-      rows (gate G1/G2)."""
+      (a statutory date, AC-NZ-08), and never while it holds no content.
+    * Any NZ pack: refused while it holds no statutory content at all."""
     from app.modules.payroll.engine.countries import new_zealand_content as content
     from app.modules.payroll.models import ContributionRate, TaxSlab
 
@@ -272,25 +273,11 @@ def nz_pack_activation_refusal(db: Session, pack, actor_id: Optional[int] = None
     slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
                                      TaxSlab.organization_id.is_(None))
     ela_id, _from, _to = content.NZ_ELA_2028
-    if pack.pack_id == ela_id:
-        if today < content.ELA_EARLIEST_EFFECTIVE:
-            return (f"{ela_id} (Employment Leave Act 2026) cannot be activated before "
-                    f"{content.ELA_EARLIEST_EFFECTIVE.isoformat()}; the Holidays Act 2003 stays in force until then")
-        if not rates.count() and not slabs.count():
-            return f"{ela_id} holds no signed content and cannot be activated"
-    marker = f"%{PENDING_G1_SUFFIX.strip()}%"
-    pending_rows = (rates.filter(ContributionRate.label.like(marker)).count()
-                    + slabs.filter(TaxSlab.rate_label.like(marker)).count())
-    if pending_rows:
-        return (f"{pending_rows} New Zealand pack row(s) are still PENDING G1 - "
-                "they must be signed at gate G1 before the pack can be activated")
-    if pack.pack_id != ela_id:
-        missing = [name for name, table in content.NZ_EMPTY_TABLES.items()
-                   if not table.get("employer_content")
-                   and not slabs.filter(TaxSlab.rule_type == table["rule_type"]).count()]
-        if missing:
-            return ("New Zealand authority tables are empty: " + ", ".join(sorted(missing))
-                    + " — they are filled from archived authority evidence at their release gate")
+    if pack.pack_id == ela_id and today < content.ELA_EARLIEST_EFFECTIVE:
+        return (f"{ela_id} (Employment Leave Act 2026) cannot be activated before "
+                f"{content.ELA_EARLIEST_EFFECTIVE.isoformat()}; the Holidays Act 2003 stays in force until then")
+    if not rates.count() and not slabs.count():
+        return f"{pack.pack_id} holds no statutory content and cannot be activated"
     return None
 
 
@@ -1568,14 +1555,9 @@ def _nz_pack_holidays(db: Session, year: int) -> list:
 
 
 def _nz_template_activation_refusal(db: Session, template, actor_id=None) -> Optional[str]:
-    country = (getattr(template, "jurisdiction_country", None) or "").upper()
-    report_type = str(getattr(template, "report_type", "") or "").upper()
-    if country != NZ and not report_type.startswith("NZ_"):
-        return None
-    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
-
-    return ActivationRefusal("New Zealand filing and payment templates stay inactive until the payday-filing schema is "
-                             "certified (gate G3).", JURISDICTION_GATE, gate="G3")
+    """Report templates follow the normal template governance, like every other
+    country (gate removal, owner decision 2026-11-25): no jurisdiction gate refuses them."""
+    return None
 
 
 def _nz_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:
@@ -1587,11 +1569,9 @@ def _nz_payslip_hold_view(item) -> Optional[dict]:
 
 
 def _nz_statutory_editors(db: Session, pack) -> set:
-    """Super Admins who edited or signed a statutory row of this pack version
-    (Phase 7a signing console): the pack approval refuses every one of them."""
-    from app.modules.payroll import nz_super_admin
-
-    return nz_super_admin.statutory_editors(db, pack)
+    """No extra editor exclusion (gate removal, owner decision 2026-11-25): the platform-wide rule that the
+    approver is not the pack's last editor still applies."""
+    return set()
 
 
 NZ_RETENTION_CATEGORIES = (
@@ -1678,22 +1658,8 @@ def _nz_retention_settings():
         has_statutory_profile=_nz_has_statutory_profile, report_matches=_nz_is_report)
 
 
-def _nz_readiness_overview(db: Session) -> dict:
-    from app.modules.payroll import nz_readiness
-
-    state = nz_readiness.nz_readiness(db)
-    return {"allPassed": state["allPassed"], "gates": state["gates"], "decisions": state["decisions"]}
-
-
-def nz_unmet_requirements(db: Session) -> list:
-    """[{key, label, detail}] of every unmet release gate G1-G7 and owner
-    decision, re-derived now (nz_readiness, Phase 9)."""
-    from app.modules.payroll import nz_readiness
-
-    return nz_readiness.nz_unmet_requirements(db)
-
-
 def statutory_summary(db: Session) -> dict:
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
     from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSlab
 
     content, m = _content(), _nz_models()
@@ -1713,7 +1679,7 @@ def statutory_summary(db: Session) -> dict:
         return db.query(model).filter(model.status == STATUS_ACTIVE).count()
 
     return {
-        "jurisdiction": NZ, "spec": SPEC, "available": False,
+        "jurisdiction": NZ, "spec": SPEC, "available": get_jurisdiction_onboarding_block_reason(db, NZ) is None,
         "packs": [{"id": p.id, "packId": p.pack_id, "version": p.version, "status": p.status,
                    "effectiveFrom": p.effective_from.isoformat() if p.effective_from else None,
                    "effectiveTo": p.effective_to.isoformat() if p.effective_to else None} for p in packs],
@@ -1726,9 +1692,8 @@ def statutory_summary(db: Session) -> dict:
         "activeKiwiSaverElections": active(m.PayrollNzKiwiSaverElection),
         "approvedNotices": db.query(m.PayrollNzAuthorityDeduction).filter(
             m.PayrollNzAuthorityDeduction.status == "APPROVED").count(),
-        "decisions": owner_decisions(db),
-        "readiness": _nz_readiness_overview(db),
-        "note": "New Zealand stays PLANNED until every release gate G1-G7 and owner decision passes.",
+        "note": ("New Zealand opens like Spain once an Active pack exists (no release gates since 2026-11-25); "
+                 "empty authority tables block only the calculations that need them."),
     }
 
 
@@ -1736,7 +1701,9 @@ def _nz_service_registry_transition(db: Session, target: str, reason: str, actor
     from app.modules.payroll import service
 
     def readiness():
-        return nz_unmet_requirements(db), {}
+        # No release gates, evidence or owner decisions (gate removal, owner
+        # decision 2026-11-25): only the reason and a named Super Admin remain.
+        return [], None
 
     return service.transition_service_registry(
         db, NZ, target, reason, actor_id, label="New Zealand", readiness=readiness,
