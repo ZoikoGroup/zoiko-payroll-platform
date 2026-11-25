@@ -153,13 +153,18 @@ def test_every_mexico_snapshot_path_is_in_the_mexico_catalog(db):
     assert len(fields) > 60
     for key, _comp, f in fields:
         assert f.source_column in service._PAYSLIP_ITEM_JSON_FIELD_CATALOG["MX"], (key, f.source_column)
-    # Only MX and FR use the keyed selector (FR: its per-family contribution
+    # Only MX, FR and ES use the keyed selector (FR: its per-family contribution
     # lines, contributions[family=<f>].ee/.er, added with the String(100)
-    # source_column); every other country stays on the plain dotted route.
+    # source_column; ES (docs/spain P8): its per-family Social Security lines and
+    # solidarity tranches); every other country stays on the plain dotted route.
     for country, paths in service._PAYSLIP_ITEM_JSON_FIELD_CATALOG.items():
         selector = [p for p in paths if "[" in p]
         if country == "FR":
             assert selector and all(p.startswith("fr_calculation_snapshot.contributions[family=") for p in selector)
+        elif country == "ES":
+            assert selector and all(p.startswith(("es_calculation_snapshot.social_security.lines[family=",
+                                                  "es_calculation_snapshot.solidarity.tranches[tranche="))
+                                    for p in selector)
         elif country != "MX":
             assert not selector, country
 

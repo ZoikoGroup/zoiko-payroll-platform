@@ -42,6 +42,9 @@ export const REGISTRATION_COUNTRIES = [
   // once an Active AE canonical pack with rates exists. DIFC / ADGM are
   // selectable as regions but the calculator blocks them with a named reason.
   "United Arab Emirates",
+  // Spain (ZP-ES-ENG-001, docs/spain) — registration opens once an Active ES
+  // canonical pack with rates exists (mirrors backend REGISTRATION_COUNTRIES).
+  "Spain",
 ];
 
 const STATES_BY_COUNTRY = {

@@ -545,6 +545,10 @@ class PayrollContext:
     # (AEEmployeeValidation compliance_fields + work_state), set by
     # resolver.build_context_from_employee for AE employees only. None elsewhere.
     ae_facts: dict = None
+    # Spain (ZP-ES-ENG-001, docs/spain): the employee's Spanish facts
+    # (ESEmployeeValidation compliance_fields + work_state), set by
+    # resolver.build_context_from_employee for ES employees only. None elsewhere.
+    es_facts: dict = None
     employment_type: str = None
 
     # Guyana PAYE statutory credit (GY-010) — this employee's remaining
@@ -1866,6 +1870,9 @@ class PayrollResult:
     # countries/uae.py returns (JSON-safe), stored on
     # payslip_items.ae_calculation_snapshot. None for every other country.
     ae_result: dict = None
+    # Spain (ZP-ES-ENG-001): the calculation breakdown countries/spain.py returns
+    # (JSON-safe), stored on payslip_items.es_calculation_snapshot. None elsewhere.
+    es_result: dict = None
 
     # ── Brazil (ZP-BR-ENG-001) ─────────────────────────────────────────────────
     # The whole dict countries/brazil.py returns under 'br_result' key (spec,

@@ -82,6 +82,9 @@ REGISTRATION_COUNTRIES = [
     # United Arab Emirates (ZP-AE-ENG-001, docs/uae). Registration opens only
     # once an Active AE canonical pack with rates exists (same as Jamaica).
     "United Arab Emirates",
+    # Spain (ZP-ES-ENG-001, docs/spain). Registration opens only once an Active
+    # ES canonical pack with rates exists (same as Jamaica / United Arab Emirates).
+    "Spain",
 ]
 
 # Keyed by the 2-letter code the rest of the payroll module uses
@@ -768,6 +771,19 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^[A-Za-z0-9][A-Za-z0-9 /-]{2,19}$", "example": "123456", "primary": False},
         ],
     },
+    # Spain (ZP-ES-ENG-001 §12, docs/spain). The employer NIF is 9 characters;
+    # the CCC (Codigo Cuenta de Cotizacion) pattern is deliberately permissive:
+    # the spec gives no format. Examples only illustrate the input shape.
+    "ES": {
+        "label": "NIF",
+        "currency": "EUR",
+        "fields": [
+            {"key": "nif", "label": "NIF (employer tax ID)",
+             "pattern": r"^[A-Za-z0-9]{9}$", "example": "B12345678", "primary": True},
+            {"key": "ccc", "label": "CCC (Social Security contribution account)",
+             "pattern": r"^[0-9][0-9 /-]{8,19}$", "example": "28123456789", "primary": False},
+        ],
+    },
 }
 
 # Country name → payroll code. Full names come from the Register Page's
@@ -872,6 +888,14 @@ COUNTRY_NAME_TO_CODE = {
     "u.a.e": "AE",
     "the uae": "AE",
     "emirates": "AE",
+    # Spain (docs/spain, Phase 1). The bare "es" is deliberately NOT an alias
+    # (it is also a Brazilian state code); "ES" resolves through
+    # JURISDICTION_TAX_SCHEMAS like every other code.
+    "spain": "ES",
+    "españa": "ES",
+    "espana": "ES",
+    "kingdom of spain": "ES",
+    "reino de españa": "ES",
 }
 
 CODE_TO_COUNTRY_NAME = {
@@ -906,6 +930,7 @@ CODE_TO_COUNTRY_NAME = {
     "MY": "Malaysia",
     "BE": "Belgium",
     "AE": "United Arab Emirates",
+    "ES": "Spain",
 }
 
 # Mirror of the mappings already used elsewhere (payroll service) so this

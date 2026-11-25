@@ -97,7 +97,7 @@ def test_strategy_map_and_message_unchanged():
 
     # + United Arab Emirates (ZP-AE-ENG-001): an ordinary (not dormant) country.
     assert list(_STRATEGIES) == ["IN", "US", "UK", "AU", "CA", "DE", "BB", "KY", "DO", "GY", "JM", "BS", "TT", "PR",
-                                 "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL", "AE"]
+                                 "FR", "IE", "SG", "HK", "SE", "IT", "CH", "SA", "NL", "AE", "ES"]
     # Brazil (ZP-BR-ENG-001 Phase 3) and South Africa (ZP-ZA-ENG-001 Phase 5)
     # are dormant like Mexico, each behind its own flag.
     # + New Zealand (ZP-NZ-ENG-001 Phase 4), dormant behind NZ_TENANT_ONBOARDING_ENABLED.
@@ -151,10 +151,10 @@ def test_bank_routing_other_countries_unchanged():
     # Phase 0, IBAN routing) follows South Africa; Malaysia (ZP-MY-ENG-001 Phase 0,
     # SWIFT/BIC + account) follows Poland; Belgium (ZP-BE-ENG-001 Phase 1, IBAN
     # routing) follows Malaysia; the United Arab Emirates (docs/uae Phase 1, IBAN
-    # routing) follows Belgium.
-    assert br.ROUTING_COUNTRIES[:-9] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
-                                         "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-9:] == (
-        "MX", "BR", "CH", "SA", "ZA", "PL", "MY", "BE", "AE")
+    # routing) follows Belgium; Spain (docs/spain Phase 6, IBAN routing) follows the UAE.
+    assert br.ROUTING_COUNTRIES[:-10] == ("IN", "UK", "US", "CA", "DE", "AU", "BB", "KY", "DO", "GY", "JM", "BS", "TT",
+                                          "PR", "FR", "IE", "HK", "NL") and br.ROUTING_COUNTRIES[-10:] == (
+        "MX", "BR", "CH", "SA", "ZA", "PL", "MY", "BE", "AE", "ES")
     assert br.ROUTING_FIELDS["MX"] == [{"key": "clabe", "label": "CLABE"}]
     assert (br.BTF_ROUTING_LABEL["MX"], br.PAYMENT_MODE_LABEL["MX"]) == ("CLABE", "SPEI")
     from app.modules.payroll.employee_validation import mask_routing

@@ -2232,6 +2232,97 @@ class AEEmployeeValidation(EmployeeValidationStrategy):
             raise BadRequestException("; ".join(errors))
 
 
+class ESEmployeeValidation(EmployeeValidationStrategy):
+    """Spain (ZP-ES-ENG-001, docs/spain). The facts the Spanish calculator
+    routes on, held in compliance_fields and edited in the normal employee
+    screens. Statutory VALUES (rates, bases, tranches, SMI) are never here: they
+    live in the ES jurisdiction pack.
+
+    Identifiers (ES-037): NIF/NIE with its official mod-23 check letter; the
+    Social Security number (NAF/NUSS) as 12 digits. Both are masked.
+    Combination rules: a TEMPORARY contract has an end date; SEPARATE_14 needs
+    the annual extra-pay total and its payment months (1-12); the short-contract
+    exception only for TEMPORARY contracts; children under 3 never exceed the
+    children count (Modelo 145 facts, ES-018 — declared by the employee, never
+    inferred). The AT/EP rate is per employee (docs/spain D10).
+    """
+
+    country_code = "ES"
+    _AMOUNT = re.compile(r"^\d{1,9}(\.\d{1,2})?$")
+    _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    _COUNT = re.compile(r"^\d{1,2}$")
+    _CHECK_LETTERS = "TRWAGMYFPDXBNJZSQVHLCKE"
+    _NIF_NIE = re.compile(r"([0-9]{8}|[XYZ][0-9]{7})[A-Z]")
+    FIELD_SPECS = {
+        # Shapes checked in _validate_combination so a refused identifier is
+        # never echoed back in the error message (ES-058).
+        "nif_nie": {"required": False, "upper": True, "strip_chars": "- "},
+        "naf_nuss": {"required": False, "strip_chars": "/- "},
+        "contract_type": {"required": True, "upper": True, "choices": ["INDEFINITE", "TEMPORARY"]},
+        "contract_end_date": {"required": False, "pattern": _DATE, "error": "contract_end_date must be YYYY-MM-DD."},
+        "short_contract_exception": {"required": False, "upper": True, "choices": ["YES", "NO"]},
+        "contribution_group": {"required": True, "choices": [str(n) for n in range(1, 12)],
+                               "error": "contribution_group must be 1 to 11."},
+        "work_pattern": {"required": False, "upper": True, "choices": ["FULL_TIME", "PART_TIME"]},
+        "extra_pay_policy": {"required": True, "upper": True, "choices": ["PRORATED_12", "SEPARATE_14"]},
+        "extra_pay_annual_amount": {"required": False, "pattern": _AMOUNT, "strip_chars": ", ",
+                                    "error": "extra_pay_annual_amount must be an amount in EUR."},
+        "extra_pay_months": {"required": False, "strip_chars": " ", "pattern": re.compile(r"^\d{1,2}(,\d{1,2})*$"),
+                             "error": "extra_pay_months must be month numbers such as 6,12."},
+        "overtime_kind": {"required": False, "upper": True, "choices": ["OTHER", "FORCE_MAJEURE"]},
+        "at_ep_rate": {"required": False, "pattern": re.compile(r"^0(\.\d{1,6})?$"),
+                       "error": "at_ep_rate must be a fraction such as 0.015 (1.5%)."},
+        "family_situation": {"required": False, "choices": ["1", "2", "3"],
+                             "error": "family_situation must be 1, 2 or 3 (Modelo 145)."},
+        "children_count": {"required": False, "pattern": _COUNT, "error": "children_count must be a whole number."},
+        "children_under_3": {"required": False, "pattern": _COUNT, "error": "children_under_3 must be a whole number."},
+        "ascendants_count": {"required": False, "pattern": _COUNT, "error": "ascendants_count must be a whole number."},
+        "disability_degree": {"required": False, "upper": True, "choices": ["NONE", "33_TO_64", "65_PLUS"]},
+        "irpf_voluntary_rate": {"required": False, "pattern": re.compile(r"^\d{1,2}(\.\d{1,2})?$"),
+                                "error": "irpf_voluntary_rate must be a percentage such as 15 or 15.5."},
+        "iban": {"required": False, "upper": True, "strip_chars": " "},
+    }
+    SENSITIVE_FIELDS = ("nif_nie", "naf_nuss")
+    duplicate_field = "nif_nie"
+
+    @classmethod
+    def nif_nie_check_letter_ok(cls, value: str) -> bool:
+        number = {"X": "0", "Y": "1", "Z": "2"}.get(value[0], value[0]) + value[1:-1]
+        return cls._CHECK_LETTERS[int(number) % 23] == value[-1]
+
+    @classmethod
+    def _validate_combination(cls, cleaned: dict) -> None:
+        errors = []
+        nif = cleaned.get("nif_nie")
+        if nif and not cls._NIF_NIE.fullmatch(nif):
+            errors.append("NIF/NIE must be 8 digits + letter (DNI) or X/Y/Z + 7 digits + letter (NIE).")
+        elif nif and not cls.nif_nie_check_letter_ok(nif):
+            errors.append("NIF/NIE check letter is not valid.")
+        if cleaned.get("naf_nuss") and not re.fullmatch(r"\d{12}", cleaned["naf_nuss"]):
+            errors.append("The Social Security number (NAF/NUSS) must be 12 digits.")
+        contract = cleaned.get("contract_type")
+        if contract == "TEMPORARY" and not cleaned.get("contract_end_date"):
+            errors.append("contract_end_date is required for a TEMPORARY contract.")
+        if cleaned.get("short_contract_exception") and contract != "TEMPORARY":
+            errors.append("short_contract_exception applies only to TEMPORARY contracts.")
+        if cleaned.get("extra_pay_policy") == "SEPARATE_14":
+            if not cleaned.get("extra_pay_annual_amount"):
+                errors.append("extra_pay_annual_amount is required when extra payments are paid separately.")
+            if not cleaned.get("extra_pay_months"):
+                errors.append("extra_pay_months (for example 6,12) is required when extra payments are paid "
+                              "separately.")
+        months = cleaned.get("extra_pay_months")
+        if months and any(not 1 <= int(m) <= 12 for m in months.split(",")):
+            errors.append("extra_pay_months must be between 1 and 12.")
+        if cleaned.get("children_under_3") and int(cleaned["children_under_3"]) > int(cleaned.get("children_count") or 0):
+            errors.append("children_under_3 cannot exceed children_count.")
+        iban = cleaned.get("iban")
+        if iban and (not re.fullmatch(r"ES\d{22}", iban) or not iban_checksum_ok(iban)):
+            errors.append("Spanish IBAN must be ES followed by 22 digits with a valid check digit.")
+        if errors:
+            raise BadRequestException("; ".join(errors))
+
+
 _STRATEGIES = {
     "IN": INEmployeeValidation,
     "US": USEmployeeValidation,
@@ -2258,6 +2349,8 @@ _STRATEGIES = {
     "NL": NLEmployeeValidation,
     # United Arab Emirates (ZP-AE-ENG-001): an ordinary country, no dormancy.
     "AE": AEEmployeeValidation,
+    # Spain (ZP-ES-ENG-001, docs/spain): an ordinary country, no dormancy.
+    "ES": ESEmployeeValidation,
 }
 
 class NZEmployeeValidation(EmployeeValidationStrategy):

@@ -1651,7 +1651,7 @@ def check_jurisdiction_readiness(
 # Mexico (ZP-MX-ENG-001): MX-003 — only the signed, effective-dated canonical
 # pack; an org-synced copy would drop the row-level dates that separate the
 # January and February UMA rows (MX-004).
-_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE", "AE")
+_CANONICAL_PACK_ONLY_COUNTRIES = ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE", "AE", "ES")
 # Countries whose payroll refuses an AMBIGUOUS resolution: more than one Active
 # canonical tax pack covering the payroll date (activation already forbids the
 # overlap; this keeps a corrupted / manually edited database from silently
@@ -10601,6 +10601,38 @@ _PAYSLIP_ITEM_JSON_FIELD_CATALOG["AE"] = {
     _AE_SNAP + "end_of_service.employer_amount": ("End-of-Service Cost (Employer)", "currency", True),
 }
 
+# Spain (ZP-ES-ENG-001, docs/spain): engine/countries/spain.py `es_result`.
+# Amounts are fixed-point strings. Per-family Social Security lines and the
+# solidarity tranches are lists, read with the keyed-list selector
+# (lines[family=<f>] / tranches[tranche=<t>]). The employee Social Security
+# total, IRPF, employer Social Security, AT/EP and the short-contract surcharge
+# are also the scalar columns social_security / tds / employer_social_security /
+# employer_occupational_hazard / employer_payroll_tax.
+_ES_SNAP = "es_calculation_snapshot."
+_ES_FAMILIES = (("common_contingencies", "Common Contingencies"), ("mei", "MEI"), ("unemployment", "Unemployment"),
+                ("training", "Training"), ("overtime", "Overtime Contribution"))
+_PAYSLIP_ITEM_JSON_FIELD_CATALOG["ES"] = {
+    _ES_SNAP + "inputs.contract_type": ("Contract Type", "text", False),
+    _ES_SNAP + "inputs.contribution_group": ("Contribution Group", "text", False),
+    _ES_SNAP + "inputs.extra_pay_policy": ("Extra-Pay Policy", "text", False),
+    _ES_SNAP + "inputs.days_in_alta": ("Days in Alta", "text", False),
+    _ES_SNAP + "pay.extra_pay_cash": ("Extra Pay (paga extra) Paid", "currency", True),
+    _ES_SNAP + "bases.common": ("Common-Contingency Base", "currency", True),
+    _ES_SNAP + "bases.at_ep": ("AT/EP Base", "currency", True),
+    _ES_SNAP + "bases.extra_prorrata": ("Extra-Pay Prorrata in the Base", "currency", True),
+    _ES_SNAP + "bases.excess_over_maximum": ("Remuneration above the Maximum Base", "currency", True),
+    **{f"{_ES_SNAP}social_security.lines[family={f}].employee": (f"{label} (Employee)", "currency", True)
+       for f, label in _ES_FAMILIES},
+    **{f"{_ES_SNAP}social_security.lines[family={f}].employer": (f"{label} (Employer)", "currency", True)
+       for f, label in _ES_FAMILIES + (("fogasa", "FOGASA"),)},
+    _ES_SNAP + "solidarity.employee_total": ("Solidarity Contribution (Employee)", "currency", True),
+    _ES_SNAP + "solidarity.employer_total": ("Solidarity Contribution (Employer)", "currency", True),
+    **{f"{_ES_SNAP}solidarity.tranches[tranche={t}].amount": (f"Solidarity Tranche {n} Amount", "currency", True)
+       for n, t in ((1, "t1"), (2, "t2"), (3, "t3"))},
+    _ES_SNAP + "irpf.version": ("IRPF Algorithm Version", "text", False),
+    _ES_SNAP + "irpf.rate": ("IRPF Rate", "text", False),
+}
+
 _PAYROLL_RUN_FIELD_CATALOG = {
     "run_code": ("Run Code", "text", False),
     "period_label": ("Period", "text", False),
@@ -10840,6 +10872,11 @@ _PAYSLIP_FIELDS_BY_COUNTRY = {
     # employee/employer pension slots, SANED (unemployment) reuses the
     # social-security slots, and the employer-only Occupational Hazards branch
     # has its own employer_occupational_hazard column.
+    # Spain (ZP-ES-ENG-001): IRPF -> tds; employee Social Security (incl.
+    # solidarity) -> social_security; the per-family lines are in catalog "ES".
+    "ES": ["employee_name", "department", "designation", "bank_name", "bank_account",
+           "basic_salary", "gross_pay", "social_security", "tds", "total_deductions",
+           "employer_social_security", "employer_occupational_hazard", "employer_payroll_tax", "net_pay"],
     # United Arab Emirates (ZP-AE-ENG-001): no income tax column; pension and
     # end-of-service figures also in catalog "AE" above.
     "AE": ["employee_name", "department", "designation", "bank_name", "bank_account",
@@ -10864,6 +10901,13 @@ _DEFAULT_PAYSLIP_FIELDS = list(_PAYSLIP_ITEM_FIELD_CATALOG.keys())
 # changes which PayslipItem column is read, only the label shown in the
 # Report Template field picker.
 _PAYSLIP_FIELD_LABEL_OVERRIDES = {
+    "ES": {
+        "tds": "IRPF (retención)",
+        "social_security": "Social Security (Employee, incl. solidarity)",
+        "employer_social_security": "Social Security (Employer, incl. solidarity)",
+        "employer_occupational_hazard": "AT/EP (Employer)",
+        "employer_payroll_tax": "Short-Contract Surcharge (Employer)",
+    },
     "AE": {
         "employee_pension": "Pension (Employee)",
         "employer_pension": "Pension Cash after Government Support (Employer)",
@@ -27055,6 +27099,9 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
         # United Arab Emirates (ZP-AE-ENG-001): the breakdown (pension, gratuity /
         # savings, pack values used) so payslip, run and reports show one figure.
         "ae_calculation_snapshot": result.ae_result,
+        # Spain (ZP-ES-ENG-001): bases, Social Security families, solidarity
+        # tranches, IRPF version / rate and the pack values used.
+        "es_calculation_snapshot": result.es_result,
         "it_calculation_snapshot": _italy_service.it_payslip_snapshot(result),
         "ch_calculation_snapshot": _switzerland_service.ch_payslip_snapshot(result, frozen=switzerland_frozen),
         # Saudi Arabia (ZP-SA-ENG-001): the frozen GOSI picture (worker class,

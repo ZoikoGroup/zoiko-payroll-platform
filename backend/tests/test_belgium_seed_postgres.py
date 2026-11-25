@@ -65,8 +65,8 @@ def test_the_widening_revision_is_the_single_head_on_the_report_field_revision()
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     script = ScriptDirectory.from_config(Config(os.path.join(here, "alembic.ini")))
     # UAE ad01fc67ce44 and the report-template content editor d7a3f1c9e5b2 both grow from this
-    # revision; merge b5f3e8a1c6d9 joins them and is the single head.
-    assert script.get_heads() == ["b5f3e8a1c6d9"]
+    # revision; merge b5f3e8a1c6d9 joins them and Spain 86f1ec062709 on it is the single head.
+    assert script.get_heads() == ["86f1ec062709"]
     assert script.get_revision("ad01fc67ce44").down_revision == REVISION
     assert script.get_revision("d7a3f1c9e5b2").down_revision == REVISION
     assert script.get_revision(REVISION).down_revision == "a4c7e1f9b3d8"

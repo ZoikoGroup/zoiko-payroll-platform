@@ -45,6 +45,8 @@ export { default as PLReportTemplatesPage } from "./PLReportTemplatesPage";
 export { default as SAReportTemplatesPage } from "./SAReportTemplatesPage";
 export { default as ZAReportTemplatesPage } from "./ZAReportTemplatesPage";
 export { default as AEReportTemplatesPage } from "./AEReportTemplatesPage";
+// Spain (ZP-ES-ENG-001, docs/spain) — shared list + detail layout.
+export { default as ESReportTemplatesPage } from "./ESReportTemplatesPage";
 
 // Phase 2: UK and USA added. Phase 8: CA added (service.py's
 // _PAYSLIP_FIELDS_BY_COUNTRY now has a real "CA" entry rather than
@@ -89,4 +91,5 @@ export const COUNTRY_CODE_TO_ROUTE = {
   SA: "saudi-arabia",
   ZA: "south-africa",
   AE: "united-arab-emirates",
+  ES: "spain",
 };

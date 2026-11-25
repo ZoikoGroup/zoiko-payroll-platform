@@ -32,9 +32,10 @@ export { default as SEStatutoryPage } from "./SEStatutoryPage";
 // Switzerland), so StatutoryRates must NOT render a France or Switzerland
 // card pointing at a route that doesn't exist. Filtering keeps every shared
 // name identical and leaves only those three out (AE has no separate Statutory
-// Rates page: every UAE statutory value is edited in its Compliance pack).
+// Rates page: every UAE statutory value is edited in its Compliance pack; the same
+// holds for Spain, ES).
 import { COUNTRY_CODE_TO_ROUTE as COMPLIANCE_COUNTRY_CODE_TO_ROUTE } from "../JurisdictionCompliance";
 
 export const COUNTRY_CODE_TO_ROUTE = Object.fromEntries(
-  Object.entries(COMPLIANCE_COUNTRY_CODE_TO_ROUTE).filter(([code]) => !["FR", "CH", "AE"].includes(code)),
+  Object.entries(COMPLIANCE_COUNTRY_CODE_TO_ROUTE).filter(([code]) => !["FR", "CH", "AE", "ES"].includes(code)),
 );
