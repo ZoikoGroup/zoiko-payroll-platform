@@ -101,16 +101,17 @@ def _blocked(table, decision):
     return caught.value.key
 
 
-def test_a_signed_file_does_not_sign_its_rows_an_unsigned_row_blocks():
-    assert _blocked(_table(rate_status="PENDING", attested=True), _decision()).startswith("BE_ONSS_RATE_UNSIGNED:")
+def test_an_unsigned_live_row_is_used_since_the_gate_removal():
+    """Owner decision 2026-11-26 (C2): row signing is optional; a live (PENDING) row calculates like a signed one."""
+    assert _compute(_table(rate_status="PENDING", attested=True), _decision()) == _compute(_table(), _decision())
 
 
 def test_a_signed_row_in_an_unattested_file_blocks():
     assert _blocked(_table(attested=False), _decision()).startswith("BE_ONSS_RATE_FILE_UNATTESTED:")
 
 
-def test_an_unsigned_combination_in_use_blocks():
-    assert _blocked(_table(comb_status="PENDING"), _decision()).startswith("BE_ONSS_RATE_UNSIGNED:combination")
+def test_an_unsigned_combination_in_use_is_used():
+    assert _compute(_table(comb_status="PENDING"), _decision()) == _compute(_table(), _decision())
 
 
 @pytest.mark.parametrize("fact", ["sector", "workforce", "moderation"])
@@ -145,14 +146,14 @@ def test_the_base_follows_the_worker_pay_basis_and_adds_the_combined_moderation(
     assert white["lines"]["WAGE_MODERATION"] == Decimal("4.40") + Decimal("0.10")   # base 0.44 % + 809 type 0 0.01 %
 
 
-def test_no_rule_an_ambiguous_rule_or_a_pending_rule_blocks():
+def test_no_rule_or_an_ambiguous_rule_blocks_a_pending_rule_is_used():
     no_rule = [r for r in RULES_809 + RULES_WORKER if r["code"] != "809"]
     assert _blocked(_table(rules=no_rule), _decision()).startswith("BE_ONSS_TYPE_UNRESOLVED:809")
     clash = RULES_809 + RULES_WORKER + [{"code": "809", "closureFundSector": "COMMERCIAL", "outcome": "4"}]
     assert _blocked(_table(rules=clash), _decision()).startswith("BE_ONSS_TYPE_AMBIGUOUS:809")
     table = _table()
     table["typeRules"] = [dict(r, status="PENDING") if r["code"] == "809" else r for r in table["typeRules"]]
-    assert _blocked(table, _decision()).startswith("BE_ONSS_RATE_UNSIGNED:type_rule:809")
+    assert _compute(table, _decision()) == _compute(_table(), _decision())
 
 
 def test_flat_rates_and_quarterly_minimums_block():
