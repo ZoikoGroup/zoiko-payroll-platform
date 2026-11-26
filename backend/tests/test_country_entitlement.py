@@ -672,5 +672,6 @@ def test_any_payroll_country_can_be_added_setup_pending_is_noted():
     assert us["setupNote"]  # no Active US pack in this test database
     assert summary["remaining"] == 1
 
+    # NZ is an ordinary payroll country since the gate removal, owner decision 2026-11-25; Brazil is still dormant.
     with pytest.raises(Exception, match="not a country Zoiko runs payroll for"):
-        je.add_entitled_country(_db, _Actor(org), "NZ")
+        je.add_entitled_country(_db, _Actor(org), "BR")
