@@ -282,6 +282,101 @@ def get_invoice_explanation(
     return build_invoice_explanation(db, invoice)
 
 
+# ── Billing email log, invoices, resend (Super Admin) ────────────────────
+
+@router.get("/email-log")
+def list_billing_email_log(
+    organization_id: Optional[int] = Query(None),
+    outcome: Optional[str] = Query(None, description="sent | failed | not_delivered | pending | skipped_duplicate"),
+    limit: int = Query(100, ge=1, le=500),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Billing + organization-welcome emails across organizations, plus any
+    platform configuration problem that stops email reaching inboxes."""
+    from app.modules.billing import notifications as billing_notifications
+    from app.modules.organizations.models import Organization
+    from app.services.email_service import email_delivery_problems
+
+    emails = billing_notifications.email_log(db, organization_id, limit=limit, outcome=outcome)
+    org_ids = {e["organizationId"] for e in emails if e["organizationId"]}
+    names = dict(
+        db.query(Organization.id, Organization.organization_name).filter(Organization.id.in_(org_ids)).all()
+    ) if org_ids else {}
+    for e in emails:
+        e["organizationName"] = names.get(e["organizationId"])
+    return {"emails": emails, "deliveryProblems": email_delivery_problems(db)}
+
+
+@router.get("/organizations/{organization_id}/invoices")
+def list_organization_invoices(
+    organization_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    invoices = (
+        db.query(BillingInvoice)
+        .filter(BillingInvoice.organization_id == organization_id)
+        .order_by(BillingInvoice.issued_at.desc())
+        .all()
+    )
+    return {"invoices": [
+        {"id": i.id, "stripe_invoice_id": i.stripe_invoice_id, "status": i.status, "total": i.total,
+         "tax_amount": i.tax_amount, "currency": i.currency, "issued_at": i.issued_at}
+        for i in invoices
+    ]}
+
+
+def _org_invoice(db: Session, organization_id: int, invoice_id: int) -> BillingInvoice:
+    invoice = (
+        db.query(BillingInvoice)
+        .filter(BillingInvoice.id == invoice_id, BillingInvoice.organization_id == organization_id)
+        .first()
+    )
+    if invoice is None:
+        raise NotFoundException("Invoice", invoice_id)
+    return invoice
+
+
+@router.get("/organizations/{organization_id}/invoices/{invoice_id}/download")
+def get_organization_invoice_download(
+    organization_id: int,
+    invoice_id: int,
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    from app.modules.billing import notifications as billing_notifications
+
+    links = billing_notifications.invoice_links(_org_invoice(db, organization_id, invoice_id))
+    if not links["pdfUrl"] and not links["hostedUrl"]:
+        raise NotFoundException("Invoice PDF", invoice_id)
+    return links
+
+
+@router.post("/organizations/{organization_id}/invoices/{invoice_id}/resend")
+def resend_organization_invoice(
+    organization_id: int,
+    invoice_id: int,
+    kind: str = Query("both", description="both | invoice | receipt"),
+    current_user=Depends(get_current_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Resend an organization's invoice / receipt to its billing contacts.
+    Sends immediately and reports each recipient's real outcome."""
+    from app.modules.billing import notifications as billing_notifications
+    from app.modules.billing.router import _resend_kinds
+
+    results = billing_notifications.resend_invoice_emails(
+        db, _org_invoice(db, organization_id, invoice_id), kinds=_resend_kinds(kind), actor_user_id=current_user.id,
+    )
+    db.add(BillingCommercialAuditEvent(
+        organization_id=organization_id, actor_user_id=current_user.id, event_type="INVOICE_EMAIL_RESENT",
+        payload={"invoice_id": invoice_id, "kind": kind, "outcomes": [r["outcome"] for r in results]},
+    ))
+    db.commit()
+    return {"results": results}
+
+
 # Step 3: the Finance-facing BWM/invoice discrepancy check now lives on the
 # existing Super Admin Exceptions & Reconciliation page
 # (GET /super-admin/compliance/exceptions, super_admin/command_center_router.py)

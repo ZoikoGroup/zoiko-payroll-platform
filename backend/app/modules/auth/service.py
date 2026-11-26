@@ -354,7 +354,17 @@ def _send_and_mirror(auth_row_id: int, send: Callable, db: Session = None) -> bo
     except Exception as exc:  # noqa: BLE001
         _update_audit_outcome(db, SimpleNamespace(id=auth_row_id), "failed", f"{type(exc).__name__}: {exc}")
         raise
-    _update_audit_outcome(db, SimpleNamespace(id=auth_row_id), "sent" if sent else "failed")
+    outcome, detail = ("sent" if sent else "failed"), None
+    if sent:
+        # Mirror communications' honest outcome: a mock send (no SMTP host)
+        # or a blocked one (test/local mode) did not reach the recipient.
+        from app.modules.communications import service as communications
+        from app.services import email_service
+
+        disposition = (email_service.last_send_disposition() or {}).get("disposition")
+        if disposition in communications._NOT_DELIVERED_REASONS:
+            outcome, detail = communications.OUTCOME_NOT_DELIVERED, communications._NOT_DELIVERED_REASONS[disposition]
+    _update_audit_outcome(db, SimpleNamespace(id=auth_row_id), outcome, detail)
     return sent
 
 
@@ -1310,62 +1320,76 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
     logger.info("New organization %s registered by %s (auth_provider=%s)",
                 org.organization_code, data.email, admin.auth_provider)
 
+    # Plain-value snapshots taken NOW, while the request session is live.
+    # The welcome email runs as a background task AFTER the response — by
+    # then _post_registration_session's commit has expired `org`/`admin` and
+    # get_db has closed the session, so touching `org.id` there raised
+    # DetachedInstanceError and (inside the old except, which read org.id
+    # again) killed the task: no welcome email, no audit row, no clear log.
+    from app.modules.communications.service import snapshot as _snapshot
+    from app.modules.organizations.notifications import _ADMIN_ALERT_FIELDS, _ORG_ALERT_FIELDS
+
+    org_snap = _snapshot(org, *_ORG_ALERT_FIELDS)
+    admin_snap = _snapshot(admin, "id", *_ADMIN_ALERT_FIELDS)
+    # data.plan_code is Stage 1's plan-picker choice, carried through purely
+    # so the welcome email can name the actual plan — checkout hasn't
+    # happened yet. Resolve it to the real BillingPlan.name (never show the
+    # raw code — "PROFESSIONAL" means nothing to a customer).
+    plan_display_name = None
+    if data.plan_code:
+        from app.modules.billing.models import BillingPlan
+
+        plan_row = db.query(BillingPlan).filter(BillingPlan.code == data.plan_code.upper()).first()
+        if plan_row is not None:
+            plan_display_name = plan_row.name
+    bind = db.get_bind()
+
     def _dispatch_org_created_emails() -> None:
         # Runs after the HTTP response is sent (or synchronously if no
         # background_tasks was supplied — e.g. direct/test callers). Doing
         # this inline used to block the register response on a live SMTP
-        # round-trip: a hung or auth-rejecting relay (see SMTP_HOST) made a
-        # real registration take ~30s (the socket timeout) before the
-        # client ever saw a response, for an email that isn't required for
-        # the account to work.
+        # round-trip. Uses its OWN session: the request's is closed by now.
+        from contextlib import nullcontext
+
+        from app.modules.communications.service import dispatch_inline
+
+        session = Session(bind=bind) if background_tasks is not None else db
         try:
-            from app.services.email_service import send_organization_created_email
-            ref_id = f"ORG-{org.id:04d}-INIT"
+            with (dispatch_inline() if background_tasks is not None else nullcontext()):
+                from app.services.email_service import send_organization_created_email
+                ref_id = f"ORG-{org_snap.id:04d}-INIT"
 
-            # data.plan_code is Stage 1's plan-picker choice, carried
-            # through purely so the welcome email can name the actual plan
-            # — checkout hasn't happened yet at this point (that's
-            # PlanReviewPage, a separate later call), so there's no
-            # BillingSubscription/plan_version to resolve from yet, only
-            # this code string. Resolve it to the real BillingPlan.name
-            # (never show the raw code — "PROFESSIONAL" means nothing to a
-            # customer) rather than hardcoding a second code->name map.
-            plan_display_name = None
-            if data.plan_code:
-                from app.modules.billing.models import BillingPlan
+                _dispatch_email_guarded(
+                    session,
+                    event_type="commercial.organization_created",
+                    template_id="COM-001",
+                    recipient_email=admin_snap.email,
+                    user_id=admin_snap.id,
+                    organization_id=org_snap.id,
+                    actor_user_id=admin_snap.id,
+                    idempotency_key=_idempotency_key(
+                        org_snap.id, "commercial.organization_created", admin_snap.email, "COM-001",
+                    ),
+                    send=lambda send_db: send_organization_created_email(
+                        email=admin_snap.email,
+                        recipient_first_name=first_name,
+                        organization_name=org_snap.organization_name,
+                        reference_id=ref_id,
+                        plan_display_name=plan_display_name,
+                        organization_id=org_snap.id,
+                        db=send_db,
+                    ),
+                )
+                # Notify Super Admins with full org & primary admin metadata
+                # (ADM-001) — one audited communication_events row per recipient.
+                from app.modules.organizations.notifications import queue_super_admin_org_created_alerts
 
-                plan_row = db.query(BillingPlan).filter(BillingPlan.code == data.plan_code.upper()).first()
-                if plan_row is not None:
-                    plan_display_name = plan_row.name
-
-            _dispatch_email_guarded(
-                db,
-                event_type="commercial.organization_created",
-                template_id="COM-001",
-                recipient_email=admin.email,
-                user_id=admin.id,
-                organization_id=org.id,
-                actor_user_id=admin.id,
-                idempotency_key=_idempotency_key(
-                    org.id, "commercial.organization_created", admin.email, "COM-001",
-                ),
-                send=lambda: send_organization_created_email(
-                    email=admin.email,
-                    recipient_first_name=first_name,
-                    organization_name=org.organization_name,
-                    reference_id=ref_id,
-                    plan_display_name=plan_display_name,
-                    organization_id=org.id,
-                    db=db,
-                ),
-            )
-            # Notify Super Admins with full org & primary admin metadata
-            # (ADM-001) — one audited communication_events row per recipient.
-            from app.modules.organizations.notifications import queue_super_admin_org_created_alerts
-
-            queue_super_admin_org_created_alerts(db, org, admin, module="auth", actor_user_id=admin.id)
-        except Exception as exc:
-            logger.warning("Failed to dispatch org created emails for org %s: %s", org.id, exc)
+                queue_super_admin_org_created_alerts(session, org_snap, admin_snap, module="auth", actor_user_id=admin_snap.id)
+        except Exception:
+            logger.exception("Failed to dispatch org created emails for org %s", org_snap.id)
+        finally:
+            if session is not db:
+                session.close()
 
     if background_tasks is not None:
         background_tasks.add_task(_dispatch_org_created_emails)
@@ -1499,39 +1523,54 @@ def register_trial(db: Session, data: TrialRegisterRequest, background_tasks: Op
 
     logger.info("New evaluation organization %s registered by %s", org.organization_code, data.email)
 
+    # Snapshot plain values while the session is live — see register_enterprise:
+    # the background task runs after the request session is closed.
+    org_id, org_name = org.id, org.organization_name
+    admin_id, admin_email = admin.id, admin.email
+    bind = db.get_bind()
+
     def _dispatch_trial_org_created_email() -> None:
         # See register_enterprise's identical wrapper for why this is
         # deferred to a background task rather than blocking the response
         # on a live SMTP round-trip.
-        try:
-            from app.services.email_service import send_trial_organization_created_email
+        from contextlib import nullcontext
 
-            evaluation_end = (datetime.utcnow() + timedelta(days=30)).strftime("%d %B %Y")
-            ref_id = f"TRIAL-{org.id:04d}-INIT"
-            _dispatch_email_guarded(
-                db,
-                event_type="commercial.evaluation_created",
-                template_id="COM-003",
-                recipient_email=admin.email,
-                user_id=admin.id,
-                organization_id=org.id,
-                actor_user_id=admin.id,
-                idempotency_key=_idempotency_key(
-                    org.id, "commercial.evaluation_created", admin.email, "COM-003",
-                ),
-                send=lambda: send_trial_organization_created_email(
-                    email=admin.email,
-                    recipient_first_name=first_name,
-                    organization_name=org.organization_name,
-                    reference_id=ref_id,
-                    evaluation_days=30,
-                    evaluation_end_date=evaluation_end,
-                    organization_id=org.id,
-                    db=db,
-                ),
-            )
-        except Exception as exc:
-            logger.warning("Failed to dispatch trial org created email for org %s: %s", org.id, exc)
+        from app.modules.communications.service import dispatch_inline
+
+        session = Session(bind=bind) if background_tasks is not None else db
+        try:
+            with (dispatch_inline() if background_tasks is not None else nullcontext()):
+                from app.services.email_service import send_trial_organization_created_email
+
+                evaluation_end = (datetime.utcnow() + timedelta(days=30)).strftime("%d %B %Y")
+                ref_id = f"TRIAL-{org_id:04d}-INIT"
+                _dispatch_email_guarded(
+                    session,
+                    event_type="commercial.evaluation_created",
+                    template_id="COM-003",
+                    recipient_email=admin_email,
+                    user_id=admin_id,
+                    organization_id=org_id,
+                    actor_user_id=admin_id,
+                    idempotency_key=_idempotency_key(
+                        org_id, "commercial.evaluation_created", admin_email, "COM-003",
+                    ),
+                    send=lambda send_db: send_trial_organization_created_email(
+                        email=admin_email,
+                        recipient_first_name=first_name,
+                        organization_name=org_name,
+                        reference_id=ref_id,
+                        evaluation_days=30,
+                        evaluation_end_date=evaluation_end,
+                        organization_id=org_id,
+                        db=send_db,
+                    ),
+                )
+        except Exception:
+            logger.exception("Failed to dispatch trial org created email for org %s", org_id)
+        finally:
+            if session is not db:
+                session.close()
 
     if background_tasks is not None:
         background_tasks.add_task(_dispatch_trial_org_created_email)

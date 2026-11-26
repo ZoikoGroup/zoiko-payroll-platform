@@ -77,6 +77,18 @@ OUTCOME_PENDING = "pending"
 OUTCOME_SENT = "sent"
 OUTCOME_FAILED = "failed"
 OUTCOME_SKIPPED_DUPLICATE = "skipped_duplicate"
+# The send function reported success but nothing left the server: no SMTP
+# host is configured (mock send) or outbound delivery is blocked because the
+# process classified itself as test/local (app/core/outbound.py). These used
+# to be recorded as "sent" — a false receipt that hid a production
+# misconfiguration (e.g. DEBUG left at its default true) behind a clean log.
+OUTCOME_NOT_DELIVERED = "not_delivered"
+
+_NOT_DELIVERED_REASONS = {
+    "mocked_no_smtp_host": "NOT DELIVERED: no SMTP host configured (SMTP_HOST / platform smtp_host) - message was only logged",
+    "blocked_outbound": "NOT DELIVERED: outbound email blocked - this process runs in test/local mode "
+                        "(ENVIRONMENT/APP_ENV, or DEBUG=true with neither set); set ENVIRONMENT=production and DEBUG=false",
+}
 
 # Patched in tests so retry backoff doesn't actually sleep.
 _sleep = time.sleep
@@ -335,6 +347,7 @@ def dispatch_email(
         provider_response = None
         while True:
             attempts += 1
+            email_service.reset_last_send_disposition()
             try:
                 with email_service.propagate_delivery_errors():
                     ok = bool(send_fn(*send_fn_args, **kwargs))
@@ -352,6 +365,9 @@ def dispatch_email(
                 break
             if ok:
                 outcome, provider_response = OUTCOME_SENT, None
+                disposition = (email_service.last_send_disposition() or {}).get("disposition")
+                if disposition in _NOT_DELIVERED_REASONS:
+                    outcome, provider_response = OUTCOME_NOT_DELIVERED, _NOT_DELIVERED_REASONS[disposition]
             else:
                 outcome = OUTCOME_FAILED
                 provider_response = provider_response or "send function reported failure (returned False)"
@@ -359,13 +375,15 @@ def dispatch_email(
 
         if row_id is not None:
             _finalize_row(db, row_id, outcome, provider_response, attempts)
-        log = logger.info if outcome == OUTCOME_SENT else logger.error
+        log = {OUTCOME_SENT: logger.info, OUTCOME_NOT_DELIVERED: logger.warning}.get(outcome, logger.error)
         log(
             "[communications] module=%s event=%s template_id=%s recipient=%s outcome=%s attempts=%d%s",
             module, event_type, template_id, recipient_email, outcome, attempts,
             f" error={provider_response}" if provider_response else "",
         )
-        return outcome == OUTCOME_SENT
+        # not_delivered keeps the historical "nothing to report" True that
+        # send_approval_email gives a mock/blocked send; the row says the truth.
+        return outcome in (OUTCOME_SENT, OUTCOME_NOT_DELIVERED)
     finally:
         if own_session:
             db.close()

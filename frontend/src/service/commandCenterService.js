@@ -100,3 +100,22 @@ export const getServiceHealth = () => apiFetch("/api/super-admin/platform/servic
 export const listIntegrations = () => apiFetch("/api/super-admin/platform/integrations");
 
 export const getSecurityAuditLog = (params) => apiFetch("/api/super-admin/security/audit", { params });
+
+// ── Billing emails (Super Admin) ───────────────────────────────────────────
+// { emails: [{ id, organizationId, organizationName, eventType, templateId,
+//   recipient, outcome, attempts, error, createdAt }], deliveryProblems: [str] }
+export const getBillingEmailLog = (params) =>
+  apiFetch("/api/super-admin/billing/email-log", { params });
+
+export const listOrganizationInvoices = (organizationId) =>
+  apiFetch(`/api/super-admin/billing/organizations/${organizationId}/invoices`);
+
+export const getOrganizationInvoiceDownload = (organizationId, invoiceId) =>
+  apiFetch(`/api/super-admin/billing/organizations/${organizationId}/invoices/${invoiceId}/download`);
+
+// kind: "both" | "invoice" | "receipt" -> { results: [{ recipient, eventType, outcome, error }] }
+export const resendOrganizationInvoice = (organizationId, invoiceId, kind = "both") =>
+  apiFetch(`/api/super-admin/billing/organizations/${organizationId}/invoices/${invoiceId}/resend`, {
+    method: "POST",
+    params: { kind },
+  });

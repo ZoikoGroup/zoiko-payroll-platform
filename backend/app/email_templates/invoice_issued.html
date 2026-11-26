@@ -1,0 +1,20 @@
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 12px 0;">Hello,</p>
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 16px 0;">
+  Invoice <span style="color:#0b1f3a; font-weight:bold;">{{invoice_number}}</span> for
+  <span style="color:#0b1f3a; font-weight:bold;">{{organization_name}}</span>
+  ({{plan_name}} plan) is {{invoice_state}}.
+</p>
+{{#if pdf_attached}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 16px 0;">
+  The invoice is attached to this email as a PDF.
+</p>
+{{/if}}
+{{#if invoice_pdf_url}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0 0 16px 0;">
+  Download the PDF: <a href="{{invoice_pdf_url}}" style="color:#1d4ed8;">{{invoice_number}}.pdf</a>
+</p>
+{{/if}}
+<p style="color:#33455e; font-size:14px; line-height:1.6; margin:0;">
+  Every invoice is also listed under Subscription &amp; Billing, where you can download
+  or resend it at any time.
+</p>

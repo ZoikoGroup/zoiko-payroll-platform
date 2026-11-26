@@ -27,6 +27,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 import stripe
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,7 @@ from app.core.dependencies import get_current_org_admin, get_current_user
 from app.core.exceptions import BadRequestException, ForbiddenException, NotFoundException
 from app.database import get_db
 from app.modules.billing import entitlements, jurisdiction_entitlement, plan_catalog
+from app.modules.billing import notifications as billing_notifications
 from app.modules.billing.models import (
     BillingAuthority,
     BillingCommercialAuditEvent,
@@ -694,6 +696,12 @@ def confirm_checkout_session(
         if sub is None:
             raise
 
+    # The invoice ledger and the payment emails used to come ONLY from the
+    # invoice.paid webhook — an environment the webhook never reaches got
+    # neither. Reconcile the subscription's first invoice here too
+    # (idempotent with the webhook: same invoice row guard, same email keys).
+    _reconcile_latest_paid_invoice(db, sub)
+
     org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
     plan_code = None
     version_row = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == sub.plan_version_id).first()
@@ -1032,6 +1040,26 @@ def _write_invoice_from_stripe(db: Session, sub: BillingSubscription, stripe_inv
             unit_amount=Decimal(line.amount) / quantity / 100,
             line_total=Decimal(line.amount) / 100,
         ))
+
+
+def _reconcile_latest_paid_invoice(db: Session, sub: BillingSubscription) -> None:
+    """Record the subscription's latest invoice and send its receipt/invoice
+    emails when Stripe says it is paid with money collected. Never raises:
+    the customer's subscription is already active either way."""
+    if not sub or not sub.stripe_subscription_id:
+        return
+    try:
+        stripe_sub = billing_notifications.to_dict(stripe.Subscription.retrieve(sub.stripe_subscription_id))
+        latest = stripe_sub.get("latest_invoice")
+        invoice = billing_notifications.to_dict(stripe.Invoice.retrieve(latest)) if isinstance(latest, str) else (latest or {})
+        if invoice.get("status") != "paid" or int(invoice.get("amount_paid") or 0) <= 0:
+            return
+        _write_invoice_from_stripe(db, sub, invoice.get("id"), status="PAID")
+        db.commit()
+        billing_notifications.notify_invoice_paid(db, sub.organization_id, invoice)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        logger.exception("[checkout-confirm] could not reconcile the latest invoice for organization %s", sub.organization_id)
 
 
 def _update_invoice_status_from_stripe_event(db: Session, stripe_invoice_id: Optional[str], status: str) -> None:
@@ -1443,6 +1471,19 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
             db.commit()
 
+            # BIL-001 receipt + BIL-002 invoice. Keyed on the Stripe invoice
+            # id, so the success page's reconciliation never doubles them.
+            if real_payment:
+                billing_notifications.safe_notify(
+                    billing_notifications.notify_invoice_paid, db, sub.organization_id, data_object,
+                )
+        else:
+            logger.warning(
+                "[stripe-webhook] invoice.paid %s names subscription %s that no organization has yet; "
+                "the success-page confirmation reconciles it (event %s)",
+                data_object.get("id"), stripe_sub_id, event_id,
+            )
+
     elif event_type == "invoice.payment_failed":
         stripe_sub_id = _invoice_subscription_id(data_object)
         sub = (
@@ -1473,6 +1514,32 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             _write_invoice_from_stripe(db, sub, data_object.get("id"), status="FAILED")
 
             db.commit()
+
+            # BIL-003 with a retry link (Stripe's hosted invoice page).
+            billing_notifications.safe_notify(
+                billing_notifications.notify_payment_failed, db, sub.organization_id, data_object,
+            )
+
+    elif event_type == "invoice.upcoming":
+        # BIL-004 renewal reminder. Stripe sends this ahead of each renewal
+        # when "Upcoming renewal events" is enabled in its billing settings.
+        stripe_sub_id = _invoice_subscription_id(data_object)
+        sub = (
+            db.query(BillingSubscription)
+            .filter(BillingSubscription.stripe_subscription_id == stripe_sub_id)
+            .first()
+        ) if stripe_sub_id else None
+        if sub:
+            db.add(BillingCommercialAuditEvent(
+                organization_id=sub.organization_id,
+                event_type="RENEWAL_UPCOMING",
+                payload={"stripe_subscription_id": stripe_sub_id, "amount_due": data_object.get("amount_due")},
+                stripe_event_id=event_id,
+            ))
+            db.commit()
+            billing_notifications.safe_notify(
+                billing_notifications.notify_upcoming_renewal, db, sub.organization_id, data_object,
+            )
 
     elif event_type in {"charge.refunded", "refund.created"}:
         stripe_invoice_id = data_object.get("invoice")
@@ -1613,6 +1680,73 @@ def list_my_invoices(
             for inv in invoices
         ],
     }
+
+
+class InvoiceResendRequest(BaseModel):
+    # "both" (receipt + invoice), "invoice" or "receipt"; a failed invoice
+    # always resends its payment-failed notice with the retry link.
+    kind: str = "both"
+
+
+def _resend_kinds(kind: str):
+    kind = (kind or "both").lower()
+    if kind not in ("both", "invoice", "receipt"):
+        raise BadRequestException("kind must be one of: both, invoice, receipt.")
+    return ("receipt", "invoice") if kind == "both" else (kind,)
+
+
+def _own_invoice(db: Session, organization_id: int, invoice_id: int):
+    from app.modules.billing.models import BillingInvoice
+
+    invoice = db.query(BillingInvoice).filter(
+        BillingInvoice.id == invoice_id, BillingInvoice.organization_id == organization_id,
+    ).first()
+    if invoice is None:
+        raise NotFoundException("Invoice", invoice_id)
+    return invoice
+
+
+@router.get("/my-subscription/invoices/{invoice_id}/download")
+def get_my_invoice_download(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_org_admin),
+):
+    """Stripe's PDF + hosted-page links for one of the caller's invoices
+    (read live from Stripe; never stored)."""
+    invoice = _own_invoice(db, current_user.organization_id, invoice_id)
+    links = billing_notifications.invoice_links(invoice)
+    if not links["pdfUrl"] and not links["hostedUrl"]:
+        raise NotFoundException("Invoice PDF", invoice_id)
+    return links
+
+
+@router.post("/my-subscription/invoices/{invoice_id}/resend")
+def resend_my_invoice(
+    invoice_id: int,
+    body: Optional[InvoiceResendRequest] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_org_admin),
+):
+    """Resend the invoice and/or payment receipt to the organization's
+    billing contacts. Sends immediately and reports each recipient's real
+    outcome (sent / failed / not_delivered)."""
+    invoice = _own_invoice(db, current_user.organization_id, invoice_id)
+    results = billing_notifications.resend_invoice_emails(
+        db, invoice, kinds=_resend_kinds((body or InvoiceResendRequest()).kind), actor_user_id=current_user.id,
+    )
+    return {"results": results}
+
+
+@router.get("/my-subscription/email-log")
+def get_my_billing_email_log(
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_org_admin),
+):
+    """Every billing / welcome email sent for the caller's organization:
+    type, recipient, status, attempts, error, timestamp."""
+    return {"emails": billing_notifications.email_log(db, current_user.organization_id, limit=limit)}
 
 
 @router.get("/my-subscription/invoice-explanation/{invoice_id}")

@@ -1912,3 +1912,182 @@ def send_security_alert_email(email: str, rule_key: str, severity: str, summary:
         "cta_label": "Open Alerts",
         "details_panel": _details_rows([("Rule", rule_key), ("Severity", severity), ("Summary", summary)]),
     }, db=db, accent=PALETTE["error"])
+
+
+# ── Billing emails (BIL-001..004) ───────────────────────────────────────────
+# Subscription money is shown in the currency Stripe actually charged —
+# never the organization's payroll currency.
+
+BILLING_SENDER = "Zoiko Payroll Billing"
+_INVOICE_PDF_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _billing_send(email: str, template_name: str, context: dict, organization_id=None, db=None,
+                  accent: str = "", attachments=None) -> bool:
+    if not email:
+        return False
+    context.setdefault("accent_bar", accent)
+    context.setdefault("support_email", "")
+    return send_approval_email(email, template_name, context, db=db, organization_id=organization_id,
+                               attachments=attachments, from_display_name_override=BILLING_SENDER)
+
+
+def _subscription_url() -> str:
+    return f"{_frontend_base()}/organization-admin/subscription"
+
+
+def fetch_invoice_pdf(url: str) -> Optional[bytes]:
+    """Download Stripe's invoice PDF (a public, unguessable link) for
+    attaching. None on any failure: the email then carries the link only."""
+    if not url or not url.startswith("https://"):
+        return None
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "ZoikoPayroll-Billing/1.0"})
+        tls = ssl.create_default_context(cafile=certifi.where())
+        with urllib.request.urlopen(req, timeout=20, context=tls) as resp:
+            data = resp.read(_INVOICE_PDF_MAX_BYTES + 1)
+        if len(data) > _INVOICE_PDF_MAX_BYTES or not data.startswith(b"%PDF"):
+            logger.warning("[email] Invoice PDF from Stripe was not a usable PDF; sending the link only")
+            return None
+        return data
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[email] Could not download invoice PDF ({type(exc).__name__}); sending the link only")
+        return None
+
+
+def send_payment_succeeded_email(
+    email: str, organization_name: str, plan_name: str, amount_display: str, transaction_id: str,
+    paid_at: str, invoice_number: str = "", receipt_url: str = "", organization_id=None, db=None,
+) -> bool:
+    """BIL-001: payment receipt (amount, currency, plan, transaction ID, date)."""
+    return _billing_send(email, "payment_succeeded.html", {
+        "subject": f"Payment received — {amount_display} | Zoiko Payroll",
+        "preheader": f"Your {plan_name} plan payment was successful.",
+        "heading": "Payment successful",
+        "organization_name": organization_name,
+        "plan_name": plan_name,
+        "amount_display": amount_display,
+        "cta_url": receipt_url or _subscription_url(),
+        "cta_label": "View receipt" if receipt_url else "Open Subscription & Billing",
+        "details_panel": _details_rows([
+            ("Organization", organization_name),
+            ("Plan", plan_name),
+            ("Amount paid", amount_display),
+            ("Transaction ID", transaction_id or "—"),
+            ("Invoice", invoice_number or "—"),
+            ("Date (UTC)", paid_at),
+        ]),
+    }, organization_id=organization_id, db=db, accent=PALETTE["success"])
+
+
+def send_invoice_email(
+    email: str, organization_name: str, plan_name: str, invoice_number: str, amount_display: str,
+    issued_at: str, status_label: str = "paid", period_label: str = "", invoice_pdf_url: str = "",
+    hosted_invoice_url: str = "", attach_pdf: bool = True, organization_id=None, db=None,
+) -> bool:
+    """BIL-002: the invoice, attached as a PDF when Stripe's copy downloads,
+    and always linked."""
+    pdf = fetch_invoice_pdf(invoice_pdf_url) if attach_pdf else None
+    safe_number = re.sub(r"[^A-Za-z0-9_-]", "", invoice_number or "") or "invoice"
+    return _billing_send(email, "invoice_issued.html", {
+        "subject": f"Invoice {invoice_number} — {amount_display} | Zoiko Payroll",
+        "preheader": f"Invoice {invoice_number} for your {plan_name} plan.",
+        "heading": f"Invoice {invoice_number}",
+        "organization_name": organization_name,
+        "plan_name": plan_name,
+        "invoice_number": invoice_number,
+        "invoice_state": status_label,
+        "pdf_attached": bool(pdf),
+        "invoice_pdf_url": invoice_pdf_url,
+        "cta_url": hosted_invoice_url or _subscription_url(),
+        "cta_label": "View invoice online" if hosted_invoice_url else "Open Subscription & Billing",
+        "details_panel": _details_rows([
+            ("Invoice number", invoice_number),
+            ("Organization", organization_name),
+            ("Plan", plan_name),
+            ("Billing period", period_label or "—"),
+            ("Total", amount_display),
+            ("Status", status_label.capitalize()),
+            ("Issued (UTC)", issued_at),
+        ]),
+    }, organization_id=organization_id, db=db, accent=PALETTE["cta"],
+        attachments=[(f"{safe_number}.pdf", pdf)] if pdf else None)
+
+
+def send_payment_failed_email(
+    email: str, organization_name: str, plan_name: str, amount_display: str, invoice_number: str = "",
+    failure_reason: str = "", retry_url: str = "", next_attempt: str = "", organization_id=None, db=None,
+) -> bool:
+    """BIL-003: payment failed, with a retry link (Stripe's hosted invoice
+    page, where the customer can pay or change card)."""
+    return _billing_send(email, "payment_failed.html", {
+        "subject": f"Payment failed — action needed for {organization_name} | Zoiko Payroll",
+        "preheader": f"We could not collect {amount_display} for your {plan_name} plan.",
+        "heading": "Payment failed",
+        "organization_name": organization_name,
+        "plan_name": plan_name,
+        "amount_display": amount_display,
+        "next_attempt": next_attempt,
+        "cta_url": retry_url or _subscription_url(),
+        "cta_label": "Retry payment",
+        "details_panel": _details_rows([
+            ("Organization", organization_name),
+            ("Plan", plan_name),
+            ("Amount due", amount_display),
+            ("Invoice", invoice_number or "—"),
+            ("Reason", failure_reason or "The card issuer declined the charge."),
+        ]),
+    }, organization_id=organization_id, db=db, accent=PALETTE["error"])
+
+
+def send_subscription_renewal_reminder_email(
+    email: str, organization_name: str, plan_name: str, amount_display: str, renewal_date: str,
+    organization_id=None, db=None,
+) -> bool:
+    """BIL-004: upcoming renewal (Stripe invoice.upcoming)."""
+    return _billing_send(email, "subscription_renewal_reminder.html", {
+        "subject": f"Your {plan_name} plan renews on {renewal_date} | Zoiko Payroll",
+        "preheader": f"Expected charge: {amount_display}.",
+        "heading": "Upcoming renewal",
+        "organization_name": organization_name,
+        "plan_name": plan_name,
+        "amount_display": amount_display,
+        "renewal_date": renewal_date,
+        "cta_url": _subscription_url(),
+        "cta_label": "Manage subscription",
+        "details_panel": _details_rows([
+            ("Organization", organization_name),
+            ("Plan", plan_name),
+            ("Renewal date", renewal_date),
+            ("Expected charge", amount_display),
+        ]),
+    }, organization_id=organization_id, db=db, accent=PALETTE["warning"])
+
+
+def email_delivery_problems(db=None) -> list:
+    """Configuration problems that stop email reaching real inboxes: names
+    and causes only, never values. Shown at startup and on the email logs."""
+    from app.config import settings as _cfg
+
+    problems = []
+    smtp = _get_smtp_settings(db=db)
+    if not str(smtp.get("host") or "").strip():
+        problems.append("SMTP_HOST is not set: emails are only logged, never sent.")
+    mode = outbound.delivery_mode()
+    if mode != outbound.PRODUCTION_LIKE:
+        problems.append(
+            f"Outbound email is blocked: this server runs in {mode} mode. Set ENVIRONMENT=production "
+            "in the process environment and DEBUG=false in backend/.env."
+        )
+    sender = str(smtp.get("from_email") or "").strip().lower()
+    domain = sender.rsplit("@", 1)[-1] if "@" in sender else ""
+    if not domain or domain.endswith((".example", ".invalid", ".test", ".local", "localhost")):
+        problems.append(
+            "SMTP_FROM_EMAIL is not on a real, verified sending domain (SPF, DKIM and DMARC "
+            "records required): mail will be rejected or land in spam."
+        )
+    if getattr(_cfg, "STAGING_MODE", False) and getattr(_cfg, "STAGING_SANDBOX_EMAIL", ""):
+        problems.append("STAGING_MODE is on: every email is redirected to STAGING_SANDBOX_EMAIL.")
+    return problems

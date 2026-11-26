@@ -258,7 +258,7 @@ def test_organizations_duplicate_deactivate_sends_once(db, organization, monkeyp
 
     assert sent == ["admin@testorg.test"]
     rows = _rows(db, event_type="organizations.status_changed")
-    assert [r.outcome for r in rows] == ["sent", "skipped_duplicate"]
+    assert [r.outcome for r in rows] == ["not_delivered", "skipped_duplicate"]
     assert {r.module for r in rows} == {"organizations"}
     assert rows[0].organization_id == organization.id and rows[0].actor_user_id == _Actor.id
 
@@ -271,7 +271,7 @@ def test_organizations_reactivate_after_suspend_is_a_distinct_notice(db, organiz
     org_router.update_organization_status(organization.id, False, current_user=_Actor(), db=db)
     org_router.update_organization_status(organization.id, True, current_user=_Actor(), db=db)
     rows = _rows(db, event_type="organizations.status_changed")
-    assert [r.outcome for r in rows] == ["sent", "sent"]
+    assert [r.outcome for r in rows] == ["not_delivered", "not_delivered"]
 
 
 def test_payroll_duplicate_employee_created_event_sends_once(db, organization, monkeypatch):
@@ -331,7 +331,7 @@ def test_auth_sends_are_mirrored_into_communication_events(db, organization):
 
     (auth_row,) = db.query(auth_service.AuthEmailEvent).all()
     (comm_row,) = _rows(db, module="auth")
-    assert auth_row.outcome == comm_row.outcome == "sent"
+    assert auth_row.outcome == comm_row.outcome == "not_delivered"
     assert auth_row.idempotency_key == comm_row.idempotency_key
     assert comm_row.template_id == "IAM-008"
 

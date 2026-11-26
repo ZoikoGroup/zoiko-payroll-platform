@@ -47,7 +47,8 @@ class CommunicationEvent(Base):
     # — see service.idempotency_key. Nullable only for the migration window;
     # every call site sets it.
     idempotency_key = Column(String(255), unique=True, index=True, nullable=True)
-    # pending (transient, in-flight) / sent / failed / skipped_duplicate.
+    # pending (transient, in-flight) / sent / failed / skipped_duplicate /
+    # not_delivered (mock send: no SMTP host, or outbound blocked in test/local mode).
     outcome = Column(String(24), nullable=False, default="pending")
     # SMTP provider detail on failure (e.g. "SMTPRecipientsRefused: ...").
     provider_response = Column(Text, nullable=True)
