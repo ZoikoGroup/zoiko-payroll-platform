@@ -110,6 +110,17 @@ def test_correction_only_when_the_old_value_still_matches(db, tmp_path):
     assert [e["mismatch"] for e in report["packs"]] == [[], ["regulatory_authority"]]
 
 
+def test_date_correction_compares_dates(db, tmp_path):
+    pack = _pack(db, next_review_date=dt.date(2026, 1, 15))
+    rows = bf.load_rows(_write(tmp_path, [
+        _row("next_review_date", "2027-03-06", mode="correct", expected_old="2026-01-15")]))
+    report = bf.plan_and_apply(db, rows, actor_id=None, apply=True)
+    db.commit()
+    db.refresh(pack)
+    assert pack.next_review_date == dt.date(2027, 3, 6) and report["packs"][0]["changed"] == ["next_review_date"]
+    assert _audits(db, pack)[0].old_value == {"next_review_date": "2026-01-15"}
+
+
 def test_never_touches_other_columns(db, tmp_path):
     pack = _pack(db)
     before = {c.name: getattr(pack, c.key) for c in pack.__table__.c
