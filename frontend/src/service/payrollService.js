@@ -1500,6 +1500,26 @@ export const getApplicableReportTemplate = async (params = {}) => {
   return await api.get("/api/payroll/report-templates/applicable", { params });
 };
 
+// Per payroll country: every Published/Active statutory form Super Admin
+// configured (payroll_report_templates), with reporting years, generator and
+// Active filing-calendar due dates. Drives /payroll/reports' country tabs.
+// -> { defaultCountry, countries: [{ country, forms: [{ reportType, name, templateKey,
+//      description, regulatoryAuthority, documentScope, generator, years: [{ reportingYear,
+//      templateId, version, status, state }], filingCalendar: [{ reportingYear, periodKey,
+//      periodLabel, dueDate, paymentDueDate }] }] }] }
+export const getReportCatalog = async () => {
+  const res = await api.get("/api/payroll/report-templates/catalog");
+  return { defaultCountry: res?.defaultCountry || null, countries: Array.isArray(res?.countries) ? res.countries : [] };
+};
+
+// Australia SuperStream contribution message for one finalized run.
+export const generateAuSuperstream = async ({ reportTemplateId, payrollRunId }) => {
+  return await api.post("/api/payroll/au/reports/superstream", {
+    report_template_id: reportTemplateId,
+    payroll_run_id: payrollRunId,
+  });
+};
+
 export const generateReport = async (payload) => {
   // { reportTemplateId, payrollRunId, reportingPeriod? }
   return await api.post("/api/payroll/generated-reports", payload);

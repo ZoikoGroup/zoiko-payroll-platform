@@ -147,13 +147,16 @@ const filingPanel = read("modules/payroll/Reports/ZAFilingPanel.jsx");
 const reportsPage = read("modules/payroll/Reports/ReportsPage.jsx");
 const payrollService = read("service/payrollService.js");
 
-// Multi-country Reports (7bdbb04): tabs come from a per-country map, so the
+// Multi-country Reports: a country's tabs are its Super Admin catalog forms
+// plus its built-in tools (BUILTIN_TOOLS, keyed by country), shown only for the
+// selected country — and only an active org country can be selected — so the
 // SARS tab exists only under ZA and renders only for organisations paying in ZA.
 check("The SARS filing tab is shown for ZA organisations only", () =>
   reportsPage.includes('import ZAFilingPanel from "./ZAFilingPanel"') &&
-  reportsPage.includes("ZA: [ZA_FILING_TAB]") &&
-  reportsPage.includes('isSouthAfrica = paysIn("ZA")') &&
-  reportsPage.includes('isSouthAfrica && activeTab === "za-filing"'));
+  reportsPage.includes('ZA: [{ id: "za-filing"') &&
+  reportsPage.includes('"za-filing": () => <ZAFilingPanel />') &&
+  reportsPage.includes("orgCountries.includes(countryParam) ? countryParam : primaryCountry") &&
+  reportsPage.includes("const countryTabs = formTabsFor(selectedCountry)"));
 
 check("Every filing call goes to the South Africa tenant routes", () =>
   ["/emp201/", "/reconciliation/", "/certificates/", "/artifacts", "/sars-payments", "/coida-evidence/"]

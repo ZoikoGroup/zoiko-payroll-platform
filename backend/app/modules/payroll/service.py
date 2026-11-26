@@ -12849,6 +12849,114 @@ def list_available_reports_for_org(db: Session, organization_id: int, reporting_
     return [{"reportType": rt, "name": name, "country": country} for (country, rt), name in ordered]
 
 
+# Report types with their own Org Admin generate panel on /payroll/reports.
+# Everything else that the generic payslip-column generator can render uses
+# the generic run-based panel; types it refuses get a pointer to their own
+# workspace instead of a Generate button that would only fail.
+_CATALOG_GENERATORS = {
+    ("IN", "FORM_138"): "in_form_138",
+    ("IN", "FORM_130"): "in_form_130",
+    ("IN", "FORM_123"): "in_form_123",
+    ("AU", "SUPERSTREAM"): "au_superstream",
+}
+
+
+def _catalog_generator(country: str, report_type: str) -> str:
+    if (country, report_type) in _CATALOG_GENERATORS:
+        return _CATALOG_GENERATORS[(country, report_type)]
+    if country == "SG":
+        from app.modules.payroll.engine.jurisdictions.singapore.statutory_summary import (
+            SG_DEDICATED_GENERATOR_REPORT_TYPES,
+        )
+
+        if report_type in SG_DEDICATED_GENERATOR_REPORT_TYPES:
+            return "dedicated"
+    if (country == "HK" and report_type in _HK_DEDICATED_GENERATOR_REPORT_TYPES) or \
+            (country == "MX" and report_type in MX_DEDICATED_GENERATOR_REPORT_TYPES) or \
+            (country == "CH" and report_type == _switzerland_service.CH_LOHNAUSWEIS_REPORT_TYPE) or \
+            (country == "AU" and report_type == "AU_PAYROLL_TAX_RETURN"):
+        return "dedicated"
+    return "generic_run"
+
+
+def list_report_catalog_for_org(db: Session, organization_id: int) -> dict:
+    """Org-facing statutory form catalog for /payroll/reports, per payroll
+    country: every form Super Admin has Published/Active in
+    payroll_report_templates (the same rows Super Admin → Report Templates
+    edits), each with its available reporting years and its Active filing
+    calendar (due dates). A form Super Admin drafts, archives or supersedes
+    without a Published/Active successor drops out on the next load — no
+    frontend list to keep in sync."""
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    default_country, countries = _org_report_countries(db, organization_id)
+    state = getattr(company, "jurisdiction_state", None) or None
+    out = {c: [] for c in countries}
+    if not countries:
+        return {"defaultCountry": default_country, "countries": []}
+
+    templates = (
+        db.query(ReportTemplate)
+        .filter(
+            ReportTemplate.jurisdiction_country.in_(countries),
+            ReportTemplate.status.in_(["Published", "Active"]),
+        )
+        .order_by(ReportTemplate.reporting_year.desc(), ReportTemplate.updated_at.desc())
+        .all()
+    )
+    calendar = (
+        db.query(StatutoryFilingCalendar)
+        .filter(StatutoryFilingCalendar.jurisdiction_country.in_(countries), StatutoryFilingCalendar.status == "Active")
+        .order_by(StatutoryFilingCalendar.due_date.asc())
+        .all()
+    )
+    forms = {}
+    for t in templates:
+        # A state-scoped template belongs to the org only for its default
+        # country's own state; other states' forms are another employer's.
+        if t.jurisdiction_state and not (t.jurisdiction_country == default_country and t.jurisdiction_state == state):
+            continue
+        key = (t.jurisdiction_country, t.report_type)
+        form = forms.get(key)
+        if form is None:
+            form = forms[key] = {
+                "country": t.jurisdiction_country,
+                "reportType": t.report_type,
+                "templateKey": t.template_key,
+                "name": t.name,
+                "description": t.description,
+                "regulatoryAuthority": t.regulatory_authority,
+                "documentScope": t.document_scope or "AGGREGATE",
+                "generator": _catalog_generator(t.jurisdiction_country, t.report_type),
+                "years": [],
+                "filingCalendar": [],
+            }
+            out.setdefault(t.jurisdiction_country, []).append(form)
+        year = next((y for y in form["years"] if y["reportingYear"] == t.reporting_year), None)
+        # Active beats Published for the same year (get_applicable_report_template's rule).
+        if year is None:
+            form["years"].append({"reportingYear": t.reporting_year, "templateId": t.id, "version": t.version,
+                                  "status": t.status, "state": t.jurisdiction_state})
+        elif year["status"] != "Active" and t.status == "Active":
+            year.update(templateId=t.id, version=t.version, status=t.status, state=t.jurisdiction_state)
+    for row in calendar:
+        if row.jurisdiction_state and not (row.jurisdiction_country == default_country and row.jurisdiction_state == state):
+            continue
+        form = forms.get((row.jurisdiction_country, row.report_type))
+        if form is not None:
+            form["filingCalendar"].append({
+                "reportingYear": row.reporting_year, "periodKey": row.period_key, "periodLabel": row.period_label,
+                "dueDate": row.due_date.isoformat() if row.due_date else None,
+                "paymentDueDate": row.payment_due_date.isoformat() if row.payment_due_date else None,
+            })
+    return {
+        "defaultCountry": default_country,
+        "countries": [
+            {"country": c, "forms": sorted(out.get(c, []), key=lambda f: (f["name"] or f["reportType"]))}
+            for c in countries
+        ],
+    }
+
+
 def _org_report_countries(db: Session, organization_id: int) -> Tuple[Optional[str], List[str]]:
     """(default country, every country the org pays employees in — default
     first). Reports, filing calendars and report validation cover all of
@@ -20859,9 +20967,11 @@ def _attach_document_scope(db: Session, rows: List[GeneratedReport]) -> List[Gen
 
 def get_generated_reports(
     db: Session, organization_id: int, payroll_run_id: Optional[int] = None,
-    report_type: Optional[str] = None, status: Optional[str] = None,
+    report_type: Optional[str] = None, status: Optional[str] = None, country: Optional[str] = None,
 ) -> List[GeneratedReport]:
     query = db.query(GeneratedReport).filter(GeneratedReport.organization_id == organization_id)
+    if country:
+        query = query.filter(GeneratedReport.jurisdiction_country == _normalize_country(country))
     if payroll_run_id:
         query = query.filter(GeneratedReport.payroll_run_id == payroll_run_id)
     if report_type:

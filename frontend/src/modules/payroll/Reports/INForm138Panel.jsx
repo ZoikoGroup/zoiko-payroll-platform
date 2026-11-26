@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { getApplicableReportTemplate, generateIndiaForm138 } from "../../../service/payrollService";
 
 // India Form 138 — quarterly salary TDS statement (ZP-TAX-IN-2026-27-001
@@ -31,9 +31,28 @@ function Field({ label, children }) {
   );
 }
 
-export default function INForm138Panel() {
-  const [reportingYear, setReportingYear] = useState(currentIndiaTaxYear());
+function formatDue(iso) {
+  if (!iso) return "";
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+// years / filingCalendar come from the Super Admin report catalog (Reports
+// page); without them the panel keeps its original free-text year and the
+// standard quarter due dates.
+export default function INForm138Panel({ years = [], filingCalendar = [] } = {}) {
+  const [reportingYear, setReportingYear] = useState(() => {
+    const current = currentIndiaTaxYear();
+    return years.length && !years.includes(current) ? years[0] : current;
+  });
   const [periodKey, setPeriodKey] = useState("Q1");
+  // Quarter labels carry the real due date Super Admin published for the
+  // chosen year when there is one.
+  const quarters = useMemo(() => QUARTERS.map((q) => {
+    const row = filingCalendar.find((c) => c.reportingYear === reportingYear && c.periodKey === q.value);
+    return row?.dueDate ? { ...q, label: `${q.label.split(" (")[0]} (due ${formatDue(row.dueDate)})` } : q;
+  }), [filingCalendar, reportingYear]);
+  const due = filingCalendar.find((c) => c.reportingYear === reportingYear && c.periodKey === periodKey);
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
   const [result, setResult] = useState(null);
@@ -43,7 +62,7 @@ export default function INForm138Panel() {
     setMessage("");
     setResult(null);
     try {
-      const { template } = await getApplicableReportTemplate({ reportingYear, reportType: "FORM_138" });
+      const { template } = await getApplicableReportTemplate({ reportingYear, reportType: "FORM_138", country: "IN" });
       if (!template) {
         setStatus("error");
         setMessage(`No Published/Active Form 138 template found for ${reportingYear} — a Super Admin needs to author and activate one first (Compliance > India > Report Templates).`);
@@ -69,14 +88,26 @@ export default function INForm138Panel() {
         </p>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Reporting year (India FY)">
-            <input className={inputClass} value={reportingYear} onChange={(e) => setReportingYear(e.target.value)} placeholder="2026-27" />
+            {years.length > 0 ? (
+              <select className={inputClass} value={reportingYear} onChange={(e) => setReportingYear(e.target.value)}>
+                {[...new Set([...years, reportingYear])].map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            ) : (
+              <input className={inputClass} value={reportingYear} onChange={(e) => setReportingYear(e.target.value)} placeholder="2026-27" />
+            )}
           </Field>
           <Field label="Quarter">
             <select className={inputClass} value={periodKey} onChange={(e) => setPeriodKey(e.target.value)}>
-              {QUARTERS.map((q) => <option key={q.value} value={q.value}>{q.label}</option>)}
+              {quarters.map((q) => <option key={q.value} value={q.value}>{q.label}</option>)}
             </select>
           </Field>
         </div>
+        {due?.dueDate && (
+          <p className="mt-3 text-[12px] text-foreground-secondary" data-testid="form138-due-date">
+            Due date: <span className="font-semibold text-foreground">{formatDue(due.dueDate)}</span>
+            {due.paymentDueDate ? ` · payment due ${formatDue(due.paymentDueDate)}` : ""}
+          </p>
+        )}
         <div className="mt-4 flex justify-end">
           <button
             onClick={handleGenerate} disabled={status === "generating"}
