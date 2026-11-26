@@ -156,6 +156,16 @@ def create_entitlement_override(
     current_user=Depends(get_current_super_admin),
     db: Session = Depends(get_db),
 ):
+    from app.modules.billing import jurisdiction_entitlement
+    from app.modules.billing.feature_keys import MAX_JURISDICTIONS
+
+    if data.feature_key == MAX_JURISDICTIONS:
+        new_limit = None if data.limit_value is None else max(int(data.limit_value), 1)
+        jurisdiction_entitlement.guard_country_downgrade(
+            db, organization_id, new_limit, f"override of {new_limit} countries",
+            source="super_admin_entitlement_override", actor_user_id=current_user.id,
+            override=data.override_country_limit, override_reason=data.override_reason,
+        )
     return entitlements.create_entitlement_override(
         db,
         organization_id=organization_id,
@@ -225,7 +235,21 @@ def convert_trial_to_paid(
     that takes a subscription away from TRIALING. Sets workspace_type=PRODUCTION,
     points the subscription at the paid plan version, opens a fresh 30-day
     period, reactivates the org, and audits TRIAL_CONVERTED. No invoice is
-    created here (separate, explicit step)."""
+    created here (separate, explicit step). A target plan with fewer countries
+    than the org has active is refused (409) unless override_country_limit is
+    set with a reason (audited)."""
+    from app.modules.billing import jurisdiction_entitlement
+    from app.modules.billing.models import BillingPlan
+
+    version = db.query(BillingPlanVersion).filter(BillingPlanVersion.id == data.plan_version_id).first()
+    if version is not None:
+        plan = db.query(BillingPlan).filter(BillingPlan.id == version.plan_id).first()
+        jurisdiction_entitlement.guard_country_downgrade(
+            db, organization_id, jurisdiction_entitlement.limit_for_plan_version(db, version),
+            plan.name if plan else "target", source="super_admin_trial_conversion",
+            actor_user_id=current_user.id,
+            override=data.override_country_limit, override_reason=data.override_reason,
+        )
     return trial_lifecycle.convert_trial_to_paid(
         db,
         organization_id=organization_id,
@@ -421,7 +445,23 @@ def create_enterprise_order_form(
         limits come from this row's negotiated_scale_limits, never a
         BillingPlanVersion)
     Refuses an org that already has a subscription/Order Form under a
-    DIFFERENT commercial route (no overlapping billable ownership)."""
+    DIFFERENT commercial route (no overlapping billable ownership). Negotiated
+    max_jurisdictions below the org's active countries is refused (409) unless
+    override_country_limit is set with a reason (audited)."""
+    from app.modules.billing import jurisdiction_entitlement
+    from app.modules.billing.feature_keys import MAX_JURISDICTIONS
+
+    limits = data.negotiated_scale_limits or {}
+    if MAX_JURISDICTIONS in limits:
+        raw = limits[MAX_JURISDICTIONS]
+        new_limit = None if raw is None else max(int(raw), 1)
+    else:
+        new_limit = 1  # not negotiated = not granted; the primary country still counts
+    jurisdiction_entitlement.guard_country_downgrade(
+        db, organization_id, new_limit, "Enterprise order form", source="super_admin_order_form",
+        actor_user_id=current_user.id,
+        override=data.override_country_limit, override_reason=data.override_reason,
+    )
     return record_order_form(
         db,
         organization_id=organization_id,

@@ -328,9 +328,9 @@ def test_enterprise_payroll_setup_is_gone(client):
 
 # ── Professional 3 / Business 10 / Enterprise negotiated ────────────────────
 
-# add_entitled_country's limit check is billing.entitlements.require_scope_limit,
-# imported lazily — after this file's sys.modules swap that is a different
-# ForbiddenException class object, so these two match on the message instead.
+# add_entitled_country's limit check raises ForbiddenException from
+# jurisdiction_entitlement — after this file's sys.modules swap that can be a
+# different class object, so these two match on the message instead.
 def _swap_out(org, removed_code, added_code):
     """Free `removed_code`'s slot (REMOVED) and fill it with `added_code`
     directly, so the next add of `removed_code` is the (limit+1)th. Germany
@@ -350,9 +350,10 @@ def test_professional_three_countries_allowed_fourth_rejected():
     for code in ("IN", "US", "DE"):
         je.assert_country_allowed(_db, _pro.id, code)
     _swap_out(_pro, "DE", "UK")
-    with pytest.raises(Exception, match="exceed your plan's limit") as exc:
+    with pytest.raises(Exception, match="includes 3 countries and all are in use") as exc:
         je.add_entitled_country(_db, _Actor(_pro), "DE")  # 4th
-    assert exc.value.trace["limit_value"] == 3 and exc.value.trace["requested_qty"] == 4
+    assert (exc.value.trace["limit_value"], exc.value.trace["used"]) == (3, 3)
+    assert exc.value.trace["reason"] == je.COUNTRY_LIMIT_REACHED and exc.value.trace["upgrade_path"]
     with pytest.raises(ForbiddenException):
         je.assert_country_allowed(_db, _pro.id, "DE")
 
@@ -362,9 +363,9 @@ def test_business_ten_countries_allowed_eleventh_rejected():
     summary = je.add_entitled_country(_db, _Actor(_business), "DE")  # 10th
     assert summary["used"] == 10 and summary["limit"] == 10 and summary["canAdd"] is False
     _swap_out(_business, "DE", "IT")
-    with pytest.raises(Exception, match="exceed your plan's limit") as exc:
+    with pytest.raises(Exception, match="includes 10 countries and all are in use") as exc:
         je.add_entitled_country(_db, _Actor(_business), "DE")  # 11th
-    assert exc.value.trace["limit_value"] == 10 and exc.value.trace["requested_qty"] == 11
+    assert (exc.value.trace["limit_value"], exc.value.trace["used"]) == (10, 10)
 
 
 def test_enterprise_limit_read_from_negotiated_scale_limits():
@@ -493,46 +494,140 @@ def _run(org):
     return run
 
 
-def test_downgrade_marks_over_limit_keeps_data_skips_in_runs_and_upgrade_restores():
+def _conflict_status(exc):
+    return getattr(exc, "status_code", None)
+
+
+def test_org_admin_downgrade_with_too_many_countries_is_refused(monkeypatch):
+    """Professional (3 countries in use) -> Core (1) from the plan picker:
+    409 before any Stripe call, nothing changes; after removing two
+    countries the same downgrade passes the country check."""
+    from app.modules.billing import router as billing_router
+    from app.modules.billing.schemas import BillingCheckoutRequest
+
     org = _pro_downgrade
     _set_rows(org, ["IN", "US", "UK"])
-    us_emp = _employee(org, "DG-US", "US")
+    monkeypatch.setattr(billing_router, "_require_checkout_config", lambda: None)
     sub = _db.query(BillingSubscription).filter(BillingSubscription.organization_id == org.id).first()
 
-    sub.plan_version_id = _core_version.id
-    _db.commit()
-    je.reconcile_jurisdiction_limit(_db, org.id)
-    _db.commit()
-    assert _ledger(org) == {"IN": "ACTIVE", "US": "OVER_LIMIT", "UK": "OVER_LIMIT"}
-    assert _db.query(PayrollEmployee).filter(PayrollEmployee.id == us_emp.id).first() is not None  # nothing deleted
-    with pytest.raises(ForbiddenException) as exc:
-        je.assert_country_allowed(_db, org.id, "US")
-    assert "paused" in exc.value.message
+    with pytest.raises(Exception) as exc:
+        billing_router.create_checkout_session(BillingCheckoutRequest(plan_code="CORE"), db=_db,
+                                               current_user=_Actor(org))
+    assert _conflict_status(exc.value) == 409
+    assert exc.value.message.endswith(
+        "Your organization has 3 countries; the Core plan allows 1. "
+        "Remove 2 countries under Compliance > Countries to downgrade.")
+    assert exc.value.trace["reason"] == je.DOWNGRADE_BLOCKED and exc.value.trace["remove_count"] == 2
+    _db.expire_all()
+    assert sub.plan_version_id == _professional_version.id
+    assert _ledger(org) == {"IN": "ACTIVE", "US": "ACTIVE", "UK": "ACTIVE"}
 
-    # Run generation: the US employee gets a FAILED item, nothing is calculated.
+    impact = je.plan_change_impact(_db, org.id, "CORE")
+    assert (impact["blocked"], impact["removeCount"]) == (True, 2)
+
+    je.remove_entitled_country(_db, _Actor(org), "UK")
+    je.remove_entitled_country(_db, _Actor(org), "US")
+    assert je.plan_change_impact(_db, org.id, "CORE")["blocked"] is False
+    je.guard_country_downgrade(_db, org.id, 1, "Core", source="org_admin_plan_change")  # no raise
+
+
+def test_stripe_initiated_downgrade_keeps_countries_blocks_adding_and_flags_review():
+    """A change Stripe makes (billing portal, payment lapse) cannot be
+    refused: every country keeps running, adding is blocked and the org is
+    flagged for Super Admin review — once per situation."""
+    org = _org("CESTRIPEDOWN", _professional_version, country="India")
+    _set_rows(org, ["IN", "US", "UK"])
+    us_emp = _employee(org, "SD-US", "US")
+    sub = _db.query(BillingSubscription).filter(BillingSubscription.organization_id == org.id).first()
+    sub.plan_version_id = _core_version.id  # what the customer.subscription.updated webhook applies
+    _db.commit()
+    je.safe_reconcile(_db, org.id, reason="subscription_updated")
+    je.safe_reconcile(_db, org.id, reason="subscription_updated")  # duplicate delivery
+    _db.commit()
+
+    assert _ledger(org) == {"IN": "ACTIVE", "US": "ACTIVE", "UK": "ACTIVE"}
+    je.assert_country_allowed(_db, org.id, "US")  # enforce mode: still writable
     from app.modules.payroll.service import generate_payslips_for_run
 
     run = _run(org)
     generate_payslips_for_run(_db, run, organization_id=org.id)
-    items = _db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id).all()
-    assert len(items) == 1
-    assert items[0].employee_id == us_emp.id and items[0].status == PayslipStatus.FAILED
-    assert items[0].notes.startswith("[COUNTRY_NOT_ENTITLED]")
+    (item,) = _db.query(PayslipItem).filter(PayslipItem.payroll_run_id == run.id).all()
+    assert item.employee_id == us_emp.id and not (item.notes or "").startswith("[COUNTRY_NOT_ENTITLED]")
 
-    events = _db.query(BillingCommercialAuditEvent).filter(
+    flags = _db.query(BillingCommercialAuditEvent).filter(
         BillingCommercialAuditEvent.organization_id == org.id,
-        BillingCommercialAuditEvent.event_type == "JURISDICTION_LIMIT_RECONCILED").all()
-    assert events and events[-1].payload["over_limit"] == ["US", "UK"]
+        BillingCommercialAuditEvent.event_type == "COUNTRY_LIMIT_REVIEW_REQUIRED").all()
+    assert len(flags) == 1 and flags[0].payload["reason"] == "subscription_updated"
+    assert (flags[0].payload["used"], flags[0].payload["limit_value"]) == (3, 1)
+    flagged = {r["organization_id"]: r for r in je.find_country_limit_exceptions(_db)}
+    assert flagged[org.id]["review_reason"]["reason"] == "subscription_updated"
 
-    sub.plan_version_id = _professional_version.id
+    with pytest.raises(Exception, match="already has 3") as exc:
+        je.add_entitled_country(_db, _Actor(org), "DE")
+    assert exc.value.trace["reason"] == je.COUNTRY_LIMIT_REACHED
+
+
+def test_super_admin_downgrades_are_refused_unless_overridden_with_an_audited_reason():
+    from app.modules.billing import admin_router
+    from app.modules.billing.feature_keys import MAX_JURISDICTIONS as MJ
+    from app.modules.billing.schemas import (
+        BillingEntitlementOverrideCreateRequest, ConvertTrialRequest, EnterpriseOrderFormCreate,
+    )
+
+    org = _org("CESADOWN", _professional_version, country="India")
+    sub = _db.query(BillingSubscription).filter(BillingSubscription.organization_id == org.id).first()
+    sub.status = SubscriptionStatus.TRIALING.value
     _db.commit()
-    je.reconcile_jurisdiction_limit(_db, org.id)
-    _db.commit()
-    assert _ledger(org) == {"IN": "ACTIVE", "US": "ACTIVE", "UK": "ACTIVE"}
-    je.assert_country_allowed(_db, org.id, "US")
+    _set_rows(org, ["IN", "US"])
+
+    # Trial conversion to Core (1 country) with 2 in use.
+    with pytest.raises(Exception) as exc:
+        admin_router.convert_trial_to_paid(org.id, ConvertTrialRequest(plan_version_id=_core_version.id),
+                                           current_user=_super, db=_db)
+    assert _conflict_status(exc.value) == 409 and "the Core plan allows 1" in exc.value.message
+    with pytest.raises(Exception, match="A reason is required"):
+        admin_router.convert_trial_to_paid(
+            org.id, ConvertTrialRequest(plan_version_id=_core_version.id, override_country_limit=True),
+            current_user=_super, db=_db)
+    _db.rollback()
+
+    # A max_jurisdictions override below the countries in use, and an order
+    # form without enough negotiated countries, are refused the same way.
+    with pytest.raises(Exception) as exc:
+        admin_router.create_entitlement_override(org.id, BillingEntitlementOverrideCreateRequest(
+            feature_key=MJ, limit_value=1, reason="r", expires_at=datetime.utcnow() + timedelta(days=1),
+        ), current_user=_super, db=_db)
+    assert _conflict_status(exc.value) == 409
+    with pytest.raises(Exception) as exc:
+        admin_router.create_enterprise_order_form(org.id, EnterpriseOrderFormCreate(
+            contract_reference="ENT-DOWN", negotiated_scale_limits={MJ: 1}, negotiated_price_terms={},
+            term_start=datetime.utcnow().date(),
+        ), current_user=_super, db=_db)
+    assert _conflict_status(exc.value) == 409
+    _db.rollback()
+
+    # Overridden with a reason: goes ahead, audited, org flagged for review.
+    admin_router.convert_trial_to_paid(org.id, ConvertTrialRequest(
+        plan_version_id=_core_version.id, override_country_limit=True,
+        override_reason="Contracted Core price, two countries until 2027 renewal"), current_user=_super, db=_db)
+    _db.expire_all()
+    assert sub.status == SubscriptionStatus.ACTIVE.value and sub.plan_version_id == _core_version.id
+    assert _ledger(org) == {"IN": "ACTIVE", "US": "ACTIVE"}
+    (override,) = _db.query(BillingCommercialAuditEvent).filter(
+        BillingCommercialAuditEvent.organization_id == org.id,
+        BillingCommercialAuditEvent.event_type == "COUNTRY_LIMIT_DOWNGRADE_OVERRIDE").all()
+    assert override.actor_user_id == _super.id
+    assert override.payload["reason"].startswith("Contracted Core price")
+    assert (override.payload["source"], override.payload["used"], override.payload["new_limit"]) == (
+        "super_admin_trial_conversion", 2, 1)
+    assert _db.query(BillingCommercialAuditEvent).filter(
+        BillingCommercialAuditEvent.organization_id == org.id,
+        BillingCommercialAuditEvent.event_type == "COUNTRY_LIMIT_REVIEW_REQUIRED").all()
 
 
 def test_trial_conversion_to_core_reconciles():
+    """The service-level conversion (no endpoint guard) never pauses: both
+    countries keep running and the org is flagged for review."""
     from app.modules.billing.trial_lifecycle import convert_trial_to_paid
 
     org = _org("CETRIAL", _professional_version, country="India")
@@ -541,7 +636,11 @@ def test_trial_conversion_to_core_reconciles():
     _db.commit()
     _set_rows(org, ["IN", "US"])
     convert_trial_to_paid(_db, org.id, _core_version.id, actor_user_id=_super.id)
-    assert _ledger(org) == {"IN": "ACTIVE", "US": "OVER_LIMIT"}
+    assert _ledger(org) == {"IN": "ACTIVE", "US": "ACTIVE"}
+    assert je.entitlement_summary(_db, org.id)["overLimitBy"] == 1
+    assert _db.query(BillingCommercialAuditEvent).filter(
+        BillingCommercialAuditEvent.organization_id == org.id,
+        BillingCommercialAuditEvent.event_type == "COUNTRY_LIMIT_REVIEW_REQUIRED").all()
 
 
 # ── Registration ─────────────────────────────────────────────────────────────
@@ -583,8 +682,11 @@ def test_backfill_is_idempotent_and_flags_over_limit():
 
     first = run(_db)
     after_first = _ledger(_backfill)
-    assert after_first == {"IN": "ACTIVE", "US": "OVER_LIMIT", "DE": "OVER_LIMIT"}
-    assert any(o["id"] == _backfill.id for o in first["orgs_over_limit"])
+    # Every country in use is kept ACTIVE (grandfathered); the org is reported
+    # as over its 1-country limit by the countries beyond it.
+    assert after_first == {"IN": "ACTIVE", "US": "ACTIVE", "DE": "ACTIVE"}
+    flagged = [o for o in first["orgs_over_limit"] if o["id"] == _backfill.id]
+    assert flagged and sorted(flagged[0]["over_limit"]) == ["DE", "US"]
     primary = _db.query(OrganizationJurisdiction).filter(
         OrganizationJurisdiction.organization_id == _backfill.id,
         OrganizationJurisdiction.is_primary.is_(True)).one()
@@ -628,31 +730,41 @@ def test_super_admin_exceptions_and_subscription_columns(client):
     r = client.get("/api/super-admin/billing/subscriptions", headers=headers, params={"country_limit": "OVER"})
     assert r.status_code == 200, r.text
     rows = r.json()["subscriptions"]
-    assert any(row["organization_id"] == _backfill.id and row["countries_over_limit"] == 2 for row in rows)
+    assert any(row["organization_id"] == _backfill.id and row["countries_over_limit"] == 2
+               and row["countries_used"] == 3 for row in rows)
 
 
 # ── Billing: overrides and self-heal ────────────────────────────────────────
 
-def test_entitlement_override_restores_paused_countries_and_expiry_self_heals():
+def test_legacy_paused_country_keeps_its_state_and_is_reported():
+    """A row the earlier rule paused (OVER_LIMIT) is NOT reactivated
+    automatically — not by a ledger read, a reconcile or a raised limit —
+    and the read-only report lists it with when and why it was paused.
+    Re-adding the country reactivates it like any add."""
     from app.modules.billing.entitlements import create_entitlement_override
-    from app.modules.billing.models import BillingEntitlementOverride
+    from scripts.report_paused_countries import collect
 
     org = _org("CEOVERRIDE", _core_version, country="India")
     _set_rows(org, ["IN"])
     _db.add(OrganizationJurisdiction(organization_id=org.id, country_code="US", status="OVER_LIMIT"))
-    _db.commit()
-
-    create_entitlement_override(_db, org.id, MAX_JURISDICTIONS, 2, _super.id, "temporary US payroll",
-                                datetime.utcnow() + timedelta(days=30))
-    assert _ledger(org) == {"IN": "ACTIVE", "US": "ACTIVE"}
-
-    # Expiry raises no event: the next ledger read pauses the extra country.
-    _db.query(BillingEntitlementOverride).filter(BillingEntitlementOverride.organization_id == org.id).update(
-        {"expires_at": datetime.utcnow() - timedelta(minutes=1)})
+    _db.add(BillingCommercialAuditEvent(organization_id=org.id, event_type="JURISDICTION_LIMIT_RECONCILED",
+                                        payload={"reason": "plan_changed", "limit_value": 1,
+                                                 "restored": [], "over_limit": ["US"]}))
     _db.commit()
     je.ensure_ledger(_db, org.id)
+    je.reconcile_jurisdiction_limit(_db, org.id)
+    create_entitlement_override(_db, org.id, MAX_JURISDICTIONS, 2, _super.id, "temporary US payroll",
+                                datetime.utcnow() + timedelta(days=30))
     _db.commit()
     assert _ledger(org) == {"IN": "ACTIVE", "US": "OVER_LIMIT"}
+
+    (row,) = [r for r in collect(_db) if r["organization_id"] == org.id]
+    assert (row["country_code"], row["pause_reason"], row["limit_at_pause"]) == ("US", "plan_changed", 1)
+    assert row["paused_by_event"] == "JURISDICTION_LIMIT_RECONCILED" and row["paused_at"]
+    assert (row["current_limit"], row["active_countries"]) == (2, "IN")
+
+    je.add_entitled_country(_db, _Actor(org), "US")  # manual review decision
+    assert _ledger(org) == {"IN": "ACTIVE", "US": "ACTIVE"}
 
 
 def test_any_payroll_country_can_be_added_setup_pending_is_noted():
@@ -674,3 +786,57 @@ def test_any_payroll_country_can_be_added_setup_pending_is_noted():
 
     with pytest.raises(Exception, match="not a country Zoiko runs payroll for"):
         je.add_entitled_country(_db, _Actor(org), "NZ")
+
+
+# ── Country limit is enforced on add in every billing enforcement mode ──────
+
+@pytest.mark.parametrize("mode", ["off", "warn", "enforce"])
+def test_adding_up_to_the_limit_works_and_one_more_is_refused_in_every_mode(monkeypatch, mode):
+    """The country limit no longer depends on BILLING_ENFORCEMENT_MODE (it
+    used to be warn-only in production)."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "BILLING_ENFORCEMENT_MODE", mode)
+    org = _org(f"CELIMIT{mode.upper()}", _professional_version, country="India")
+    _set_rows(org, ["IN", "US"])
+    summary = je.add_entitled_country(_db, _Actor(org), "DE")  # 3rd of 3: allowed
+    assert (summary["used"], summary["limit"], summary["canAdd"], summary["remaining"]) == (3, 3, False, 0)
+    assert summary["countryLimitEnforced"] is True and summary["upgradePath"] == "/billing/plans"
+
+    with pytest.raises(Exception, match="all are in use") as exc:
+        je.add_entitled_country(_db, _Actor(org), "UK")  # 4th: refused
+    assert exc.value.trace["reason"] == je.COUNTRY_LIMIT_REACHED
+    assert _ledger(org) == {"IN": "ACTIVE", "US": "ACTIVE", "DE": "ACTIVE"}  # nothing added
+    refused = _db.query(BillingCommercialAuditEvent).filter(
+        BillingCommercialAuditEvent.organization_id == org.id,
+        BillingCommercialAuditEvent.event_type == "JURISDICTION_ADD_REFUSED").all()
+    assert refused and refused[-1].payload["country_code"] == "UK"
+
+
+def test_api_refuses_a_country_over_the_limit_with_an_upgrade_trace(client, monkeypatch):
+    """POST /payroll/jurisdictions/entitled at the limit -> 403, even with the
+    billing enforcement mode at its production default ("warn")."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "BILLING_ENFORCEMENT_MODE", "warn")
+    headers = _headers(client, _core_api)
+    r = client.post("/api/payroll/jurisdictions/entitled", headers=headers, json={"countryCode": "DE"})
+    assert r.status_code == 403, r.text
+    body = r.text
+    assert "includes 1 country and all are in use" in body
+    assert "country_limit_reached" in body and "/billing/plans" in body
+    listed = client.get("/api/payroll/jurisdictions/entitled", headers=headers).json()
+    assert [c["code"] for c in listed["countries"]] == ["IN"] and listed["canAdd"] is False
+
+
+def test_plan_change_impact_reports_a_blocked_downgrade():
+    org = _org("CEIMPACT", _professional_version, country="India")
+    _set_rows(org, ["IN", "US", "UK"])
+    impact = je.plan_change_impact(_db, org.id, "CORE")
+    assert impact["pause"] == [] and impact["restore"] == []
+    assert (impact["blocked"], impact["removeCount"], impact["newLimit"]) == (True, 2, 1)
+    assert impact["message"] == ("Your organization has 3 countries; the Core plan allows 1. "
+                                 "Remove 2 countries under Compliance > Countries to downgrade.")
+    assert je.plan_change_impact(_db, org.id, "PROFESSIONAL")["blocked"] is False
+
+

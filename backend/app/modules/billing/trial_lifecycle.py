@@ -221,7 +221,9 @@ def convert_trial_to_paid(
         },
     )
     # Converting off the Professional trial onto e.g. Core lowers
-    # max_jurisdictions: countries beyond the new limit become OVER_LIMIT.
+    # max_jurisdictions. The Super Admin endpoint refuses that when the org has
+    # more countries than the new plan allows (unless overridden, audited);
+    # reconcile flags an overridden org for review — nothing is paused.
     from app.modules.billing.jurisdiction_entitlement import safe_reconcile
 
     db.flush()

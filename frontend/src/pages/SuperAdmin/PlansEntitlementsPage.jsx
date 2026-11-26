@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Layers, RefreshCcw, Plus, Check } from "lucide-react";
 import StatusPill from "../../components/StatusPill";
+import CountryLimitOverrideDialog from "../../components/superAdmin/CountryLimitOverrideDialog";
+import { isDowngradeBlockedError } from "../../utils/planLimits";
 import { useToast } from "../../context/ToastContext";
 import {
   listPublishedPlans,
@@ -70,6 +72,9 @@ export default function PlansEntitlementsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // { error, retry(reason) } while a refused country-limit downgrade awaits a decision.
+  const [countryLimitBlock, setCountryLimitBlock] = useState(null);
+
   async function withBusy(fn) {
     setBusy(true);
     try {
@@ -133,21 +138,49 @@ export default function PlansEntitlementsPage() {
 
   function handleCreateOverride(e) {
     e.preventDefault();
-    withBusy(async () => {
-      await createEntitlementOverride(overrideOrgId, {
-        feature_key: newOverride.featureKey,
-        limit_value: newOverride.limitValue === "" ? null : Number(newOverride.limitValue),
-        reason: newOverride.reason,
-        expires_at: new Date(newOverride.expiresAt).toISOString(),
-      });
+    const payload = {
+      feature_key: newOverride.featureKey,
+      limit_value: newOverride.limitValue === "" ? null : Number(newOverride.limitValue),
+      reason: newOverride.reason,
+      expires_at: new Date(newOverride.expiresAt).toISOString(),
+    };
+    const created = () => {
       addToast?.("Entitlement override created.", "success");
       setNewOverride({ featureKey: "", limitValue: "", reason: "", expiresAt: "" });
       loadOverrides();
+    };
+    withBusy(async () => {
+      try {
+        await createEntitlementOverride(overrideOrgId, payload);
+      } catch (err) {
+        // A max_jurisdictions limit below the org's active countries: offer
+        // the audited Super Admin override instead of a bare error.
+        if (!isDowngradeBlockedError(err)) throw err;
+        setCountryLimitBlock({
+          error: err,
+          retry: async (reason) => {
+            await createEntitlementOverride(overrideOrgId, {
+              ...payload, override_country_limit: true, override_reason: reason,
+            });
+            setCountryLimitBlock(null);
+            created();
+          },
+        });
+        return;
+      }
+      created();
     });
   }
 
   return (
     <div>
+      {countryLimitBlock && (
+        <CountryLimitOverrideDialog
+          error={countryLimitBlock.error}
+          onOverride={countryLimitBlock.retry}
+          onClose={() => setCountryLimitBlock(null)}
+        />
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">

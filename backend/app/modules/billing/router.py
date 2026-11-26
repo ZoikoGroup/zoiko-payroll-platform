@@ -187,10 +187,12 @@ def get_plan_change_impact(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """{planCode, newLimit, currentLimit, countries, keep, pause, restore}:
-    countries that would stay active, be paused (OVER_LIMIT — existing
-    employees stay readable, new employees and payroll there stop) or be
-    restored on that plan. Read-only apart from seeding the org's ledger."""
+    """{planCode, newLimit, currentLimit, countries, keep, pause, restore,
+    overLimitBy, blocked, removeCount, message}. blocked=true: the org has
+    more active countries than that plan allows, so POST /billing/checkout
+    refuses the change (409) until removeCount countries are removed; message
+    says so. Nothing is ever paused (pause/restore are always empty).
+    Read-only apart from seeding the org's ledger."""
     plan = db.query(BillingPlan).filter(BillingPlan.code == plan_code.upper()).first()
     if plan is None:
         raise NotFoundException("Billing Plan", plan_code)
@@ -488,20 +490,15 @@ def create_checkout_session(
     if version is None:
         raise NotFoundException("Published Plan Version for code", body.plan_code)
 
-    # Country entitlement: a plan with fewer countries than the org uses
-    # pauses the extra ones (OVER_LIMIT) once the subscription changes —
-    # never silently. Checked before any Stripe call.
+    # Country limit: a plan with fewer countries than the org has ACTIVE is
+    # refused (409) — the org removes countries first. Org Admins cannot
+    # override it. Checked before any Stripe call, for an in-place plan
+    # change and a new checkout alike.
     impact = jurisdiction_entitlement.plan_change_impact(db, organization_id, plan.code)
-    if impact["pause"] and not body.acknowledge_country_pause:
-        names = ", ".join(jurisdiction_entitlement.country_name(c) for c in impact["pause"])
-        raise jurisdiction_entitlement.ConflictException(
-            f"The {plan.name} plan includes {impact['newLimit']} "
-            f"{'country' if impact['newLimit'] == 1 else 'countries'}, but your organization uses "
-            f"{len(impact['countries'])}. Switching would pause payroll and new employees in: {names}. "
-            f"Existing employees and payroll history stay readable. Confirm to continue, or remove those "
-            f"countries under Compliance > Countries first.",
-            trace={"resource": "max_jurisdictions", "reason": "plan_change_pauses_countries", **impact},
-        )
+    jurisdiction_entitlement.guard_country_downgrade(
+        db, organization_id, impact["newLimit"], plan.name, source="org_admin_plan_change",
+        actor_user_id=current_user.id,
+    )
 
     # Ensure Stripe price exists (creates on-the-fly if missing)
     stripe_price_id = _ensure_stripe_price(db, version, plan)
@@ -875,7 +872,7 @@ def _change_subscription_plan(db: Session, org, sub: BillingSubscription, plan: 
         event_type="SELF_SERVICE_PLAN_CHANGED",
         payload={"from_plan_version_id": old_version_id, "to_plan_version_id": version.id,
                  "stripe_subscription_id": sub.stripe_subscription_id,
-                 "countries_paused": impact.get("pause") or [], "countries_restored": impact.get("restore") or []},
+                 "countries": impact.get("countries") or [], "country_limit": impact.get("newLimit")},
     ))
     jurisdiction_entitlement.safe_reconcile(db, org.id, actor_user_id=actor_user_id, reason="plan_changed")
     db.commit()
