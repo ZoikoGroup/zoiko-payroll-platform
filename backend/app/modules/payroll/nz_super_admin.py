@@ -64,7 +64,7 @@ def _vocabulary() -> dict:
         return f"unknown pay frequency: {', '.join(bad)}" if bad or not items else None
 
     def precedence(v):
-        order = [p.strip() for p in v.split(",") if p.strip()]
+        order = prec.expand([p.strip() for p in v.split(",") if p.strip()])
         if sorted(order) != sorted(prec.STATUTORY):
             return f"must name each of {', '.join(prec.STATUTORY)} exactly once"
         if any(order.index("CHILD_SUPPORT") < order.index(t) for t in prec.TAX_LIKE):

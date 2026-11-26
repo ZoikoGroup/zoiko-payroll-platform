@@ -281,7 +281,10 @@ NZ_SCALAR_CONTENT = (
     # OTHER" in the engine vocabulary: the ACC earner levy is part of PAYE
     # (IRD), KIWISAVER = KS_EMPLOYEE, OTHER (voluntary) always comes last.
     ("nz_deduction_precedence", "Statutory deduction precedence (NZ-011)",
-     None, None, None, "PAYE,ACC_LEVY,STUDENT_LOAN,KS_EMPLOYEE,CHILD_SUPPORT", "S3", True, None, None),
+     # STATUTORY_ORDER = PAYE,ACC_LEVY,STUDENT_LOAN,KS_EMPLOYEE,CHILD_SUPPORT
+     # (deduction_precedence.NAMED_ORDERS): the explicit list does not fit
+     # text_value String(50).
+     None, None, None, "STATUTORY_ORDER", "S3", True, None, None),
 
     # Spec §3: official IRD rounding — not stated by the specification; owner-
     # approved policy (inventory B, P).

@@ -1,0 +1,653 @@
+pack_id,version,country,state,field,mode,expected_old,value,basis
+AE-PAYROLL-2026,1.0,AE,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+AU-ACT-2026-27,1.0,AU,ACT,next_review_date,fill,,2027-05-31,"rule: 30 days before effective_to, never before 2026-12-01"
+AU-NSW-2026-27,1.0,AU,NSW,next_review_date,fill,,2027-05-31,"rule: 30 days before effective_to, never before 2026-12-01"
+AU-NT-2026-27,1.0,AU,NT,next_review_date,fill,,2027-05-31,"rule: 30 days before effective_to, never before 2026-12-01"
+AU-QLD-2026-27,1.0,AU,QLD,next_review_date,fill,,2027-05-31,"rule: 30 days before effective_to, never before 2026-12-01"
+AU-SA-2026-27,1.0,AU,SA,next_review_date,fill,,2027-05-31,"rule: 30 days before effective_to, never before 2026-12-01"
+AU-TAS-2026-27,1.0,AU,TAS,next_review_date,fill,,2027-05-31,"rule: 30 days before effective_to, never before 2026-12-01"
+AU-VIC-2026-27,1.0,AU,VIC,next_review_date,fill,,2027-05-31,"rule: 30 days before effective_to, never before 2026-12-01"
+AU-WA-2026-27,1.0,AU,WA,next_review_date,fill,,2027-05-31,"rule: 30 days before effective_to, never before 2026-12-01"
+AU-2026-27-FED,1.0,AU,,next_review_date,fill,,2027-05-31,"rule: 30 days before effective_to, never before 2026-12-01"
+BB-PAYROLL-2026-V1,1.0,BB,,regulatory_authority,fill,,Barbados Revenue Authority / National Insurance and Social Security Service,proposed
+BB-PAYROLL-2026-V1,1.0,BB,,compliance_category,fill,,Income Tax (PAYE) / National Insurance,proposed
+BB-PAYROLL-2026-V1,1.0,BB,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+BB-PAYROLL-2026-V1,1.0,BB,,change_summary,fill,,Initial Barbados 2026 pack per ZP-BB-ENG-001 v1.0,proposed
+BB-PAYROLL-2026-V1,1.0,BB,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+BE-PAYROLL-2026,1.0,BE,,regulatory_authority,fill,,SPF Finances (FPS Finance) / ONSS-RSZ,proposed
+BE-PAYROLL-2026,1.0,BE,,compliance_owner,fill,,Zoiko Groups,default (your choice)
+BE-PAYROLL-2026,1.0,BE,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+BE-PAYROLL-2026,1.0,BE,,source_references,fill,,ZP-BE-ENG-001 v1.0,repo doc
+BE-PAYROLL-2026,1.0,BE,,change_summary,fill,,Initial Belgium 2026 pack per ZP-BE-ENG-001 v1.0,proposed
+BE-PAYROLL-2026,1.0,BE,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+BR-PAYROLL-2026,1.0,BR,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+BR-PAYROLL-2026,1.0,BR,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+BS-PAYROLL-2026-V1,1.0,BS,,regulatory_authority,fill,,National Insurance Board of The Bahamas / Department of Inland Revenue,proposed
+BS-PAYROLL-2026-V1,1.0,BS,,compliance_category,fill,,National Insurance (no personal income tax),proposed
+BS-PAYROLL-2026-V1,1.0,BS,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+BS-PAYROLL-2026-V1,1.0,BS,,change_summary,fill,,Initial The Bahamas 2026 pack per ZP-BS-ENG-001 v1.0,proposed
+BS-PAYROLL-2026-V1,1.0,BS,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-AB-2026-V1,1.0,CA,AB,compliance_category,fill,,Provincial Income Tax,proposed
+CA-AB-2026-V1,1.0,CA,AB,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-AB-2026-V1,1.0,CA,AB,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-AB-2026-V1,1.0,CA,AB,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-AB-2026-V1,1.0,CA,AB,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-BC-2026-H1,1.0,CA,BC,compliance_category,fill,,Provincial Income Tax,proposed
+CA-BC-2026-H1,1.0,CA,BC,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-BC-2026-H1,1.0,CA,BC,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-BC-2026-H1,1.0,CA,BC,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-BC-2026-H1,1.0,CA,BC,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-BC-2026-H2,1.0,CA,BC,compliance_category,fill,,Provincial Income Tax,proposed
+CA-BC-2026-H2,1.0,CA,BC,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-BC-2026-H2,1.0,CA,BC,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-BC-2026-H2,1.0,CA,BC,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-BC-2026-H2,1.0,CA,BC,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-MB-2026-V1,1.0,CA,MB,compliance_category,fill,,Provincial Income Tax,proposed
+CA-MB-2026-V1,1.0,CA,MB,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-MB-2026-V1,1.0,CA,MB,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-MB-2026-V1,1.0,CA,MB,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-MB-2026-V1,1.0,CA,MB,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-NB-2026-V1,1.0,CA,NB,compliance_category,fill,,Provincial Income Tax,proposed
+CA-NB-2026-V1,1.0,CA,NB,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-NB-2026-V1,1.0,CA,NB,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-NB-2026-V1,1.0,CA,NB,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-NB-2026-V1,1.0,CA,NB,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-NL-2026-H1,1.0,CA,NL,compliance_category,fill,,Provincial Income Tax,proposed
+CA-NL-2026-H1,1.0,CA,NL,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-NL-2026-H1,1.0,CA,NL,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-NL-2026-H1,1.0,CA,NL,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-NL-2026-H1,1.0,CA,NL,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-NL-2026-H2,1.0,CA,NL,compliance_category,fill,,Provincial Income Tax,proposed
+CA-NL-2026-H2,1.0,CA,NL,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-NL-2026-H2,1.0,CA,NL,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-NL-2026-H2,1.0,CA,NL,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-NL-2026-H2,1.0,CA,NL,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-NS-2026-V1,1.0,CA,NS,compliance_category,fill,,Provincial Income Tax,proposed
+CA-NS-2026-V1,1.0,CA,NS,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-NS-2026-V1,1.0,CA,NS,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-NS-2026-V1,1.0,CA,NS,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-NS-2026-V1,1.0,CA,NS,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-NT-2026-V1,1.0,CA,NT,compliance_category,fill,,Provincial Income Tax,proposed
+CA-NT-2026-V1,1.0,CA,NT,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-NT-2026-V1,1.0,CA,NT,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-NT-2026-V1,1.0,CA,NT,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-NT-2026-V1,1.0,CA,NT,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-NU-2026-V1,1.0,CA,NU,compliance_category,fill,,Provincial Income Tax,proposed
+CA-NU-2026-V1,1.0,CA,NU,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-NU-2026-V1,1.0,CA,NU,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-NU-2026-V1,1.0,CA,NU,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-NU-2026-V1,1.0,CA,NU,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-ON-2026-V1,1.0,CA,ON,compliance_category,fill,,Provincial Income Tax,proposed
+CA-ON-2026-V1,1.0,CA,ON,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-ON-2026-V1,1.0,CA,ON,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-ON-2026-V1,1.0,CA,ON,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-ON-2026-V1,1.0,CA,ON,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-PE-2026-H1,1.0,CA,PE,compliance_category,fill,,Provincial Income Tax,proposed
+CA-PE-2026-H1,1.0,CA,PE,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-PE-2026-H1,1.0,CA,PE,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-PE-2026-H1,1.0,CA,PE,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-PE-2026-H1,1.0,CA,PE,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-PE-2026-H2,1.0,CA,PE,compliance_category,fill,,Provincial Income Tax,proposed
+CA-PE-2026-H2,1.0,CA,PE,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-PE-2026-H2,1.0,CA,PE,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-PE-2026-H2,1.0,CA,PE,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-PE-2026-H2,1.0,CA,PE,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-QC-2026-V1,1.0,CA,QC,compliance_category,fill,,Quebec Income Tax,proposed
+CA-QC-2026-V1,1.0,CA,QC,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-QC-2026-V1,1.0,CA,QC,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-QC-2026-V1,1.0,CA,QC,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-QC-2026-V1,1.0,CA,QC,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-SK-2026-V1,1.0,CA,SK,compliance_category,fill,,Provincial Income Tax,proposed
+CA-SK-2026-V1,1.0,CA,SK,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-SK-2026-V1,1.0,CA,SK,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-SK-2026-V1,1.0,CA,SK,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-SK-2026-V1,1.0,CA,SK,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-YT-2026-V1,1.0,CA,YT,compliance_category,fill,,Provincial Income Tax,proposed
+CA-YT-2026-V1,1.0,CA,YT,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-YT-2026-V1,1.0,CA,YT,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-YT-2026-V1,1.0,CA,YT,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-YT-2026-V1,1.0,CA,YT,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-2026-H1,1.0,CA,,compliance_category,fill,,Federal Income Tax / CPP / CPP2 / EI,proposed
+CA-2026-H1,1.0,CA,,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-2026-H1,1.0,CA,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-2026-H1,1.0,CA,,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-2026-H1,1.0,CA,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CA-2026-H2,1.0,CA,,compliance_category,fill,,Federal Income Tax / CPP / CPP2 / EI,proposed
+CA-2026-H2,1.0,CA,,compliance_owner,fill,,Zoiko Groups,default (your choice)
+CA-2026-H2,1.0,CA,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CA-2026-H2,1.0,CA,,source_references,fill,,ZP-TAX-CA-2026-001 v1.0,repo doc
+CA-2026-H2,1.0,CA,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-AG-PAYROLL-2026,1.0,CH,CH-AG,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-AG-PAYROLL-2026,1.0,CH,CH-AG,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-AI-PAYROLL-2026,1.0,CH,CH-AI,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-AI-PAYROLL-2026,1.0,CH,CH-AI,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-AR-PAYROLL-2026,1.0,CH,CH-AR,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-AR-PAYROLL-2026,1.0,CH,CH-AR,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-BE-PAYROLL-2026,1.0,CH,CH-BE,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-BE-PAYROLL-2026,1.0,CH,CH-BE,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-BL-PAYROLL-2026,1.0,CH,CH-BL,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-BL-PAYROLL-2026,1.0,CH,CH-BL,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-BS-PAYROLL-2026,1.0,CH,CH-BS,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-BS-PAYROLL-2026,1.0,CH,CH-BS,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-FR-PAYROLL-2026,1.0,CH,CH-FR,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-FR-PAYROLL-2026,1.0,CH,CH-FR,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-GE-PAYROLL-2026,1.0,CH,CH-GE,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-GE-PAYROLL-2026,1.0,CH,CH-GE,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-GL-PAYROLL-2026,1.0,CH,CH-GL,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-GL-PAYROLL-2026,1.0,CH,CH-GL,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-GR-PAYROLL-2026,1.0,CH,CH-GR,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-GR-PAYROLL-2026,1.0,CH,CH-GR,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-JU-PAYROLL-2026,1.0,CH,CH-JU,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-JU-PAYROLL-2026,1.0,CH,CH-JU,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-LU-PAYROLL-2026,1.0,CH,CH-LU,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-LU-PAYROLL-2026,1.0,CH,CH-LU,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-NE-PAYROLL-2026,1.0,CH,CH-NE,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-NE-PAYROLL-2026,1.0,CH,CH-NE,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-NW-PAYROLL-2026,1.0,CH,CH-NW,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-NW-PAYROLL-2026,1.0,CH,CH-NW,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-OW-PAYROLL-2026,1.0,CH,CH-OW,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-OW-PAYROLL-2026,1.0,CH,CH-OW,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-SG-PAYROLL-2026,1.0,CH,CH-SG,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-SG-PAYROLL-2026,1.0,CH,CH-SG,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-SH-PAYROLL-2026,1.0,CH,CH-SH,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-SH-PAYROLL-2026,1.0,CH,CH-SH,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-SO-PAYROLL-2026,1.0,CH,CH-SO,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-SO-PAYROLL-2026,1.0,CH,CH-SO,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-SZ-PAYROLL-2026,1.0,CH,CH-SZ,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-SZ-PAYROLL-2026,1.0,CH,CH-SZ,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-TG-PAYROLL-2026,1.0,CH,CH-TG,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-TG-PAYROLL-2026,1.0,CH,CH-TG,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-TI-PAYROLL-2026,1.0,CH,CH-TI,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-TI-PAYROLL-2026,1.0,CH,CH-TI,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-UR-PAYROLL-2026,1.0,CH,CH-UR,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-UR-PAYROLL-2026,1.0,CH,CH-UR,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-VD-PAYROLL-2026,1.0,CH,CH-VD,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-VD-PAYROLL-2026,1.0,CH,CH-VD,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-VS-PAYROLL-2026,1.0,CH,CH-VS,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-VS-PAYROLL-2026,1.0,CH,CH-VS,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-ZG-PAYROLL-2026,1.0,CH,CH-ZG,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-ZG-PAYROLL-2026,1.0,CH,CH-ZG,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-ZH-PAYROLL-2026,1.0,CH,CH-ZH,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-ZH-PAYROLL-2026,1.0,CH,CH-ZH,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+CH-PAYROLL-2026,1.0,CH,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+CH-PAYROLL-2026,1.0,CH,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-BB-PAYROLL-CY2026-V1,1.0,DE,DE-BB,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-BE-PAYROLL-CY2026-V1,1.0,DE,DE-BE,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-BW-PAYROLL-CY2026-V1,1.0,DE,DE-BW,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-BY-PAYROLL-CY2026-V1,1.0,DE,DE-BY,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-HB-PAYROLL-CY2026-V1,1.0,DE,DE-HB,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-HE-PAYROLL-CY2026-V1,1.0,DE,DE-HE,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-HH-PAYROLL-CY2026-V1,1.0,DE,DE-HH,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-MV-PAYROLL-CY2026-V1,1.0,DE,DE-MV,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-NI-PAYROLL-CY2026-V1,1.0,DE,DE-NI,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-NW-PAYROLL-CY2026-V1,1.0,DE,DE-NW,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-RP-PAYROLL-CY2026-V1,1.0,DE,DE-RP,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-SH-PAYROLL-CY2026-V1,1.0,DE,DE-SH,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-SL-PAYROLL-CY2026-V1,1.0,DE,DE-SL,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-SN-PAYROLL-CY2026-V1,1.0,DE,DE-SN,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-ST-PAYROLL-CY2026-V1,1.0,DE,DE-ST,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-TH-PAYROLL-CY2026-V1,1.0,DE,DE-TH,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DE-PAYROLL-CY2026-V1,1.0,DE,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+DO-PAYROLL-2026-V1,1.0,DO,,regulatory_authority,fill,,Direccion General de Impuestos Internos (DGII) / Tesoreria de la Seguridad Social (TSS),proposed
+DO-PAYROLL-2026-V1,1.0,DO,,compliance_category,fill,,"ISR Withholding / TSS (SFS, AFP)",proposed
+DO-PAYROLL-2026-V1,1.0,DO,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+DO-PAYROLL-2026-V1,1.0,DO,,change_summary,fill,,Initial Dominican Republic 2026 pack per ZP-DO-ENG-001 v1.0,proposed
+DO-PAYROLL-2026-V1,1.0,DO,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+GY-PAYROLL-2026-V1,1.0,GY,,regulatory_authority,fill,,Guyana Revenue Authority / National Insurance Scheme,proposed
+GY-PAYROLL-2026-V1,1.0,GY,,compliance_category,fill,,PAYE Income Tax / National Insurance,proposed
+GY-PAYROLL-2026-V1,1.0,GY,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+GY-PAYROLL-2026-V1,1.0,GY,,change_summary,fill,,Initial Guyana 2026 pack per ZP-GY-ENG-001 v1.0,proposed
+GY-PAYROLL-2026-V1,1.0,GY,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+HK-PAYROLL-2025,1.0,HK,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+HK-PAYROLL-2025,1.0,HK,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+HK-PAYROLL-2026,1.0,HK,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+HK-PAYROLL-2026,1.0,HK,,next_review_date,fill,,2027-03-01,"rule: 30 days before effective_to, never before 2026-12-01"
+IN-KA-2026-27,1.0,IN,Karnataka,regulatory_authority,fill,,"Commercial Taxes Department, Karnataka (Professional Tax)",proposed
+IN-KA-2026-27,1.0,IN,Karnataka,compliance_category,fill,,State Professional Tax,proposed
+IN-KA-2026-27,1.0,IN,Karnataka,compliance_owner,fill,,Zoiko Groups,default (your choice)
+IN-KA-2026-27,1.0,IN,Karnataka,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+IN-KA-2026-27,1.0,IN,Karnataka,source_references,fill,,ZP-TAX-IN-2026-27-001 v1.0,repo doc
+IN-KA-2026-27,1.0,IN,Karnataka,change_summary,fill,,Initial India Karnataka 2026-27 pack per ZP-TAX-IN-2026-27-001 v1.0,proposed
+IN-KA-2026-27,1.0,IN,Karnataka,next_review_date,fill,,2027-03-01,"rule: 30 days before effective_to, never before 2026-12-01"
+IN-MH-2026-27,1.0,IN,Maharashtra,regulatory_authority,fill,,Maharashtra Goods and Services Tax Department (Professional Tax),proposed
+IN-MH-2026-27,1.0,IN,Maharashtra,compliance_category,fill,,State Professional Tax,proposed
+IN-MH-2026-27,1.0,IN,Maharashtra,compliance_owner,fill,,Zoiko Groups,default (your choice)
+IN-MH-2026-27,1.0,IN,Maharashtra,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+IN-MH-2026-27,1.0,IN,Maharashtra,source_references,fill,,ZP-TAX-IN-2026-27-001 v1.0,repo doc
+IN-MH-2026-27,1.0,IN,Maharashtra,change_summary,fill,,Initial India Maharashtra 2026-27 pack per ZP-TAX-IN-2026-27-001 v1.0,proposed
+IN-MH-2026-27,1.0,IN,Maharashtra,next_review_date,fill,,2027-03-01,"rule: 30 days before effective_to, never before 2026-12-01"
+IN-OD-2026-27,1.0,IN,Odisha,regulatory_authority,fill,,"Commercial Taxes & GST Organisation, Odisha (Professional Tax)",proposed
+IN-OD-2026-27,1.0,IN,Odisha,compliance_category,fill,,State Professional Tax,proposed
+IN-OD-2026-27,1.0,IN,Odisha,compliance_owner,fill,,Zoiko Groups,default (your choice)
+IN-OD-2026-27,1.0,IN,Odisha,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+IN-OD-2026-27,1.0,IN,Odisha,source_references,fill,,ZP-TAX-IN-2026-27-001 v1.0,repo doc
+IN-OD-2026-27,1.0,IN,Odisha,change_summary,fill,,Initial India Odisha 2026-27 pack per ZP-TAX-IN-2026-27-001 v1.0,proposed
+IN-OD-2026-27,1.0,IN,Odisha,next_review_date,fill,,2027-03-01,"rule: 30 days before effective_to, never before 2026-12-01"
+IN-TN-2026-27,1.0,IN,Tamil Nadu,regulatory_authority,fill,,"Urban/Local Bodies of Tamil Nadu, e.g. Greater Chennai Corporation (Professional Tax)",proposed
+IN-TN-2026-27,1.0,IN,Tamil Nadu,compliance_category,fill,,State Professional Tax,proposed
+IN-TN-2026-27,1.0,IN,Tamil Nadu,compliance_owner,fill,,Zoiko Groups,default (your choice)
+IN-TN-2026-27,1.0,IN,Tamil Nadu,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+IN-TN-2026-27,1.0,IN,Tamil Nadu,source_references,fill,,ZP-TAX-IN-2026-27-001 v1.0,repo doc
+IN-TN-2026-27,1.0,IN,Tamil Nadu,change_summary,fill,,Initial India Tamil Nadu 2026-27 pack per ZP-TAX-IN-2026-27-001 v1.0,proposed
+IN-TN-2026-27,1.0,IN,Tamil Nadu,next_review_date,fill,,2027-03-01,"rule: 30 days before effective_to, never before 2026-12-01"
+IN-PAYROLL-FY2026-27,1.1,IN,,regulatory_authority,fill,,Income Tax Department (CBDT) / EPFO / ESIC,proposed
+IN-PAYROLL-FY2026-27,1.1,IN,,compliance_category,fill,,Income Tax (TDS) / EPF / ESI,proposed
+IN-PAYROLL-FY2026-27,1.1,IN,,compliance_owner,fill,,Zoiko Groups,default (your choice)
+IN-PAYROLL-FY2026-27,1.1,IN,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+IN-PAYROLL-FY2026-27,1.1,IN,,source_references,fill,,ZP-TAX-IN-2026-27-001 v1.0,repo doc
+IN-PAYROLL-FY2026-27,1.1,IN,,change_summary,fill,,Initial India 2026-27 pack per ZP-TAX-IN-2026-27-001 v1.0,proposed
+IN-PAYROLL-FY2026-27,1.1,IN,,next_review_date,fill,,2027-03-01,"rule: 30 days before effective_to, never before 2026-12-01"
+IT-PAYROLL-2026,1.0,IT,,regulatory_authority,fill,,Agenzia delle Entrate / INPS / INAIL,proposed
+IT-PAYROLL-2026,1.0,IT,,compliance_category,fill,,IRPEF / INPS / INAIL,proposed
+IT-PAYROLL-2026,1.0,IT,,compliance_owner,fill,,Zoiko Groups,default (your choice)
+IT-PAYROLL-2026,1.0,IT,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+IT-PAYROLL-2026,1.0,IT,,source_references,fill,,ZP-IT-ENG-001 v1.0,repo doc
+IT-PAYROLL-2026,1.0,IT,,change_summary,fill,,Initial Italy 2026 pack per ZP-IT-ENG-001 v1.0,proposed
+IT-PAYROLL-2026,1.0,IT,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+IT-PAYROLL-2026,1.0,IT,,currency,fill,,EUR,proposed
+JP-PAYROLL-2026,1.0,JP,,compliance_category,fill,,Income Tax / Social Insurance / Labour Insurance,proposed
+JP-PAYROLL-2026,1.0,JP,,compliance_owner,fill,,Zoiko Groups,default (your choice)
+JP-PAYROLL-2026,1.0,JP,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+JP-PAYROLL-2026,1.0,JP,,source_references,fill,,ZP-JP-ENG-001 v1.0,repo doc
+JP-PAYROLL-2026,1.0,JP,,change_summary,fill,,Initial Japan 2026 pack per ZP-JP-ENG-001 v1.0,proposed
+JP-PAYROLL-2026,1.0,JP,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+KY-PAYROLL-2026-V1,1.0,KY,,regulatory_authority,fill,,Department of Labour and Pensions / Health Insurance Commission,proposed
+KY-PAYROLL-2026-V1,1.0,KY,,compliance_category,fill,,Pensions / Health Insurance (no personal income tax),proposed
+KY-PAYROLL-2026-V1,1.0,KY,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+KY-PAYROLL-2026-V1,1.0,KY,,change_summary,fill,,Initial Cayman Islands 2026 pack per ZP-KY-ENG-001 v1.0,proposed
+KY-PAYROLL-2026-V1,1.0,KY,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+MX-ISN-CDMX-2026,1.0,MX,CDMX,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+MX-ISN-CDMX-2026,1.0,MX,CDMX,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+MX-PAYROLL-2026,1.1,MX,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+MX-PAYROLL-2026,1.1,MX,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+MY-PAYROLL-2026,1.0,MY,,compliance_category,fill,,PCB / EPF / SOCSO / EIS / HRD Levy,proposed
+MY-PAYROLL-2026,1.0,MY,,compliance_owner,fill,,Zoiko Groups,default (your choice)
+MY-PAYROLL-2026,1.0,MY,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+MY-PAYROLL-2026,1.0,MY,,source_references,fill,,ZP-MY-ENG-001 v1.0,repo doc
+MY-PAYROLL-2026,1.0,MY,,change_summary,fill,,Initial Malaysia 2026 pack per ZP-MY-ENG-001 v1.0,proposed
+MY-PAYROLL-2026,1.0,MY,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+NL-PAYROLL-2026,1.0,NL,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+NL-PAYROLL-2026,1.0,NL,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+PL-PAYROLL-2026,1.0,PL,,compliance_category,fill,,PIT / ZUS / Health Insurance / PPK,proposed
+PL-PAYROLL-2026,1.0,PL,,compliance_owner,fill,,Zoiko Groups,default (your choice)
+PL-PAYROLL-2026,1.0,PL,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+PL-PAYROLL-2026,1.0,PL,,source_references,fill,,ZP-PL-ENG-001 v1.0,repo doc
+PL-PAYROLL-2026,1.0,PL,,change_summary,fill,,Initial Poland 2026 pack per ZP-PL-ENG-001 v1.0,proposed
+PL-PAYROLL-2026,1.0,PL,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+PR-PAYROLL-2026-V1,1.0,PR,,regulatory_authority,fill,,Departamento de Hacienda / Departamento del Trabajo y Recursos Humanos,proposed
+PR-PAYROLL-2026-V1,1.0,PR,,compliance_category,fill,,Income Tax Withholding / SINOT,proposed
+PR-PAYROLL-2026-V1,1.0,PR,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+PR-PAYROLL-2026-V1,1.0,PR,,change_summary,fill,,Initial Puerto Rico 2026 pack per ZP-PR-ENG-001 v1.0,proposed
+PR-PAYROLL-2026-V1,1.0,PR,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+SA-PAYROLL-2026,1.0,SA,,regulatory_authority,fill,,GOSI / Ministry of Human Resources and Social Development (HRSD),proposed
+SA-PAYROLL-2026,1.0,SA,,compliance_category,fill,,GOSI Social Insurance,proposed
+SA-PAYROLL-2026,1.0,SA,,compliance_owner,fill,,Zoiko Groups,default (your choice)
+SA-PAYROLL-2026,1.0,SA,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+SA-PAYROLL-2026,1.0,SA,,source_references,fill,,ZP-SA-ENG-001 v1.0,repo doc
+SA-PAYROLL-2026,1.0,SA,,change_summary,fill,,Initial Saudi Arabia 2026 pack per ZP-SA-ENG-001 v1.0,proposed
+SA-PAYROLL-2026,1.0,SA,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+SA-PAYROLL-2026,1.0,SA,,currency,fill,,SAR,proposed
+SE-PAYROLL-2026,1.0,SE,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+SE-PAYROLL-2026,1.0,SE,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+SE-PAYROLL-2027,1.0,SE,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+SE-PAYROLL-2027,1.0,SE,,next_review_date,fill,,2027-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+SG-PAYROLL-2026,1.2,SG,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+SG-PAYROLL-2026,1.2,SG,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+SG-PAYROLL-2027,1.0,SG,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+SG-PAYROLL-2027,1.0,SG,,next_review_date,fill,,2027-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+TT-PAYROLL-2026-V1,1.0,TT,,regulatory_authority,fill,,Board of Inland Revenue / National Insurance Board of Trinidad and Tobago,proposed
+TT-PAYROLL-2026-V1,1.0,TT,,compliance_category,fill,,PAYE / National Insurance / Health Surcharge,proposed
+TT-PAYROLL-2026-V1,1.0,TT,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+TT-PAYROLL-2026-V1,1.0,TT,,change_summary,fill,,Initial Trinidad and Tobago 2026 pack per ZP-TT-ENG-001 v1.0,proposed
+TT-PAYROLL-2026-V1,1.0,TT,,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+UK-SCT-2026-27,1.0,UK,Scotland,regulatory_authority,fill,,HM Revenue & Customs (HMRC) - Scottish income tax rates set by the Scottish Parliament,proposed
+UK-SCT-2026-27,1.0,UK,Scotland,compliance_category,fill,,Scottish Income Tax,proposed
+UK-SCT-2026-27,1.0,UK,Scotland,compliance_owner,fill,,Zoiko Groups,default (your choice)
+UK-SCT-2026-27,1.0,UK,Scotland,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+UK-SCT-2026-27,1.0,UK,Scotland,source_references,fill,,ZP-TAX-UK-2026-27-001 v1.0,repo doc
+UK-SCT-2026-27,1.0,UK,Scotland,change_summary,fill,,Initial United Kingdom Scotland 2026-27 pack per ZP-TAX-UK-2026-27-001 v1.0,proposed
+UK-SCT-2026-27,1.0,UK,Scotland,next_review_date,fill,,2027-03-06,"rule: 30 days before effective_to, never before 2026-12-01"
+UK-WLS-2026-27,1.0,UK,Wales,regulatory_authority,fill,,HM Revenue & Customs (HMRC) - Welsh income tax rates set by the Senedd,proposed
+UK-WLS-2026-27,1.0,UK,Wales,compliance_category,fill,,Welsh Income Tax,proposed
+UK-WLS-2026-27,1.0,UK,Wales,compliance_owner,fill,,Zoiko Groups,default (your choice)
+UK-WLS-2026-27,1.0,UK,Wales,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+UK-WLS-2026-27,1.0,UK,Wales,source_references,fill,,ZP-TAX-UK-2026-27-001 v1.0,repo doc
+UK-WLS-2026-27,1.0,UK,Wales,change_summary,fill,,Initial United Kingdom Wales 2026-27 pack per ZP-TAX-UK-2026-27-001 v1.0,proposed
+UK-WLS-2026-27,1.0,UK,Wales,next_review_date,fill,,2027-03-06,"rule: 30 days before effective_to, never before 2026-12-01"
+UK-PAYROLL-FY2026-27,1.2,UK,,change_summary,fill,,Initial United Kingdom 2026-27 pack per ZP-TAX-UK-2026-27-001 v1.0,proposed
+US-AK-2026-V1,1.0,US,AK,compliance_category,fill,,State Payroll - No State Income Tax,proposed
+US-AK-2026-V1,1.0,US,AK,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-AK-2026-V1,1.0,US,AK,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-AK-2026-V1,1.0,US,AK,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-AK-2026-V1,1.0,US,AK,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-AL-2026-V1,1.0,US,AL,compliance_category,fill,,State Income Tax Withholding,proposed
+US-AL-2026-V1,1.0,US,AL,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-AL-2026-V1,1.0,US,AL,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-AL-2026-V1,1.0,US,AL,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-AL-2026-V1,1.0,US,AL,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-AR-2026-V1,1.0,US,AR,compliance_category,fill,,State Income Tax Withholding,proposed
+US-AR-2026-V1,1.0,US,AR,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-AR-2026-V1,1.0,US,AR,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-AR-2026-V1,1.0,US,AR,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-AR-2026-V1,1.0,US,AR,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-AZ-2026-V1,1.0,US,AZ,compliance_category,fill,,State Income Tax Withholding,proposed
+US-AZ-2026-V1,1.0,US,AZ,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-AZ-2026-V1,1.0,US,AZ,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-AZ-2026-V1,1.0,US,AZ,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-AZ-2026-V1,1.0,US,AZ,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-CA-2026-V1,1.0,US,CA,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-CA-2026-V1,1.0,US,CA,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-CA-2026-V1,1.0,US,CA,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-CA-2026-V1,1.0,US,CA,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-CA-2026-V1,1.0,US,CA,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-CO-2026-V1,1.0,US,CO,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-CO-2026-V1,1.0,US,CO,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-CO-2026-V1,1.0,US,CO,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-CO-2026-V1,1.0,US,CO,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-CO-2026-V1,1.0,US,CO,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-CT-2026-V1,1.0,US,CT,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-CT-2026-V1,1.0,US,CT,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-CT-2026-V1,1.0,US,CT,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-CT-2026-V1,1.0,US,CT,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-CT-2026-V1,1.0,US,CT,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-DC-2026-V1,1.0,US,DC,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-DC-2026-V1,1.0,US,DC,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-DC-2026-V1,1.0,US,DC,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-DC-2026-V1,1.0,US,DC,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-DC-2026-V1,1.0,US,DC,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-DE-2026-V1,1.0,US,DE,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-DE-2026-V1,1.0,US,DE,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-DE-2026-V1,1.0,US,DE,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-DE-2026-V1,1.0,US,DE,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-DE-2026-V1,1.0,US,DE,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-FL-2026-V1,1.0,US,FL,compliance_category,fill,,State Payroll - No State Income Tax,proposed
+US-FL-2026-V1,1.0,US,FL,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-FL-2026-V1,1.0,US,FL,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-FL-2026-V1,1.0,US,FL,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-FL-2026-V1,1.0,US,FL,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-GA-2026-V1,1.0,US,GA,compliance_category,fill,,State Income Tax Withholding,proposed
+US-GA-2026-V1,1.0,US,GA,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-GA-2026-V1,1.0,US,GA,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-GA-2026-V1,1.0,US,GA,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-GA-2026-V1,1.0,US,GA,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-HI-2026-V1,1.0,US,HI,compliance_category,fill,,State Income Tax Withholding,proposed
+US-HI-2026-V1,1.0,US,HI,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-HI-2026-V1,1.0,US,HI,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-HI-2026-V1,1.0,US,HI,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-HI-2026-V1,1.0,US,HI,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-IA-2026-V1,1.0,US,IA,compliance_category,fill,,State Income Tax Withholding,proposed
+US-IA-2026-V1,1.0,US,IA,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-IA-2026-V1,1.0,US,IA,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-IA-2026-V1,1.0,US,IA,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-IA-2026-V1,1.0,US,IA,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-ID-2026-V1,1.0,US,ID,compliance_category,fill,,State Income Tax Withholding,proposed
+US-ID-2026-V1,1.0,US,ID,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-ID-2026-V1,1.0,US,ID,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-ID-2026-V1,1.0,US,ID,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-ID-2026-V1,1.0,US,ID,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-IL-2026-V1,1.0,US,IL,compliance_category,fill,,State Income Tax Withholding,proposed
+US-IL-2026-V1,1.0,US,IL,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-IL-2026-V1,1.0,US,IL,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-IL-2026-V1,1.0,US,IL,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-IL-2026-V1,1.0,US,IL,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-KS-STATE-TAX,2026.1,US,KS,regulatory_authority,fill,,Kansas Department of Revenue,proposed
+US-KS-STATE-TAX,2026.1,US,KS,compliance_category,fill,,State Income Tax Withholding,proposed
+US-KS-STATE-TAX,2026.1,US,KS,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-KS-STATE-TAX,2026.1,US,KS,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-KS-STATE-TAX,2026.1,US,KS,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-KS-STATE-TAX,2026.1,US,KS,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-KS-STATE-TAX,2026.1,US,KS,currency,fill,,USD,proposed
+US-KY-2026-V1,1.0,US,KY,compliance_category,fill,,State Income Tax Withholding,proposed
+US-KY-2026-V1,1.0,US,KY,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-KY-2026-V1,1.0,US,KY,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-KY-2026-V1,1.0,US,KY,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-KY-2026-V1,1.0,US,KY,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-LA-STATE-TAX,2026.1,US,LA,regulatory_authority,fill,,Louisiana Department of Revenue,proposed
+US-LA-STATE-TAX,2026.1,US,LA,compliance_category,fill,,State Income Tax Withholding,proposed
+US-LA-STATE-TAX,2026.1,US,LA,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-LA-STATE-TAX,2026.1,US,LA,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-LA-STATE-TAX,2026.1,US,LA,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-LA-STATE-TAX,2026.1,US,LA,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-LA-STATE-TAX,2026.1,US,LA,currency,fill,,USD,proposed
+US-MA-2026-V1,1.0,US,MA,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-MA-2026-V1,1.0,US,MA,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-MA-2026-V1,1.0,US,MA,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-MA-2026-V1,1.0,US,MA,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-MA-2026-V1,1.0,US,MA,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-MD-STATE-TAX,2026.1,US,MD,regulatory_authority,fill,,Comptroller of Maryland,proposed
+US-MD-STATE-TAX,2026.1,US,MD,compliance_category,fill,,State Income Tax Withholding,proposed
+US-MD-STATE-TAX,2026.1,US,MD,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-MD-STATE-TAX,2026.1,US,MD,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-MD-STATE-TAX,2026.1,US,MD,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-MD-STATE-TAX,2026.1,US,MD,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-MD-STATE-TAX,2026.1,US,MD,currency,fill,,USD,proposed
+US-ME-2026-V1,1.0,US,ME,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-ME-2026-V1,1.0,US,ME,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-ME-2026-V1,1.0,US,ME,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-ME-2026-V1,1.0,US,ME,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-ME-2026-V1,1.0,US,ME,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-ME-STATE-TAX,2026.1,US,ME,regulatory_authority,fill,,Maine Revenue Services,proposed
+US-ME-STATE-TAX,2026.1,US,ME,compliance_category,fill,,State Income Tax Withholding,proposed
+US-ME-STATE-TAX,2026.1,US,ME,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-ME-STATE-TAX,2026.1,US,ME,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-ME-STATE-TAX,2026.1,US,ME,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-ME-STATE-TAX,2026.1,US,ME,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-ME-STATE-TAX,2026.1,US,ME,currency,fill,,USD,proposed
+US-MI-2026-V1,1.0,US,MI,compliance_category,fill,,State Income Tax Withholding,proposed
+US-MI-2026-V1,1.0,US,MI,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-MI-2026-V1,1.0,US,MI,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-MI-2026-V1,1.0,US,MI,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-MI-2026-V1,1.0,US,MI,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-MN-2026-V1,1.0,US,MN,compliance_category,fill,,State Income Tax Withholding,proposed
+US-MN-2026-V1,1.0,US,MN,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-MN-2026-V1,1.0,US,MN,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-MN-2026-V1,1.0,US,MN,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-MN-2026-V1,1.0,US,MN,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-MO-2026-V1,1.0,US,MO,compliance_category,fill,,State Income Tax Withholding,proposed
+US-MO-2026-V1,1.0,US,MO,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-MO-2026-V1,1.0,US,MO,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-MO-2026-V1,1.0,US,MO,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-MO-2026-V1,1.0,US,MO,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-MS-2026-V1,1.0,US,MS,compliance_category,fill,,State Income Tax Withholding,proposed
+US-MS-2026-V1,1.0,US,MS,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-MS-2026-V1,1.0,US,MS,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-MS-2026-V1,1.0,US,MS,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-MS-2026-V1,1.0,US,MS,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-MT-2026-V1,1.0,US,MT,compliance_category,fill,,State Income Tax Withholding,proposed
+US-MT-2026-V1,1.0,US,MT,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-MT-2026-V1,1.0,US,MT,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-MT-2026-V1,1.0,US,MT,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-MT-2026-V1,1.0,US,MT,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-NC-2026-V1,1.0,US,NC,compliance_category,fill,,State Income Tax Withholding,proposed
+US-NC-2026-V1,1.0,US,NC,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-NC-2026-V1,1.0,US,NC,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-NC-2026-V1,1.0,US,NC,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-NC-2026-V1,1.0,US,NC,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-ND-2026-V1,1.0,US,ND,compliance_category,fill,,State Income Tax Withholding,proposed
+US-ND-2026-V1,1.0,US,ND,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-ND-2026-V1,1.0,US,ND,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-ND-2026-V1,1.0,US,ND,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-ND-2026-V1,1.0,US,ND,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-NE-2026-V1,1.0,US,NE,compliance_category,fill,,State Income Tax Withholding,proposed
+US-NE-2026-V1,1.0,US,NE,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-NE-2026-V1,1.0,US,NE,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-NE-2026-V1,1.0,US,NE,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-NE-2026-V1,1.0,US,NE,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-NH-2026-V1,1.0,US,NH,compliance_category,fill,,State Payroll - No State Income Tax,proposed
+US-NH-2026-V1,1.0,US,NH,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-NH-2026-V1,1.0,US,NH,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-NH-2026-V1,1.0,US,NH,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-NH-2026-V1,1.0,US,NH,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-NJ-2026-V1,1.0,US,NJ,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-NJ-2026-V1,1.0,US,NJ,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-NJ-2026-V1,1.0,US,NJ,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-NJ-2026-V1,1.0,US,NJ,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-NJ-2026-V1,1.0,US,NJ,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-NM-2026-V1,1.0,US,NM,compliance_category,fill,,State Income Tax Withholding,proposed
+US-NM-2026-V1,1.0,US,NM,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-NM-2026-V1,1.0,US,NM,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-NM-2026-V1,1.0,US,NM,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-NM-2026-V1,1.0,US,NM,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-NV-2026-V1,1.0,US,NV,compliance_category,fill,,State Payroll - No State Income Tax,proposed
+US-NV-2026-V1,1.0,US,NV,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-NV-2026-V1,1.0,US,NV,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-NV-2026-V1,1.0,US,NV,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-NV-2026-V1,1.0,US,NV,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-NY-2026-V1,1.0,US,NY,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-NY-2026-V1,1.0,US,NY,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-NY-2026-V1,1.0,US,NY,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-NY-2026-V1,1.0,US,NY,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-NY-2026-V1,1.0,US,NY,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-OH-2026-V1,1.0,US,OH,compliance_category,fill,,State Income Tax Withholding,proposed
+US-OH-2026-V1,1.0,US,OH,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-OH-2026-V1,1.0,US,OH,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-OH-2026-V1,1.0,US,OH,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-OH-2026-V1,1.0,US,OH,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-OK-2026-V1,1.0,US,OK,compliance_category,fill,,State Income Tax Withholding,proposed
+US-OK-2026-V1,1.0,US,OK,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-OK-2026-V1,1.0,US,OK,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-OK-2026-V1,1.0,US,OK,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-OK-2026-V1,1.0,US,OK,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-PA-2026-V1,1.0,US,PA,compliance_category,fill,,State Income Tax Withholding,proposed
+US-PA-2026-V1,1.0,US,PA,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-PA-2026-V1,1.0,US,PA,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-PA-2026-V1,1.0,US,PA,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-PA-2026-V1,1.0,US,PA,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-RI-2026-V1,1.0,US,RI,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-RI-2026-V1,1.0,US,RI,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-RI-2026-V1,1.0,US,RI,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-RI-2026-V1,1.0,US,RI,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-RI-2026-V1,1.0,US,RI,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-SC-2026-V1,1.0,US,SC,compliance_category,fill,,State Income Tax Withholding,proposed
+US-SC-2026-V1,1.0,US,SC,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-SC-2026-V1,1.0,US,SC,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-SC-2026-V1,1.0,US,SC,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-SC-2026-V1,1.0,US,SC,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-SD-2026-V1,1.0,US,SD,compliance_category,fill,,State Payroll - No State Income Tax,proposed
+US-SD-2026-V1,1.0,US,SD,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-SD-2026-V1,1.0,US,SD,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-SD-2026-V1,1.0,US,SD,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-SD-2026-V1,1.0,US,SD,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-TN-2026-V1,1.0,US,TN,compliance_category,fill,,State Payroll - No State Income Tax,proposed
+US-TN-2026-V1,1.0,US,TN,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-TN-2026-V1,1.0,US,TN,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-TN-2026-V1,1.0,US,TN,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-TN-2026-V1,1.0,US,TN,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-TX-2026-V1,1.0,US,TX,compliance_category,fill,,State Payroll - No State Income Tax,proposed
+US-TX-2026-V1,1.0,US,TX,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-TX-2026-V1,1.0,US,TX,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-TX-2026-V1,1.0,US,TX,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-TX-2026-V1,1.0,US,TX,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-UT-2026-V1,1.0,US,UT,compliance_category,fill,,State Income Tax Withholding,proposed
+US-UT-2026-V1,1.0,US,UT,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-UT-2026-V1,1.0,US,UT,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-UT-2026-V1,1.0,US,UT,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-UT-2026-V1,1.0,US,UT,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-VA-2026-V1,1.0,US,VA,compliance_category,fill,,State Income Tax Withholding,proposed
+US-VA-2026-V1,1.0,US,VA,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-VA-2026-V1,1.0,US,VA,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-VA-2026-V1,1.0,US,VA,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-VA-2026-V1,1.0,US,VA,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-VT-2026-V1,1.0,US,VT,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-VT-2026-V1,1.0,US,VT,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-VT-2026-V1,1.0,US,VT,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-VT-2026-V1,1.0,US,VT,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-VT-2026-V1,1.0,US,VT,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-WA-2026-V1,1.0,US,WA,compliance_category,fill,,State Payroll Programs (Paid Leave / Disability),proposed
+US-WA-2026-V1,1.0,US,WA,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-WA-2026-V1,1.0,US,WA,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-WA-2026-V1,1.0,US,WA,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-WA-2026-V1,1.0,US,WA,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-WV-2026-V1,1.0,US,WV,compliance_category,fill,,State Income Tax Withholding,proposed
+US-WV-2026-V1,1.0,US,WV,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-WV-2026-V1,1.0,US,WV,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-WV-2026-V1,1.0,US,WV,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-WV-2026-V1,1.0,US,WV,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+US-WY-2026-V1,1.0,US,WY,compliance_category,fill,,State Payroll - No State Income Tax,proposed
+US-WY-2026-V1,1.0,US,WY,compliance_owner,fill,,Zoiko Groups,default (your choice)
+US-WY-2026-V1,1.0,US,WY,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+US-WY-2026-V1,1.0,US,WY,source_references,fill,,ZP-TAX-US-2026-001 v1.0,repo doc
+US-WY-2026-V1,1.0,US,WY,next_review_date,fill,,2026-12-01,"rule: 30 days before effective_to, never before 2026-12-01"
+ZA-PAYROLL-2027,1.0,ZA,,compliance_category,fill,,PAYE / UIF / SDL / ETI,proposed
+ZA-PAYROLL-2027,1.0,ZA,,compliance_owner,fill,,Zoiko Groups,default (your choice)
+ZA-PAYROLL-2027,1.0,ZA,,engineering_owner,fill,,Payroll Engine Team,default (your choice)
+ZA-PAYROLL-2027,1.0,ZA,,source_references,fill,,ZP-ZA-ENG-001 v1.0,repo doc
+ZA-PAYROLL-2027,1.0,ZA,,change_summary,fill,,Initial South Africa 2027 pack per ZP-ZA-ENG-001 v1.0,proposed
+ZA-PAYROLL-2027,1.0,ZA,,next_review_date,fill,,2027-01-29,"rule: 30 days before effective_to, never before 2026-12-01"
+US-PAYROLL-CY2026-V1,1.0,US,,compliance_category,correct,STATIONARY RATES,Statutory Payroll Tax,owner-approved correction 2026-11-26
+US-PAYROLL-CY2026-V1,1.0,US,,change_summary,correct,Initialy payroll configuration for CY 2062-27,Initial payroll configuration for CY 2026,owner-approved correction 2026-11-26
+US-AK-2026-V1,1.0,US,AK,regulatory_authority,correct,ZP-TAX-US-2026-001,Alaska Department of Revenue,owner-approved correction 2026-11-26
+US-FL-2026-V1,1.0,US,FL,regulatory_authority,correct,ZP-TAX-US-2026-001,Florida Department of Revenue,owner-approved correction 2026-11-26
+US-NV-2026-V1,1.0,US,NV,regulatory_authority,correct,ZP-TAX-US-2026-001,Nevada Department of Taxation,owner-approved correction 2026-11-26
+US-NH-2026-V1,1.0,US,NH,regulatory_authority,correct,ZP-TAX-US-2026-001,New Hampshire Department of Revenue Administration,owner-approved correction 2026-11-26
+US-SD-2026-V1,1.0,US,SD,regulatory_authority,correct,ZP-TAX-US-2026-001,South Dakota Department of Revenue,owner-approved correction 2026-11-26
+US-TN-2026-V1,1.0,US,TN,regulatory_authority,correct,ZP-TAX-US-2026-001,Tennessee Department of Revenue,owner-approved correction 2026-11-26
+US-TX-2026-V1,1.0,US,TX,regulatory_authority,correct,ZP-TAX-US-2026-001,Texas Comptroller of Public Accounts / Texas Workforce Commission,owner-approved correction 2026-11-26
+US-WA-2026-V1,1.0,US,WA,regulatory_authority,correct,ZP-TAX-US-2026-001,Washington Employment Security Department (Paid Leave),owner-approved correction 2026-11-26
+US-WY-2026-V1,1.0,US,WY,regulatory_authority,correct,ZP-TAX-US-2026-001,Wyoming Department of Revenue / Department of Workforce Services,owner-approved correction 2026-11-26
+US-CO-2026-V1,1.0,US,CO,regulatory_authority,correct,ZP-TAX-US-2026-001,Colorado Department of Labor and Employment (FAMLI Division),owner-approved correction 2026-11-26
+US-KY-2026-V1,1.0,US,KY,regulatory_authority,correct,ZP-TAX-US-2026-001,Kentucky Department of Revenue,owner-approved correction 2026-11-26
+US-CA-2026-V1,1.0,US,CA,regulatory_authority,correct,ZP-TAX-US-2026-001,California Employment Development Department (EDD),owner-approved correction 2026-11-26
+US-CT-2026-V1,1.0,US,CT,regulatory_authority,correct,ZP-TAX-US-2026-001,Connecticut Paid Leave Authority,owner-approved correction 2026-11-26
+US-DC-2026-V1,1.0,US,DC,regulatory_authority,correct,ZP-TAX-US-2026-001,DC Department of Employment Services (Office of Paid Family Leave),owner-approved correction 2026-11-26
+US-NY-2026-V1,1.0,US,NY,regulatory_authority,correct,ZP-TAX-US-2026-001,New York State Department of Taxation and Finance,owner-approved correction 2026-11-26
+US-RI-2026-V1,1.0,US,RI,regulatory_authority,correct,ZP-TAX-US-2026-001,Rhode Island Department of Labor and Training,owner-approved correction 2026-11-26
+US-NJ-2026-V1,1.0,US,NJ,regulatory_authority,correct,ZP-TAX-US-2026-001,New Jersey Department of Labor and Workforce Development,owner-approved correction 2026-11-26
+US-ME-2026-V1,1.0,US,ME,regulatory_authority,correct,ZP-TAX-US-2026-001,Maine Department of Labor (Paid Family and Medical Leave),owner-approved correction 2026-11-26
+US-DE-2026-V1,1.0,US,DE,regulatory_authority,correct,ZP-TAX-US-2026-001,Delaware Department of Labor (Paid Leave),owner-approved correction 2026-11-26
+CA-AB-2026-V1,1.0,CA,AB,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-MB-2026-V1,1.0,CA,MB,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-NB-2026-V1,1.0,CA,NB,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-NS-2026-V1,1.0,CA,NS,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-NT-2026-V1,1.0,CA,NT,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-NU-2026-V1,1.0,CA,NU,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-ON-2026-V1,1.0,CA,ON,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-SK-2026-V1,1.0,CA,SK,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-YT-2026-V1,1.0,CA,YT,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-QC-2026-V1,1.0,CA,QC,regulatory_authority,correct,ZP-TAX-CA-2026-001,Revenu Quebec,owner-approved correction 2026-11-26
+CA-BC-2026-H1,1.0,CA,BC,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-BC-2026-H2,1.0,CA,BC,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-NL-2026-H1,1.0,CA,NL,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-NL-2026-H2,1.0,CA,NL,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-PE-2026-H1,1.0,CA,PE,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-PE-2026-H2,1.0,CA,PE,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-2026-H1,1.0,CA,,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+CA-2026-H2,1.0,CA,,regulatory_authority,correct,ZP-TAX-CA-2026-001,Canada Revenue Agency (CRA),owner-approved correction 2026-11-26
+US-AZ-2026-V1,1.0,US,AZ,regulatory_authority,correct,ZP-TAX-US-2026-001,Arizona Department of Revenue,owner-approved correction 2026-11-26
+US-IL-2026-V1,1.0,US,IL,regulatory_authority,correct,ZP-TAX-US-2026-001,Illinois Department of Revenue,owner-approved correction 2026-11-26
+US-MA-2026-V1,1.0,US,MA,regulatory_authority,correct,ZP-TAX-US-2026-001,Massachusetts Department of Family and Medical Leave,owner-approved correction 2026-11-26
+US-MI-2026-V1,1.0,US,MI,regulatory_authority,correct,ZP-TAX-US-2026-001,Michigan Department of Treasury,owner-approved correction 2026-11-26
+US-PA-2026-V1,1.0,US,PA,regulatory_authority,correct,ZP-TAX-US-2026-001,Pennsylvania Department of Revenue,owner-approved correction 2026-11-26
+US-GA-2026-V1,1.0,US,GA,regulatory_authority,correct,ZP-TAX-US-2026-001,Georgia Department of Revenue,owner-approved correction 2026-11-26
+US-ID-2026-V1,1.0,US,ID,regulatory_authority,correct,ZP-TAX-US-2026-001,Idaho State Tax Commission,owner-approved correction 2026-11-26
+US-MS-2026-V1,1.0,US,MS,regulatory_authority,correct,ZP-TAX-US-2026-001,Mississippi Department of Revenue,owner-approved correction 2026-11-26
+US-NC-2026-V1,1.0,US,NC,regulatory_authority,correct,ZP-TAX-US-2026-001,North Carolina Department of Revenue,owner-approved correction 2026-11-26
+US-UT-2026-V1,1.0,US,UT,regulatory_authority,correct,ZP-TAX-US-2026-001,Utah State Tax Commission,owner-approved correction 2026-11-26
+US-IA-2026-V1,1.0,US,IA,regulatory_authority,correct,ZP-TAX-US-2026-001,Iowa Department of Revenue,owner-approved correction 2026-11-26
+US-HI-2026-V1,1.0,US,HI,regulatory_authority,correct,ZP-TAX-US-2026-001,Hawaii Department of Taxation,owner-approved correction 2026-11-26
+US-AL-2026-V1,1.0,US,AL,regulatory_authority,correct,ZP-TAX-US-2026-001,Alabama Department of Revenue,owner-approved correction 2026-11-26
+US-AR-2026-V1,1.0,US,AR,regulatory_authority,correct,ZP-TAX-US-2026-001,Arkansas Department of Finance and Administration,owner-approved correction 2026-11-26
+US-MN-2026-V1,1.0,US,MN,regulatory_authority,correct,ZP-TAX-US-2026-001,Minnesota Department of Revenue,owner-approved correction 2026-11-26
+US-MT-2026-V1,1.0,US,MT,regulatory_authority,correct,ZP-TAX-US-2026-001,Montana Department of Revenue,owner-approved correction 2026-11-26
+US-NE-2026-V1,1.0,US,NE,regulatory_authority,correct,ZP-TAX-US-2026-001,Nebraska Department of Revenue,owner-approved correction 2026-11-26
+US-NM-2026-V1,1.0,US,NM,regulatory_authority,correct,ZP-TAX-US-2026-001,New Mexico Taxation and Revenue Department,owner-approved correction 2026-11-26
+US-ND-2026-V1,1.0,US,ND,regulatory_authority,correct,ZP-TAX-US-2026-001,North Dakota Office of State Tax Commissioner,owner-approved correction 2026-11-26
+US-OK-2026-V1,1.0,US,OK,regulatory_authority,correct,ZP-TAX-US-2026-001,Oklahoma Tax Commission,owner-approved correction 2026-11-26
+US-SC-2026-V1,1.0,US,SC,regulatory_authority,correct,ZP-TAX-US-2026-001,South Carolina Department of Revenue,owner-approved correction 2026-11-26
+US-VT-2026-V1,1.0,US,VT,regulatory_authority,correct,ZP-TAX-US-2026-001,Vermont Department of Taxes,owner-approved correction 2026-11-26
+US-VA-2026-V1,1.0,US,VA,regulatory_authority,correct,ZP-TAX-US-2026-001,Virginia Department of Taxation,owner-approved correction 2026-11-26
+US-WV-2026-V1,1.0,US,WV,regulatory_authority,correct,ZP-TAX-US-2026-001,West Virginia State Tax Department,owner-approved correction 2026-11-26
+US-MO-2026-V1,1.0,US,MO,regulatory_authority,correct,ZP-TAX-US-2026-001,Missouri Department of Revenue,owner-approved correction 2026-11-26
+US-OH-2026-V1,1.0,US,OH,regulatory_authority,correct,ZP-TAX-US-2026-001,Ohio Department of Taxation,owner-approved correction 2026-11-26
+BB-PAYROLL-2026-V1,1.0,BB,,source_references,correct,See ZP-<code>-ENG-001 engineering specification,ZP-BB-ENG-001 v1.0 engineering specification,owner-approved correction 2026-11-26
+KY-PAYROLL-2026-V1,1.0,KY,,source_references,correct,See ZP-<code>-ENG-001 engineering specification,ZP-KY-ENG-001 v1.0 engineering specification,owner-approved correction 2026-11-26
+DO-PAYROLL-2026-V1,1.0,DO,,source_references,correct,See ZP-<code>-ENG-001 engineering specification,ZP-DO-ENG-001 v1.0 engineering specification,owner-approved correction 2026-11-26
+GY-PAYROLL-2026-V1,1.0,GY,,source_references,correct,See ZP-<code>-ENG-001 engineering specification,ZP-GY-ENG-001 v1.0 engineering specification,owner-approved correction 2026-11-26
+JM-PAYROLL-2026-V1,1.0,JM,,regulatory_authority,correct,Tax Administration Jamaica (TAJ,Tax Administration Jamaica (TAJ),owner-approved correction 2026-11-26
+BS-PAYROLL-2026-V1,1.0,BS,,source_references,correct,See ZP-<code>-ENG-001 engineering specification,ZP-BS-ENG-001 v1.0 engineering specification,owner-approved correction 2026-11-26
+TT-PAYROLL-2026-V1,1.0,TT,,source_references,correct,See ZP-<code>-ENG-001 engineering specification,ZP-TT-ENG-001 v1.0 engineering specification,owner-approved correction 2026-11-26
+PR-PAYROLL-2026-V1,1.0,PR,,source_references,correct,See ZP-<code>-ENG-001 engineering specification,ZP-PR-ENG-001 v1.0 engineering specification,owner-approved correction 2026-11-26
+UK-PAYROLL-FY2026-27,1.2,UK,,regulatory_authority,correct,HMRS,HM Revenue & Customs (HMRC),owner-approved correction 2026-11-26
+UK-PAYROLL-FY2026-27,1.2,UK,,compliance_owner,correct,Zoiko Gorups,Zoiko Groups,owner-approved correction 2026-11-26
+AE-PAYROLL-2026,1.0,AE,,compliance_owner,correct,Zoiko Gorups ,Zoiko Groups,owner-approved correction 2026-11-26
+AE-PAYROLL-2026,1.0,AE,,compliance_category,correct,UAE Stationary Rates ,UAE Statutory Rates,owner-approved correction 2026-11-26

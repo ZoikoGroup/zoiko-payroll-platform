@@ -113,3 +113,26 @@ def test_apply_refuses_a_remote_database(monkeypatch):
     monkeypatch.delenv("ZOIKO_ALLOW_NONLOCAL_DB_WRITES", raising=False)
     with pytest.raises(SystemExit):
         upd.main(["--apply"])
+
+
+# ── P8 fixes (2026-11-26) ───────────────────────────────────────────────────
+def test_every_seeded_value_fits_its_column():
+    """Postgres enforces String(n); SQLite (the test DB) does not. The NZ deduction order (52 chars in a
+    String(50)) failed only on the real database - check every catalogue row against the model lengths."""
+    from app.modules.payroll.models import ContributionRate
+
+    ref = upd.reference_rows(upd.COUNTRIES)
+    lengths = {c: ContributionRate.__table__.c[c].type.length for c in ("text_value",) + upd.DISPLAY_COLS}
+    too_long = [(k, c, len(str(v[c]))) for k, v in ref.items() for c, n in lengths.items()
+                if n and v.get(c) is not None and len(str(v[c])) > n]
+    assert too_long == []
+
+
+def test_apply_is_one_transaction(db, reference):
+    """The audit row no longer commits per pack: a failure rolls every pack back."""
+    from app.modules.payroll import poland_service
+
+    pack = _legacy_pack(db, poland_service.seed_poland_pack, "PL")
+    upd.plan_and_apply(db, reference, ("PL",), include_approved=False, apply=True)
+    db.rollback()                                                      # what main() does on an error
+    assert all(MARK in r.label for r in _rates(db, pack).values())
