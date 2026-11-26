@@ -53,7 +53,7 @@ def print_summary(summary: dict, dry_run: bool = False) -> None:
     print(f"Country entitlement backfill{' (dry run, rolled back)' if dry_run else ''}")
     print(f"  orgs processed:              {summary['orgs_processed']}")
     print(f"  rows created:                {summary['rows_created']}")
-    print(f"  orgs flagged OVER_LIMIT:     {len(summary['orgs_over_limit'])}")
+    print(f"  orgs over their country limit (countries kept active): {len(summary['orgs_over_limit'])}")
     for org in summary["orgs_over_limit"]:
         print(f"    - #{org['id']} {org['name']}: {', '.join(org['over_limit'])}")
     print(f"  orgs with no resolvable country: {len(summary['orgs_unresolved'])}")

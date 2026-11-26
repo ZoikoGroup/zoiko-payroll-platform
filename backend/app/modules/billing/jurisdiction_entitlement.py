@@ -12,6 +12,30 @@ or EnterpriseOrderForm.negotiated_scale_limits).
 
 The registration country is the primary row and always counts.
 
+Country limit — always enforced, in every BILLING_ENFORCEMENT_MODE:
+  * Adding: an org at or over its limit cannot ADD a country
+    (add_entitled_country / a new default country).
+  * Downgrading: a plan change that would leave the org with more ACTIVE
+    countries than the target plan allows is REFUSED (guard_country_downgrade,
+    409 reason=downgrade_exceeds_country_limit) on every path that can refuse
+    it: Org Admin checkout / in-place plan change, and the Super Admin trial
+    conversion, Enterprise order form and max_jurisdictions override. A Super
+    Admin can override the refusal with a reason; that is written to the
+    billing audit log (COUNTRY_LIMIT_DOWNGRADE_OVERRIDE).
+  * Changes that cannot be refused (Stripe-initiated subscription changes,
+    checkout completion): existing countries keep running, adding is
+    blocked, and the org is flagged for Super Admin review
+    (COUNTRY_LIMIT_REVIEW_REQUIRED + the compliance exceptions list).
+  * A max_jurisdictions entitlement override simply stops applying at its
+    expires_at (read time, _resolve_entitlement): no job, event or email
+    runs then. Existing countries keep running and adding is blocked; the org
+    appears on the live compliance exceptions list at once, and gets a
+    COUNTRY_LIMIT_REVIEW_REQUIRED event the next time a reconcile runs.
+  * Nothing is paused, removed or reactivated automatically any more. Rows
+    the earlier rule left OVER_LIMIT keep that state (see
+    scripts/report_paused_countries.py); an admin re-adding the country
+    reactivates it like any add.
+
 Same three-state rollout switch as the rest of billing
 (settings.BILLING_ENFORCEMENT_MODE): "off" never blocks, "warn" records an
 ENTITLEMENT_WOULD_HAVE_BLOCKED audit event and lets the write through,
@@ -36,7 +60,6 @@ from app.modules.billing.entitlements import (
     _resolve_entitlement,
     get_active_subscription,
     require_not_dunning_restricted,
-    require_scope_limit,
 )
 from app.modules.billing.feature_keys import MAX_JURISDICTIONS
 from app.modules.billing.models import (
@@ -183,31 +206,16 @@ def ensure_ledger(db: Session, organization_id: int) -> list[OrganizationJurisdi
     if has_any is None:
         backfill_organization(db, organization_id)
         return _rows(db, organization_id)
-    rows = _rows(db, organization_id)
-    # Self-heal: the limit can change without an event this module hears
-    # about (a time-boxed entitlement override expiring, a missed plan-change
-    # hook). If ACTIVE rows exceed the limit, or a paused row could be
-    # restored, reconcile now so every gate sees the current plan.
-    limit_value = resolve_country_limit(db, organization_id)
-    active = sum(1 for r in rows if r.status == ACTIVE)
-    paused = any(r.status == OVER_LIMIT for r in rows)
-    if (limit_value is not None and active > limit_value) or (paused and (limit_value is None or active < limit_value)):
-        reconcile_jurisdiction_limit(db, organization_id, reason="limit_changed")
-        rows = _rows(db, organization_id)
-    return rows
+    # No automatic status changes: rows paused by the earlier OVER_LIMIT rule
+    # keep that state until an admin reviews them (re-adding reactivates).
+    return _rows(db, organization_id)
 
 
-def plan_change_impact(db: Session, organization_id: int, plan_code: str) -> dict:
-    """What switching this org to `plan_code`'s PUBLISHED version would do
-    to its countries — the same keep/pause rule reconcile_jurisdiction_limit
-    applies (primary first, then oldest ACTIVE), computed without writing.
-    Used by the plan picker and checkout so a downgrade that would pause
-    countries is never a surprise."""
+def limit_for_plan_version(db: Session, version) -> Optional[int]:
+    """max_jurisdictions a plan version grants: None = unlimited, a missing
+    or zero flag = 1 (the primary country always counts)."""
     from app.modules.billing.models import BillingEntitlementFlag
-    from app.modules.billing.plan_catalog import get_published_plan_version
 
-    rows = ensure_ledger(db, organization_id)
-    version = get_published_plan_version(db, plan_code)
     flag = None
     if version is not None:
         flag = db.query(BillingEntitlementFlag).filter(
@@ -215,21 +223,91 @@ def plan_change_impact(db: Session, organization_id: int, plan_code: str) -> dic
             BillingEntitlementFlag.feature_key == MAX_JURISDICTIONS,
         ).first()
     if flag is None or flag.limit_value == 0:
-        new_limit = 1
-    else:
-        new_limit = None if flag.limit_value is None else max(int(flag.limit_value), 1)
-    ordered = sorted(rows, key=lambda r: (not r.is_primary, r.status != ACTIVE))
-    keep = ordered if new_limit is None else ordered[:new_limit]
-    keep_codes = [r.country_code for r in keep]
+        return 1
+    return None if flag.limit_value is None else max(int(flag.limit_value), 1)
+
+
+def plan_change_impact(db: Session, organization_id: int, plan_code: str) -> dict:
+    """What switching this org to `plan_code`'s PUBLISHED version would do
+    to its countries, computed without writing. Nothing is ever paused, so
+    `pause`/`restore` are always empty. `blocked` is True when the org has
+    more ACTIVE countries than the plan allows — the change is refused until
+    `removeCount` countries are removed (`message` says so). Used by the plan
+    picker and checkout so a refused downgrade is never a surprise."""
+    from app.modules.billing.models import BillingPlan
+    from app.modules.billing.plan_catalog import get_published_plan_version
+
+    rows = ensure_ledger(db, organization_id)
+    version = get_published_plan_version(db, plan_code)
+    new_limit = limit_for_plan_version(db, version)
+    countries = [r.country_code for r in rows if r.status == ACTIVE]
+    remove = 0 if new_limit is None else max(len(countries) - new_limit, 0)
+    plan = db.query(BillingPlan).filter(BillingPlan.code == plan_code).first()
+    plan_name = plan.name if plan else plan_code
     return {
         "planCode": plan_code,
         "newLimit": new_limit,
         "currentLimit": resolve_country_limit(db, organization_id),
-        "countries": [r.country_code for r in rows if r.status == ACTIVE],
-        "keep": keep_codes,
-        "pause": [r.country_code for r in ordered if r.country_code not in keep_codes and r.status == ACTIVE],
-        "restore": [r.country_code for r in ordered if r.country_code in keep_codes and r.status == OVER_LIMIT],
+        "countries": countries,
+        "keep": countries,
+        "pause": [],
+        "restore": [],
+        "overLimitBy": remove,
+        "blocked": remove > 0,
+        "removeCount": remove,
+        "message": downgrade_blocked_message(len(countries), plan_name, new_limit) if remove else None,
     }
+
+
+# ── Downgrades ───────────────────────────────────────────────────────────
+
+DOWNGRADE_BLOCKED = "downgrade_exceeds_country_limit"
+
+
+def downgrade_blocked_message(used: int, plan_name: str, new_limit: int) -> str:
+    remove = used - new_limit
+    return (
+        f"Your organization has {_countries_phrase(used)}; the {plan_name} plan allows {new_limit}. "
+        f"Remove {_countries_phrase(remove)} under Compliance > Countries to downgrade."
+    )
+
+
+def guard_country_downgrade(db: Session, organization_id: int, new_limit: Optional[int], plan_name: str, *,
+                            source: str, actor_user_id: Optional[int] = None,
+                            override: bool = False, override_reason: Optional[str] = None) -> None:
+    """Refuse a change that would leave the org with more ACTIVE countries
+    than `new_limit` (409, reason=downgrade_exceeds_country_limit). A Super
+    Admin may pass override=True with a reason: the change then goes ahead
+    (existing countries keep running, adding stays blocked) and the override
+    is written to the billing audit log. Does not commit."""
+    if new_limit is None:
+        return
+    # Read-only ledger read: Super Admin callers must never trigger the
+    # backfill (it reads worker tables a platform principal may not touch).
+    # An org with no ledger yet has nothing to exceed.
+    rows = _rows(db, organization_id)
+    active = [r.country_code for r in rows if r.status == ACTIVE]
+    if len(active) <= new_limit:
+        return
+    if override:
+        if not (override_reason or "").strip():
+            raise BadRequestException("A reason is required to override the country limit on a downgrade.")
+        _audit(db, organization_id, actor_user_id, "COUNTRY_LIMIT_DOWNGRADE_OVERRIDE", {
+            "source": source, "plan": plan_name, "new_limit": new_limit, "used": len(active),
+            "countries": active, "reason": override_reason.strip(),
+        })
+        db.flush()
+        return
+    raise ConflictException(downgrade_blocked_message(len(active), plan_name, new_limit), trace={
+        "resource": MAX_JURISDICTIONS,
+        "reason": DOWNGRADE_BLOCKED,
+        "source": source,
+        "used": len(active),
+        "new_limit": new_limit,
+        "remove_count": len(active) - new_limit,
+        "countries": active,
+        "plan": plan_name,
+    })
 
 
 def get_entitled_countries(db: Session, organization_id: int) -> list[str]:
@@ -423,34 +501,41 @@ def payroll_run_country_gate(db: Session, organization_id: int) -> Optional[Call
 
 def reconcile_jurisdiction_limit(db: Session, organization_id: int, actor_user_id: Optional[int] = None,
                                  reason: str = "plan_change") -> dict:
-    """Apply the org's current country limit to its ledger: keep the
-    primary plus the oldest ACTIVE rows up to the limit ACTIVE, mark the
-    rest OVER_LIMIT; on an upgrade, restore OVER_LIMIT rows (oldest first)
-    up to the new limit. Never deletes anything, never touches REMOVED
-    rows, does not commit (the caller owns the transaction). Writes a
-    JURISDICTION_LIMIT_RECONCILED audit event only when a status changed.
-    """
+    """Check the org's ledger against its current country limit after a
+    change. Never changes a row's status (nothing is paused, removed or
+    reactivated). When the org now has more ACTIVE countries than the limit —
+    a change that could not be refused (Stripe-initiated subscription change)
+    or an audited Super Admin downgrade override — it is flagged for Super
+    Admin review with a COUNTRY_LIMIT_REVIEW_REQUIRED audit event (one per
+    distinct used/limit situation). An expired entitlement override is only
+    noticed here when something next calls this (no expiry job). Does not
+    commit.
+    Returns {"limit_value", "over_limit_by", "flagged"}."""
     rows = _rows(db, organization_id)
     limit_value = resolve_country_limit(db, organization_id)
-    # Primary first, then rows that were ACTIVE, then OVER_LIMIT — each
-    # group oldest first (_rows already orders by primary, then age).
-    ordered = sorted(rows, key=lambda r: (not r.is_primary, r.status != ACTIVE))
-    keep = ordered if limit_value is None else ordered[:limit_value]
-    keep_ids = {r.id for r in keep}
+    active = [r.country_code for r in rows if r.status == ACTIVE]
+    over_limit_by = 0 if limit_value is None else max(len(active) - limit_value, 0)
+    flagged = False
+    if over_limit_by:
+        last = _latest_review_flag(db, organization_id)
+        situation = {"used": len(active), "limit_value": limit_value}
+        if last is None or {k: (last.payload or {}).get(k) for k in situation} != situation:
+            _audit(db, organization_id, actor_user_id, REVIEW_EVENT, {
+                "reason": reason, **situation, "over_limit_by": over_limit_by, "countries": active,
+            })
+            db.flush()
+            flagged = True
+    return {"limit_value": limit_value, "over_limit_by": over_limit_by, "flagged": flagged}
 
-    activated, paused = [], []
-    for row in ordered:
-        target = ACTIVE if row.id in keep_ids else OVER_LIMIT
-        if row.status != target:
-            (activated if target == ACTIVE else paused).append(row.country_code)
-            row.status = target
-    if activated or paused:
-        _audit(db, organization_id, actor_user_id, "JURISDICTION_LIMIT_RECONCILED", {
-            "reason": reason, "limit_value": limit_value,
-            "restored": activated, "over_limit": paused,
-        })
-        db.flush()
-    return {"limit_value": limit_value, "restored": activated, "over_limit": paused}
+
+REVIEW_EVENT = "COUNTRY_LIMIT_REVIEW_REQUIRED"
+
+
+def _latest_review_flag(db: Session, organization_id: int):
+    return db.query(BillingCommercialAuditEvent).filter(
+        BillingCommercialAuditEvent.organization_id == organization_id,
+        BillingCommercialAuditEvent.event_type == REVIEW_EVENT,
+    ).order_by(BillingCommercialAuditEvent.created_at.desc(), BillingCommercialAuditEvent.id.desc()).first()
 
 
 def safe_reconcile(db: Session, organization_id: int, actor_user_id: Optional[int] = None,
@@ -476,10 +561,12 @@ def backfill_organization(db: Session, organization_id: int) -> dict:
 
       1. primary = effective org country (_resolve_org_country precedence)
       2. + every distinct PayrollEmployee.country_code in use
-      3. beyond the plan limit -> OVER_LIMIT (never deleted, never refused)
+      3. beyond the plan limit -> still ACTIVE, and the org is flagged for
+         Super Admin review (no new country can be added until it is under)
 
     A REMOVED row is an explicit admin decision and is left REMOVED.
-    Does not commit. Returns {"created", "over_limit", "unresolved"}.
+    Does not commit. Returns {"created", "over_limit" (countries above the
+    limit — still ACTIVE), "unresolved"}.
     """
     existing = {r.country_code: r for r in _rows(db, organization_id, include_removed=True)}
     created: list[str] = []
@@ -514,10 +601,14 @@ def backfill_organization(db: Session, organization_id: int) -> dict:
     if created:
         _audit(db, organization_id, None, "JURISDICTION_LEDGER_BACKFILLED", {
             "created": created, "primary": primary_code if primary_code in created else None,
-            "over_limit": result["over_limit"],
+            "over_limit_by": result["over_limit_by"],
         })
         db.flush()
-    over_limit = [r.country_code for r in _rows(db, organization_id) if r.status == OVER_LIMIT]
+    # Countries above the limit, in ledger order (primary first, then oldest):
+    # still ACTIVE; the reconcile above flagged the org for Super Admin review.
+    active_rows = [r for r in _rows(db, organization_id) if r.status == ACTIVE]
+    limit_value = result["limit_value"]
+    over_limit = [] if limit_value is None else [r.country_code for r in active_rows[limit_value:]]
     return {"created": created, "over_limit": over_limit, "unresolved": primary_code is None and not has_primary}
 
 
@@ -541,8 +632,8 @@ def create_primary_for_new_org(db: Session, organization_id: int, registered_cou
 def ensure_country_row(db: Session, organization_id: int, country_code: str,
                        actor_user_id: Optional[int] = None) -> OrganizationJurisdiction:
     """Make sure `country_code` has a non-REMOVED ledger row (callers have
-    already run their own limit check), then reconcile so a row beyond the limit lands as OVER_LIMIT rather
-    than silently exceeding it. Becomes the primary only if the org has
+    already run their own limit check — add_entitled_country /
+    sync_primary_with_default_country). Becomes the primary only if the org has
     none yet. Does not commit."""
     code = normalize_country_code(country_code)
     if code is None:
@@ -664,6 +755,13 @@ def entitlement_summary(db: Session, organization_id: int) -> dict:
         "catalog": catalog,
         "addable": [{"code": c["code"], "name": c["name"]} for c in catalog if c["available"]],
         "remaining": None if limit_value is None else max(limit_value - used, 0),
+        # Countries above the limit (a downgrade / override expiry): all keep
+        # working, but none can be added until this is back to 0.
+        "overLimitBy": 0 if limit_value is None else max(used - limit_value, 0),
+        # The country limit is always enforced on add (see the module docstring);
+        # employee / payroll gates still follow the billing enforcement mode.
+        "countryLimitEnforced": True,
+        "upgradePath": UPGRADE_PATH,
         "enforcementMode": _enforcement_mode(),
     }
 
@@ -704,12 +802,61 @@ def _require_payroll_country(code: str) -> None:
         raise BadRequestException(f"{country_name(code)} is not a country Zoiko runs payroll for yet.")
 
 
+COUNTRY_LIMIT_REACHED = "country_limit_reached"
+UPGRADE_PATH = "/billing/plans"
+
+
+def country_limit_error(db: Session, organization_id: int, country_code: Optional[str],
+                        used: int, limit_value: int) -> ForbiddenException:
+    """403 for adding a country at/over the plan's limit. The trace carries
+    what the frontend needs for the "Upgrade plan" prompt."""
+    subscription = get_active_subscription(db, organization_id)
+    plan = _plan_label(db, subscription)
+    target = country_name(country_code)
+    if used > limit_value:
+        message = (
+            f"Your {plan} plan includes {_countries_phrase(limit_value)} and your organization already has {used}. "
+            f"Your existing countries keep working, but {target} can't be added until you upgrade your plan "
+            f"or remove {_countries_phrase(used - limit_value + 1)}."
+        )
+    else:
+        message = (
+            f"Your {plan} plan includes {_countries_phrase(limit_value)} and all are in use. "
+            f"Upgrade your plan to add {target}."
+        )
+    return ForbiddenException(message, trace={
+        "resource": MAX_JURISDICTIONS,
+        "reason": COUNTRY_LIMIT_REACHED,
+        "country_code": country_code,
+        "limit_value": limit_value,
+        "used": used,
+        "over_limit_by": max(used - limit_value, 0),
+        "plan_code": _current_plan_code(db, subscription),
+        "upgrade_path": UPGRADE_PATH,
+    })
+
+
+def _require_country_slot(db: Session, organization_id: int, country_code: Optional[str],
+                          rows: list[OrganizationJurisdiction]) -> None:
+    """Raise unless the org can take one more country. Independent of
+    BILLING_ENFORCEMENT_MODE: the country limit is always enforced on add."""
+    limit_value = resolve_country_limit(db, organization_id)
+    used = sum(1 for r in rows if r.status == ACTIVE)
+    if limit_value is not None and used >= limit_value:
+        _audit(db, organization_id, None, "JURISDICTION_ADD_REFUSED", {
+            "country_code": country_code, "used": used, "limit_value": limit_value,
+        })
+        db.commit()
+        raise country_limit_error(db, organization_id, country_code, used, limit_value)
+
+
 def add_entitled_country(db: Session, current_user, country_code) -> dict:
     """Any country in the fixed payroll catalog can be added, within the
     plan's max_jurisdictions (counting the primary) and unless dunning
-    restricts expansion. A country whose statutory set-up isn't complete
-    (the onboarding check) is still added — recorded with that note and
-    shown as "set-up pending"; its payroll uses the default rates."""
+    restricts expansion. The limit is enforced in every billing enforcement
+    mode (403 with an upgrade trace). A country whose statutory set-up isn't
+    complete (the onboarding check) is still added — recorded with that note
+    and shown as "set-up pending"; its payroll uses the default rates."""
     organization_id = current_user.organization_id
     code = _require_code(country_code)
     require_not_dunning_restricted(DunningStage.RESTRICT_EXPANSION.value)(current_user=current_user, db=db)
@@ -723,7 +870,7 @@ def add_entitled_country(db: Session, current_user, country_code) -> dict:
     setup_note = _onboarding_block_reason(db, organization_id, code)
 
     used = sum(1 for r in rows if r.status == ACTIVE)
-    require_scope_limit(MAX_JURISDICTIONS, requested_qty=used + 1)(current_user=current_user, db=db)
+    _require_country_slot(db, organization_id, code, rows)
 
     has_primary = any(r.is_primary for r in rows)
     if row is None:
@@ -863,9 +1010,9 @@ def sync_primary_with_default_country(db: Session, organization_id: int, raw_cou
                                       actor_user_id: Optional[int] = None) -> None:
     """Compliance > Company Details' one-time jurisdiction choice
     (payroll.service.update_company_details) sets the default country; the
-    primary ledger row follows it. Under "enforce", choosing a country the
-    org isn't entitled to while at its limit is refused the same way an
-    employee write would be. Does not commit."""
+    primary ledger row follows it. Choosing a country the org doesn't have
+    while it is at its limit is an add, so it is refused like one (every
+    enforcement mode). Does not commit."""
     code = normalize_country_code(raw_country)
     if code is None:
         return
@@ -877,8 +1024,8 @@ def sync_primary_with_default_country(db: Session, organization_id: int, raw_cou
     if row is None or row.status != ACTIVE:
         limit_value = resolve_country_limit(db, organization_id)
         used = sum(1 for r in rows if r.status == ACTIVE)
-        if _enforcement_mode() == "enforce" and limit_value is not None and used >= limit_value:
-            raise _not_entitled_error(db, organization_id, code, rows)
+        if limit_value is not None and used >= limit_value:
+            raise country_limit_error(db, organization_id, code, used, limit_value)
         row = ensure_country_row(db, organization_id, code, actor_user_id=actor_user_id)
     if not row.is_primary:
         if primary is not None:
@@ -923,17 +1070,24 @@ def org_country_usage(db: Session, organization_id: int) -> dict:
     """Read-only (never seeds): used/limit/over-limit counts for the
     Subscriptions & Billing table."""
     rows = _rows(db, organization_id)
+    used = sum(1 for r in rows if r.status == ACTIVE)
+    limit_value = resolve_country_limit(db, organization_id)
+    paused = sum(1 for r in rows if r.status == OVER_LIMIT)
     return {
-        "countries_used": sum(1 for r in rows if r.status == ACTIVE),
-        "countries_limit": resolve_country_limit(db, organization_id),
-        "countries_over_limit": sum(1 for r in rows if r.status == OVER_LIMIT),
+        "countries_used": used,
+        "countries_limit": limit_value,
+        # Countries above the limit: legacy paused (OVER_LIMIT) rows plus
+        # ACTIVE countries beyond the limit after an unrefusable change.
+        "countries_over_limit": paused + (0 if limit_value is None else max(used - limit_value, 0)),
     }
 
 
 def find_country_limit_exceptions(db: Session) -> list[dict]:
-    """Orgs with OVER_LIMIT rows, more ACTIVE rows than their limit, or
-    employees in a country that is not ACTIVE-entitled. Aggregate counts
-    per country only — no employee-level data."""
+    """Orgs for Super Admin review: more ACTIVE countries than their limit
+    (an unrefusable or overridden downgrade — they can't add more), legacy
+    OVER_LIMIT rows, or employees in a country that is not ACTIVE-entitled.
+    Each carries the latest review flag (when and why). Aggregate counts per
+    country only — no employee-level data."""
     from app.modules.organizations.models import Organization
 
     ledger: dict = {}
@@ -963,5 +1117,15 @@ def find_country_limit_exceptions(db: Session) -> list[dict]:
                 "countries_limit": limit_value,
                 "over_limit_countries": over_limit,
                 "unentitled_employee_countries": unentitled,
+                "review_reason": _review_reason(db, org_id),
             })
     return result
+
+
+def _review_reason(db: Session, organization_id: int) -> Optional[dict]:
+    flag = _latest_review_flag(db, organization_id)
+    if flag is None:
+        return None
+    payload = flag.payload or {}
+    return {"at": flag.created_at.isoformat() if flag.created_at else None, "reason": payload.get("reason"),
+            "used": payload.get("used"), "limit_value": payload.get("limit_value")}

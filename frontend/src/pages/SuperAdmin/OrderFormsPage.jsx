@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import CountryLimitOverrideDialog from "../../components/superAdmin/CountryLimitOverrideDialog";
+import { isDowngradeBlockedError } from "../../utils/planLimits";
 import {
   AlertTriangle,
   Building2,
@@ -66,6 +68,8 @@ export default function OrderFormsPage() {
   const [orgsLoading, setOrgsLoading] = useState(true);
   const [keyword, setKeyword] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
+  // The 409 error while a refused country-limit downgrade awaits a decision.
+  const [countryLimitBlock, setCountryLimitBlock] = useState(null);
   const [formError, setFormError] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [pendingPayload, setPendingPayload] = useState(null);
@@ -155,22 +159,32 @@ export default function OrderFormsPage() {
     setConfirming(true);
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(override = null) {
     const { payload, org } = pendingPayload;
     setBusy(true);
     try {
-      await createOrderForm(org.organization_id, payload);
+      await createOrderForm(org.organization_id, override
+        ? { ...payload, override_country_limit: true, override_reason: override }
+        : payload);
       addToast?.(
         `Order Form ${payload.contract_reference} recorded for ${org.organization_name}. The org is now commercially active with custom, contract-defined limits.`
       );
       setConfirming(false);
       setPendingPayload(null);
+      setCountryLimitBlock(null);
       setForm(EMPTY_FORM);
       await load();
     } catch (err) {
-      addToast?.(err.message, "error");
+      if (override) throw err; // shown inside the override dialog
       setConfirming(false);
-      setPendingPayload(null);
+      if (isDowngradeBlockedError(err)) {
+        // Fewer negotiated countries than the org has active: offer the
+        // audited Super Admin override (keeps pendingPayload for the retry).
+        setCountryLimitBlock(err);
+      } else {
+        addToast?.(err.message, "error");
+        setPendingPayload(null);
+      }
     } finally {
       setBusy(false);
     }
@@ -178,6 +192,13 @@ export default function OrderFormsPage() {
 
   return (
     <div>
+      {countryLimitBlock && (
+        <CountryLimitOverrideDialog
+          error={countryLimitBlock}
+          onOverride={(reason) => handleSubmit(reason)}
+          onClose={() => { setCountryLimitBlock(null); setPendingPayload(null); }}
+        />
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
@@ -412,7 +433,7 @@ export default function OrderFormsPage() {
             </button>
             <button
               type="button"
-              onClick={handleSubmit}
+              onClick={() => handleSubmit()}
               disabled={busy}
               className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50"
             >

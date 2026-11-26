@@ -18,17 +18,39 @@ function names(codes = []) {
   return codes.map((c) => getCountryNameFromCode(c) || c).join(", ");
 }
 
-// Inline notice: pause warning (with the required confirmation checkbox) and
-// a restore note. Renders nothing when the change touches no countries.
+// Inline notice: a refused downgrade (more active countries than the plan
+// allows — remove some first), plus the legacy pause warning (with its
+// confirmation checkbox) and restore note, which the backend no longer
+// produces. Renders nothing when the change touches no countries.
 export default function PlanChangeCountryNotice({ impact, planName, acknowledged, onAcknowledgedChange, className = "" }) {
   if (!impactNeedsReview(impact)) return null;
   const pause = impact.pause || [];
   const restore = impact.restore || [];
   const keep = impact.keep || [];
   const plan = planName || impact.planCode || "this plan";
+  const blocked = Boolean(impact.blocked);
 
   return (
     <div className={`flex flex-col gap-3 text-left ${className}`}>
+      {blocked && (
+        <div role="alert" className="rounded-[12px] border border-red-300 bg-red-50 px-4 py-3 text-[13px] text-red-900 dark:border-red-700/50 dark:bg-red-900/20 dark:text-red-100" data-testid="plan-change-blocked">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-600" aria-hidden="true" />
+            <div className="min-w-0">
+              <p className="font-semibold">
+                {impact.message || `Your organization has ${(impact.countries || []).length} countries; ${plan} allows ${impact.newLimit}. Remove ${impact.removeCount} to downgrade.`}
+              </p>
+              <p className="mt-1.5 text-[12px]">
+                Remove countries under{" "}
+                <Link to={COMPLIANCE_COUNTRIES_ROUTE} state={COMPLIANCE_COUNTRIES_STATE} className="font-bold underline underline-offset-2">
+                  Compliance &gt; Countries
+                </Link>{" "}
+                ({names(impact.countries || keep)}), then switch plans.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       {pause.length > 0 && (
         <div role="alert" className="rounded-[12px] border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 dark:border-amber-700/50 dark:bg-amber-900/20 dark:text-amber-100">
           <div className="flex items-start gap-2.5">
@@ -76,7 +98,7 @@ export default function PlanChangeCountryNotice({ impact, planName, acknowledged
 // Modal wrapper for plan pickers: shows the notice and continues to checkout
 // only once a pause has been acknowledged.
 export function PlanChangeCountryDialog({ impact, planName, acknowledged, onAcknowledgedChange, onConfirm, onClose, busy }) {
-  const blocked = impactPausesCountries(impact) && !acknowledged;
+  const blocked = Boolean(impact?.blocked) || (impactPausesCountries(impact) && !acknowledged);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="plan-change-country-title">
       <div className="w-full max-w-lg rounded-xl bg-surface p-6 shadow-lg">

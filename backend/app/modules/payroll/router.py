@@ -2989,6 +2989,17 @@ def list_available_reports(
 
 
 @payroll_router.get(
+    "/report-templates/catalog",
+    summary="Per payroll country: every Published/Active statutory form (Super Admin's report templates) with years and due dates",
+)
+def get_report_catalog(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return service.list_report_catalog_for_org(db, current_user.organization_id)
+
+
+@payroll_router.get(
     "/report-templates/applicable", response_model=ApplicableTemplateResponse, response_model_by_alias=True,
     summary="Resolve the applicable Published/Active template for a jurisdiction+year+report, plus generation validation for a run",
 )
@@ -3053,11 +3064,13 @@ def list_generated_reports(
     payrollRunId: Optional[int] = Query(None),
     reportType: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    country: Optional[str] = Query(None, description="Only reports for this payroll country (ISO code)"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     return service.get_generated_reports(
         db, current_user.organization_id, payroll_run_id=payrollRunId, report_type=reportType, status=status,
+        country=country,
     )
 
 
@@ -4925,10 +4938,12 @@ def dashboard_trend(
     months: int = Query(6, ge=1, le=24),
     year: Optional[int] = Query(None, ge=2020, le=2099, description="Center trend around this year"),
     month: Optional[int] = Query(None, ge=1, le=12, description="Center trend around this month"),
+    country: Optional[str] = Query(None, description="One payroll country (ISO code): its payslips only, in its currency"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_dashboard_trend(db, current_user.organization_id, months=months, year=year, month=month)
+    return service.get_dashboard_trend(db, current_user.organization_id, months=months, year=year, month=month,
+                                       country=country)
 
 
 @payroll_router.get(

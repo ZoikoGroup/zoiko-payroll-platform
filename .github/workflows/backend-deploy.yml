@@ -73,8 +73,8 @@ jobs:
   # unchecked. Needs zero configured secrets: tests/conftest.py's `db`
   # fixture is an isolated in-memory SQLite database per test, and
   # app/config.py's fail-closed guards only fire outside a "development"
-  # environment, which a bare CI runner (no ENVIRONMENT/APP_ENV set,
-  # DEBUG defaulting to True) satisfies on its own.
+  # environment, which a bare CI runner satisfies because tests/conftest.py
+  # sets DEBUG=true for the suite (config.py's own default is false).
   test:
     runs-on: ubuntu-latest
     steps:

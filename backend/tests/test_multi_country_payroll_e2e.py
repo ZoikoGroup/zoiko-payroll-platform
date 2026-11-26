@@ -348,6 +348,20 @@ def test_09_dashboard_breaks_the_month_down_per_country(client, headers):
     assert {c: row["currency"] for c, row in by_country.items()} == {"IN": "INR", "US": "USD", "UK": "GBP"}
     for code, item in _STATE["items"].items():
         assert Decimal(str(by_country[code]["totalNet"])) == item.net_pay
+        assert Decimal(str(by_country[code]["totalDeductions"])) == Decimal(str(item.total_deductions or 0))
+    # The dashboard's own currency is the primary country's — never a default USD —
+    # and the top-level totals are flagged as mixing currencies.
+    body = r.json()
+    assert (body["defaultCountry"], body["currency"], body["mixedCurrencies"]) == ("IN", "INR", True)
+
+
+def test_09b_dashboard_trend_for_one_country_is_in_that_currency(client, headers):
+    r = client.get("/api/payroll/dashboard/trend", headers=headers,
+                   params={"year": 2026, "month": 1, "months": 1, "country": "UK"})
+    assert r.status_code == 200, r.text
+    (point,) = r.json()
+    assert (point["country"], point["currency"]) == ("UK", "GBP")
+    assert Decimal(str(point["net"])) == _STATE["items"]["UK"].net_pay
 
 
 def test_10_statutory_reports_cover_every_country_and_only_that_countrys_employees(client, headers):
@@ -426,7 +440,8 @@ def test_12_subscription_shows_country_usage_and_downgrade_impact(client, header
     assert usage["used"] == 3 and usage["limit"] == 3
     assert [c["code"] for c in usage["countries"]] == ["IN", "US", "UK"]
 
-    # A Core plan (1 country) would keep India and pause the US and UK.
+    # Switching to Core (1 country) with three in use is refused until two are
+    # removed — the impact says so up front; nothing is ever paused.
     core = plan_catalog.create_plan(_db, "CORE", "Core", actor_user_id=_super.id)
     core_flags = {**_PRO_FLAGS, MAX_JURISDICTIONS: 1}
     cv = plan_catalog.create_plan_version(_db, plan_id=core.id, feature_set={"features": list(core_flags)},
@@ -439,8 +454,10 @@ def test_12_subscription_shows_country_usage_and_downgrade_impact(client, header
     r = client.get("/api/billing/plan-change-impact", headers=headers, params={"plan_code": "CORE"})
     assert r.status_code == 200, r.text
     impact = r.json()
-    assert impact["newLimit"] == 1 and impact["keep"] == ["IN"] and impact["pause"] == ["US", "UK"]
-    assert plan_change_impact(_db, _ORG_ID, "PROFESSIONAL")["pause"] == []
+    assert impact["newLimit"] == 1 and impact["keep"] == ["IN", "US", "UK"] and impact["pause"] == []
+    assert impact["overLimitBy"] == 2 and impact["blocked"] is True and impact["removeCount"] == 2
+    assert impact["message"].startswith("Your organization has 3 countries; the Core plan allows 1.")
+    assert plan_change_impact(_db, _ORG_ID, "PROFESSIONAL")["overLimitBy"] == 0
 
 
 def test_13_preview_rows_name_the_country_engine_used(client, headers):

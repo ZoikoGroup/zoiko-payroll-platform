@@ -355,6 +355,18 @@ _db.flush()
 
 _db.commit()
 
+# This file's own app.* modules (bound to its SQLite file). Its tests must run
+# against them: app code imports lazily (main.py's lifespan does
+# `from app.database import ...`), and that resolves through sys.modules AT
+# RUN TIME. Restoring another file's app.database there bound the lifespan to
+# the URL in backend/.env, so the whole file errored at setup whenever an
+# earlier test file had imported app.* — see _own_app_modules below.
+_fresh_app_modules = {
+    _mod: _module
+    for _mod, _module in sys.modules.items()
+    if _mod == "app" or _mod.startswith("app.")
+}
+
 # Restore pre-purge app modules so other test files don't get class-identity conflicts
 for _mod in list(sys.modules):
     if _mod == "app" or _mod.startswith("app."):
@@ -363,7 +375,29 @@ sys.modules.update(_saved_app_modules)
 del _saved_app_modules
 
 
+def _app_module_names():
+    return [m for m in sys.modules if m == "app" or m.startswith("app.")]
+
+
 # ── Fixtures ───────────────────────────────────────────────────────────────
+
+@pytest.fixture(scope="module", autouse=True)
+def _own_app_modules():
+    """While this file's tests run, sys.modules holds THIS file's app.*
+    modules (so lazy imports inside the app resolve to the same database and
+    classes as `app`); afterwards every other test file's modules are put
+    back exactly as they were."""
+    outside = {m: sys.modules[m] for m in _app_module_names()}
+    for m in outside:
+        del sys.modules[m]
+    sys.modules.update(_fresh_app_modules)
+    try:
+        yield
+    finally:
+        for m in _app_module_names():
+            del sys.modules[m]
+        sys.modules.update(outside)
+
 
 @pytest.fixture(scope="module")
 def client():

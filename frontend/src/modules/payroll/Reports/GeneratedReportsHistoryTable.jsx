@@ -3,13 +3,17 @@ import { Download, Eye, CheckCircle2, AlertTriangle, FileArchive } from "lucide-
 import { getGeneratedReports, downloadReportCertificatesZip } from "../../../service/payrollService";
 import { downloadGeneratedReportAs } from "./templateReportRenderer";
 import { useToast } from "../ToastContext";
+import { getCountryNameFromCode } from "../../../utils/currency";
 
 // Every row's "Template Version" is read verbatim from the stored
 // GeneratedReport record — never re-resolved against whatever template
 // version is currently Active. A report generated against v1.2 keeps
 // showing v1.2 forever, even after Super Admin publishes v1.3 (historical
 // immutability — see backend generate_report_from_template's snapshot).
-export default function GeneratedReportsHistoryTable({ refreshKey, onView }) {
+// country (ISO code) narrows the history to one payroll country; omitted =
+// every country, with a Country column. onDownloaded(report) feeds the
+// Reports page's download counter.
+export default function GeneratedReportsHistoryTable({ refreshKey, onView, country, onDownloaded }) {
   const { addToast } = useToast();
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -18,12 +22,12 @@ export default function GeneratedReportsHistoryTable({ refreshKey, onView }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getGeneratedReports();
+      const data = await getGeneratedReports(country ? { country } : {});
       setReports(Array.isArray(data) ? data : []);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [country]);
 
   useEffect(() => { load(); }, [load, refreshKey]);
 
@@ -31,6 +35,7 @@ export default function GeneratedReportsHistoryTable({ refreshKey, onView }) {
     setDownloadingId(`${report.id}-${format}`);
     try {
       downloadGeneratedReportAs(report, format);
+      onDownloaded?.(report);
     } catch {
       addToast?.("Failed to download report.", "error");
     } finally {
@@ -45,6 +50,7 @@ export default function GeneratedReportsHistoryTable({ refreshKey, onView }) {
     setDownloadingId(`${report.id}-zip`);
     try {
       await downloadReportCertificatesZip(report.id);
+      onDownloaded?.(report);
     } catch {
       addToast?.("Failed to download certificates.", "error");
     } finally {
@@ -59,8 +65,10 @@ export default function GeneratedReportsHistoryTable({ refreshKey, onView }) {
   if (reports.length === 0) {
     return (
       <div className="py-12 text-center">
-        <p className="text-[15px] font-bold text-foreground">No reports generated yet</p>
-        <p className="text-[13px] text-foreground-muted mt-1">Use the Generate Report panel above to produce your first statutory report.</p>
+        <p className="text-[15px] font-bold text-foreground">
+          No reports generated yet{country ? ` for ${getCountryNameFromCode(country) || country}` : ""}
+        </p>
+        <p className="text-[13px] text-foreground-muted mt-1">Generate a statutory form from its tab above to produce your first report.</p>
       </div>
     );
   }
@@ -71,6 +79,7 @@ export default function GeneratedReportsHistoryTable({ refreshKey, onView }) {
         <thead>
           <tr className="border-b border-border">
             <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Report</th>
+            {!country && <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Country</th>}
             <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Period</th>
             <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Template Version</th>
             <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-foreground-muted">Status</th>
@@ -84,6 +93,9 @@ export default function GeneratedReportsHistoryTable({ refreshKey, onView }) {
             return (
               <tr key={r.id} className="hover:bg-background dark:hover:bg-surface-muted transition-colors duration-150">
                 <td className="px-4 py-3 font-semibold text-foreground">{r.reportType}</td>
+                {!country && (
+                  <td className="px-4 py-3 text-foreground-muted">{getCountryNameFromCode(r.jurisdictionCountry) || r.jurisdictionCountry || "—"}</td>
+                )}
                 <td className="px-4 py-3 text-foreground-muted">{r.reportingPeriod || "—"}</td>
                 <td className="px-4 py-3 text-foreground-muted">v{r.templateVersion}</td>
                 <td className="px-4 py-3">

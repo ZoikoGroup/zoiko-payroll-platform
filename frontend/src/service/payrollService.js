@@ -14,7 +14,7 @@ export const getCompanyProfile = async () => {
     const currencyInfo = getCurrencyForCountry(jurisdiction);
     return {
       ...company,
-      currency: currencyInfo?.code || "USD",
+      currency: currencyInfo?.code || null,  // unknown country: no currency, never a guessed USD
     };
   } catch {
     return null;
@@ -241,15 +241,20 @@ export const getDashboardSummary = async ({ year, month } = {}) => {
     if (month) params.month = month;
     return await api.get("/api/payroll/dashboard/summary", { params });
   } catch {
-    return { totalPayrollCost: 0, headcount: 0, activeCount: 0, pendingApprovals: 0, totalGross: 0, totalTaxes: 0, totalNet: 0 };
+    // `unavailable` lets the cards say the figures could not be loaded instead
+    // of presenting zeros as real totals.
+    return { totalPayrollCost: 0, headcount: 0, activeCount: 0, pendingApprovals: 0, totalGross: 0, totalTaxes: 0, totalNet: 0, unavailable: true };
   }
 };
 
-export const getDashboardTrend = async ({ months = 6, year, month } = {}) => {
+// country (ISO code): that country's payslips only, every point in its
+// currency (points then carry `currency`). Omitted: whole runs, all currencies.
+export const getDashboardTrend = async ({ months = 6, year, month, country } = {}) => {
   try {
     const params = { months };
     if (year) params.year = year;
     if (month) params.month = month;
+    if (country) params.country = country;
     const res = await api.get("/api/payroll/dashboard/trend", { params });
     return Array.isArray(res) ? res : [];
   } catch {
@@ -1498,6 +1503,26 @@ export const getApplicableReportTemplate = async (params = {}) => {
   // (backend defaults to the org's default country when omitted).
   // validation is only populated when payrollRunId is passed.
   return await api.get("/api/payroll/report-templates/applicable", { params });
+};
+
+// Per payroll country: every Published/Active statutory form Super Admin
+// configured (payroll_report_templates), with reporting years, generator and
+// Active filing-calendar due dates. Drives /payroll/reports' country tabs.
+// -> { defaultCountry, countries: [{ country, forms: [{ reportType, name, templateKey,
+//      description, regulatoryAuthority, documentScope, generator, years: [{ reportingYear,
+//      templateId, version, status, state }], filingCalendar: [{ reportingYear, periodKey,
+//      periodLabel, dueDate, paymentDueDate }] }] }] }
+export const getReportCatalog = async () => {
+  const res = await api.get("/api/payroll/report-templates/catalog");
+  return { defaultCountry: res?.defaultCountry || null, countries: Array.isArray(res?.countries) ? res.countries : [] };
+};
+
+// Australia SuperStream contribution message for one finalized run.
+export const generateAuSuperstream = async ({ reportTemplateId, payrollRunId }) => {
+  return await api.post("/api/payroll/au/reports/superstream", {
+    report_template_id: reportTemplateId,
+    payroll_run_id: payrollRunId,
+  });
 };
 
 export const generateReport = async (payload) => {

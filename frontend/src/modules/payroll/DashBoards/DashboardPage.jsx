@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Plus, ChevronLeft, ChevronRight, Globe2 } from "lucide-react";
 import StatCards from "./StatCards";
 import CostTrendChart from "./CostTrendChart";
 import BreakdownsChart from "./BreakdownsChart";
@@ -8,6 +9,7 @@ import TrialProgressBar from "./TrialProgressBar";
 import { CALCULATION_MODE_LABELS } from "../../../service/payrollService";
 import { usePayrollSetup } from "../PayrollSetupContext";
 import { useEntitledCountries } from "../EntitledCountriesContext";
+import { getCountryNameFromCode, getCurrencyForJurisdiction } from "../../../utils/currency";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -43,14 +45,42 @@ export default function DashboardPage({ onNewPayrollRun }) {
   // getActivePolicy() on its own mount. Also handles the focus-refresh that
   // used to be duplicated per-page here.
   const { currencyCode, calculationMode } = usePayrollSetup();
-  // Set by StatCards from the summary's byCountry — the trend/breakdown
-  // charts add currencies together when the org pays in several countries.
-  const [mixedCurrencies, setMixedCurrencies] = useState(false);
-  // The trend chart spans many months whatever month is selected, so it
-  // combines currencies whenever the org pays in more than one country —
-  // not only when the selected month happens to be mixed.
-  const { countries: orgCountries } = useEntitledCountries();
-  const chartsMixCurrencies = mixedCurrencies || (orgCountries?.length || 0) > 1;
+  const entitlement = useEntitledCountries();
+  // Server-resolved primary currency (Organization.currency override
+  // included) + whether the period mixes currencies — from the summary.
+  const [summaryMeta, setSummaryMeta] = useState({ currency: null, defaultCountry: null, mixedCurrencies: false });
+  const onSummary = useCallback((meta) => setSummaryMeta(meta), []);
+
+  // Country filter: "ALL" or one active payroll country, kept in ?country=.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeCountries = useMemo(
+    () => (entitlement.loaded ? entitlement.entitledEmployeeCodes : []),
+    [entitlement.loaded, entitlement.entitledEmployeeCodes],
+  );
+  const primaryCountry = summaryMeta.defaultCountry || entitlement.primaryEmployeeCode || activeCountries[0] || null;
+  const countryParam = (searchParams.get("country") || "").toUpperCase();
+  const country = activeCountries.includes(countryParam) ? countryParam : "ALL";
+  const setCountry = (code) => setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    if (code === "ALL") next.delete("country"); else next.set("country", code);
+    return next;
+  }, { replace: true });
+
+  const multiCountry = activeCountries.length > 1 || summaryMeta.mixedCurrencies;
+  // The org's own currency: the server's answer, else the compliance
+  // country's, else the primary country's — never a hardcoded USD.
+  const primaryCurrency = summaryMeta.currency || currencyCode
+    || (primaryCountry ? getCurrencyForJurisdiction(primaryCountry)?.code : null) || null;
+  const currencyFor = (code) => (code === primaryCountry ? primaryCurrency : getCurrencyForJurisdiction(code)?.code || null);
+  // One currency per view: a selected country uses its own; "All" uses the
+  // org's currency when it pays in one country, and otherwise charts the
+  // primary country (amounts in different currencies are never added up).
+  const viewCurrency = country !== "ALL" ? currencyFor(country) : multiCountry ? null : primaryCurrency;
+  const trendCountry = country !== "ALL" ? country : multiCountry ? primaryCountry : null;
+  const trendCurrency = country !== "ALL" ? currencyFor(country) : primaryCurrency;
+  const trendNote = country === "ALL" && multiCountry && primaryCountry
+    ? `${getCountryNameFromCode(primaryCountry) || primaryCountry} (primary) — currencies are never added together; pick a country to see its trend`
+    : country !== "ALL" ? getCountryNameFromCode(country) || country : "";
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -60,7 +90,7 @@ export default function DashboardPage({ onNewPayrollRun }) {
   }, []);
 
   const effectiveFilter = allMonths ? {} : filter;
-  const monthLabel = allMonths ? "All Months" : `${MONTHS[filter.month - 1]} ${filter.year}`;
+  const monthLabel = allMonths ? "All months" : `${MONTHS[filter.month - 1]} ${filter.year}`;
   const isCurrentMonth = allMonths ? false : (() => {
     const now = new Date();
     return filter.year === now.getFullYear() && filter.month === now.getMonth() + 1;
@@ -117,15 +147,38 @@ export default function DashboardPage({ onNewPayrollRun }) {
               )}
             </div>
 
+            {/* Country filter — each country's totals in its own currency */}
+            {activeCountries.length > 0 && (
+              <label className="inline-flex items-center gap-2 rounded-[12px] border border-border bg-surface px-3 py-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+                <Globe2 size={14} className="text-foreground-muted" />
+                <span className="sr-only">Country</span>
+                <select
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                  data-testid="dashboard-country-filter"
+                  className="bg-transparent text-[13px] font-semibold text-foreground focus:outline-none"
+                >
+                  <option value="ALL">All countries</option>
+                  {activeCountries.map((code) => (
+                    <option key={code} value={code}>
+                      {getCountryNameFromCode(code) || code}{currencyFor(code) ? ` (${currencyFor(code)})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
             <button
               onClick={() => setAllMonths((v) => !v)}
+              aria-pressed={allMonths}
+              title="Show every month instead of one"
               className={`inline-flex items-center rounded-[12px] px-4 py-2 text-[13px] font-bold transition-all duration-200 shadow-[0_1px_3px_rgba(0,0,0,0.04)] ${
                 allMonths
                   ? "bg-primary text-white shadow-[0_2px_8px_rgba(25,197,138,0.3)]"
                   : "border border-border bg-surface text-foreground-muted hover:text-primary hover:border-primary"
               }`}
             >
-              All
+              All months
             </button>
 
             <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3.5 py-1.5 text-[11px] font-semibold text-foreground-muted shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
@@ -150,16 +203,16 @@ export default function DashboardPage({ onNewPayrollRun }) {
         <TrialProgressBar />
 
         {/* Stat Cards */}
-        <StatCards filter={effectiveFilter} refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={currencyCode} onMixedCurrenciesChange={setMixedCurrencies} />
+        <StatCards filter={effectiveFilter} refreshTick={refreshTick} calculationMode={calculationMode} country={country} primaryCurrency={primaryCurrency} onSummary={onSummary} />
 
-        {/* Trend Chart — always Jan → current month */}
-        <CostTrendChart refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={currencyCode} mixedCurrencies={chartsMixCurrencies} />
+        {/* Trend Chart — always Jan → current month, always one currency */}
+        <CostTrendChart refreshTick={refreshTick} calculationMode={calculationMode} country={trendCountry} currencyCode={trendCurrency} scopeNote={trendNote} />
 
-        {/* Breakdowns: Department Donut + Pay Type Bar + Deductions */}
-        <BreakdownsChart filter={effectiveFilter} refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={currencyCode} mixedCurrencies={chartsMixCurrencies} />
+        {/* Breakdowns: Department Donut + Pay Type Bar + Deductions (org-wide) */}
+        <BreakdownsChart filter={effectiveFilter} refreshTick={refreshTick} calculationMode={calculationMode} currencyCode={primaryCurrency} mixedCurrencies={multiCountry} />
 
-        {/* Recent Activity */}
-        <RecentActivity filter={effectiveFilter} refreshTick={refreshTick} currencyCode={currencyCode} />
+        {/* Recent Activity — each run shows its own per-country currencies */}
+        <RecentActivity filter={effectiveFilter} refreshTick={refreshTick} currencyCode={viewCurrency || primaryCurrency} />
       </div>
     </div>
   );

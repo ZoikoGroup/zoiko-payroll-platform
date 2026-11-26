@@ -21,6 +21,9 @@ import {
   createBillingPortalSession,
   listMyInvoices,
   getMyInvoiceExplanation,
+  getMyInvoiceDownload,
+  resendMyInvoice,
+  getMyBillingEmailLog,
 } from "../../service/billingService";
 import {
   X,
@@ -41,6 +44,9 @@ import {
   Receipt,
   Percent,
   Globe,
+  Download,
+  Send,
+  Mail,
 } from "lucide-react";
 import { PlanChangeCountryDialog } from "../../components/billing/PlanChangeCountryNotice";
 import { getCountryNameFromCode } from "../../utils/currency";
@@ -512,7 +518,148 @@ function InvoiceExplanationDetail({ invoiceId }) {
   );
 }
 
-function InvoicesPanel() {
+const EMAIL_EVENT_LABELS = {
+  "billing.payment_succeeded": "Payment receipt",
+  "billing.invoice_issued": "Invoice",
+  "billing.payment_failed": "Payment failed",
+  "billing.renewal_upcoming": "Renewal reminder",
+  "commercial.organization_created": "Organization created",
+  "commercial.evaluation_created": "Evaluation created",
+};
+
+const EMAIL_OUTCOME_STYLE = {
+  sent: { label: "Sent", color: "var(--success, #15803d)" },
+  failed: { label: "Failed", color: "var(--danger)" },
+  not_delivered: { label: "Not delivered", color: "var(--warning, #b45309)" },
+  pending: { label: "Pending", color: "var(--ink-faint)" },
+  skipped_duplicate: { label: "Duplicate skipped", color: "var(--ink-faint)" },
+};
+
+function summarizeResend(results) {
+  if (!results?.length) return { ok: false, text: "No billing contact to send to." };
+  const sent = results.filter((r) => r.outcome === "sent").length;
+  if (sent === results.length) {
+    return { ok: true, text: `Sent to ${[...new Set(results.map((r) => r.recipient))].join(", ")}.` };
+  }
+  const problem = results.find((r) => r.outcome !== "sent");
+  return { ok: false, text: `${sent} of ${results.length} sent. ${problem?.error || problem?.outcome || ""}`.trim() };
+}
+
+function InvoiceActions({ invoice, onResent }) {
+  const [busy, setBusy] = useState(null);
+  const [note, setNote] = useState(null);
+
+  const download = async (e) => {
+    e.stopPropagation();
+    setBusy("download");
+    setNote(null);
+    try {
+      const links = await getMyInvoiceDownload(invoice.id);
+      window.open(links.pdfUrl || links.hostedUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setNote({ ok: false, text: err.message || "The invoice PDF is not available." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const resend = async (e, kind) => {
+    e.stopPropagation();
+    setBusy(kind);
+    setNote(null);
+    try {
+      const { results } = await resendMyInvoice(invoice.id, kind);
+      setNote(summarizeResend(results));
+      onResent?.();
+    } catch (err) {
+      setNote({ ok: false, text: err.message || "Could not resend." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const paid = invoice.status === "PAID";
+  const spinner = <Loader2 size={14} className="animate-spin" />;
+  return (
+    <div style={{ padding: "4px 24px 12px", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+      <button className="btn btn-ghost" onClick={download} disabled={!!busy} data-testid={`invoice-download-${invoice.id}`}>
+        {busy === "download" ? spinner : <Download size={14} />} Download PDF
+      </button>
+      <button
+        className="btn btn-ghost"
+        onClick={(e) => resend(e, paid ? "invoice" : "both")}
+        disabled={!!busy}
+        data-testid={`invoice-resend-${invoice.id}`}
+      >
+        {busy === "invoice" || busy === "both" ? spinner : <Send size={14} />}
+        {paid ? " Resend invoice" : " Resend payment notice"}
+      </button>
+      {paid && (
+        <button className="btn btn-ghost" onClick={(e) => resend(e, "receipt")} disabled={!!busy}>
+          {busy === "receipt" ? spinner : <Receipt size={14} />} Resend receipt
+        </button>
+      )}
+      {note && (
+        <span style={{ fontSize: 12, color: note.ok ? "var(--success, #15803d)" : "var(--danger)" }}>{note.text}</span>
+      )}
+    </div>
+  );
+}
+
+function EmailLogPanel({ refreshKey }) {
+  const [emails, setEmails] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    getMyBillingEmailLog(50)
+      .then((data) => { setEmails(data.emails || []); setError(null); })
+      .catch((err) => setError(err.message || "Could not load the email log."))
+      .finally(() => setLoading(false));
+  }, [refreshKey]);
+
+  return (
+    <div className="glass rise" style={{ animationDelay: ".24s", marginBottom: 16 }} data-testid="billing-email-log">
+      <div className="panel-head">
+        <div className="panel-icon icon-violet">
+          <Mail size={16} />
+        </div>
+        <div>
+          <p className="panel-title">Email log</p>
+          <p className="panel-sub">Welcome, receipt, invoice and payment emails sent for this organization</p>
+        </div>
+      </div>
+      {loading ? (
+        <p style={{ padding: "0 24px 20px", color: "var(--ink-faint)", fontSize: 13 }}>Loading email log…</p>
+      ) : error ? (
+        <p style={{ padding: "0 24px 20px", color: "var(--danger)", fontSize: 13 }}>{error}</p>
+      ) : emails.length === 0 ? (
+        <p style={{ padding: "0 24px 20px", color: "var(--ink-faint)", fontSize: 13 }}>No billing emails have been sent yet.</p>
+      ) : (
+        <div className="rows">
+          {emails.map((e) => {
+            const style = EMAIL_OUTCOME_STYLE[e.outcome] || { label: e.outcome, color: "var(--ink-faint)" };
+            return (
+              <div className="row" key={e.id} title={e.error || ""}>
+                <span className="label">
+                  {EMAIL_EVENT_LABELS[e.eventType] || e.eventType} · {e.recipient}
+                  {e.error && <span style={{ display: "block", fontSize: 11, color: "var(--ink-faint)" }}>{e.error}</span>}
+                </span>
+                <span className="value" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <span style={{ color: style.color, fontWeight: 600 }}>{style.label}</span>
+                  {e.attempts > 1 && <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{e.attempts} attempts</span>}
+                  <span className="mono" style={{ fontSize: 12, color: "var(--ink-faint)" }}>{formatDate(e.createdAt)}</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InvoicesPanel({ canManage = false, onEmailSent }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -562,6 +709,7 @@ function InvoicesPanel() {
                     {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                   </span>
                 </div>
+                {canManage && <InvoiceActions invoice={inv} onResent={onEmailSent} />}
                 {isOpen && <InvoiceExplanationDetail invoiceId={inv.id} />}
               </div>
             );
@@ -576,6 +724,7 @@ export default function SubscriptionPage() {
   const navigate = useNavigate();
   const { role } = useAuth();
   const canManage = role === ROLES.ORG_ADMIN;
+  const [emailLogKey, setEmailLogKey] = useState(0);
   const [subscription, setSubscription] = useState(null);
   const [entitlements, setEntitlements] = useState({});
   const [countryUsage, setCountryUsage] = useState(null);
@@ -975,8 +1124,9 @@ export default function SubscriptionPage() {
               </div>
             </div>
 
-            {/* Invoices — Step 3 */}
-            <InvoicesPanel />
+            {/* Invoices — Step 3 (download / resend for org admins) */}
+            <InvoicesPanel canManage={canManage} onEmailSent={() => setEmailLogKey((k) => k + 1)} />
+            {canManage && <EmailLogPanel refreshKey={emailLogKey} />}
 
             {/* Upgrade CTA — org_admin only */}
             {canManage && !isCancelled && showPlanActions && (

@@ -57,6 +57,22 @@ export const confirmCheckoutSession = (sessionId) =>
 /** Fetch the calling org's own invoices, newest first (Step 3). */
 export const listMyInvoices = () => api.get("/api/billing/my-subscription/invoices");
 
+/** Stripe PDF + hosted-page links for one invoice: { pdfUrl, hostedUrl, number }. Org admin. */
+export const getMyInvoiceDownload = (invoiceId) =>
+  api.get(`/api/billing/my-subscription/invoices/${invoiceId}/download`);
+
+/**
+ * Resend an invoice and/or its payment receipt to the organization's billing
+ * contacts. kind: "both" | "invoice" | "receipt". Returns { results: [{ recipient,
+ * eventType, outcome, error }] } with each recipient's real delivery outcome.
+ */
+export const resendMyInvoice = (invoiceId, kind = "both") =>
+  api.post(`/api/billing/my-subscription/invoices/${invoiceId}/resend`, { kind });
+
+/** Billing + welcome emails sent for this organization: { emails: [...] }. Org admin. */
+export const getMyBillingEmailLog = (limit = 50) =>
+  api.get("/api/billing/my-subscription/email-log", { params: { limit } });
+
 /** Fetch a specific invoice's per-employee explanation (Step 3 / Part 7). */
 export const getMyInvoiceExplanation = (invoiceId) =>
   api.get(`/api/billing/my-subscription/invoice-explanation/${invoiceId}`);

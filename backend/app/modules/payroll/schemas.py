@@ -4446,6 +4446,10 @@ class DashboardSummaryResponse(BaseModel):
     # Per-country totals for the same period, each in its own currency
     # (service._dashboard_country_breakdown).
     byCountry:                   List[dict] = []
+    # Primary country + its currency (org override included); never USD by default.
+    defaultCountry:              Optional[str] = None
+    currency:                    Optional[str] = None
+    mixedCurrencies:             bool = False
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -4455,6 +4459,9 @@ class DashboardTrendPoint(BaseModel):
     gross: Optional[Decimal] = None
     net:   Optional[Decimal] = None
     cost:  Optional[Decimal] = None
+    # Set when the trend was asked for one country (?country=IN).
+    currency: Optional[str] = None
+    country:  Optional[str] = None
 
 
 class RecentActivityItem(BaseModel):

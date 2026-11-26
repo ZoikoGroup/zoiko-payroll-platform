@@ -411,6 +411,12 @@ class BillingEntitlementOverrideCreateRequest(BaseModel):
     reason: str = Field(..., min_length=1)
     expires_at: datetime
 
+    # The change would leave the org with more active countries than the new
+    # limit allows: refused (409) unless a Super Admin overrides it with a
+    # reason, which is written to the billing audit log.
+    override_country_limit: bool = False
+    override_reason: Optional[str] = Field(None, max_length=500)
+
 
 class BillingPriceComponentResponse(BaseModel):
     """One line of a plan's price breakdown, resolved from a PUBLISHED
@@ -524,6 +530,12 @@ class ConvertTrialRequest(BaseModel):
 
     plan_version_id: int = Field(..., gt=0)
 
+    # The change would leave the org with more active countries than the new
+    # limit allows: refused (409) unless a Super Admin overrides it with a
+    # reason, which is written to the billing audit log.
+    override_country_limit: bool = False
+    override_reason: Optional[str] = Field(None, max_length=500)
+
 
 class BillingCheckoutRequest(BaseModel):
     """POST /billing/checkout — tenant-facing checkout request."""
@@ -532,9 +544,9 @@ class BillingCheckoutRequest(BaseModel):
     # (now) for self-service Core/Professional. Never inferred from
     # checkout completing — see Organization.service_commencement_at.
     service_commencement_at: Optional[datetime] = None
-    # A plan with a lower country limit than the org currently uses pauses
-    # the extra countries (OVER_LIMIT). Checkout refuses that change (409)
-    # unless the admin has seen GET /billing/plan-change-impact and confirms.
+    # Legacy, ignored: a plan with fewer countries than the org uses is now
+    # refused outright (409 downgrade_exceeds_country_limit) — remove
+    # countries first. Kept so older clients' requests still validate.
     acknowledge_country_pause: bool = False
 
 
@@ -600,6 +612,12 @@ class EnterpriseOrderFormCreate(BaseModel):
     negotiated_price_terms: dict
     term_start: date
     term_end: Optional[date] = None
+
+    # The change would leave the org with more active countries than the new
+    # limit allows: refused (409) unless a Super Admin overrides it with a
+    # reason, which is written to the billing audit log.
+    override_country_limit: bool = False
+    override_reason: Optional[str] = Field(None, max_length=500)
 
 
 class EnterpriseOrderFormResponse(BaseModel):

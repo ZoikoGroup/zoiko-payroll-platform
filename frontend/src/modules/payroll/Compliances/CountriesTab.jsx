@@ -53,7 +53,7 @@ export default function CountriesTab() {
   const { hasRole } = useAuth();
   const { addToast } = useToast();
   const { refresh: refreshPayrollSetup } = usePayrollSetup();
-  const { countries, limit, used, remaining, planCode, canAdd, addable, catalog, enforcementMode, loaded, loading, error, refresh } =
+  const { countries, limit, used, remaining, overLimitBy, planCode, canAdd, addable, catalog, loaded, loading, error, refresh } =
     useEntitledCountries();
   const canEdit = hasRole([ROLES.ADMIN, ROLES.SUPER_ADMIN]);
   const isSingleCountryPlan = limit === 1;
@@ -67,7 +67,6 @@ export default function CountriesTab() {
 
   const planLabel = planCode ? PLAN_LABEL[planCode] || planCode : null;
   const primary = countries.find((c) => c.isPrimary) || null;
-  const overLimitCount = countries.filter((c) => c.status === "OVER_LIMIT").length;
   const countSummary = limit == null
     ? `${used} ${used === 1 ? "country" : "countries"} · unlimited`
     : `${used} of ${limit} ${limit === 1 ? "country" : "countries"}`;
@@ -198,32 +197,27 @@ export default function CountriesTab() {
             {isSingleCountryPlan ? <RefreshCcw size={14} /> : <Plus size={14} />}
             {addLabel}
           </button>
-          {!isSingleCountryPlan && !canAdd && (
-            <p className="max-w-xs text-right text-[11px] text-foreground-muted">
+          {!isSingleCountryPlan && !canAdd && overLimitBy === 0 && (
+            <p className="max-w-xs text-right text-[11px] text-foreground-muted" data-testid="country-limit-reached">
               <Lock size={11} className="inline -mt-0.5 mr-1" />
               Your {planLabel ? `${planLabel} ` : ""}plan includes {limit} {limit === 1 ? "country" : "countries"} and all are in use.{" "}
               <Link to={PLAN_SELECTION_ROUTE} className="font-bold text-primary hover:text-primary-hover hover:underline">
-                Upgrade to add more
+                Upgrade plan
               </Link>
             </p>
           )}
         </div>
       </div>
 
-      {enforcementMode === "warn" && (
-        <div className="bg-info/5 border border-info/15 rounded-[14px] px-4 py-3 text-[13px] text-foreground-muted">
-          Country limits are currently shown as warnings only — they will be enforced soon.
-        </div>
-      )}
-
-      {overLimitCount > 0 && (
-        <div className="bg-warning/5 border border-warning/15 rounded-[14px] px-4 py-3 text-[13px] text-foreground-muted flex items-start gap-2">
+      {overLimitBy > 0 && (
+        <div role="alert" className="bg-warning/5 border border-warning/30 rounded-[14px] px-4 py-3 text-[13px] text-foreground-muted flex items-start gap-2" data-testid="country-over-limit-banner">
           <AlertTriangle size={14} className="text-warning mt-0.5 shrink-0" />
           <span>
-            {overLimitCount === 1 ? "One country is" : `${overLimitCount} countries are`} over your plan&apos;s country limit.
-            Existing employees there are kept, but <strong>new employees and payroll in {overLimitCount === 1 ? "that country" : "those countries"} are paused</strong> until
-            you <Link to={PLAN_SELECTION_ROUTE} className="font-bold text-primary hover:text-primary-hover hover:underline">upgrade your plan</Link> or
-            remove another country.
+            Your organization has <strong>{used} countries</strong> but your {planLabel ? `${planLabel} ` : ""}plan
+            includes {limit} {limit === 1 ? "country" : "countries"}. All your existing countries, employees and payroll keep
+            working — you just can&apos;t add a new country until you{" "}
+            <Link to={PLAN_SELECTION_ROUTE} className="font-bold text-primary hover:text-primary-hover hover:underline">upgrade your plan</Link>{" "}
+            or remove {overLimitBy === 1 ? "one country" : `${overLimitBy} countries`}.
           </span>
         </div>
       )}
@@ -275,11 +269,6 @@ export default function CountriesTab() {
               {c.setupNote && !overLimit && (
                 <p className="text-[11px] text-warning">
                   Statutory set-up pending — payroll in {c.name} uses the default rates until Zoiko completes it.
-                </p>
-              )}
-              {overLimit && (
-                <p className="text-[11px] text-warning">
-                  Over your plan&apos;s limit — new employees and payroll in {c.name} are paused until you upgrade.
                 </p>
               )}
               {!c.isPrimary && !isSingleCountryPlan && (

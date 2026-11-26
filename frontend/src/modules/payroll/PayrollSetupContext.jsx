@@ -38,7 +38,11 @@ export function PayrollSetupProvider({ children }) {
 
   const company = compliance?.company || null;
   const jurisdiction = company?.jurisdictionCountry || company?.jurisdiction_country || "";
-  const currencyCode = getCurrencyForCountry(jurisdiction)?.code || "USD";
+  // The org's own (default-country) currency. null — never a guessed "USD" —
+  // while compliance details load or when no country is set; formatters then
+  // show the bare number and screens that know better (the dashboard's
+  // server-resolved currency, a row's own currency) supply the code.
+  const currencyCode = getCurrencyForCountry(jurisdiction)?.code || null;
   const calculationMode = policy?.calculationMode || "standard";
 
   const value = { policy, compliance, company, calculationMode, currencyCode, loading, refresh };

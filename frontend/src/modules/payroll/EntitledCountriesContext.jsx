@@ -56,6 +56,9 @@ export function EntitledCountriesProvider({ children }) {
       catalog: data?.catalog || [],
       // How many more countries the plan allows (null = unlimited).
       remaining: data ? data.remaining ?? null : null,
+      // Countries above the plan limit (after a downgrade): all keep working,
+      // none can be added until this is 0.
+      overLimitBy: data?.overLimitBy ?? 0,
       enforcementMode: data?.enforcementMode || "off",
       // true once a payload has arrived — consumers fall back to their
       // pre-entitlement behaviour (every country) until then or on error.

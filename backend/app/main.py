@@ -130,6 +130,15 @@ async def lifespan(app: FastAPI):
             ", ".join(missing_checkout_config),
         )
 
+    # Email that cannot reach a real inbox used to fail silently (mock or
+    # blocked sends logged as success). Say so once, loudly, at startup.
+    try:
+        from app.services.email_service import email_delivery_problems
+        for problem in email_delivery_problems():
+            logger.error("[startup] Email delivery: %s", problem)
+    except Exception:  # noqa: BLE001
+        logger.exception("[startup] could not check email delivery configuration")
+
     logger.info("Zoiko Payroll Platform backend is ready.")
     yield
     stop_token_cleanup_scheduler()

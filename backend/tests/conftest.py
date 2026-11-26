@@ -39,6 +39,10 @@ os.environ.setdefault("MFA_ENFORCEMENT", "enforce")
 # themselves. Pinned here so a developer's backend/.env (e.g. a local
 # MX_TENANT_ONBOARDING_ENABLED=true) never changes what the suite sees.
 os.environ.setdefault("MX_TENANT_ONBOARDING_ENABLED", "false")
+# DEBUG defaults to false in app/config.py (production-safe). The suite runs
+# as a local/development process, as it always has (a bare CI runner has no
+# ENVIRONMENT and no .env): set it explicitly instead of relying on a default.
+os.environ.setdefault("DEBUG", "true")
 
 import pytest
 from sqlalchemy import event as _sa_event

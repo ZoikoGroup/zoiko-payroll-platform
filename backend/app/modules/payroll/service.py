@@ -12850,6 +12850,114 @@ def list_available_reports_for_org(db: Session, organization_id: int, reporting_
     return [{"reportType": rt, "name": name, "country": country} for (country, rt), name in ordered]
 
 
+# Report types with their own Org Admin generate panel on /payroll/reports.
+# Everything else that the generic payslip-column generator can render uses
+# the generic run-based panel; types it refuses get a pointer to their own
+# workspace instead of a Generate button that would only fail.
+_CATALOG_GENERATORS = {
+    ("IN", "FORM_138"): "in_form_138",
+    ("IN", "FORM_130"): "in_form_130",
+    ("IN", "FORM_123"): "in_form_123",
+    ("AU", "SUPERSTREAM"): "au_superstream",
+}
+
+
+def _catalog_generator(country: str, report_type: str) -> str:
+    if (country, report_type) in _CATALOG_GENERATORS:
+        return _CATALOG_GENERATORS[(country, report_type)]
+    if country == "SG":
+        from app.modules.payroll.engine.jurisdictions.singapore.statutory_summary import (
+            SG_DEDICATED_GENERATOR_REPORT_TYPES,
+        )
+
+        if report_type in SG_DEDICATED_GENERATOR_REPORT_TYPES:
+            return "dedicated"
+    if (country == "HK" and report_type in _HK_DEDICATED_GENERATOR_REPORT_TYPES) or \
+            (country == "MX" and report_type in MX_DEDICATED_GENERATOR_REPORT_TYPES) or \
+            (country == "CH" and report_type == _switzerland_service.CH_LOHNAUSWEIS_REPORT_TYPE) or \
+            (country == "AU" and report_type == "AU_PAYROLL_TAX_RETURN"):
+        return "dedicated"
+    return "generic_run"
+
+
+def list_report_catalog_for_org(db: Session, organization_id: int) -> dict:
+    """Org-facing statutory form catalog for /payroll/reports, per payroll
+    country: every form Super Admin has Published/Active in
+    payroll_report_templates (the same rows Super Admin → Report Templates
+    edits), each with its available reporting years and its Active filing
+    calendar (due dates). A form Super Admin drafts, archives or supersedes
+    without a Published/Active successor drops out on the next load — no
+    frontend list to keep in sync."""
+    company = db.query(CompanyComplianceDetails).filter(CompanyComplianceDetails.organization_id == organization_id).first()
+    default_country, countries = _org_report_countries(db, organization_id)
+    state = getattr(company, "jurisdiction_state", None) or None
+    out = {c: [] for c in countries}
+    if not countries:
+        return {"defaultCountry": default_country, "countries": []}
+
+    templates = (
+        db.query(ReportTemplate)
+        .filter(
+            ReportTemplate.jurisdiction_country.in_(countries),
+            ReportTemplate.status.in_(["Published", "Active"]),
+        )
+        .order_by(ReportTemplate.reporting_year.desc(), ReportTemplate.updated_at.desc())
+        .all()
+    )
+    calendar = (
+        db.query(StatutoryFilingCalendar)
+        .filter(StatutoryFilingCalendar.jurisdiction_country.in_(countries), StatutoryFilingCalendar.status == "Active")
+        .order_by(StatutoryFilingCalendar.due_date.asc())
+        .all()
+    )
+    forms = {}
+    for t in templates:
+        # A state-scoped template belongs to the org only for its default
+        # country's own state; other states' forms are another employer's.
+        if t.jurisdiction_state and not (t.jurisdiction_country == default_country and t.jurisdiction_state == state):
+            continue
+        key = (t.jurisdiction_country, t.report_type)
+        form = forms.get(key)
+        if form is None:
+            form = forms[key] = {
+                "country": t.jurisdiction_country,
+                "reportType": t.report_type,
+                "templateKey": t.template_key,
+                "name": t.name,
+                "description": t.description,
+                "regulatoryAuthority": t.regulatory_authority,
+                "documentScope": t.document_scope or "AGGREGATE",
+                "generator": _catalog_generator(t.jurisdiction_country, t.report_type),
+                "years": [],
+                "filingCalendar": [],
+            }
+            out.setdefault(t.jurisdiction_country, []).append(form)
+        year = next((y for y in form["years"] if y["reportingYear"] == t.reporting_year), None)
+        # Active beats Published for the same year (get_applicable_report_template's rule).
+        if year is None:
+            form["years"].append({"reportingYear": t.reporting_year, "templateId": t.id, "version": t.version,
+                                  "status": t.status, "state": t.jurisdiction_state})
+        elif year["status"] != "Active" and t.status == "Active":
+            year.update(templateId=t.id, version=t.version, status=t.status, state=t.jurisdiction_state)
+    for row in calendar:
+        if row.jurisdiction_state and not (row.jurisdiction_country == default_country and row.jurisdiction_state == state):
+            continue
+        form = forms.get((row.jurisdiction_country, row.report_type))
+        if form is not None:
+            form["filingCalendar"].append({
+                "reportingYear": row.reporting_year, "periodKey": row.period_key, "periodLabel": row.period_label,
+                "dueDate": row.due_date.isoformat() if row.due_date else None,
+                "paymentDueDate": row.payment_due_date.isoformat() if row.payment_due_date else None,
+            })
+    return {
+        "defaultCountry": default_country,
+        "countries": [
+            {"country": c, "forms": sorted(out.get(c, []), key=lambda f: (f["name"] or f["reportType"]))}
+            for c in countries
+        ],
+    }
+
+
 def _org_report_countries(db: Session, organization_id: int) -> Tuple[Optional[str], List[str]]:
     """(default country, every country the org pays employees in — default
     first). Reports, filing calendars and report validation cover all of
@@ -20860,9 +20968,11 @@ def _attach_document_scope(db: Session, rows: List[GeneratedReport]) -> List[Gen
 
 def get_generated_reports(
     db: Session, organization_id: int, payroll_run_id: Optional[int] = None,
-    report_type: Optional[str] = None, status: Optional[str] = None,
+    report_type: Optional[str] = None, status: Optional[str] = None, country: Optional[str] = None,
 ) -> List[GeneratedReport]:
     query = db.query(GeneratedReport).filter(GeneratedReport.organization_id == organization_id)
+    if country:
+        query = query.filter(GeneratedReport.jurisdiction_country == _normalize_country(country))
     if payroll_run_id:
         query = query.filter(GeneratedReport.payroll_run_id == payroll_run_id)
     if report_type:
@@ -39814,6 +39924,8 @@ def get_dashboard_summary(db: Session, organization_id: int = None, year: int = 
         change_pct = None
         window = (all_start, all_end)
 
+    by_country = _dashboard_country_breakdown(db, organization_id, *window)
+    default_country = _resolve_org_country(db, organization_id) if organization_id else None
     return {
         "totalPayrollCost": total_net,
         "totalPayrollCostChangePct": change_pct,
@@ -39828,7 +39940,15 @@ def get_dashboard_summary(db: Session, organization_id: int = None, year: int = 
         "pendingApprovals": pending_approvals,
         # Multi-country orgs: the totals above add every currency together;
         # this is the same period per country, each in its own currency.
-        "byCountry": _dashboard_country_breakdown(db, organization_id, *window),
+        "byCountry": by_country,
+        # The org's primary (default-country) currency, Organization.currency
+        # override included — what a single-country dashboard is shown in.
+        # Never a hardcoded USD.
+        "defaultCountry": default_country,
+        "currency": _country_currency_code(db, organization_id, default_country, default_country) if default_country else None,
+        # True when the period's payslips span more than one currency: the
+        # top-level totals above are then NOT a meaningful single figure.
+        "mixedCurrencies": len({c["currency"] for c in by_country}) > 1,
     }
 
 
@@ -39846,6 +39966,8 @@ def _dashboard_country_breakdown(db: Session, organization_id: Optional[int], st
             sa_func.coalesce(sa_func.sum(PayslipItem.gross_pay), 0),
             sa_func.coalesce(sa_func.sum(PayslipItem.net_pay), 0),
             sa_func.coalesce(sa_func.sum(PayslipItem.tds), 0),
+            sa_func.coalesce(sa_func.sum(PayslipItem.attendance_deduction), 0),
+            sa_func.coalesce(sa_func.sum(PayslipItem.total_deductions), 0),
         )
         .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
         .filter(
@@ -39857,19 +39979,21 @@ def _dashboard_country_breakdown(db: Session, organization_id: Optional[int], st
         .all()
     )
     merged: Dict[str, dict] = {}
-    for code, count, gross, net, taxes in rows:
+    money_keys = ("totalGross", "totalNet", "totalTaxes", "totalAttendanceDeduction", "totalDeductions")
+    for code, count, gross, net, taxes, attendance, deductions in rows:
         country = _normalize_country(code or default_country or "")
-        entry = merged.setdefault(country, {"country": country, "payslips": 0, "totalGross": Decimal("0"),
-                                            "totalNet": Decimal("0"), "totalTaxes": Decimal("0")})
+        entry = merged.setdefault(country, {"country": country, "payslips": 0, **{k: Decimal("0") for k in money_keys}})
         entry["payslips"] += int(count)
         entry["totalGross"] += Decimal(str(gross))
         entry["totalNet"] += Decimal(str(net))
         entry["totalTaxes"] += Decimal(str(taxes))
+        entry["totalAttendanceDeduction"] += Decimal(str(attendance))
+        entry["totalDeductions"] += Decimal(str(deductions))
     result = []
     for country in _sort_org_countries(db, organization_id, merged):
         entry = merged[country]
         entry["currency"] = _country_currency_code(db, organization_id, country, default_country)
-        for key in ("totalGross", "totalNet", "totalTaxes"):
+        for key in money_keys:
             entry[key] = _round2(entry[key])
         result.append(entry)
     return result
@@ -39907,7 +40031,12 @@ def _compute_attendance_deductions(db: Session, organization_id: int = None, yea
     return _round2(Decimal(str(total)))
 
 
-def get_dashboard_trend(db: Session, organization_id: int = None, months: int = 6, year: int = None, month: int = None) -> List[dict]:
+def get_dashboard_trend(db: Session, organization_id: int = None, months: int = 6, year: int = None, month: int = None,
+                        country: Optional[str] = None) -> List[dict]:
+    """Monthly gross/net. Without `country` it sums whole runs (every
+    currency together — only meaningful for a single-currency org); with
+    `country` it sums that country's payslips only, so every point is in one
+    currency, returned on each point as `currency`."""
     if year and month:
         start_m = month - months + 1
         start_y = year
@@ -39933,13 +40062,35 @@ def get_dashboard_trend(db: Session, organization_id: int = None, months: int = 
             window_start = date(now.year, now.month, 1)
         window_end = date(now.year, now.month + 1, 1) if now.month < 12 else date(now.year + 1, 1, 1)
 
-    query = db.query(
-        sa_func.extract("year", PayrollRun.period_start).label("y"),
-        sa_func.extract("month", PayrollRun.period_start).label("m"),
-        sa_func.coalesce(sa_func.sum(PayrollRun.total_gross), 0).label("gross"),
-        sa_func.coalesce(sa_func.sum(PayrollRun.total_net), 0).label("net"),
-    )
-    query = _apply_org_filter(query, PayrollRun, organization_id)
+    currency = None
+    if country and organization_id is not None:
+        country = _normalize_country(country)
+        default_country = _resolve_org_country(db, organization_id)
+        currency = _country_currency_code(db, organization_id, country, default_country)
+        country_filter = PayslipItem.country_code == country
+        if country == default_country:
+            # Payslips from before country_code was recorded belong to the default country.
+            country_filter = or_(country_filter, PayslipItem.country_code.is_(None))
+        query = (
+            db.query(
+                sa_func.extract("year", PayrollRun.period_start).label("y"),
+                sa_func.extract("month", PayrollRun.period_start).label("m"),
+                sa_func.coalesce(sa_func.sum(PayslipItem.gross_pay), 0).label("gross"),
+                sa_func.coalesce(sa_func.sum(PayslipItem.net_pay), 0).label("net"),
+            )
+            .select_from(PayslipItem)
+            .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+            .filter(PayrollRun.organization_id == organization_id, country_filter,
+                    PayslipItem.status != PayslipStatus.FAILED)
+        )
+    else:
+        query = db.query(
+            sa_func.extract("year", PayrollRun.period_start).label("y"),
+            sa_func.extract("month", PayrollRun.period_start).label("m"),
+            sa_func.coalesce(sa_func.sum(PayrollRun.total_gross), 0).label("gross"),
+            sa_func.coalesce(sa_func.sum(PayrollRun.total_net), 0).label("net"),
+        )
+        query = _apply_org_filter(query, PayrollRun, organization_id)
     query = query.filter(PayrollRun.period_start >= window_start, PayrollRun.period_start < window_end)
     rows = query.group_by(
         sa_func.extract("year", PayrollRun.period_start),
@@ -39958,6 +40109,7 @@ def get_dashboard_trend(db: Session, organization_id: int = None, months: int = 
             "month": f"{month_name[m][:3]} {y}",
             "gross": buckets[(y, m)]["gross"],
             "net": buckets[(y, m)]["net"],
+            **({"currency": currency, "country": country} if currency else {}),
         }
         for (y, m) in ordered_keys
     ]

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CreditCard, RefreshCcw, ShieldCheck, X } from "lucide-react";
+import { CreditCard, Mail, RefreshCcw, ShieldCheck, X } from "lucide-react";
+import BillingEmailsDrawer from "../../components/superAdmin/BillingEmailsDrawer";
 import StatusPill from "../../components/StatusPill";
 import { useToast } from "../../context/ToastContext";
 import { listAllSubscriptions } from "../../service/commandCenterService";
@@ -187,6 +188,8 @@ export default function SubscriptionsBillingPage() {
   // the table below is filtered down to one slice of it.
   const [allRows, setAllRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  // { org } for one organization's invoices & emails; { org: null } for the platform-wide log.
+  const [emailsDrawer, setEmailsDrawer] = useState(null);
   const [status, setStatus] = useState(searchParams.get("status") || "");
   const [workspaceType, setWorkspaceType] = useState(searchParams.get("workspace_type") || "");
   const [billingClassification, setBillingClassification] = useState(searchParams.get("billing_classification") || "");
@@ -291,6 +294,13 @@ export default function SubscriptionsBillingPage() {
           </h1>
           <p className="text-sm text-foreground-muted mt-0.5">Every organization, whether or not it has a subscription yet — and their billing status.</p>
         </div>
+        <div className="flex items-center gap-2">
+        <button
+          onClick={() => setEmailsDrawer({ org: null })}
+          className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground-secondary hover:bg-slate-100 dark:hover:bg-white/5"
+        >
+          <Mail size={15} /> Email log
+        </button>
         <button
           onClick={handleRefresh}
           disabled={loading}
@@ -298,6 +308,7 @@ export default function SubscriptionsBillingPage() {
         >
           <RefreshCcw size={15} className={loading ? "animate-spin" : ""} /> Refresh
         </button>
+        </div>
       </div>
 
       {allRows.length > 0 && (
@@ -396,7 +407,17 @@ export default function SubscriptionsBillingPage() {
               const meta = DISPLAY_META[ds] || { pill: "inactive", label: ds };
               return (
                 <tr key={row.organization_id} className="border-t border-border-light">
-                  <td className="px-4 py-3 font-medium text-foreground">{row.organization_name}</td>
+                  <td className="px-4 py-3 font-medium text-foreground">
+                    {row.organization_name}
+                    <button
+                      type="button"
+                      onClick={() => setEmailsDrawer({ org: row })}
+                      className="mt-0.5 flex items-center gap-1 text-xs font-normal text-primary hover:underline"
+                      title="Invoices, resend and email delivery log"
+                    >
+                      <Mail size={11} /> Invoices & emails
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-foreground-muted">{row.workspace_type}</td>
                   <td className="px-4 py-3">
                     <StatusPill
@@ -465,6 +486,7 @@ export default function SubscriptionsBillingPage() {
           </div>
         )}
       </div>
+      {emailsDrawer && <BillingEmailsDrawer organization={emailsDrawer.org} onClose={() => setEmailsDrawer(null)} />}
     </div>
   );
 }

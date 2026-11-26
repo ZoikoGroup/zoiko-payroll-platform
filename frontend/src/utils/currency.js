@@ -99,9 +99,11 @@ export function getCurrencyInfo(code) {
   return CURRENCY_MASTER[code] || null;
 }
 
+// Never "$" for an unknown/missing code: an org whose currency hasn't
+// loaded yet must not see its payroll labelled in US dollars.
 export function getCurrencySymbol(code) {
   const info = CURRENCY_MASTER[code];
-  return info ? info.symbol : (code || "$");
+  return info ? info.symbol : (code || "");
 }
 
 export function getFlag(code) {
@@ -109,22 +111,64 @@ export function getFlag(code) {
   return info ? info.flag : '';
 }
 
+// Digits grouped the way the currency's own locale writes them —
+// ₹1,00,000.00 (Indian lakh grouping), A$100,000.00, CHF 100’000.00 — always
+// in Latin digits. No code = the number alone, never a "$".
+function groupedNumber(value, code, precision) {
+  const info = code ? CURRENCY_MASTER[code] : null;
+  const locale = info?.locale || "en-US";
+  try {
+    return new Intl.NumberFormat(`${locale}-u-nu-latn`, {
+      minimumFractionDigits: precision,
+      maximumFractionDigits: precision,
+    }).format(value);
+  } catch {
+    return value.toFixed(precision);
+  }
+}
+
 export function formatCurrency(amount, code, position = 'before') {
-  const cleanCurrency = code || 'USD';
-  const info = CURRENCY_MASTER[cleanCurrency] || { symbol: '$', decimalDigits: 2 };
-  const symbol = info.symbol || '$';
-  const precision = typeof info.decimalDigits === 'number' ? info.decimalDigits : 2;
+  const info = code ? CURRENCY_MASTER[code] : null;
+  const symbol = info ? info.symbol : (code || '');
+  const precision = typeof info?.decimalDigits === 'number' ? info.decimalDigits : 2;
 
   let cleanAmount = 0;
   if (amount !== null && amount !== undefined && amount !== '' && !isNaN(amount)) {
     cleanAmount = Number(amount);
   }
 
-  const formatted = cleanAmount.toFixed(precision);
+  const sign = cleanAmount < 0 ? '-' : '';
+  const formatted = groupedNumber(Math.abs(cleanAmount), code, precision);
+  if (!symbol) return `${sign}${formatted}`;
   if (position === 'after') {
-    return `${formatted}${symbol}`;
+    return `${sign}${formatted} ${symbol}`;
   }
-  return `${symbol}${formatted}`;
+  // Letter symbols (CHF, kr, RM) read as words: "CHF 1’250.00"; sign-like
+  // symbols attach: "₹1,250.00", "A$1,250.00".
+  const gap = /[A-Za-z]$/.test(symbol) ? ' ' : '';
+  return `${sign}${symbol}${gap}${formatted}`;
+}
+
+// Short axis/tick label in one currency: ₹12.5L / ₹1.2Cr for INR (lakh/crore),
+// A$12.5K / A$1.2M elsewhere.
+export function formatCompactCurrency(amount, code) {
+  const n = Number(amount) || 0;
+  const symbol = getCurrencySymbol(code);
+  const gap = /[A-Za-z]$/.test(symbol) ? ' ' : '';
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  const trim = (v) => (Math.round(v * 10) / 10).toString();
+  let body;
+  if (code === 'INR') {
+    if (abs >= 1e7) body = `${trim(abs / 1e7)}Cr`;
+    else if (abs >= 1e5) body = `${trim(abs / 1e5)}L`;
+    else if (abs >= 1e3) body = `${trim(abs / 1e3)}K`;
+    else body = trim(abs);
+  } else if (abs >= 1e9) body = `${trim(abs / 1e9)}B`;
+  else if (abs >= 1e6) body = `${trim(abs / 1e6)}M`;
+  else if (abs >= 1e3) body = `${trim(abs / 1e3)}K`;
+  else body = trim(abs);
+  return `${sign}${symbol}${symbol ? gap : ''}${body}`;
 }
 
 // Locale-aware formatter for one explicit ISO currency code — used where a

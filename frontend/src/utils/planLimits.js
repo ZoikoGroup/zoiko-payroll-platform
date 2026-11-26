@@ -20,7 +20,10 @@ export function formatCountryLimit(limit) {
 // ── Plan-change country impact ────────────────────────────────────────────
 // GET /billing/plan-change-impact and the 409 POST /billing/checkout returns
 // for an unacknowledged change share one shape:
-// {planCode, newLimit, currentLimit, countries, keep, pause, restore}.
+// {planCode, newLimit, currentLimit, countries, keep, pause, restore, overLimitBy}.
+// Nothing is paused any more (pause/restore are always empty). blocked=true
+// (with removeCount and a ready message) means the org has more active
+// countries than the plan allows: the change is refused until it removes some.
 
 export const PLAN_CHANGE_PAUSES_COUNTRIES = "plan_change_pauses_countries";
 
@@ -32,7 +35,18 @@ export function getCountryPauseImpact(error) {
 
 /** True when the impact needs the user to see it before checkout. */
 export function impactNeedsReview(impact) {
-  return Boolean(impact && ((impact.pause?.length || 0) > 0 || (impact.restore?.length || 0) > 0));
+  return Boolean(impact && (
+    impact.blocked || (impact.pause?.length || 0) > 0 || (impact.restore?.length || 0) > 0
+  ));
+}
+
+// POST /billing/checkout's 409 for a refused downgrade (more active countries
+// than the target plan allows): { reason, used, new_limit, remove_count, ... }.
+export const DOWNGRADE_EXCEEDS_COUNTRY_LIMIT = "downgrade_exceeds_country_limit";
+
+/** True for that refusal (the error message already says what to remove). */
+export function isDowngradeBlockedError(error) {
+  return error?.status === 409 && error?.trace?.reason === DOWNGRADE_EXCEEDS_COUNTRY_LIMIT;
 }
 
 /** True when checkout must send acknowledge_country_pause: true. */

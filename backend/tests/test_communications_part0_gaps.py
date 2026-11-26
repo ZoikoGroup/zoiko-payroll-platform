@@ -91,7 +91,7 @@ def test_bulk_create_sends_one_summary_and_no_per_employee_welcome(db, org, capt
     assert [(t, e) for t, e, _ in captured] == [("bulk_employee_operation_summary.html", "hr@testorg.test")]
     (row,) = _rows(db, event_type="payroll.bulk_employees_created")
     assert (row.outcome, row.recipient_email, row.module, row.actor_user_id) == (
-        "sent", "hr@testorg.test", "payroll", 9,
+        "not_delivered", "hr@testorg.test", "payroll", 9,
     )
     assert _rows(db, event_type="payroll.employee_created") == []
 
@@ -116,10 +116,10 @@ def test_bulk_update_sends_sensitive_notices_only_to_changed_employees_plus_summ
         ("employee_sensitive_fields_changed.html", "one@testorg.test"),
     ]
     (notice,) = _rows(db, event_type="payroll.employee_sensitive_fields_changed")
-    assert (notice.recipient_email, notice.outcome) == ("one@testorg.test", "sent")
+    assert (notice.recipient_email, notice.outcome) == ("one@testorg.test", "not_delivered")
     assert f"obj:employee:{bank_change.id}" in notice.idempotency_key
     (summary,) = _rows(db, event_type="payroll.bulk_employees_updated")
-    assert summary.outcome == "sent"
+    assert summary.outcome == "not_delivered"
     summary_ctx = next(c for t, _, c in captured if t == "bulk_employee_operation_summary.html")
     assert summary_ctx["succeeded_count"] == 2
     assert "1 employee(s)" in summary_ctx["employee_notice_line"]
@@ -137,7 +137,7 @@ def test_bulk_delete_sends_one_summary_with_failures(db, org, captured):
     ctx = captured[0][2]
     assert (ctx["succeeded_count"], ctx["failed_count"], ctx["has_failures"]) == (1, 1, True)
     (row,) = _rows(db, event_type="payroll.bulk_employees_deleted")
-    assert row.outcome == "sent"
+    assert row.outcome == "not_delivered"
     assert _rows(db, event_type="payroll.employee_deleted") == []
 
 
@@ -149,7 +149,7 @@ def test_bulk_duplicate_submission_sends_one_summary(db, org, captured):
     service.bulk_delete_employees(db, request, org.id)
     service.bulk_delete_employees(db, request, org.id)
     outcomes = [r.outcome for r in _rows(db, event_type="payroll.bulk_employees_deleted")]
-    assert outcomes == ["sent", "skipped_duplicate"]
+    assert outcomes == ["not_delivered", "skipped_duplicate"]
     assert len(captured) == 1
 
 
@@ -177,13 +177,13 @@ def test_overtime_approval_decision_notifies_employee(db, organization, captured
     assert [(t, e) for t, e, _ in captured] == [("overtime_record_decision.html", "ot@testorg.test")]
     assert captured[0][2]["approved"] is True
     (event,) = _rows(db, event_type="payroll.overtime_record_approved")
-    assert (event.outcome, event.actor_user_id, event.module) == ("sent", 5, "payroll")
+    assert (event.outcome, event.actor_user_id, event.module) == ("not_delivered", 5, "payroll")
 
     # Re-setting the same status is a no-op; reversing the decision notifies again.
     service.set_germany_overtime_work_record_approval(db, row.id, organization.id, "APPROVED", actor_id=5)
     service.set_germany_overtime_work_record_approval(db, row.id, organization.id, "REJECTED", actor_id=5)
     assert [c[2]["approved"] for c in captured] == [True, False]
-    assert _rows(db, event_type="payroll.overtime_record_rejected")[0].outcome == "sent"
+    assert _rows(db, event_type="payroll.overtime_record_rejected")[0].outcome == "not_delivered"
 
 
 # ── 0.4 Super Admin forced password reset ──────────────────────────────────
@@ -243,9 +243,9 @@ def test_admin_reset_uses_iam007_admin_variant_and_is_audited(db, organization, 
     assert ctx["admin_initiated"] is True and ctx["self_requested"] is False
     assert ctx["subject"] == "A Zoiko Payroll administrator reset your password"
     (row,) = _rows(db, event_type=auth_service.ADMIN_RESET_EVENT_TYPE)
-    assert (row.template_id, row.outcome, row.actor_user_id, row.module) == ("IAM-007", "sent", admin.id, "auth")
+    assert (row.template_id, row.outcome, row.actor_user_id, row.module) == ("IAM-007", "not_delivered", admin.id, "auth")
     (auth_row,) = db.query(auth_service.AuthEmailEvent).all()
-    assert auth_row.outcome == "sent" and auth_row.event_type == auth_service.ADMIN_RESET_EVENT_TYPE
+    assert auth_row.outcome == "not_delivered" and auth_row.event_type == auth_service.ADMIN_RESET_EVENT_TYPE
 
 
 def test_admin_variant_renders_distinct_copy():
@@ -280,4 +280,4 @@ def test_form_assignment_is_audited_and_reports_delivery_synchronously(db, organ
     assert "no SMTP host" in res["reason"]
     assert [(t, e) for t, e, _ in captured] == [("update_form_invite.html", "form@testorg.test")]
     (row,) = _rows(db, event_type="payroll.form_assigned")
-    assert (row.outcome, row.recipient_email) == ("sent", "form@testorg.test")
+    assert (row.outcome, row.recipient_email) == ("not_delivered", "form@testorg.test")
