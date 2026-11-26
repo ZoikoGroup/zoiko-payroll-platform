@@ -181,7 +181,12 @@ class Settings(BaseSettings):
     # ── App Info ──────────────────────────────────────────────────────
     APP_NAME: str = "Zoiko Payroll Platform Backend"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    # Default OFF: a server whose .env forgets DEBUG must never come up in
+    # debug/local mode — that blocks all outbound email (core/outbound.py),
+    # allows the SQLite fallback and skips the fail-closed secret-key guard.
+    # Local development sets DEBUG=true or ENVIRONMENT=development explicitly
+    # (backend/.env.example); the test suite sets it in tests/conftest.py.
+    DEBUG: bool = False
 
     @field_validator("DEBUG", mode="before")
     @classmethod
@@ -398,12 +403,11 @@ settings = Settings()
 
 def _is_development_environment() -> bool:
     # Deliberately NOT identical to app/database.py's same-named function:
-    # that one treats DEBUG's own default (True) as sufficient to count as
-    # "development" even when ENVIRONMENT is explicitly set to something
-    # else (e.g. "production") — fine for choosing a DB fallback, but it
-    # would make this fail-closed secret-key guard never actually fire in
-    # the most realistic misconfiguration (ENVIRONMENT set correctly,
-    # DEBUG's default left untouched). Here, an explicit ENVIRONMENT/APP_ENV
+    # that one treats DEBUG=true as sufficient to count as "development"
+    # even when ENVIRONMENT is explicitly set to something else (e.g.
+    # "production") — fine for choosing a DB fallback, but it would make this
+    # fail-closed secret-key guard never fire when ENVIRONMENT is set
+    # correctly and DEBUG=true was left in .env. Here, an explicit ENVIRONMENT/APP_ENV
     # value is authoritative; DEBUG is consulted only when neither is set.
     import os
     env_name = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "").strip().lower()
