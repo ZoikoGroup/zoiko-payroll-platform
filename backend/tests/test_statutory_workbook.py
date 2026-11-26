@@ -1,6 +1,7 @@
 """Statutory workbook (country-neutral) with the Malaysia adapter — ZP-MY-ENG-001
-Phase 1. Preview writes nothing; apply is all-or-nothing, writes EXTRACTED
-(unsigned) rows through my_super_admin and keeps the workbook as evidence;
+Phase 1. Preview writes nothing; apply is all-or-nothing, writes rows through
+my_super_admin (schedule / holiday rows without the [PENDING G1] marker since
+the gate removal of 2026-11-25) and keeps the workbook as evidence;
 signing needs a stored, hashed source reviewed by a second Super Admin."""
 import io
 from datetime import date
@@ -85,7 +86,8 @@ def test_export_holds_every_row_and_the_pack_fingerprint(wb):
     params = list(book["Parameters"].iter_rows(min_row=2, values_only=True))
     assert len(params) == len(c.MALAYSIA_SCALAR_CONTENT)
     status = {row[0]: row[6] for row in params}
-    assert status["my_min_wage_monthly"] == "EXTRACTED" and status["my_rounding_pcb"] == "MISSING"
+    # gate removal (2026-11-25): seeded rows carry no [PENDING G1] marker
+    assert status["my_min_wage_monthly"] == "VERIFIED" and status["my_rounding_pcb"] == "MISSING"
     assert len(list(book["Earning classes"].iter_rows(min_row=2))) == 96
 
 
@@ -103,7 +105,7 @@ def test_preview_writes_nothing_and_apply_writes_extracted_rows(wb):
     data = _edit(wb.wbk.export_workbook(wb.db, wb.pack, wb.adapter), {
         "Parameters": [("key", "my_rounding_pcb", {"value": "five_sen_up", "source_document_id": wb.source,
                                                    "page": "s.4"}),
-                       ("key", "my_ot_multiplier_workday__SBH", {"value": "1.5", "source_document_id": wb.source})],
+                       ("key", "my_ot_multiplier_workday__SBH", {"value": "1.75", "source_document_id": wb.source})],
         "MY_EPF_SCHEDULE": _epf_rows(wb),
         "Holidays": [("append", ["2026-08-31", "Hari Kebangsaan", None, wb.source, "p.1"]),
                      ("append", ["2026-03-07", "Hari Keputeraan Sultan Johor", "JHR", wb.source, "p.1"])],
@@ -121,15 +123,15 @@ def test_preview_writes_nothing_and_apply_writes_extracted_rows(wb):
     assert out["applied"] is True and out["written"]["tables"] == 8         # 3 bands x 2 sides + 2 holidays
     rate = _rates(wb)["my_rounding_pcb"]
     assert (rate.text_value, rate.source_document_id) == ("FIVE_SEN_UP", wb.source)
-    assert rate.label.endswith("[PENDING G1]")                              # extracted, not verified
+    assert "[PENDING G1]" not in rate.label                                 # in force (no signing, 2026-11-25)
     epf = wb.db.query(TaxSlab).filter_by(jurisdiction_pack_id=wb.pack.id, rule_type="MY_EPF_SCHEDULE").all()
     assert len(epf) == 6 and {s.tax_regime for s in epf} == {"EMPLOYEE", "EMPLOYER"}
-    assert all("[PENDING G1]" in s.rate_label and "p." in s.tax_formula for s in epf)
+    assert all("[PENDING G1]" not in s.rate_label and "p." in s.tax_formula for s in epf)    # gate removal
     top = next(s for s in epf if s.tax_regime == "EMPLOYER" and s.min_amount == Decimal("20"))
     assert top.flat_amount == Decimal("13.00") and top.filing_status == "MY_PR_BELOW_60"
     holiday = wb.db.query(TaxSlab).filter_by(jurisdiction_pack_id=wb.pack.id, rule_type="MY_PUBLIC_HOLIDAY",
                                              jurisdiction_state="JHR").one()
-    assert holiday.tax_formula.startswith("2026-03-07") and "[PENDING G1]" in holiday.rate_label
+    assert holiday.tax_formula.startswith("2026-03-07") and "[PENDING G1]" not in holiday.rate_label
     evidence = wb.db.get(SourceArtifact, out["workbookArtifactId"])
     assert evidence.form_number == "MY-WORKBOOK" and len(evidence.checksum_sha256) == 64
     assert wb.db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type.like("my_statutory_%")).count() >= 4
@@ -149,7 +151,6 @@ def test_preview_writes_nothing_and_apply_writes_extracted_rows(wb):
      "my_hrd_base_rule", "NOT_SUPPORTED"),
     ({"Parameters": [("append", ["my_invented_key", "NATIONAL", "", "amount", "", "", "", "1"])]},
      "my_invented_key", "unknown parameter"),
-    ({"Parameters": [("key", "my_min_wage_monthly", {"value": "1800"})]}, "my_min_wage_monthly", "source document"),
     ({"MY_EPF_SCHEDULE": [("append", ["MY_PR_BELOW_60", 0, 10, 0, 0, 1, ""]),
                           ("append", ["MY_PR_BELOW_60", 11, 20, 1, 1, 1, ""])]}, "MY_EPF_SCHEDULE", "contiguous"),
     ({"MY_EPF_SCHEDULE": [("append", ["SOMEONE", 0, 10, 0, 0, 1, ""])]}, "MY_EPF_SCHEDULE", "member class"),
@@ -207,26 +208,18 @@ def test_only_a_draft_pack_takes_a_workbook(wb):
 
 
 # ── signing (second person, reviewed source) ───────────────────────────────
-def test_signing_needs_a_reviewed_source_and_is_all_or_nothing(wb):
-    from app.modules.payroll import my_super_admin as msa
-
-    rates = _rates(wb)
-    wage, missing = rates["my_min_wage_monthly"], rates["my_hospitalisation_days__PEN"]
-    with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        msa.sign_rows(wb.db, [{"kind": "rate", "id": wage.id}], wb.signer, "G1", source_document_id=wb.draft_source)
-    wb.db.rollback()
-    with pytest.raises(BadRequestException, match="has no value"):
-        msa.sign_rows(wb.db, [{"kind": "rate", "id": wage.id}, {"kind": "rate", "id": missing.id}], wb.signer, "G1",
-                      source_document_id=wb.source)
-    wb.db.rollback()                                                        # the API commits only on success
-    assert _rates(wb)["my_min_wage_monthly"].label.endswith("[PENDING G1]")
-    out = msa.sign_rows(wb.db, [{"kind": "rate", "id": wage.id}], wb.signer, "G1 signature",
-                        source_document_id=wb.source)
+def test_a_workbook_value_without_a_source_is_applied(wb):
+    """Gate removal (2026-11-25): the source document is optional provenance; there is no signing step and an
+    edit never re-marks the row."""
+    data = _edit(wb.wbk.export_workbook(wb.db, wb.pack, wb.adapter),
+                 {"Parameters": [("key", "my_min_wage_monthly", {"value": "1800"})]})
+    preview = wb.wbk.import_workbook(wb.db, wb.pack, data, wb.adapter, wb.editor)
+    row = next(r for r in preview["rows"] if r["ref"] == "my_min_wage_monthly")
+    assert row["status"] == "CHANGED", row
+    wb.wbk.import_workbook(wb.db, wb.pack, data, wb.adapter, wb.editor, reason="2026 order", apply=True)
     wb.db.commit()
-    assert out["signed"] == 1 and not _rates(wb)["my_min_wage_monthly"].label.endswith("[PENDING G1]")
-    msa.update_row(wb.db, "rate", wage.id, {"flatAmount": "1800", "reason": "typo", "sourceDocumentId": wb.source},
-                   wb.editor)
-    assert _rates(wb)["my_min_wage_monthly"].label.endswith("[PENDING G1]")  # an unsigned change re-marks it
+    wage = _rates(wb)["my_min_wage_monthly"]
+    assert wage.flat_amount == Decimal("1800") and "[PENDING G1]" not in wage.label
 
 
 def test_text_without_vocabulary_can_only_be_not_supported(wb):

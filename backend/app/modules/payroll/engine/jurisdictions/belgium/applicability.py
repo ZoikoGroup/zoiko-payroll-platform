@@ -100,7 +100,7 @@ def _check_list(c: _Collector, pack: BePack, key: str, value: str, code: str, wh
     if not value:
         c.block(E.keyed(E.FACT_MISSING, what), f"the {what.replace('_', ' ')} is not recorded")
     elif value not in supported:
-        c.block(E.keyed(code, value), f"{what.replace('_', ' ')} {value} is not in the signed supported list ({key})")
+        c.block(E.keyed(code, value), f"{what.replace('_', ' ')} {value} is not in the supported list ({key})")
 
 
 def _employer(c: _Collector, pack: BePack, registration, on: date) -> Optional[dict]:
@@ -285,7 +285,7 @@ def resolve(pack: Optional[BePack], pay_date: date, *, registration=None, profil
                 c.block(E.keyed(E.FACT_MISSING, "contract_type"), f"line {line} has no contract type recorded (G-23)")
             elif contract not in supported_contracts:
                 c.block(E.keyed(E.CONTRACT_UNSUPPORTED, contract),
-                        f"contract type {contract} is not in the signed supported list (be_supported_contract_types)")
+                        f"contract type {contract} is not in the supported list (be_supported_contract_types)")
         if worker is not None and worker["contractType"] is None:
             worker["contractType"] = contract or None
         agreement = agreements.get(field(row, "collective_agreement_id"))

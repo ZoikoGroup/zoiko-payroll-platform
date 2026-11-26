@@ -3,7 +3,6 @@ import PLOverviewDashboard from "../../components/jurisdiction/poland/PLOverview
 import PLPackRowsTab from "../../components/jurisdiction/poland/PLPackRowsTab";
 import PLEarningClassTab from "../../components/jurisdiction/poland/PLEarningClassTab";
 import PLSigningStatusTab from "../../components/jurisdiction/poland/PLSigningStatusTab";
-import PLReadinessTab from "../../components/jurisdiction/poland/PLReadinessTab";
 import { GROUPS } from "../../components/jurisdiction/poland/plContent";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
 
@@ -35,9 +34,8 @@ export function polandExtraTabs() {
     tab("pl-policy", "Scope & rounding", Settings2, "pl-filing", group("policy")),
     tab("pl-earning", "Earning classification", ListChecks, "pl-policy",
       ({ pack, slabs, onReload }) => <PLEarningClassTab pack={pack} slabs={slabs} onReload={onReload} />),
-    tab("pl-signing", "Signing status", Gauge, "pl-earning", ({ pack }) => <PLSigningStatusTab pack={pack} />),
-    tab("pl-readiness", "Release gates", BadgeCheck, "pl-signing", ({ pack }) => <PLReadinessTab pack={pack} />),
-    tab("sources", "Sources", FileCheck2, "pl-readiness", () => <SourceEvidencePanel />),
+    tab("pl-signing", "Missing content", Gauge, "pl-earning", ({ pack }) => <PLSigningStatusTab pack={pack} />),
+    tab("sources", "Sources", FileCheck2, "pl-signing", () => <SourceEvidencePanel />),
   ];
 }
 

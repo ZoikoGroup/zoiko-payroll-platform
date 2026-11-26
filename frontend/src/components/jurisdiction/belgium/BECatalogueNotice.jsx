@@ -7,7 +7,7 @@ import Notice from "../Notice";
 // Shown instead of the per-row reports for a Belgian pack that holds no
 // catalogue rows yet (e.g. a pack created with "New Tax"): a calm explanation,
 // never a developer message, and — for a Draft pack — "Set up Belgian
-// catalogue": the standard rows, every one empty and unsigned (reason
+// catalogue": the standard rows with the approved spec values, every other row empty (reason
 // required; audited; no value copied or invented).
 
 function SetUpCatalogue({ pack, onDone }) {
@@ -43,8 +43,8 @@ export default function BECatalogueNotice({ pack, onDone }) {
     <Notice tone="info" title="This pack has no Belgian statutory rows yet." testId="be-no-catalogue">
       <p>
         {pack?.packId} v{pack?.version} holds none of the Belgian catalogue rows. Once the standard catalogue is set
-        up (every row empty and unsigned), values can be added row by row or imported from a file, and a second Super
-        Admin signs them.
+        up (approved spec values filled, every other row empty), the remaining values can be added row by row or
+        imported from a file. A saved value is in force; there is no signing step.
       </p>
       {draft ? <SetUpCatalogue pack={pack} onDone={onDone} /> : (
         <p className="mt-2" data-testid="be-catalogue-not-draft">

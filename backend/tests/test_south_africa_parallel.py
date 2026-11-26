@@ -10,7 +10,6 @@ import pytest
 
 from app.core.exceptions import BadRequestException
 from app.modules.payroll import south_africa_parallel as parallel
-from app.modules.payroll import south_africa_readiness as readiness
 from app.modules.payroll.models import PayslipItem
 
 from tests._za_run_helpers import APPROVER, PREPARER, THIRD, employee, payslip, run
@@ -184,19 +183,6 @@ def test_nothing_changes_a_payslip(db, organization, committed, monkeypatch):
     after = [(i.gross_pay, i.net_pay, i.tds, dict(i.za_calculation_snapshot))
              for i in db.query(PayslipItem).filter(PayslipItem.id.in_([i1.id, i2.id])).order_by(PayslipItem.id)]
     assert after == before
-
-
-def test_two_accepted_months_satisfy_the_g6_code_check(db, organization, monkeypatch):
-    _materiality(monkeypatch, "10")
-    emp = employee(db, organization, "ZA-M")
-    for pay_date in (date(2026, 8, 31), date(2026, 9, 30)):
-        r = run(db, organization, pay_date=pay_date, status="Paid")
-        payslip(db, organization, r, emp)
-        out = _import(db, organization, r, f"{HEADER}\nZA-M,{F1}\n")
-        assert readiness.code_checks(db)["parallel_cycles"][0] is False
-        parallel.accept_za_parallel_import(db, organization.id, out["id"], APPROVER)
-    met, detail = readiness.code_checks(db)["parallel_cycles"]
-    assert met and detail.startswith("2 pay month(s)")
 
 
 def test_eti_is_not_a_compared_concept():

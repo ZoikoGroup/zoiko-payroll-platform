@@ -65,7 +65,7 @@ def _no_niss(blob):
     assert NISS not in text and not re.search(r"(?<!\d)\d{11}(?!\d)", text)
 
 
-def test_templates_are_seeded_draft_with_their_layout_and_activation_stays_refused(db, world):
+def test_templates_are_seeded_draft_with_their_layout(db, world):
     from app.modules.payroll import belgium_service as be
     from app.modules.payroll.models import ReportTemplate, ReportTemplateComponent
 
@@ -77,7 +77,7 @@ def test_templates_are_seeded_draft_with_their_layout_and_activation_stays_refus
     for r in rows:
         keys = {c.component_key for c in db.query(ReportTemplateComponent).filter_by(report_template_id=r.id)}
         assert set(_rep().be_required_fields(r.report_type)) <= keys
-    assert be._be_template_activation_refusal(db, rows[0])                                # gate unchanged
+    assert be._be_template_activation_refusal(db, rows[0]) is None       # no country gate (gate removal 2026-11-25)
 
 
 def test_the_individual_account_comes_from_committed_data_only(db, world):

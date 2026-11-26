@@ -7,14 +7,14 @@ import { inputClass, labelClass } from "../constants";
 import { card, useLoad } from "../japan/jpFormat";
 import { ErrorNote } from "../new_zealand/nzShared";
 import PackOverviewSummary from "../PackOverviewSummary";
-import { beOverviewCounts, engineStatusLabel, gateCounts, loadConfiguration, rowsHint } from "./beShared";
+import { beOverviewCounts, loadConfiguration, rowsHint } from "./beShared";
 
 // Belgium pack Overview: the same summary every country shows
 // (PackOverviewSummary — status chips, counts, effective dates, regions, needs
 // attention) plus one chip with the engine certification and how many release
 // gates are met, which opens the Release Readiness tab. The gates, their
 // evidence and the golden certification live on that tab
-// (BEReleaseReadinessTab). With no Belgian pack yet, BECompliancePage offers the
+// (BEReleaseReadinessTab, "Pack status"). With no Belgian pack yet, BECompliancePage offers the
 // governed "create the Draft pack" action (SeedDraftPanel below).
 
 export function SeedDraftPanel({ onDone }) {
@@ -35,7 +35,7 @@ export function SeedDraftPanel({ onDone }) {
     <form onSubmit={submit} className={`${card} space-y-2`} data-testid="be-seed-draft">
       <h3 className="text-[14px] font-semibold text-foreground">No Belgium pack yet</h3>
       <p className="text-[12px] text-foreground-secondary">
-        Creates the Draft pack from the content catalogue: every row PENDING G1 with no value. Nothing becomes Active here.
+        Creates the Draft pack from the content catalogue, with the approved specification values filled in. Nothing becomes Active here.
       </p>
       <label className={labelClass} htmlFor="be-seed-reason">Reason *</label>
       <input id="be-seed-reason" className={inputClass} value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -115,17 +115,16 @@ export function GoldenCertification({ pack }) {
 function EngineChip({ onOpen }) {
   const [summary, error] = useLoad(getBeSummary);
   if (error || !summary) return null;
-  const { met, total } = gateCounts(summary);
-  const ok = total > 0 && met === total;
+  const ok = Boolean(summary.available);
   const Icon = ok ? ShieldCheck : ShieldAlert;
   return (
     <button type="button" onClick={onOpen} data-testid="be-engine-chip"
-      title="Open Release Readiness"
+      title="Open Pack status"
       className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold underline-offset-2 hover:underline ${
         ok ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
       }`}>
       <Icon size={12} aria-hidden="true" />
-      Engine: {engineStatusLabel(summary.status)} ({met}/{total} gates met)
+      Onboarding: {ok ? "open" : "closed until a pack is Active"}
     </button>
   );
 }

@@ -68,7 +68,6 @@ const NZ_FILES = [
   "modules/payroll/Compliances/NZFilingRemittanceSection.jsx",
   "modules/payroll/PayRollRuns/NZRunFilingPanel.jsx",
   // P9 — release gates and parallel cycles
-  "components/jurisdiction/new_zealand/NZReadinessTab.jsx",
   "modules/payroll/Compliances/NZParallelCyclesSection.jsx",
 ];
 const files = Object.fromEntries(NZ_FILES.map((f) => [f, read(f)]));
@@ -78,7 +77,7 @@ const config = files["config/jurisdictions/newZealandComplianceConfig.jsx"];
 // ── Super Admin client ↔ backend routes ─────────────────────────────────────
 const superAdminService = read("service/superAdminService.js");
 const nzBlock = superAdminService.slice(superAdminService.indexOf('const NZ_SA = "/api/super-admin/compliance/new-zealand";'));
-const nzClient = nzBlock.slice(0, nzBlock.indexOf("export const getZaReadiness"));
+const nzClient = nzBlock.slice(0, nzBlock.indexOf("export const listBrOrganizations"));
 const saRouter = readBackend("app/modules/super_admin/router.py");
 const saRoutes = new Set(
   [...saRouter.matchAll(/@router\.(get|post|put|patch|delete)\(\s*"([^"]+)"/g)]
@@ -106,27 +105,21 @@ check("The draft-pack seed is offered only while no NZ pack exists, with a reaso
     "a reason is required");
   assert(!/Active/.test(seed.replace(/\/\/.*$/gm, "").replace(/is active|not active/gi, "")), "the seed never activates");
 });
-check("The signing status shows the activation checklist in order", () => {
+check("The missing-content tab shows the go-live checklist in order (no signing steps)", () => {
   const signing = files["components/jurisdiction/new_zealand/NZSigningStatusTab.jsx"];
-  const order = ["Draft pack seeded", "Parameters signed", "Table rows signed", "Authority tables filled",
-    "Approved by a Super Admin who made none of the edits", "Activated"].map((label) => signing.indexOf(label));
+  const order = ["Pack seeded", "Approved by a Super Admin other than its last editor", "Activated"]
+    .map((label) => signing.indexOf(label));
+  assert(!/signed|Signed/.test(signing.replace(/\/\/.*$/gm, "")), "no signing wording");
   assert(signing.includes('data-testid="nz-activation-checklist"') && order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1])),
     `order ${order}`);
 });
 
-// ── P9: release gates and parallel cycles ───────────────────────────────────
-check("The release-gate tab and the parallel-cycle section are mounted", () => {
-  assert(/tab\("nz-readiness", "Release gates", BadgeCheck, "nz-signing", \(\{ pack \}\) => <NZReadinessTab pack=\{pack\} \/>\)/
-    .test(config), "Super Admin tab");
+// ── P9: parallel cycles (no release-gate tab since the gate removal, 2026-11-25) ──
+check("No release-gate tab or gate line; the parallel-cycle section is mounted", () => {
+  assert(!/nz-readiness|NZReadinessTab/.test(config), "no release-gate tab");
   const centreText = read("modules/payroll/Compliances/NZComplianceCentreTab.jsx");
-  assert(centreText.includes("<NZParallelCyclesSection />") && centreText.includes('data-testid="nz-gates-passed"'),
+  assert(centreText.includes("<NZParallelCyclesSection />") && !centreText.includes("nz-gates-passed"),
     "compliance centre");
-});
-check("The readiness tab only reads the server's gates (nothing ticked in the browser)", () => {
-  const tab = files["components/jurisdiction/new_zealand/NZReadinessTab.jsx"];
-  assert(/getNzStatutorySummary\(\)/.test(tab) && /summary\?\.readiness/.test(tab), "reads the summary readiness");
-  assert(!/useState\(\s*\{[^}]*passed/.test(tab) && !/passed:\s*true/.test(tab), "no client-side pass");
-  assert(/runNzGoldenCheck\(pack\.id\)/.test(tab), "golden check runs against the selected pack");
 });
 check("Parallel concepts are exactly the backend's and no identifier column is offered", () => {
   const section = files["modules/payroll/Compliances/NZParallelCyclesSection.jsx"];
@@ -186,12 +179,11 @@ check("Authority tables offered are the ones the backend accepts", () => {
 // ── governance in the UI ────────────────────────────────────────────────────
 check("The generic Contribution Rates / Tax Slabs editors are hidden for NZ", () =>
   /hiddenTabs:\s*\[\s*"rates",\s*"slabs"\s*\]/.test(config));
-check("Every change sends a reason and a source; signing is an explicit opt-in", () => {
+check("Every change sends a reason; the source is optional and there is no signing step (2026-11-25)", () => {
   const form = files["components/jurisdiction/new_zealand/nzForm.js"];
   const shared = files["components/jurisdiction/new_zealand/nzShared.jsx"];
   assert(/reason: value\.reason\.trim\(\)/.test(form) && /sourceDocumentId: Number/.test(form), "payload");
-  assert(/specialistVerified: Boolean\(value\.specialistVerified\)/.test(form), "verify flag");
-  assert(/disabled=\{!reviewed\(chosen\)\}/.test(shared), "sign checkbox must need a reviewed source");
+  assert(!/specialistVerified/.test(form) && !/specialistVerified/.test(shared), "no signing flag");
 });
 check("Editing is offered only on an editable pack version", () => {
   for (const f of ["NZPackRowsTab.jsx", "NZAuthorityTablesTab.jsx", "NZEarningClassTab.jsx"]) {

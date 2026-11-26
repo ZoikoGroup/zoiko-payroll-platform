@@ -14,8 +14,8 @@ TEST values are NOT statutory content. This script refuses every non-local
 database ALWAYS — the ZOIKO_ALLOW_NONLOCAL_DB_WRITES override is deliberately
 not honoured here. A real pack is signed by Super Admins in the console.
 
-It does not turn New Zealand on: set NZ_TENANT_ONBOARDING_ENABLED=true in your
-own local environment to use the organisation screens.
+New Zealand has no onboarding switch (gate removal, 2026-11-25): a local
+organisation whose payroll jurisdiction is New Zealand uses the screens directly.
 
 Usage:
     PAYROLL_DATABASE_URL=sqlite:///./nz_demo.sqlite3 python -m scripts.nz_local_demo_pack
@@ -98,8 +98,7 @@ def main() -> int:
     try:
         pack = build_demo_pack(db)
         print(f"[{NAME}] {pack.pack_id} v{pack.version} (id={pack.id}) is {pack.status} — {DEMO_NOTE}.")
-        print(f"[{NAME}] Next: set NZ_TENANT_ONBOARDING_ENABLED=true in your local environment to use the "
-              "New Zealand organisation screens.")
+        print(f"[{NAME}] Next: use a local organisation whose payroll jurisdiction is New Zealand.")
         return 0
     except Exception:
         db.rollback()

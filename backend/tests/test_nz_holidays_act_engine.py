@@ -162,10 +162,10 @@ def test_public_holidays_empty_blocks_until_g2():
     assert exc.value.key == "NZ_TABLE_EMPTY:public_holidays"
 
 
-def test_unsigned_public_holiday_blocks():
+def test_a_marked_public_holiday_no_longer_blocks():
     rate_map, slabs = build_pack(pending=True, extra_slabs=[_holiday(date(2026, 12, 25), "Christmas Day")])
-    with pytest.raises(NZCalculationBlockedError):
-        ha.holidays_for(NzPack(rate_map, slabs, 1, None), 2026, None)
+    days = ha.holidays_for(NzPack(rate_map, slabs, 1, None), 2026, None)
+    assert [h["date"] for h in days] == [date(2026, 12, 25)]
 
 
 def test_regional_holiday_filtered_by_region():
@@ -189,7 +189,10 @@ def test_every_number_from_content():
     assert ha.bereavement_quantity("CLOSE", date(2026, 1, 5), date(2026, 4, 5), pack)[0] == D("4")
 
 
-def test_unsigned_holidays_row_blocks():
+def test_a_marked_holidays_row_no_longer_blocks_but_an_empty_one_does():
     rate_map, slabs = build_pack(pending=True)
+    vests = ha.annual_vests(date(2025, 5, 12), date(2026, 5, 12), [], NzPack(rate_map, slabs, 1, date(2026, 6, 1)))
+    assert vests[0].quantity == 4
+    rate_map, slabs = build_pack(pending=True, overrides={"nz_hol_annual_weeks": None})
     with pytest.raises(NZCalculationBlockedError):
         ha.annual_vests(date(2025, 5, 12), date(2026, 5, 12), [], NzPack(rate_map, slabs, 1, date(2026, 6, 1)))

@@ -85,6 +85,15 @@ REGISTRATION_COUNTRIES = [
     # Spain (ZP-ES-ENG-001, docs/spain). Registration opens only once an Active
     # ES canonical pack with rates exists (same as Jamaica / United Arab Emirates).
     "Spain",
+    # Gate removal (owner decision 2026-11-25): no dormancy, registry readiness,
+    # sign-off or evidence gates. Like Spain, registration opens once an Active
+    # canonical pack with rates exists (and no PLANNED registry row blocks it).
+    "Japan",
+    "New Zealand",
+    "Poland",
+    "Malaysia",
+    "South Africa",
+    "Belgium",
 ]
 
 # Keyed by the 2-letter code the rest of the payroll module uses
@@ -741,9 +750,8 @@ JURISDICTION_TAX_SCHEMAS = {
              "pattern": r"^[A-Za-z0-9 -]{4,20}$", "example": "123456789", "primary": False},
         ],
     },
-    # Belgium (ZP-BE-ENG-001 Phase 1, BE-001) — schema only. BE stays out of
-    # REGISTRATION_COUNTRIES and is registry-gated (tax_resolver.
-    # _REGISTRY_ROW_REQUIRED_COUNTRIES) and dormant (belgium_dormancy).
+    # Belgium (ZP-BE-ENG-001 Phase 1, BE-001). In REGISTRATION_COUNTRIES since
+    # the gate removal (2026-11-25).
     # Patterns are deliberately permissive: format and check digits pending
     # verification, gap G-16. The examples only illustrate the input shape
     # (validate_tax_identifiers quotes them in its format message); they are

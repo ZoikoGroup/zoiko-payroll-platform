@@ -391,7 +391,7 @@ def test_the_individual_account_template_is_seeded_inactive(db):
     row = be.seed_be_individual_account_template(db, "2026")
     assert (row.document_scope, row.status, row.jurisdiction_country) == ("EMPLOYEE", "Draft", "BE")
     assert be.seed_be_individual_account_template(db, "2026").id == row.id
-    assert jh.call("BE", "template_activation_refusal", db, row, 1)
+    assert jh.call("BE", "template_activation_refusal", db, row, 1) is None       # gate removal 2026-11-25
 
 
 def test_no_approval_without_an_accepted_dimona_in(world):

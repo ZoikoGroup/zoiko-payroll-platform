@@ -10,7 +10,8 @@ jurisdiction_service_registry row as PLANNED.
 Source: ZP-ZA-ENG-001 v1.0 — the implementation specification.
 Every value is traceable to SOURCE_REFERENCES S1–S14 in
 south_africa_content.py. String scalars (MONTHLY, HALF_UP, 25.3.0,
-PENDING_G1) live in ContributionRate.text_value, never flat_amount.
+PAYMENT_DATE) live in ContributionRate.text_value, never flat_amount. Rows
+are written plain: no "[PENDING G1]" label marker (gate removal, 2026-11-25).
 
 Governance: nothing is ever set Active here, and the registry row is
 created only when missing (an existing row is never changed). Re-running

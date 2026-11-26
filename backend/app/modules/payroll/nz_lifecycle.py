@@ -10,7 +10,7 @@ runs, compensating corrections and rehire.
                 payable. When the FINAL run is PAID the employment ends and
                 the entitlements are closed with their history kept (never
                 zeroed).
-  corrections   refused while the signed correction policy is pending. The
+  corrections   refused while the correction policy value is not provided. The
                 original PAID payslip is never touched: its frozen context is
                 replayed with the corrected inputs and a CORRECTION payslip
                 carries only the deltas; its year-to-date entries post as
@@ -292,7 +292,7 @@ def _correction(db: Session, organization_id: int, correction_id: int):
 def _policy_signed(db: Session, on: date) -> bool:
     rate_map, _slabs, _pack = nzs._nz_pack_in_force(db, on)
     row = (rate_map or {}).get("nz_correction_policy")
-    if row is None or "[PENDING G1]" in (row.label or ""):
+    if row is None:
         return False
     return (row.text_value or "").strip().upper() == CORRECTION_POLICY
 
@@ -318,7 +318,8 @@ def create_correction(db: Session, organization_id: int, original_item_id: int, 
     if run.status not in (PayrollStatus.PAID, PayrollStatus.CLOSED):
         raise BadRequestException("Only a PAID payslip is corrected; an unpaid run is recalculated instead.")
     if not _policy_signed(db, run.pay_date):
-        _conflict("NZ_CORRECTION_POLICY_PENDING", "the retro-pay and correction policy is not signed (NZ-006).")
+        _conflict("NZ_CORRECTION_POLICY_PENDING", "the retro-pay and correction policy value is not yet provided "
+                  "(NZ-006).")
     snapshot = item.nz_calculation_snapshot or {}
     frozen = snapshot.get("frozenContext")
     if not frozen:

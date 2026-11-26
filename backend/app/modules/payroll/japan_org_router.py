@@ -5,9 +5,9 @@ Organisation API for Japan statutory setup (ZP-JP-ENG-001 Phase 5), mounted
 inside payroll_router as /api/payroll/japan. Same house rules as the Brazil /
 Mexico / Netherlands organisation routers:
 
-  * Dormancy: the router-level guard refuses EVERY route with 404 while
-    JP_TENANT_ONBOARDING_ENABLED is off, or when the caller's payroll
-    jurisdiction is not Japan. Japan is dormant, not forbidden.
+  * Scope: the router-level guard refuses EVERY route with 404 when the
+    caller's payroll jurisdiction is not Japan. There is no onboarding
+    switch (gate removal, owner decision 2026-11-25).
   * The organisation is always the caller's own; no route takes an org id.
   * Every child id is checked against that organisation before the service
     acts.
@@ -31,14 +31,14 @@ from app.modules.payroll import japan_service as jp
 
 def require_japan_tenant(current_user=Depends(get_current_payroll_operator),
                          db: Session = Depends(get_db)):
-    from app.modules.payroll import japan_dormancy, service
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.payroll import service
 
-    if not japan_dormancy.onboarding_enabled():
-        raise NotFoundException(japan_dormancy.DORMANT_MESSAGE)
     org_id = getattr(current_user, "organization_id", None)
     if org_id is None:
         return
-    if not japan_dormancy.is_japan(service._resolve_org_country(db, org_id)):
+    country = service._resolve_org_country(db, org_id)
+    if not country or get_jurisdiction_code(country) != "JP":
         raise NotFoundException("The Japan API is only available to organisations whose payroll "
                                 "jurisdiction is Japan.")
 
@@ -80,13 +80,7 @@ def _list(db: Session, model, organization_id: int, employee_id: Optional[int] =
     return _rows(q.order_by(model.id).all())
 
 
-# ── readiness / summary ─────────────────────────────────────────────────────
-
-@router.get("/readiness", summary="Japan release gates G0-G8 with checks and evidence (read-only)")
-def jp_readiness(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
-    from app.modules.payroll import japan_readiness
-    return japan_readiness.jp_readiness(db)
-
+# ── summary ─────────────────────────────────────────────────────────────────
 
 @router.get("/summary", summary="Japan statutory setup summary (read-only)")
 def jp_summary(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):

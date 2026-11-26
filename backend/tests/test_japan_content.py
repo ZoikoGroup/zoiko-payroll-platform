@@ -1,9 +1,9 @@
 """Contract tests pinning japan_content.py to ZP-JP-ENG-001 (Phase 1).
 
 These assert the values and rules the specification states (§2 calendars and
-rates, §5 social insurance, §6 labour, §15 evidence register) and the
-production safety rule: every row is PENDING G1, nothing the specification
-does not reproduce (NTA tables, SMR grades, prefectural health rates, minimum
+rates, §5 social insurance, §6 labour, §15 evidence register), the
+owner-approved policy values (gate removal 2026-11-25, Spain model), and that
+nothing the specification does not reproduce (NTA tables, SMR grades, prefectural health rates, minimum
 wages) is filled, and there is no global rounding (JP-002). Also covers the
 Draft seeder, the dormancy switch and fail-closed dispatch.
 """
@@ -64,9 +64,10 @@ def test_only_listed_rows_may_be_empty():
     assert empty == set(content.JP_EMPTY_BY_DESIGN)
 
 
-def test_every_row_is_pending_g1():
-    # Production safety rule: nothing is active because the spec states it.
-    assert all(row[7] is True for row in content.JP_SCALAR_CONTENT)
+def test_pending_g1_flag_is_kept_for_data_shape_only():
+    # Gate removal: the field stays (index 7) but the seeder ignores it.
+    assert all(isinstance(row[7], bool) for row in content.JP_SCALAR_CONTENT)
+    assert all(len(row) == 10 for row in content.JP_SCALAR_CONTENT)
 
 
 def test_values_parse_and_dates_are_ordered():
@@ -90,11 +91,14 @@ def test_there_is_no_global_rounding_row():
         assert _scalar(key)[5] in content.ROUNDING_RULES, key
 
 
-def test_only_the_stated_rounding_rule_is_filled():
+def test_rounding_rules_stated_or_owner_approved():
     assert _scalar("jp_sba_rounding")[5] == "DOWN_1000"
     assert _scalar("jp_sba_rounding_unit")[4] == "1000"
-    for key in ("jp_wht_rounding", "jp_si_employee_share_rounding", "jp_ei_employee_share_rounding"):
-        assert _scalar(key)[5] == content.PENDING, key
+    # Owner-approved 2026-11-25: the 50-sen rule.
+    for key in ("jp_si_employee_share_rounding", "jp_ei_employee_share_rounding"):
+        assert _scalar(key)[5] == "HALF_DOWN", key
+    # Withholding rounding stays blocked until the NTA tables are supplied.
+    assert _scalar("jp_wht_rounding")[5] == content.PENDING
 
 
 # ── spec-stated values (§2, §5, §6) ─────────────────────────────────────────
@@ -106,7 +110,7 @@ def test_social_insurance_values():
     assert (_scalar("jp_kyokai_health_total_min")[4], _scalar("jp_kyokai_health_total_max")[4]) == \
         ("9.2100", "10.5500")
     assert _scalar("jp_kyokai_care_total")[4] == "1.6200"
-    assert _scalar("jp_care_split_rule")[5] == content.PENDING        # the spec states no care split
+    assert _scalar("jp_care_split_rule")[5] == "EQUAL"                # owner-approved 2026-11-25
     assert (_scalar("jp_care_min_age")[4], _scalar("jp_care_max_age")[4]) == ("40", "64")
 
 
@@ -145,6 +149,9 @@ def test_labour_premiums_and_hours():
         ("60", "50")
     assert _scalar("jp_statutory_holiday_premium_pct")[4] == "35"
     assert (_scalar("jp_night_premium_pct")[4], _scalar("jp_night_window")[5]) == ("25", "22:00-05:00")
+    assert _scalar("jp_premium_combination_rule")[5] == "ADDITIVE"
+    assert "ADDITIVE" in content.PREMIUM_COMBINATION_RULES
+    assert _scalar("jp_holiday_substitute_rule")[5] == content.PENDING
 
 
 def test_calendars_and_due_dates():
@@ -152,7 +159,10 @@ def test_calendars_and_due_dates():
     assert (_scalar("jp_smr_determination_months")[5], _scalar("jp_smr_report_month")[5],
             _scalar("jp_smr_application_months")[5]) == ("04-06", "07", "09-08")
     assert _scalar("jp_wht_remittance_due_day")[4] == "10"
+    # Left PENDING_G1: shifting needs the (empty) public-holiday table.
     assert _scalar("jp_wht_due_non_business_day_rule")[5] == content.PENDING
+    assert _scalar("jp_resident_tax_remittance_due_day")[4] == "10"
+    assert "jp_resident_tax_remittance_due_day" not in content.JP_EMPTY_BY_DESIGN
     assert _scalar("jp_si_remittance_due")[5] == "LAST_DAY_FOLLOWING_MONTH"
     assert _scalar("jp_bonus_report_days")[4] == "5"
     assert _scalar("jp_statutory_reports_due")[5] == "01-31"
@@ -241,7 +251,7 @@ def test_seed_writes_a_draft_pack_with_every_row(db):
     rates = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).all()
     assert {r.component_key for r in rates} == set(content.JP_PARAMETER_KEYS)
     by_key = {r.component_key: r for r in rates}
-    assert all(r.label.endswith("[PENDING G1]") for r in rates)
+    assert not any("[PENDING G1]" in r.label for r in rates)          # gate removal: no marker
     assert by_key["jp_epi_total"].flat_amount == Decimal("18.3") and by_key["jp_epi_total"].total == "18.3000% total"
     assert by_key["jp_ei_general"].employee_rate_pct == Decimal("0.5")
     assert by_key["jp_ei_general"].employer_rate_pct == Decimal("0.85")
@@ -252,6 +262,7 @@ def test_seed_writes_a_draft_pack_with_every_row(db):
     slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).all()
     assert {s.rule_type for s in slabs} == {"JP_EARNING_CLASS"}          # no table row is invented
     assert len(slabs) == len(content.JP_EARNING_CLASSES)
+    assert not any("[PENDING G1]" in (s.rate_label or "") for s in slabs)
     assert db.query(SourceArtifact).filter(SourceArtifact.form_number.like("ZP-JP-ENG-001 S%")).count() == 17
 
 
@@ -282,50 +293,7 @@ def test_japan_resolves_to_jp(value):
     from app.core.jurisdiction import REGISTRATION_COUNTRIES, get_jurisdiction_code
 
     assert get_jurisdiction_code(value) == "JP"
-    assert "Japan" not in REGISTRATION_COUNTRIES                      # never registrable while dormant
-
-
-def test_entering_japan_is_refused_while_dormant(monkeypatch):
-    from app.config import settings
-    from app.modules.payroll import japan_dormancy as d
-
-    assert settings.JP_TENANT_ONBOARDING_ENABLED is False
-    assert d.entering_japan_refusal("India", "Japan") == d.DORMANT_MESSAGE
-    assert d.entering_japan_refusal("JP", "Japan") is None                      # already Japanese
-    assert d.entering_japan_refusal("India", "Brazil") is None                  # not Japan
-    monkeypatch.setattr(settings, "JP_TENANT_ONBOARDING_ENABLED", True)
-    assert d.entering_japan_refusal("India", "Japan") is None
-
-
-def test_country_change_into_japan_is_blocked(db):
-    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
-
-    assert "Japan is not open" in get_jurisdiction_change_block_reason(db, "India", "Japan")
-
-
-@pytest.mark.parametrize("value", ["JP", "Japan"])
-def test_company_jurisdiction_cannot_become_japan(db, value):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll import service
-    from app.modules.payroll.schemas import CompanyDetailsUpdate
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="JP Test Org", code="JPTEST", country=None)
-    service.get_company_details(db, t.org.id)
-    with pytest.raises(BadRequestException, match="Japan is not open"):
-        service.update_company_details(db, t.org.id, CompanyDetailsUpdate(jurisdictionCountry=value))
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("JP", "Japan")
-
-
-def test_backfill_never_makes_an_org_japanese(db):
-    from app.modules.organizations.models import Organization
-    from app.modules.payroll import service
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="JP Backfill Org", code="JPBACK", country=None)
-    db.get(Organization, t.org.id).country = "Japan"
-    db.commit()
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("JP", "Japan")
+    assert "Japan" in REGISTRATION_COUNTRIES                          # registrable since the gate removal
 
 
 def test_japan_dispatch_is_fail_closed():
@@ -356,16 +324,18 @@ def test_japan_is_a_hooked_statutory_module():
         assert callable(jurisdiction_hooks.get("JP", hook))
 
 
-def test_year_end_content_is_empty_or_pending_until_g1():
-    for key in ("jp_yea_income_limit", "jp_yea_earthquake_cap", "jp_reconstruction_surtax_pct"):
+def test_year_end_content_values_and_remaining_empty_rows():
+    for key in ("jp_yea_income_limit", "jp_yea_earthquake_cap"):
         assert key in content.JP_EMPTY_BY_DESIGN
-    for key in ("jp_yea_taxable_rounding", "jp_yea_rounding", "jp_yea_earliest_month"):
-        assert _scalar(key)[5] == content.PENDING
+    assert _scalar("jp_reconstruction_surtax_pct")[4] == "2.1"         # a PERCENT of the income tax
+    assert "jp_reconstruction_surtax_pct" not in content.JP_EMPTY_BY_DESIGN
+    assert (_scalar("jp_yea_taxable_rounding")[5], _scalar("jp_yea_rounding")[5],
+            _scalar("jp_yea_earliest_month")[5]) == ("DOWN_1000", "DOWN_100", "12")
     assert content.JP_EMPTY_TABLES["year_end_adjustment"]["rows"] == ()
     assert set(content.JP_EMPTY_TABLES["year_end_adjustment"]["rule_types"]) == set(content.JP_YEA_RULE_TYPES)
 
 
-def test_corrections_and_exports_stay_closed_until_signed():
-    assert _scalar("jp_correction_policy")[5] == content.PENDING
+def test_correction_policy_is_delta_payslip_and_exports_stay_closed():
+    assert _scalar("jp_correction_policy")[5] == "DELTA_PAYSLIP"
     assert content.CORRECTION_POLICIES == ("DELTA_PAYSLIP", "PENDING_G1")
     assert content.JP_EXPORT_SCHEMAS == {}

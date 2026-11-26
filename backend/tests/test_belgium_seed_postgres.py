@@ -142,7 +142,7 @@ def test_postgres_seed_draft_from_the_production_column_shape():
             classes = db.query(TaxSlab).filter_by(jurisdiction_pack_id=pack.id, rule_type=c.EARNING_CLASS_RULE)
             assert classes.count() == len(c.OBLIGATIONS) * len(c.COMPONENTS)
             assert {s.tax_regime for s in classes} == set(c.OBLIGATIONS)
-            assert all(c.PENDING_MARK in (s.rate_label or "") for s in classes)          # nothing signed
+            assert not any(c.PENDING_MARK in (s.rate_label or "") for s in classes)      # no legacy marker
             with pytest.raises(BadRequestException):                         # create-only
                 be_super_admin.seed_draft(db, {"reason": "TEST ONLY: second seed"}, None)
             db.rollback()

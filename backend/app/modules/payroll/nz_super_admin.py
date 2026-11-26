@@ -124,23 +124,24 @@ def _reason(data: dict) -> str:
     return reason[:300]
 
 
-def _source(db: Session, data: dict, verify: bool):
+def _source(db: Session, data: dict, verify: bool = False):
+    """The source document of a statutory change - optional provenance since the
+    gate removal, owner decision 2026-11-25: no reviewed-source signing step exists."""
     from app.modules.payroll.models import SourceArtifact
 
     source_id = data.get("sourceDocumentId")
-    source = db.get(SourceArtifact, int(source_id)) if source_id not in (None, "") else None
+    if source_id in (None, ""):
+        return None
+    source = db.get(SourceArtifact, int(source_id))
     if source is None:
-        raise BadRequestException("A statutory change needs the official source document (an existing SourceArtifact).")
-    if verify and not (source.checksum_sha256 and source.file_path and source.reviewer_id
-                       and source.reviewer_id != source.created_by_id and "[UNVERIFIED" not in (source.title or "")):
-        raise BadRequestException("Signing needs a stored, hashed source document reviewed by a Super Admin other "
-                                  "than its uploader (and not itself marked UNVERIFIED).")
+        raise BadRequestException(f"Source document {source_id} does not exist.")
     return source
 
 
-def _marked(label: Optional[str], signed: bool, limit: int) -> str:
-    base = " ".join((label or "").replace(MARK, " ").split())
-    return (base if signed else f"{base} {MARK}".strip())[:limit]
+def _marked(label: Optional[str], signed: bool = True, limit: int = 150) -> str:
+    """The plain label: no row is ever marked "[PENDING G1]" again (gate removal, owner decision 2026-11-25);
+    an old marker on an already-seeded row is stripped on its next edit."""
+    return " ".join((label or "").replace(MARK, " ").split())[:limit]
 
 
 def _finish(db: Session, pack, actor_id, entity_type: str, entity_id: int, old: dict, new: dict, reason: str):
@@ -159,7 +160,7 @@ def _rate_view(row) -> dict:
     return {"kind": "rate", "id": row.id, "componentKey": row.component_key, "label": row.label,
             "flatAmount": None if row.flat_amount is None else str(row.flat_amount), "textValue": row.text_value,
             "effectiveFrom": nzs._json_safe(row.effective_from), "effectiveTo": nzs._json_safe(row.effective_to),
-            "sourceDocumentId": row.source_document_id, "signed": MARK not in (row.label or "")}
+            "sourceDocumentId": row.source_document_id, "signed": True}
 
 
 def _slab_view(row) -> dict:
@@ -169,7 +170,7 @@ def _slab_view(row) -> dict:
             "minAmount": nzs._json_safe(row.min_amount), "maxAmount": nzs._json_safe(row.max_amount),
             "ratePct": nzs._json_safe(row.rate_pct), "flatAmount": nzs._json_safe(row.flat_amount),
             "effectiveFrom": nzs._json_safe(row.effective_from), "effectiveTo": nzs._json_safe(row.effective_to),
-            "sourceDocumentId": row.source_document_id, "signed": MARK not in (row.rate_label or "")}
+            "sourceDocumentId": row.source_document_id, "signed": True}
 
 
 # ── governed edit / sign of one canonical row ───────────────────────────────
@@ -197,7 +198,7 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id) -> dic
     pack = _pack(db, row.jurisdiction_pack_id)
     _require_editable_pack(pack)
     reason = _reason(data)
-    verify = data.get("specialistVerified") is True
+    verify = False                       # no signing step (gate removal, owner decision 2026-11-25)
     source = _source(db, data, verify)
     allowed = dict(RATE_FIELDS if kind == "rate" else SLAB_FIELDS)
     if kind == "slab" and row.rule_type == content.NZ_EARNING_CLASS_RULE:
@@ -249,7 +250,7 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id) -> dic
         raise BadRequestException(f"{row.component_key} has no value: fill it before signing.")
     label_col = "label" if kind == "rate" else "rate_label"
     was_signed = MARK not in (getattr(row, label_col) or "")
-    signed = verify or (was_signed and not changed)
+    signed = True                        # every saved row is in force (no signing)
     setattr(row, label_col, _marked(getattr(row, label_col), signed, 100 if kind == "rate" else 150))
     if kind == "rate":
         if row.text_value:
@@ -261,8 +262,9 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id) -> dic
             total = f"{row.flat_amount}%" if pct else str(row.flat_amount)
         row.total = total[:50]
     old["signed"], new["signed"] = was_signed, signed
-    old["sourceDocumentId"], new["sourceDocumentId"] = row.source_document_id, source.id
-    row.source_document_id = source.id
+    if source is not None:
+        old["sourceDocumentId"], new["sourceDocumentId"] = row.source_document_id, source.id
+        row.source_document_id = source.id
     _finish(db, pack, actor_id, f"nz_statutory_{kind}", row.id, old, new, reason)
     return _rate_view(row) if kind == "rate" else _slab_view(row)
 
@@ -316,7 +318,7 @@ def add_table_row(db: Session, pack_row_id: int, rule_type: str, data: dict, act
     _require_editable_pack(pack)
     data = dict(data or {})
     reason = _reason(data)
-    verify = data.get("specialistVerified") is True
+    verify = False                       # no signing step (gate removal, owner decision 2026-11-25)
     source = _source(db, data, verify)
     unknown = set(data) - set(TABLE_FIELDS) - {"reason", "sourceDocumentId", "specialistVerified"}
     if unknown:
@@ -358,7 +360,7 @@ def add_table_row(db: Session, pack_row_id: int, rule_type: str, data: dict, act
                   jurisdiction_state=_region(data.get("region")) if rule_type == content.NZ_PUBLIC_HOLIDAY_RULE else None,
                   rate_label=_marked(name, verify, 150),
                   effective_from=day if rule_type == content.NZ_PUBLIC_HOLIDAY_RULE else None,
-                  effective_to=end, source_document_id=source.id, sort_order=0)
+                  effective_to=end, source_document_id=source.id if source else None, sort_order=0)
     db.add(row)
     db.flush()
     _finish(db, pack, actor_id, "nz_statutory_table_row", row.id, {}, {**_slab_view(row), "action": "added"}, reason)
@@ -393,12 +395,9 @@ def signing_status(db: Session, pack_row_id: int) -> dict:
                                                ContributionRate.organization_id.is_(None)).all())
     slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
                                       TaxSlab.organization_id.is_(None)).all())
-    pending_rates = sorted(r.component_key for r in rates if MARK in (r.label or ""))
+    pending_rates = []                   # no signing: only empty values block
     empty_values = sorted(r.component_key for r in rates if r.flat_amount is None and not r.text_value)
     pending_slabs = {}
-    for s in slabs:
-        if MARK in (s.rate_label or ""):
-            pending_slabs[s.rule_type] = pending_slabs.get(s.rule_type, 0) + 1
     tables = []
     for name, table in content.NZ_EMPTY_TABLES.items():
         count = sum(1 for s in slabs if s.rule_type == table["rule_type"])
@@ -428,10 +427,6 @@ def list_packs(db: Session) -> list:
     return [{"id": p.id, "packId": p.pack_id, "version": p.version, "packType": p.pack_type, "status": p.status,
              "effectiveFrom": nzs._json_safe(p.effective_from), "effectiveTo": nzs._json_safe(p.effective_to),
              "approvedById": p.approved_by_id, "updatedById": p.updated_by_id} for p in packs]
-
-
-def decisions(db: Session) -> list:
-    return nzs.owner_decisions(db)
 
 
 def golden_check(db: Session, pack_row_id: int) -> dict:

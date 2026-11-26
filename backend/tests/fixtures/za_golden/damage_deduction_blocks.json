@@ -1,6 +1,6 @@
 {
-  "description": "A consented damage deduction BLOCKS while the damage / loss limit is not configured (the spec states none).",
-  "source": "ZP-ZA-ENG-001 v1.0 (22 Sep 2026) \u00a75, ZA-013.",
+  "description": "A consented R10,000 damage deduction BLOCKS: it exceeds the configured limit of 25% of net pay before the deduction (R38,747.30 x 25% = R9,686.83).",
+  "source": "ZP-ZA-ENG-001 v1.0 (22 Sep 2026) \u00a75, ZA-013; BCEA s34(2)(c) one quarter of net pay (owner-approved 2026-11-25). Net before deductions: R50,000 - PAYE R11,075.58 - UIF R177.12 = R38,747.30.",
   "context": {
     "country": "ZA",
     "pay_frequency": "Monthly",
@@ -26,10 +26,10 @@
         "text_value": "MONTHLY"
       },
       "za_paye_tax_year_date_basis": {
-        "text_value": "PENDING_G1"
+        "text_value": "PAYMENT_DATE"
       },
       "za_variable_remuneration_basis": {
-        "text_value": "PENDING_G1"
+        "text_value": "PAYMENT_DATE"
       },
       "za_rounding_mode": {
         "text_value": "HALF_UP"
@@ -121,6 +121,9 @@
       },
       "za_deduction_authority_types": {
         "text_value": "STATUTORY,COURT_ORDER,CONSENT,COLLECTIVE"
+      },
+      "za_damage_deduction_limit_pct": {
+        "employee_rate_pct": "25.0000"
       }
     },
     "slabs": [
@@ -449,7 +452,7 @@
         "id": 11,
         "order_type": "DAMAGE",
         "authority_type": "CONSENT",
-        "amount": "500",
+        "amount": "10000",
         "evidence_ref": "Emoluments attachment order 12/2026"
       }
     ]

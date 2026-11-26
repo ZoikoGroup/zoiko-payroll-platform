@@ -194,20 +194,10 @@ check("the filing / settlement panel and the journal are wired and never send an
   assert(events.includes("buildMyEventFiling(r.id)"), "event form action");
 });
 
-// ── Phase 10: release gates, golden check, parallel cycles ─────────────────
-check("the release-gates tab is on the Super Admin page and never decides a gate", () => {
+// ── Phase 10: parallel cycles (no release-gate tab since the gate removal, 2026-11-25) ──
+check("there is no release-gate tab on the Super Admin page", () => {
   const config = read("config/jurisdictions/malaysiaComplianceConfig.jsx");
-  assert(/tab\("my-readiness", "Release gates"/.test(config) && config.includes("<MYReadinessTab pack={pack} />"),
-    "release-gates tab");
-  const service = read("service/superAdminService.js");
-  assert(service.includes("${MY_SA}/packs/${packRowId}/golden-check")
-    && service.includes("${MY_SA}/packs/${packRowId}/authority-examples"), "golden-check / example client calls");
-  const router = saRouter();
-  ["/compliance/malaysia/packs/{pack_row_id}/golden-check", "/compliance/malaysia/packs/{pack_row_id}/authority-examples"]
-    .forEach((path) => assert(router.includes(`"${path}"`), `no backend route ${path}`));
-  const tab = read("components/jurisdiction/malaysia/MYReadinessTab.jsx");
-  assert(!/passed\s*=\s*true|allPassed\s*=/.test(tab), "the UI must never decide a gate");
-  assert(/pack\.status === "Draft" && <AddExample/.test(tab), "examples are added to a Draft pack only");
+  assert(!/my-readiness|MYReadinessTab/.test(config), "release-gates tab still mounted");
 });
 check("the parallel-cycle screen is wired and names the Malaysian identifiers it refuses", () => {
   const centre = read("modules/payroll/Compliances/MYComplianceCentreTab.jsx");

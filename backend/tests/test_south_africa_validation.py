@@ -1,13 +1,11 @@
 ﻿"""South Africa (ZP-ZA-ENG-001 Phase 5) - identity and bank validation.
 
-The ZAEmployeeValidation strategy is exercised directly; its dormancy gate
-(ZA_TENANT_ONBOARDING_ENABLED via south_africa_dormancy) keeps the strategy
-out of production onboarding until the release gates are signed.
+The ZAEmployeeValidation strategy is exercised directly. Since the gate
+removal (2026-11-25) it is an ordinary registered strategy (no dormancy).
 """
 import pytest
 
 from app.core.exceptions import BadRequestException
-from app.modules.payroll import south_africa_dormancy
 from app.modules.payroll.bank_routing import (
     PAYMENT_MODE_LABEL, ROUTING_FIELDS, btf_routing_label, payment_mode_label,
     resolve_routing,
@@ -20,17 +18,14 @@ VALID_ID = "8001015009087"
 VALID_PASSPORT = "AB123456"
 
 
-def test_za_validation_is_registered_and_dormant(monkeypatch):
+def test_za_validation_is_registered():
     assert ZAEmployeeValidation.country_code == "ZA"
     assert ZAEmployeeValidation.duplicate_field == "national_id"
     assert {"national_id", "passport_number", "tax_number"} <= set(
         ZAEmployeeValidation.SENSITIVE_FIELDS)
 
-    monkeypatch.setattr(south_africa_dormancy, "onboarding_enabled", lambda: False)
     from app.modules.payroll import employee_validation
-    assert employee_validation._dormant_strategy("ZA") is None
-    monkeypatch.setattr(south_africa_dormancy, "onboarding_enabled", lambda: True)
-    assert employee_validation._dormant_strategy("ZA") is ZAEmployeeValidation
+    assert employee_validation.get_employee_validation_strategy("ZA") is ZAEmployeeValidation
 
 
 @pytest.mark.parametrize("value", [VALID_ID, "800101-5009-087", "800101 5009 087"])

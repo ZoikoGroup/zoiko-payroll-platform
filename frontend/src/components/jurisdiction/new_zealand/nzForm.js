@@ -19,14 +19,14 @@ export function useSources() {
 }
 
 export function governanceError(value) {
-  if (!value.sourceDocumentId) return "Select the source document.";
   if (!(value.reason || "").trim()) return "A change reason is required.";
   return null;
 }
 
 export function governancePayload(value) {
-  return { reason: value.reason.trim(), sourceDocumentId: Number(value.sourceDocumentId),
-    specialistVerified: Boolean(value.specialistVerified) };
+  // The source document is optional; there is no signing step (gate removal 2026-11-25).
+  return { reason: value.reason.trim(),
+    ...(value.sourceDocumentId ? { sourceDocumentId: Number(value.sourceDocumentId) } : {}) };
 }
 
 const nzd = (value) => `$${Number(value).toLocaleString("en-NZ", { maximumFractionDigits: 2 })}`;

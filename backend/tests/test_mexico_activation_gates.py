@@ -374,11 +374,12 @@ def test_governance_opt_in_tuples_gain_only_mexico():
         # all opt-in with the same four-eyes/fail-closed rules; + Germany in the
         # two four-eyes lists only (owner decision 2026-11-25).
         four_eyes = name in ("_APPROVER_NOT_ACTIVATOR_COUNTRIES", "_SELF_APPROVAL_REFUSED_COUNTRIES")
-        expected = _BEFORE + ("MX", "BR", "ZA", "PL", "MY", "BE") + (("DE",) if four_eyes else ())
+        # ZA, PL, MY and BE left all four lists with the gate removal, owner decision 2026-11-25.
+        expected = _BEFORE + ("MX", "BR") + (("DE",) if four_eyes else ())
         assert getattr(service, name) == expected, name
     assert service._GATED_PACK_COUNTRY_NAMES["MX"] == "Mexico"
     assert set(service._GATED_PACK_COUNTRY_NAMES) == {
-        "US", "DE", "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE"}
+        "US", "DE", "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR"}
     assert service._GOLDEN_FIXTURES_DIR_BY_COUNTRY["MX"] == "mx_golden"
     assert len(service._GOLDEN_FIXTURES_DIR_BY_COUNTRY) == 14
     assert service._CANONICAL_PACK_ONLY_COUNTRIES == ("SG", "HK", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE", "AE", "ES")

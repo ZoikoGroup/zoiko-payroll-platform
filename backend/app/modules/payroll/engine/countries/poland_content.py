@@ -55,17 +55,20 @@ Conventions (the engine must match them):
     PPK and FEP rows mirror EMERYTALNE (PL-014: PPK uses the pension base
     without the 30x cap; FEP "uses pension-base logic").
   * Rounding is per obligation (PL-004) and is NOT given by the
-    specification: every pl_rounding_* row is "PENDING_G1".
+    specification: the pl_rounding_* rows carry the owner-approved policy
+    (GATE_REMOVAL_INVENTORY.md section B, 2026-11-25).
 
 Scope (spec §1, decision D2): employees under umowa o pracę on MONTHLY pay.
 Civil-law contracts, multiple insurance titles, posted workers / A1,
 management contracts, equity and the 50% creator costs have NO rows on
 purpose — the engine BLOCKS them.
 
-Status is Draft throughout and the registry row stays PLANNED. Rows marked
-pending_g1=True need the Polish specialist's signature at gate G1 (spec §15)
-before any pack carrying them is activated; rows stated by the specification
-still go through the same four-eyes activation.
+Gate removal (owner decision 2026-11-25, "Spain model"): there is no G1
+signing gate. The per-row boolean (tuple index 7) now only records that the
+value is NOT stated by the specification (proposed policy / statutory value
+approved by the owner in docs/poland/GATE_REMOVAL_INVENTORY.md section B);
+it never adds a "[PENDING G1]" label marker. A row that is still empty or
+"PENDING_G1" blocks only the calculation that needs it.
 """
 
 from datetime import date
@@ -144,11 +147,11 @@ OBLIGATIONS = COVERAGE_OBLIGATIONS + ("MIN_WAGE",)
 TREATMENTS = ("INCLUDED", "EXCLUDED", "REVIEW")
 DATE_BASES = ("CALENDAR_YEAR", "CONTRIBUTION_YEAR", "PAYROLL_MONTH", "PAYMENT_DATE", "EMPLOYMENT_EVENT")
 # Rounding rule vocabulary (unit + mode). Which rule each obligation uses is
-# NOT given by the specification (PL-004) — every pl_rounding_* row ships
-# PENDING_G1 and the engine blocks until G1 signs one of these.
+# NOT given by the specification (PL-004); the owner-approved choice is in the
+# pl_rounding_* rows. A row left at PENDING_G1 blocks.
 ROUNDING_MODES = ("GROSZ_HALF_UP", "GROSZ_DOWN", "FULL_PLN_HALF_UP", "FULL_PLN_DOWN", "PENDING_G1")
-# Signed-value vocabularies for the policy rows the specification leaves open.
-# A vocabulary is not a decision: the shipped rows stay PENDING_G1.
+# Value vocabularies for the policy rows the specification leaves open.
+# The rows carry the owner-approved value (gate removal, 2026-11-25).
 HEALTH_LIMITATION_RULES = ("NONE",)
 FP_FS_MIN_BASE_RULES = ("NONE", "BASE_AT_LEAST_MIN_WAGE")
 FUND_CAP_RULES = ("CAPPED_WITH_PENSION_BASE", "UNCAPPED")
@@ -157,14 +160,33 @@ PIT2_ALLOCATIONS = {"FULL": "pl_pit2_reduction_full", "HALF": "pl_pit2_reduction
                     "THIRD": "pl_pit2_reduction_third"}
 # PL-016: the event that created an overtime premium (spec §8). Which events
 # earn the standard vs the high premium is NOT given by the specification:
-# pl_overtime_premium_map ("DAILY=50,WEEKLY=100,...") ships PENDING_G1.
+# pl_overtime_premium_map is either an explicit "DAILY=50,WEEKLY=100,..." list
+# or a named map below. Owner-approved 2026-11-25: LABOUR_CODE_151_1 (Labour
+# Code art. 151(1)) — DAILY earns the STANDARD premium; WEEKLY, NIGHT (daily
+# overtime worked at night), SUNDAY_HOLIDAY and COMP_TIME_FAILED earn the HIGH
+# premium. Tiers only: the percentages stay in pl_overtime_premium_standard /
+# pl_overtime_premium_high. (The explicit list is 68 chars; text_value is String(50).)
 OVERTIME_EVENT_KINDS = ("DAILY", "WEEKLY", "NIGHT", "SUNDAY_HOLIDAY", "COMP_TIME_FAILED")
+OVERTIME_PREMIUM_MAPS = {
+    "LABOUR_CODE_151_1": {"DAILY": "STANDARD", "WEEKLY": "HIGH", "NIGHT": "HIGH", "SUNDAY_HOLIDAY": "HIGH",
+                          "COMP_TIME_FAILED": "HIGH"},
+}
 LEAVE_PART_TIME_ROUNDING = ("ROUND_UP_FULL_DAY", "EXACT")
-# The night-work supplement formula is not given by the specification; no
-# signed vocabulary exists yet, so a non-zero supplement always blocks.
-NIGHT_SUPPLEMENT_RULES = ()
+# The night-work supplement formula is not given by the specification.
+# MIN_WAGE_HOURLY_20PCT = 20% of the hourly rate derived from the minimum wage
+# (Labour Code art. 151(8)); owner-approved 2026-11-25. The engine accepts the
+# basis but does not recompute the supplement amount.
+NIGHT_SUPPLEMENT_RULES = ("MIN_WAGE_HOURLY_20PCT",)
+# Owner-approved policy tokens (2026-11-25) for rows no engine module reads yet.
+# STATUTORY = age 55F/60M; 36 months after parental leave; 12 months for a new
+# hire under 30. The engine still blocks a worker carrying an exemption code.
+FUND_EXEMPTION_RULES = ("STATUTORY",)
+# Variable components averaged over the 3 months before the leave.
+LEAVE_PAY_REFERENCE_RULES = ("VARIABLE_COMPONENTS_3_MONTHS",)
+# PIT advances remitted by the 20th of the month after withholding (PIT Act art. 38).
+PIT_REMITTANCE_DUE_RULES = ("DAY_20_NEXT_MONTH",)
 # Spec §9 IncapacityEpisode statutory category. Which categories are paid at
-# the full rate is a signed list (pl_sick_full_rate_cases, PENDING_G1).
+# the full rate is the pl_sick_full_rate_cases list.
 INCAPACITY_CATEGORIES = ("ILLNESS", "ROUTE_ACCIDENT", "PREGNANCY", "DONOR", "WORK_ACCIDENT", "OTHER")
 # How "aged over 50 under statutory age rule" is measured is not given.
 SICK_AGE_RULES = ("AGE_AT_EPISODE_START", "FROM_YEAR_AFTER_REACHING_AGE")
@@ -330,14 +352,14 @@ POLAND_SCALAR_CONTENT = (
      None, None, None, "GROSS_LESS_EMPLOYEE_SOCIAL", "S7", False, None, None, _PD),
     # Not stated by the specification — whether any limit applies to health.
     ("pl_health_limitation_rule", "Health contribution limitation rule (not in spec)",
-     None, None, None, _PENDING, "S7", True, None, None, _PD),
+     None, None, None, "NONE", "S7", True, None, None, _PD),
     # PL-004: rounding per obligation — values not given by the specification.
-    ("pl_rounding_pit", "PIT advance rounding (PL-004)", None, None, None, _PENDING, "S3", True, None, None, _PD),
-    ("pl_rounding_zus", "ZUS social contribution rounding (PL-004)", None, None, None, _PENDING, "S5", True,
+    ("pl_rounding_pit", "PIT advance rounding (PL-004)", None, None, None, "FULL_PLN_HALF_UP", "S3", True, None, None, _PD),
+    ("pl_rounding_zus", "ZUS social contribution rounding (PL-004)", None, None, None, "GROSZ_HALF_UP", "S5", True,
      None, None, _PD),
-    ("pl_rounding_health", "Health contribution rounding (PL-004)", None, None, None, _PENDING, "S7", True,
+    ("pl_rounding_health", "Health contribution rounding (PL-004)", None, None, None, "GROSZ_HALF_UP", "S7", True,
      None, None, _PD),
-    ("pl_rounding_ppk", "PPK contribution rounding (PL-004)", None, None, None, _PENDING, "S9", True,
+    ("pl_rounding_ppk", "PPK contribution rounding (PL-004)", None, None, None, "GROSZ_HALF_UP", "S9", True,
      None, None, _PD),
 
     # ── wages (spec §2, §8) ───────────────────────────────────────────────
@@ -361,19 +383,21 @@ POLAND_SCALAR_CONTENT = (
      "S4", False, None, None, _PD),
     ("pl_costs_standard_monthly", "Standard employee deductible costs (monthly, PLN)", None, None, "250",
      None, "S3", False, None, None, _PD),
-    # Spec: "annual caps depend on one/multiple employment relationships" — no figures.
-    ("pl_costs_standard_annual_cap", "Standard costs annual cap, one employment (PLN)", None, None, None,
+    # Spec: "annual caps depend on one/multiple employment relationships" — no figures;
+# statutory values from PIT Act art. 22(2), owner-approved 2026-11-25.
+    ("pl_costs_standard_annual_cap", "Standard costs annual cap, one employment (PLN)", None, None, "3000.00",
      None, "S3", True, None, None, _CY),
     ("pl_costs_standard_multi_annual_cap", "Standard costs annual cap, multiple employments (PLN)", None,
-     None, None, None, "S3", True, None, None, _CY),
+     None, "4500.00", None, "S3", True, None, None, _CY),
     ("pl_costs_commuter_monthly", "Commuter employee deductible costs (monthly, PLN)", None, None, "300",
      None, "S3", False, None, None, _PD),
-    ("pl_costs_commuter_annual_cap", "Commuter costs annual cap, one employment (PLN)", None, None, None,
+    ("pl_costs_commuter_annual_cap", "Commuter costs annual cap, one employment (PLN)", None, None, "3600.00",
      None, "S3", True, None, None, _CY),
     ("pl_costs_commuter_multi_annual_cap", "Commuter costs annual cap, multiple employments (PLN)", None,
-     None, None, None, "S3", True, None, None, _CY),
-    # Spec §4: PIT-0 reliefs have "statutory shared/exemption limits" — no figure.
-    ("pl_pit0_annual_limit", "PIT-0 reliefs shared annual exempt-income limit (PLN)", None, None, None,
+     None, "5400.00", None, "S3", True, None, None, _CY),
+    # Spec §4: PIT-0 reliefs have "statutory shared/exemption limits" — no figure;
+# PIT Act art. 21 limit, owner-approved 2026-11-25.
+    ("pl_pit0_annual_limit", "PIT-0 reliefs shared annual exempt-income limit (PLN)", None, None, "85528.00",
      None, "S3", True, None, None, _CY),
 
     # ── ZUS social and health (spec §2, §5) ───────────────────────────────
@@ -403,19 +427,21 @@ POLAND_SCALAR_CONTENT = (
      None, None, _PD),
     # Spec: "minimum-wage and exemption tests require an employer-side
     # applicability engine" — the test itself is not given.
-    ("pl_fp_fs_min_base_rule", "FP/FS minimum-base applicability test", None, None, None, _PENDING, "S5",
+    ("pl_fp_fs_min_base_rule", "FP/FS minimum-base applicability test", None, None, None,
+     "BASE_AT_LEAST_MIN_WAGE", "S5",
      True, None, None, _PM),
     # Spec §5 says the 30x cap "does not automatically cap ... employer funds
     # that are defined without that limit" and §6 states it only for FEP — so
     # whether FP/FS and FGSP use the capped base is not decided by the spec.
     ("pl_fund_cap_rule", "FP/FS and FGSP base: with or without the 30x cap (not in spec)", None, None, None,
-     _PENDING, "S5", True, None, None, _PD),
+     "CAPPED_WITH_PENSION_BASE", "S5", True, None, None, _PD),
     ("pl_fgsp", "Guaranteed Employee Benefits Fund (FGSP), employer", None, "0.1000", None, None, "S12",
      False, None, None, _PD),
     ("pl_fep", "Bridging Pension Fund (FEP), employer, qualifying work only", None, "1.5000", None, None,
      "S12", False, None, None, _PD),
     # Spec §6: named exemption rules with exact effective periods — none given.
-    ("pl_fund_exemption_rules", "Age / return-to-work employer-fund exemptions", None, None, None, _PENDING,
+    ("pl_fund_exemption_rules", "Age / return-to-work employer-fund exemptions", None, None, None,
+     "STATUTORY",
      "S12", True, None, None, _EE),
 
     # ── PPK (spec §2, §7) ─────────────────────────────────────────────────
@@ -435,11 +461,11 @@ POLAND_SCALAR_CONTENT = (
     ("pl_ppk_transfer_day", "PPK transfer due by this day of the following month", None, None, "15", None,
      "S9", True, None, None, _PM),
     # Spec: "periodic auto-re-enrolment" — the period is not given.
-    ("pl_ppk_reenrolment_cycle_years", "PPK auto re-enrolment cycle (years)", None, None, None, None, "S9",
+    ("pl_ppk_reenrolment_cycle_years", "PPK auto re-enrolment cycle (years)", None, None, "4", None, "S9",
      True, None, None, _EE),
     # Not stated by the specification: PIT treatment of the employer PPK contribution.
     ("pl_ppk_employer_pit_treatment", "PIT treatment of the employer PPK contribution (not in spec)", None,
-     None, None, _PENDING, "S9", True, None, None, _PD),
+     None, None, "TAXABLE_EMPLOYEE_INCOME", "S9", True, None, None, _PD),
 
     # ── working time, overtime and leave (spec §8) ────────────────────────
     ("pl_working_hours_daily", "Standard working time (hours per day)", None, None, "8", None, "S10", False,
@@ -451,11 +477,12 @@ POLAND_SCALAR_CONTENT = (
     ("pl_overtime_premium_high", "Overtime premium on normal pay, statutory high case", "100.0000", None,
      None, None, "S10", False, None, None, _PM),
     # Spec §8: "50% or 100% premium depending on statutory circumstance" — the
-    # event-to-premium mapping is not given (PL-016).
+    # event-to-premium mapping is not given (PL-016). Owner-approved named map
+    # (OVERTIME_PREMIUM_MAPS): the explicit KIND=pct list does not fit String(50).
     ("pl_overtime_premium_map", "Overtime event kind -> premium (spec §8, not given)", None, None, None,
-     _PENDING, "S10", True, None, None, _PM),
+     "LABOUR_CODE_151_1", "S10", True, None, None, _PM),
     # Spec: "tied to current minimum wage/hours" — the formula is not given.
-    ("pl_night_supplement_basis", "Night-work supplement basis", None, None, None, _PENDING, "S10", True,
+    ("pl_night_supplement_basis", "Night-work supplement basis", None, None, None, "MIN_WAGE_HOURLY_20PCT", "S10", True,
      None, None, _PM),
     ("pl_leave_days_base", "Annual leave days, service credit under the senior threshold", None, None, "20",
      None, "S10", False, None, None, _EE),
@@ -464,9 +491,11 @@ POLAND_SCALAR_CONTENT = (
     ("pl_leave_service_years_senior", "Service credit (years) for the higher leave tier", None, None, "10",
      None, "S10", False, None, None, _EE),
     # Spec §8: "proportional rules for part-time" — the rounding is not given.
-    ("pl_leave_part_time_rounding", "Part-time annual leave rounding (not in spec)", None, None, None, _PENDING,
+    ("pl_leave_part_time_rounding", "Part-time annual leave rounding (not in spec)", None, None, None,
+     "ROUND_UP_FULL_DAY",
      "S10", True, None, None, _EE),
-    ("pl_leave_pay_reference_rule", "Leave remuneration reference-period rule", None, None, None, _PENDING,
+    ("pl_leave_pay_reference_rule", "Leave remuneration reference-period rule", None, None, None,
+     "VARIABLE_COMPONENTS_3_MONTHS",
      "S10", True, None, None, _PM),
 
     # ── sickness (spec §9) ────────────────────────────────────────────────
@@ -486,15 +515,16 @@ POLAND_SCALAR_CONTENT = (
     ("pl_sick_full_rate_cases", "Cases paid at the full sick-pay rate", None, None, None,
      "ROUTE_ACCIDENT,PREGNANCY,DONOR", "S10", True, None, None, _EE),
     ("pl_sick_age_rule", "How the shorter employer sick-pay period's age test is applied (not in spec)", None, None,
-     None, _PENDING, "S10", True, None, None, _CY),
-    ("pl_benefit_reference_months", "Benefit base reference period (months)", None, None, None, None, "S10",
+     None, "FROM_YEAR_AFTER_REACHING_AGE", "S10", True, None, None, _CY),
+    ("pl_benefit_reference_months", "Benefit base reference period (months)", None, None, "12", None, "S10",
      True, None, None, _EE),
 
     # ── filing and settlement (spec §10) ──────────────────────────────────
     ("pl_zus_due_day_classes", "ZUS DRA filing/payment day by payer class", None, None, None, "5,15,20",
      "S8", False, None, None, _PM),
     # Spec: "production calendar must use authority-verified due-date logic".
-    ("pl_pit_remittance_due_rule", "PIT advance remittance due-date rule", None, None, None, _PENDING, "S11",
+    ("pl_pit_remittance_due_rule", "PIT advance remittance due-date rule", None, None, None,
+     "DAY_20_NEXT_MONTH", "S11",
      True, None, None, _PM),
     ("pl_pit11_authority_due", "PIT-11 to the tax office", None, None, None, "END_JANUARY", "S11", False,
      None, None, _CY),
@@ -506,7 +536,7 @@ POLAND_SCALAR_CONTENT = (
      None, None, _CY),
 
     # ── operations (Phase 9 evidence; the specification gives no values) ──
-    ("pl_record_retention_years", "Payroll / filing record retention (years)", None, None, None, None, "S11",
+    ("pl_record_retention_years", "Payroll / filing record retention (years)", None, None, "10", None, "S11",
      True, None, None, _CY),
     ("pl_reconciliation_tolerance", "Statutory reconciliation tolerance (PLN)", None, None, None, None, "S8",
      True, None, None, _PM),
@@ -518,10 +548,7 @@ POLAND_SCALAR_CONTENT = (
 # never filled with an assumed value. The engine BLOCKS when a calculation
 # needs one of them.
 POLAND_EMPTY_BY_DESIGN = frozenset({
-    "pl_costs_standard_annual_cap", "pl_costs_standard_multi_annual_cap",
-    "pl_costs_commuter_annual_cap", "pl_costs_commuter_multi_annual_cap",
-    "pl_pit0_annual_limit", "pl_ppk_reenrolment_cycle_years", "pl_benefit_reference_months",
-    "pl_record_retention_years", "pl_reconciliation_tolerance", "pl_parallel_materiality_amount",
+    "pl_reconciliation_tolerance", "pl_parallel_materiality_amount",     # gate-only rows (left empty)
 })
 
 # ── PIT scale — TaxSlab rule_type="PL_PIT_BAND" (spec §2 / §4, S3/S4) ─────

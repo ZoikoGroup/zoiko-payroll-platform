@@ -51,7 +51,7 @@ def test_every_alias_resolves_to_be(value):
     from app.core.jurisdiction import REGISTRATION_COUNTRIES, get_jurisdiction_code
 
     assert get_jurisdiction_code(value) == "BE"
-    assert "Belgium" not in REGISTRATION_COUNTRIES                    # never registrable while dormant
+    assert "Belgium" in REGISTRATION_COUNTRIES                        # registrable since the gate removal
 
 
 def test_bare_be_is_not_a_free_text_alias():
@@ -142,17 +142,19 @@ def test_belgium_is_registered_fail_closed():
 
     assert standard._COUNTRY_CALC["BE"] is belgium.calculate
     assert standard._COUNTRY_CALC["BE"] is not standard._calc_generic
-    assert "BE" in _REGISTRY_ROW_REQUIRED_COUNTRIES
+    assert "BE" not in _REGISTRY_ROW_REQUIRED_COUNTRIES                # gate removal 2026-11-25
     assert PayrollResult.__dataclass_fields__["be_result"].default is None
 
 
-def test_shared_governance_tuples_include_belgium():
+def test_shared_governance_tuples_after_the_gate_removal():
+    """Belgium keeps the canonical-pack rule but left the four-eyes / transition-graph opt-ins (gate removal 2026-11-25)."""
     from app.modules.payroll import service
 
-    for name in ("_CANONICAL_PACK_ONLY_COUNTRIES", "_APPROVER_NOT_ACTIVATOR_COUNTRIES",
-                 "_SELF_APPROVAL_REFUSED_COUNTRIES", "_REFUSAL_AUDIT_COUNTRIES", "_PACK_TRANSITION_GRAPH_COUNTRIES"):
-        assert "BE" in getattr(service, name), name
-    assert service._GATED_PACK_COUNTRY_NAMES["BE"] == "Belgium"
+    assert "BE" in service._CANONICAL_PACK_ONLY_COUNTRIES
+    for name in ("_APPROVER_NOT_ACTIVATOR_COUNTRIES", "_SELF_APPROVAL_REFUSED_COUNTRIES", "_REFUSAL_AUDIT_COUNTRIES",
+                 "_PACK_TRANSITION_GRAPH_COUNTRIES"):
+        assert "BE" not in getattr(service, name), name
+    assert "BE" not in service._GATED_PACK_COUNTRY_NAMES
 
 
 # ── onboarding and country-change gates ────────────────────────────────────
@@ -182,83 +184,26 @@ def test_onboarding_refused_with_planned_row_and_an_active_canonical_pack(db):
     assert get_jurisdiction_onboarding_block_reason(db, "Belgium")
 
 
-def test_moving_an_existing_org_into_belgium_is_refused_while_dormant(db):
-    from app.modules.payroll.belgium_dormancy import DORMANT_MESSAGE
-    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
-
-    assert get_jurisdiction_change_block_reason(db, "India", "Belgium") == DORMANT_MESSAGE
-    assert get_jurisdiction_change_block_reason(db, None, "BE") == DORMANT_MESSAGE
-    assert get_jurisdiction_change_block_reason(db, "Belgium", "Belgium") is None   # already Belgian
-
-
-@pytest.mark.parametrize("value", ["BE", "Belgium"])
-def test_company_jurisdiction_cannot_become_belgium(db, value):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll import service
-    from app.modules.payroll.schemas import CompanyDetailsUpdate
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="BE Test Org", code="BETEST", country=None)
-    service.get_company_details(db, t.org.id)
-    with pytest.raises(BadRequestException, match="Belgium is not open"):
-        service.update_company_details(db, t.org.id, CompanyDetailsUpdate(jurisdictionCountry=value))
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("BE", "Belgium")
-
-
-def test_backfill_never_makes_an_org_belgian(db):
-    from app.modules.organizations.models import Organization
-    from app.modules.payroll import service
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="BE Backfill Org", code="BEBACK", country=None)
-    db.get(Organization, t.org.id).country = "Belgium"
-    db.commit()
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("BE", "Belgium")
-
-
-def test_e2e_belgium_listed_in_tax_schemas_but_org_cannot_select_it(db):
+def test_e2e_belgium_listed_in_tax_schemas_and_an_org_can_select_it(db):
     from app.modules.organizations.models import Organization
     from tests._mx_employer_helpers import http, make_org, principal
 
-    _registry_row(db)                                                    # PLANNED, and dormant
+    # Gate removal (2026-11-25): like Spain, changing an existing organisation's
+    # country is not registry-gated; registration / checkout still need an Active pack.
+    _registry_row(db)
     t = make_org(db, name="BE E2E Org", code="BEE2E", country=None)
-    before = db.get(Organization, t.org.id).country
     with http(db, principal(t.org.id)) as c:
         listing = c.get("/api/jurisdictions/tax-schemas")
         assert listing.status_code == 200
         body = listing.json()
         assert {"code": "BE", "name": "Belgium"} in body["countries"] and "BE" in body["schemas"]
         r = c.put("/api/organizations/me", json={"country": "Belgium"})
-    assert r.status_code == 400 and "not open for onboarding" in r.text
+    assert r.status_code == 200, r.text
     db.expire_all()
-    assert db.get(Organization, t.org.id).country == before
+    assert db.get(Organization, t.org.id).country == "Belgium"
 
 
 # ── employee validation (dormant) ──────────────────────────────────────────
-def test_belgium_is_not_an_employee_country_while_dormant():
-    from app.modules.payroll.employee_validation import _STRATEGIES, _dormant_strategy, is_supported_employee_country
-
-    assert "BE" not in _STRATEGIES
-    assert _dormant_strategy("BE") is None
-    assert is_supported_employee_country("BE") is False
-
-
-def test_flag_makes_belgium_an_employee_country(monkeypatch):
-    from app.config import settings
-    from app.modules.payroll.employee_validation import is_supported_employee_country
-
-    monkeypatch.setattr(settings, "BE_TENANT_ONBOARDING_ENABLED", True)
-    assert is_supported_employee_country("BE") is True
-
-
-def test_canary_makes_belgium_an_employee_country(monkeypatch):
-    from app.config import settings
-    from app.modules.payroll.employee_validation import is_supported_employee_country
-
-    monkeypatch.setattr(settings, "BE_CANARY_ORG_IDS", "4242")
-    assert is_supported_employee_country("BE") is True
-
-
 def test_dormant_strategy_never_uses_mexicos_flag(monkeypatch):
     from app.config import settings
     from app.modules.payroll.employee_validation import _dormant_strategy
@@ -273,7 +218,6 @@ def be_strategy(monkeypatch):
     from app.config import settings
     from app.modules.payroll.employee_validation import BEEmployeeValidation, get_employee_validation_strategy
 
-    monkeypatch.setattr(settings, "BE_TENANT_ONBOARDING_ENABLED", True)
     strategy = get_employee_validation_strategy("BE")
     assert strategy is BEEmployeeValidation
     return strategy
@@ -351,7 +295,7 @@ def test_type_a_hooks_fail_closed(db):
     # Phase 3A: an unseeded BE pack is refused; editors are a set (see test_belgium_super_admin.py).
     pack = _be_pack(db, pack_id="BE-EMPTY")
     assert "no Belgian statutory rows yet" in jh.call("BE", "pack_activation_refusal", db, pack)
-    assert jh.call("BE", "template_activation_refusal", db, SimpleNamespace(jurisdiction_country="BE"), 1)
+    assert jh.call("BE", "template_activation_refusal", db, SimpleNamespace(jurisdiction_country="BE"), 1) is None
     assert jh.call("BE", "statutory_editors", db, pack) == set()
     # Block B3 (D13): Belgian payslips leave the generic bank file; they are paid
     # only through an approved Belgian payment batch.
@@ -363,9 +307,9 @@ def test_specified_inert_values(db):
     from app.modules.payroll import jurisdiction_hooks as jh
 
     assert jh.call("BE", "pack_holidays", db, 2026) == []
-    summary = jh.call("BE", "statutory_summary", db)            # Block C2: real gate states; not certified
-    assert summary["country"] == "BE" and summary["status"] == "NOT_CERTIFIED" and summary["available"] is False
-    assert summary["gates"] == {g: "NOT MET" for g in ("G1", "G2", "G3", "G4", "G5", "G6", "G7")}
+    summary = jh.call("BE", "statutory_summary", db)            # no gates since 2026-11-25; no Active pack
+    assert summary["country"] == "BE" and summary["available"] is False
+    assert "gates" not in summary and "status" not in summary
     assert jh.call("BE", "payslip_hold_view", SimpleNamespace(country_code="BE")) is None
 
 
@@ -414,7 +358,6 @@ def test_delete_employee_refused_for_a_canary_belgian_employee(db, monkeypatch):
     from tests._mx_employer_helpers import make_org
 
     t = make_org(db, name="BE Canary Org", code="BECAN", country=None)
-    monkeypatch.setattr(settings, "BE_CANARY_ORG_IDS", str(t.org.id))
     be = PayrollEmployee(organization_id=t.org.id, employee_code="BE1", name="Synthetic Worker", country_code="BE")
     other = PayrollEmployee(organization_id=t.org.id, employee_code="IN1", name="Synthetic Other", country_code="IN")
     db.add_all([be, other])
@@ -428,21 +371,20 @@ def test_delete_employee_refused_for_a_canary_belgian_employee(db, monkeypatch):
     assert db.get(PayrollEmployee, other.id) is None
 
 
-def test_registry_cannot_open_belgium_and_the_refusal_is_audited(db):
-    from app.core.exceptions import BadRequestException
+def test_registry_opens_belgium_with_a_reason_and_the_change_is_audited(db):
+    """Gate removal (2026-11-25): no release gates — only a reason and a named Super Admin."""
     from app.modules.billing.models import JurisdictionServiceRegistry
     from app.modules.payroll import service
     from app.modules.payroll.models import TaxConfigurationAudit
 
     _registry_row(db)
-    with pytest.raises(BadRequestException, match="Statutory content"):    # Block C2: the real red gates
-        service.transition_jurisdiction_service_registry(db, "BE", "AVAILABLE", "go live", actor_id=1)
+    service.transition_jurisdiction_service_registry(db, "BE", "AVAILABLE", "go live", actor_id=1)
     row = db.query(JurisdictionServiceRegistry).filter(JurisdictionServiceRegistry.country == "BE").one()
-    assert row.availability == "PLANNED"
+    assert row.availability == "AVAILABLE"
     audit = (db.query(TaxConfigurationAudit)
              .filter(TaxConfigurationAudit.entity_type == "jurisdiction_service_registry",
-                     TaxConfigurationAudit.action == "refused").all())
-    assert len(audit) == 1 and "Statutory content" in audit[0].reason            # Block C2: real gates
+                     TaxConfigurationAudit.action == "status_change").all())
+    assert len(audit) == 1 and audit[0].reason == "go live"
 
 
 # ── pack governance ────────────────────────────────────────────────────────

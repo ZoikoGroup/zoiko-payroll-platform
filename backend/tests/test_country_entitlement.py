@@ -784,8 +784,9 @@ def test_any_payroll_country_can_be_added_setup_pending_is_noted():
     assert us["setupNote"]  # no Active US pack in this test database
     assert summary["remaining"] == 1
 
+    # NZ is an ordinary payroll country since the gate removal, owner decision 2026-11-25; Brazil is still dormant.
     with pytest.raises(Exception, match="not a country Zoiko runs payroll for"):
-        je.add_entitled_country(_db, _Actor(org), "NZ")
+        je.add_entitled_country(_db, _Actor(org), "BR")
 
 
 # ── Country limit is enforced on add in every billing enforcement mode ──────
@@ -838,5 +839,3 @@ def test_plan_change_impact_reports_a_blocked_downgrade():
     assert impact["message"] == ("Your organization has 3 countries; the Core plan allows 1. "
                                  "Remove 2 countries under Compliance > Countries to downgrade.")
     assert je.plan_change_impact(_db, org.id, "PROFESSIONAL")["blocked"] is False
-
-

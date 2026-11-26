@@ -1,11 +1,12 @@
 """Test helpers for the Poland P3 engine.
 
 `build_pack()` turns poland_content into an in-memory rate_map / slabs the way
-seed_poland_pack writes them. With signed=True (the default) it strips the
-"[PENDING G1]" labels and fills every value the specification leaves open with
-clearly labelled TEST fixtures — simulating a G1-signed pack. TEST values are
-fixtures only: they are never copied into poland_content.py and are not
-statutory content. signed=False reproduces the shipped (unsigned) content.
+seed_poland_pack writes them. Since the gate removal (2026-11-25) the content
+carries the owner-approved values for the points the specification leaves
+open; TEST_TEXT / TEST_AMOUNTS below mirror those values and are kept for the
+tests that import them. signed=False reproduces a LEGACY pack seeded before
+the gate removal: labels carry the "[PENDING G1]" marker (which no longer
+blocks) and no TEST values are applied.
 """
 from datetime import date
 from decimal import Decimal
@@ -18,7 +19,7 @@ PENDING = " [PENDING G1]"
 WINDOW_FROM, WINDOW_TO = content.PL_2026[1], content.PL_2026[2]
 PAY_DATE = date(2026, 3, 31)
 
-# TEST fixtures for the points the specification does not decide.
+# Mirrors of the owner-approved values for the points the specification does not decide.
 TEST_TEXT = {
     "pl_rounding_pit": "FULL_PLN_HALF_UP",
     "pl_rounding_zus": "GROSZ_HALF_UP",

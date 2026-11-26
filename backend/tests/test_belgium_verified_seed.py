@@ -1,6 +1,7 @@
 """scripts/seed_belgium_verified_values.py: loads a file of verified Belgian
 values into a Draft pack through the SAME governed import as the Super Admin
-"Import from file" button. Dry run by default; --apply writes unsigned rows; a
+"Import from file" button. Dry run by default; --apply writes the rows (in force: no signing step since the
+gate removal, 2026-11-25); a
 missing or unverified (AI / SAMPLE / DRAFT / NOT VERIFIED) source is refused,
 and so is the AI-drafted workbook by name. SYNTHETIC values only: every number
 here is a 0.00 placeholder, never Belgian statutory content."""
@@ -71,7 +72,7 @@ def test_dry_run_writes_nothing(db, seeded):
     assert _pack_state(db, seeded) == before
 
 
-def test_apply_writes_unsigned_rows(db, seeded):
+def test_apply_writes_rows_in_force(db, seeded):
     from decimal import Decimal
 
     src = _verified_source(db)
@@ -80,7 +81,7 @@ def test_apply_writes_unsigned_rows(db, seeded):
     db.expire_all()
     row = _rate(db, seeded, _rate_key())
     assert row.employee_rate_pct == Decimal(ZERO) and row.source_document_id == src.id
-    assert _c().PENDING_MARK in row.label                       # saved UNSIGNED
+    assert _c().PENDING_MARK not in row.label                   # no marker: in force (gate removal 2026-11-25)
     assert seeded.status == "Draft" and seeded.approved_by_id is None    # nothing approved / activated
 
 

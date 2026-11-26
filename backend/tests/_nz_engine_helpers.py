@@ -1,9 +1,12 @@
 """Test helpers for the New Zealand P3 engine.
 
 `build_pack()` turns new_zealand_content into an in-memory rate_map / slabs the
-way seed_nz_pack writes them, then (unless pending=True) strips the
-"[PENDING G1]" labels and fills every value the specification leaves open
-with clearly labelled TEST fixtures. TEST values are fixtures only — they are
+way seed_nz_pack writes them (plain labels since the gate removal of
+2026-11-25) and adds clearly labelled TEST rows for the empty authority
+tables. `marked=True` appends the legacy "[PENDING G1]" label marker to every
+row, as packs seeded before the gate removal still carry it (the marker no
+longer blocks). `pending=True` reproduces such a legacy-seeded pack exactly:
+marked labels and no TEST authority rows. TEST values are fixtures only — they are
 never copied into new_zealand_content.py and are not statutory content.
 """
 from datetime import date
@@ -59,9 +62,11 @@ def _slab(pending, **kw):
     return SimpleNamespace(**base)
 
 
-def build_pack(overrides=None, drop_tables=(), pending=False, extra_slabs=()):
-    """(rate_map, slabs). pending=True reproduces the shipped (unsigned) content
-    without any TEST fill."""
+def build_pack(overrides=None, drop_tables=(), pending=False, extra_slabs=(), marked=False):
+    """(rate_map, slabs). pending=True reproduces a legacy-seeded pack (marked
+    labels) without any TEST fill; marked=True only adds the legacy label marker."""
+    tables = not pending
+    pending = pending or marked
     rate_map = {row[0]: _rate(row, pending) for row in content.NZ_SCALAR_CONTENT}
     if not pending:
         for key, kind in content.NZ_PARAMETER_KEYS.items():
@@ -95,7 +100,7 @@ def build_pack(overrides=None, drop_tables=(), pending=False, extra_slabs=()):
     for obligation, treatment, component, label, _src in content.NZ_EARNING_CLASSES:
         add(rule_type=content.NZ_EARNING_CLASS_RULE, filing_status=component, tax_regime=obligation,
             assessment_basis=treatment, rate_label=label, effective_from=None, effective_to=None)
-    if not pending:
+    if tables:
         for rule, rows in TEST_TABLES.items():
             if rule in drop_tables:
                 continue

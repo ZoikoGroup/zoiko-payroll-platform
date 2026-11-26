@@ -128,10 +128,28 @@ def test_unsigned_or_invalid_premium_map_blocks():
     _blocks(_ot(components, events, premium_map="DAILY=75"), "PL_POLICY_PENDING:pl_overtime_premium_map")
 
 
-def test_night_supplement_blocks_until_a_rule_is_signed():
+def test_night_supplement_blocks_while_the_basis_is_not_provided():
     _blocks(ctx(gross="8500", components={"SALARY": Decimal("8000"), "NIGHT_SUPPLEMENT": Decimal("500")},
-                pack=build_pack(classes=_signed_classes("NIGHT_SUPPLEMENT"))),
+                pack=build_pack({"pl_night_supplement_basis": "PENDING_G1"},
+                                classes=_signed_classes("NIGHT_SUPPLEMENT"))),
             "PL_POLICY_PENDING:pl_night_supplement_basis")
+
+
+def test_night_supplement_passes_with_the_approved_basis():
+    pl = _pl(ctx(gross="8500", components={"SALARY": Decimal("8000"), "NIGHT_SUPPLEMENT": Decimal("500")},
+                 pack=build_pack(classes=_signed_classes("NIGHT_SUPPLEMENT"))))
+    assert pl["hashes"]
+
+
+def test_the_approved_named_overtime_map_reads_tiers_from_the_pack():
+    events = [{"kind": "DAILY", "event_ref": "D1", "hours": "10", "hourly_rate": "50"},
+              {"kind": "NIGHT", "event_ref": "N1", "hours": "2", "hourly_rate": "50"},
+              {"kind": "COMP_TIME_FAILED", "event_ref": "C1", "hours": "2", "hourly_rate": "50"}]
+    pl = _pl(_ot({"SALARY": Decimal("8000"), "OVERTIME_50": Decimal("750"), "OVERTIME_100": Decimal("400")}, events,
+                 premium_map="LABOUR_CODE_151_1"))
+    overtime = pl["trace"]["labour"]["overtime"]
+    assert overtime["status"] == "MATCHED"
+    assert [e["premiumPct"] for e in overtime["events"]] == ["50.0000", "100.0000", "100.0000"]
 
 
 # ── pay timing (spec §8) ───────────────────────────────────────────────────
@@ -159,9 +177,13 @@ def test_leave_tier_by_service_credit(months, tier, days):
     assert (out["tier"], out["days"]) == (tier, days)
 
 
-def test_part_time_leave_needs_a_signed_rounding_rule():
+def test_part_time_leave_needs_a_rounding_rule():
     with pytest.raises(PLCalculationBlockedError, match="pl_leave_part_time_rounding"):
-        leave.annual_entitlement(_pack(), profile(fte_numerator=3, fte_denominator=4))
+        leave.annual_entitlement(_pack({"pl_leave_part_time_rounding": "PENDING_G1"}),
+                                 profile(fte_numerator=3, fte_denominator=4))
+    shipped = leave.annual_entitlement(_pack(), profile(fte_numerator=3, fte_denominator=4,
+                                                        service_credit_months=130))
+    assert (shipped["rounding"], shipped["days"]) == ("ROUND_UP_FULL_DAY", "20")              # approved value
     up = leave.annual_entitlement(_pack({"pl_leave_part_time_rounding": "ROUND_UP_FULL_DAY"}),
                                   profile(fte_numerator=3, fte_denominator=4, service_credit_months=130))
     assert (up["exactDays"], up["days"]) == ("19.5", "20")                       # 26 x 3/4

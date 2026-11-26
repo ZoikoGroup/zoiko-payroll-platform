@@ -315,7 +315,10 @@ def find_active_tax_pack(
     return _find_active_tax_pack(db, country, state, tax_regime, as_of or date_cls.today())
 
 
-_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG", "HK", "SA", "NL", "ZA", "JP", "NZ", "PL", "MY", "BE")
+# ZA, JP, NZ, PL, MY and BE were removed by the gate removal (owner decision
+# 2026-11-25): like Spain, a missing registry row falls through to the
+# Active-pack check. A PLANNED / NOT_AVAILABLE row still blocks every country.
+_REGISTRY_ROW_REQUIRED_COUNTRIES = ("SG", "HK", "SA", "NL")
 
 
 def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str], new_country: Optional[str],
@@ -340,48 +343,8 @@ def get_jurisdiction_change_block_reason(db: Session, old_country: Optional[str]
     br_refusal = entering_brazil_refusal(old_country, new_country)
     if br_refusal:
         return br_refusal
-    # South Africa (ZP-ZA-ENG-001 Phase 5): dormant until its gates are signed.
-    from app.modules.payroll.south_africa_dormancy import entering_south_africa_refusal
-
-    za_refusal = entering_south_africa_refusal(old_country, new_country)
-    if za_refusal:
-        return za_refusal
-    # Japan (ZP-JP-ENG-001 Phase 1): dormant until G0-G8 are signed.
-    from app.modules.payroll.japan_dormancy import entering_japan_refusal
-
-    jp_refusal = entering_japan_refusal(old_country, new_country)
-    if jp_refusal:
-        return jp_refusal
-    # New Zealand (ZP-NZ-ENG-001 Phase 0): dormant until G1-G7 are signed.
-    from app.modules.payroll.nz_dormancy import entering_nz_refusal
-
-    nz_refusal = entering_nz_refusal(old_country, new_country, organization_id)
-    if nz_refusal:
-        return nz_refusal
-    # Poland (ZP-PL-ENG-001 Phase 0): dormant until G1-G7 are signed.
-    from app.modules.payroll.poland_dormancy import entering_poland_refusal
-
-    pl_refusal = entering_poland_refusal(old_country, new_country, organization_id)
-    if pl_refusal:
-        return pl_refusal
-    # Malaysia (ZP-MY-ENG-001 Phase 0): dormant until G1-G7 are signed.
-    from app.modules.payroll.malaysia_dormancy import entering_malaysia_refusal
-
-    my_refusal = entering_malaysia_refusal(old_country, new_country, organization_id)
-    if my_refusal:
-        return my_refusal
-    # Belgium (ZP-BE-ENG-001 Phase 1): dormant until G1-G7 are signed.
-    from app.modules.payroll.belgium_dormancy import entering_belgium_refusal
-
-    be_refusal = entering_belgium_refusal(old_country, new_country, organization_id)
-    if be_refusal:
-        return be_refusal
-    # Belgium canary (owner decision 2026-11-16): an organisation on BE_CANARY_ORG_IDS may enter a PLANNED
-    # Belgium to prepare its setup before the gates; see belgium_dormancy.be_canary_may_enter_planned.
-    from app.modules.payroll.belgium_dormancy import be_canary_may_enter_planned
-
-    if be_canary_may_enter_planned(db, new_country, organization_id) and             get_jurisdiction_code(new_country) != get_jurisdiction_code(old_country):
-        return None
+    # ZA, JP, NZ, PL, MY and BE have no dormancy switch (owner decision 2026-11-25,
+    # gate removal): like Spain, they open on the registry / Active-pack check below.
 
     new_code = get_jurisdiction_code(new_country)
     if new_code not in _REGISTRY_ROW_REQUIRED_COUNTRIES or new_code == get_jurisdiction_code(old_country):

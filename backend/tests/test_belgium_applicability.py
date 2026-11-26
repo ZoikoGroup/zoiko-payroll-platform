@@ -269,7 +269,7 @@ def test_a_mid_period_classification_change():
 # ── §2: any required content pending ────────────────────────────────────────
 @pytest.mark.parametrize("key", sorted(SCOPE))
 def test_pending_not_supported_or_missing_scope_content_blocks(key):
-    pending = _resolve(pack=_pack(**{key: _row(key, SCOPE[key], label="x [PENDING G1]")}))
+    pending = _resolve(pack=_pack(**{key: _row(key, "", label="x [PENDING G1]")}))      # no value
     assert f"BE_CONTENT_PENDING:{key}" in _codes(pending)
     refused = _resolve(pack=_pack(**{key: "NOT_SUPPORTED"}))
     assert f"BE_FEATURE_BLOCKED:{key}" in _codes(refused)

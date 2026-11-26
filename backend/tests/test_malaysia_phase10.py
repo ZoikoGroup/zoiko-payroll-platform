@@ -89,41 +89,6 @@ def test_golden_check_is_exact_once_pcb_is_built(db, with_pcb):
 
 
 # ── release gates ──────────────────────────────────────────────────────────
-def test_every_gate_fails_closed_on_a_fresh_platform(db):
-    from app.modules.payroll import malaysia_readiness
-
-    state = malaysia_readiness.my_readiness(db)
-    assert [g["gate"] for g in state["gates"]] == ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
-    assert state["allPassed"] is False and not any(g["passed"] for g in state["gates"])
-    g1 = {c["key"]: c for c in state["gates"][0]["checks"]}
-    assert g1["pack_seeded"]["detail"] == "no canonical Malaysia pack is seeded"
-    g3 = {c["key"]: c for c in state["gates"][2]["checks"]}
-    assert "PCB_MONTHLY" in g3["form_layouts_archived"]["detail"]
-    g7 = state["gates"][6]
-    assert [e["tag"] for e in g7["evidence"]] == ["MY-GATE-G7", "MY-SIGNOFF-PRODUCT", "MY-SIGNOFF-COMPLIANCE",
-                                                  "MY-SIGNOFF-ENGINEERING", "MY-SIGNOFF-COMMERCIAL"]
-    unmet = {u["key"] for u in malaysia_readiness.my_unmet_requirements(db)}
-    assert {"G1", "G2", "G3", "G4", "G5", "G6", "G7", "MY-DECISION-D-8"} <= unmet
-
-
-def test_gate_g1_needs_pcb_even_when_every_other_example_matches(db):
-    from app.modules.payroll import malaysia_readiness
-
-    _pack_with_examples(db, ["G=5000;D=2026-03-31 => epfEe=550;epfEr=650"])
-    g1 = {c["key"]: c for c in malaysia_readiness.my_readiness(db)["gates"][0]["checks"]}
-    assert g1["pack_seeded"]["ok"] and g1["authority_examples_match"]["ok"] and g1["no_pending_rows"]["ok"]
-    assert g1["MY_EPF_SCHEDULE"]["ok"] and g1["pcb_proven"]["ok"] is False
-
-
-def test_malaysia_cannot_be_opened_and_the_summary_carries_the_gates(world):
-    from app.modules.payroll import jurisdiction_hooks
-
-    with pytest.raises(Exception):
-        jurisdiction_hooks.call("MY", "service_registry_transition", world.db, "AVAILABLE", "launch", world.a)
-    summary = jurisdiction_hooks.call("MY", "statutory_summary", world.db)
-    assert summary["readiness"]["allPassed"] is False and len(summary["readiness"]["gates"]) == 7
-
-
 # ── parallel cycles (gate G5) ──────────────────────────────────────────────
 def _paid_run(w):
     from app.modules.payroll import malaysia_service as my
@@ -213,7 +178,9 @@ def test_rotation_moves_every_identifier_to_the_newest_key(world, monkeypatch):
     assert my.reveal_my_identifier(w.db, w.org, row.id, w.a)["value"] == NRIC
 
 
-def test_console_adds_examples_only_with_a_reviewed_source(db):
+def test_console_adds_examples_with_an_optional_source(db):
+    """Gate removal (2026-11-25): an authority example needs a reason and a valid formula; its source document
+    is optional provenance (no reviewed-source requirement)."""
     from app.modules.auth.models import User, UserRole
     from app.modules.payroll import my_super_admin as msa
     from app.modules.payroll.models import SourceArtifact
@@ -225,22 +192,18 @@ def test_console_adds_examples_only_with_a_reviewed_source(db):
         db.add(u)
         users.append(u)
     db.flush()
-    reviewed = SourceArtifact(agency="KWSP", title="EPF Third Schedule examples", checksum_sha256="a" * 64,
-                              file_path="sources/epf.pdf", created_by_id=users[1].id,
-                              reviewer_id=users[2].id)
     draft = SourceArtifact(agency="KWSP", title="notes", created_by_id=users[1].id)
-    db.add_all([reviewed, draft])
+    db.add(draft)
     db.flush()
     pack_id = msa.seed_draft(db, {"reason": "start"}, users[0].id)["packs"][0]["id"]
     payload = {"name": "EPF 5000", "taxFormula": "G=5000 => epfEe=550", "reason": "official example",
-               "sourceDocumentId": reviewed.id}
+               "sourceDocumentId": draft.id}                                # an unreviewed source is accepted
     row = msa.add_golden_example(db, pack_id, payload, users[0].id)
     assert row["ruleType"] == "MY_AUTHORITY_EXAMPLE" and row["detail"] == "G=5000 => epfEe=550"
     with pytest.raises(BadRequestException, match="already has"):
         msa.add_golden_example(db, pack_id, payload, users[0].id)
     with pytest.raises(BadRequestException, match="taxFormula"):
         msa.add_golden_example(db, pack_id, {**payload, "name": "bad", "taxFormula": "G=5000"}, users[0].id)
-    with pytest.raises(BadRequestException):
-        msa.add_golden_example(db, pack_id, {**payload, "name": "draft src", "sourceDocumentId": draft.id},
-                               users[0].id)
-    assert msa.golden_check(db, pack_id)["examples"] == 1
+    no_source = {k: v for k, v in payload.items() if k != "sourceDocumentId"}
+    msa.add_golden_example(db, pack_id, {**no_source, "name": "EPF 6000"}, users[0].id)
+    assert msa.golden_check(db, pack_id)["examples"] == 2

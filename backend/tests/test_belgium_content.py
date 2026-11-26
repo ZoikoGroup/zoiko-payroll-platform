@@ -82,16 +82,66 @@ def test_evidence_register_s1_to_s24():
         assert agency and title and url.startswith("https://")
 
 
-def test_labels_fit_and_carry_spec_proposals_only_as_text():
+def test_labels_fit_carry_the_spec_text_and_no_pending_marker():
     c = _c()
     assert set(c.SPEC_PROPOSED) <= set(c.KEYS)
     for key in c.KEYS:
-        label = c.key_label(key) + " " + c.PENDING_MARK
+        label = c.key_label(key)
         assert len(label) <= 100, key
+        assert c.PENDING_MARK not in label, key                    # gate removal 2026-11-25
         if key in c.SPEC_PROPOSED:
-            assert f"spec-proposed: {c.SPEC_PROPOSED[key]}" in label
+            assert f"spec: {c.SPEC_PROPOSED[key]}" in label
         else:
             assert "(none in spec)" in label
+
+
+# Gate removal (owner decision 2026-11-25): the 31 spec figures of
+# docs/belgium/GATE_REMOVAL_INVENTORY.md section A are either promoted to a
+# seeded value or listed in VALUES_SKIPPED with the reason.
+_PROMOTED = {
+    "be_supported_worker_categories": ("text_value", "MANUAL,EMPLOYEE"),
+    "be_onss_employee_rate": ("employee_rate_pct", "13.07"),
+    "be_onss_manual_base_uplift": ("employee_rate_pct", "8"),
+    "be_onss_special_160": ("employer_rate_pct", "1.60"),
+    "be_onss_pension_special": ("employer_rate_pct", "8.86"),
+    "be_hol_entitlement_weeks": ("flat_amount", "4"),
+    "be_hol_wc_double_pct": ("employee_rate_pct", "92"),
+    "be_hol_manual_quarterly_contribution": ("employer_rate_pct", "5.57"),
+    "be_hol_manual_annual_debit": ("employer_rate_pct", "10.27"),
+    "be_wage_rmmmg": ("flat_amount", "2233.61"),
+    "be_wage_rmmmg_min_age": ("flat_amount", "18"),
+    "be_wage_index_centime_threshold": ("flat_amount", "4000"),
+    "be_wage_norm_margin": ("employer_rate_pct", "0"),
+    "be_wt_daily_limit_hours": ("flat_amount", "8"),
+    "be_wt_weekly_limit_hours": ("flat_amount", "40"),
+    "be_wt_weekly_reduced_hours": ("flat_amount", "38"),
+    "be_ot_premium_weekday": ("employee_rate_pct", "50"),
+    "be_ot_premium_sunday_holiday": ("employee_rate_pct", "100"),
+    "be_abs_wc_guaranteed_days": ("flat_amount", "30"),
+    "be_abs_wc_guaranteed_pct": ("employer_rate_pct", "100"),
+    "be_abs_relapse_window_weeks": ("flat_amount", "8"),
+    "be_abs_maternity_weeks": ("flat_amount", "15"),
+    "be_abs_birth_leave_days": ("flat_amount", "20"),
+    "be_abs_birth_leave_window_months": ("flat_amount", "4"),
+    "be_abs_birth_leave_employer_days": ("flat_amount", "3"),
+}
+
+
+def test_promoted_values_cover_the_spec_figures_exactly():
+    c = _c()
+    assert len(c.SPEC_PROPOSED) == 31
+    assert set(c.VALUES) | set(c.VALUES_SKIPPED) == set(c.SPEC_PROPOSED)
+    assert not set(c.VALUES) & set(c.VALUES_SKIPPED)
+    assert {k: (f, v) for k, (f, v, _from) in c.VALUES.items()} == _PROMOTED
+    assert {k: frm for k, (_f, _v, frm) in c.VALUES.items() if frm} == {
+        "be_wage_rmmmg": "2026-07-01", "be_wage_index_centime_threshold": "2026-06-01",
+        "be_abs_relapse_window_weeks": "2026-01-01"}
+    for key, (name, value, _from) in c.VALUES.items():
+        assert name in c.VALUE_FIELDS[c.KEYS[key][1]], key          # the field of the key's kind
+        assert c.KEYS[key][0] != "parallel", key                    # tolerances stay empty (gate only)
+    for key in c.LIST_VOCABULARIES:
+        if key in c.VALUES:
+            assert set(c.VALUES[key][1].split(",")) <= set(c.LIST_VOCABULARIES[key])
 
 
 def test_onss_employer_rates_are_reference_only():
@@ -189,18 +239,11 @@ _STRUCTURAL_NUMBERS = {
         16: "Belgian IBAN SHAPE (BE + 14)", 100: "source name width", 300: "note width",
         1024: "bytes per KiB (file size limit)", 5000: "maximum rows per import (operational limit)",
     },
-    "belgium_readiness.py": {0: "zero / none", 1: "one / any", 5: "items shown in a detail"},
     "belgium_demo.py": {
         0: "zero / first sheet row", 1: "first day / header", 4: "repository root (parents index)",
         10: "YYYY-MM-DD width", 100: "label width", 150: "slab label / formula width",
         2025: "DEMO employees' illustrative hire year", 2026: "DEMO month year", 9: "DEMO month (September)",
         30: "DEMO month end day",
-    },
-    "belgium_governance.py": {
-        0: "first tuple element / first sheet row", 1: "tuple index / header row", 2: "sheet column (proposal)",
-        3: "sheet column (sources) / register cell (state text) / minimum register cells",
-        4: "repository root (parents index)", 300: "reference / question / reason column width",
-        500: "note column width", 4000: "proposal / sources / decided value text width",
     },
     "belgium_reports.py": {
         0: "zero / first tuple element / table origin", 1: "first day / tuple index / last cell (-1)",
@@ -220,7 +263,6 @@ _STRUCTURAL_NUMBERS = {
                                50: "source form-number width", 200: "source agency width", 300: "source title width"},
     "belgium_payment_service.py": {0: "list index / zero amount", 1: "batch sequence (+1)",
                                    100: "idempotency key / column width 100", 200: "return reason column width"},
-    "belgium_activation_readiness.py": {1: "inclusive last year of the pack window (range end + 1)"},
     "belgium_onss_rates.py": {
         0: "first file / zero id fallback", 1: "at most one file per pay date (slice [:1]) / first day / quarter 1",
         2: "calendar quarter 2", 3: "months per quarter (calendar) / quarter 3",
@@ -270,10 +312,8 @@ def _belgian_files():
 
 
 def _spec_proposed_node(tree):
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "SPEC_PROPOSED" for t in node.targets):
-            return node
-    return None
+    return [node for node in tree.body if isinstance(node, ast.Assign)
+            and any(getattr(t, "id", None) in ("SPEC_PROPOSED", "VALUES", "VALUES_SKIPPED") for t in node.targets)]
 
 
 def test_no_statutory_numeric_literal_in_belgian_code():
@@ -281,13 +321,12 @@ def test_no_statutory_numeric_literal_in_belgian_code():
     for path in _belgian_files():
         rel = path.relative_to(PAYROLL).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        # SPEC_PROPOSED is display text for the G1 signer, never a value
-        # (written only into row labels; tests/test_belgium_super_admin.py
-        # proves no value field is ever seeded).
+        # SPEC_PROPOSED is the spec's display text; VALUES are the owner-approved
+        # spec figures (decision 2026-11-25) written only as seeded pack rows
+        # (tests/test_belgium_super_admin.py) — never read by the engine.
         skip = set()
-        spec_node = _spec_proposed_node(tree)
-        if spec_node is not None:
-            skip = {id(n) for n in ast.walk(spec_node)}
+        for spec_node in _spec_proposed_node(tree):
+            skip |= {id(n) for n in ast.walk(spec_node)}
         docstrings = {id(n.body[0].value) for n in ast.walk(tree)
                       if isinstance(n, (ast.Module, ast.FunctionDef, ast.ClassDef)) and n.body
                       and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}

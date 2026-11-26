@@ -9032,25 +9032,26 @@ def se_activation_blockers(db: Session, pack) -> list:
 
 # Display names for the per-country opt-in activation gates below.
 _GATED_PACK_COUNTRY_NAMES = {"US": "United States", "DE": "Germany", "SG": "Singapore", "SE": "Sweden", "HK": "Hong Kong",
-                             "CH": "Switzerland", "SA": "Saudi Arabia", "NL": "Netherlands", "MX": "Mexico", "BR": "Brazil",
-                             "ZA": "South Africa", "PL": "Poland", "MY": "Malaysia",
-                             "BE": "Belgium"}
+                             "CH": "Switzerland", "SA": "Saudi Arabia", "NL": "Netherlands", "MX": "Mexico", "BR": "Brazil"}
+# ZA, PL, MY and BE left the opt-in lists below with the gate removal (owner
+# decision 2026-11-25): like Spain, they keep only the platform-wide rules
+# (approver != last editor, no overlapping Active packs).
 # Phase 6.0 F2: countries whose pack approver may never be its activator.
-_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE", "DE")  # DE: owner decision 2026-11-25 (four-eyes, stricter only); MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_APPROVER_NOT_ACTIVATOR_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "DE")  # DE: owner decision 2026-11-25 (four-eyes, stricter only); MX: ZP-MX-ENG-001 Phase 2 four-eyes; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose pack approver may never be the Super Admin who
 # last edited / submitted the pack (refused at the Approve step itself).
-_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE", "DE")  # DE: owner decision 2026-11-25 (four-eyes, stricter only); MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
+_SELF_APPROVAL_REFUSED_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "DE")  # DE: owner decision 2026-11-25 (four-eyes, stricter only); MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30 four-eyes, same opt-in; NL: ZP-NL-ENG-001 fail-closed
 # Phase 6.5: countries whose REFUSED pack / report-template governance
 # actions are themselves audited (action "refused"). Same per-country opt-in
 # pattern as F2; other countries keep their existing, unaudited refusals.
-_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_REFUSAL_AUDIT_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 # Singapore completion programme (2026-09-29): countries whose TAX packs follow
 # an explicit transition graph. Before this, only the Active-downgrade guard
 # applied, so a Superseded / Retired Singapore pack could be moved back to
 # Draft, edited through upsert and re-activated, and any string was accepted
 # as a status. Same per-country opt-in pattern as the constants above; other
 # countries keep their existing free lifecycle (DE keeps its downgrade guard).
-_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
+_PACK_TRANSITION_GRAPH_COUNTRIES = ("SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR")  # MX: ZP-MX-ENG-001 Phase 2; SE: ZP-SE-ENG-001 §14/§16 four-eyes, same opt-in as SG; CH: CH Step 12; SA: ZP-SA-ENG-001 §30; NL: ZP-NL-ENG-001 fail-closed
 TAX_PACK_TRANSITIONS = {
     "Draft": ("In Review", "QA", "Approved", "Active"),
     "In Review": ("Draft", "QA", "Approved", "Active"),
@@ -38788,26 +38789,7 @@ def get_company_details(db: Session, organization_id: int) -> CompanyComplianceD
             from app.modules.payroll.brazil_dormancy import entering_brazil_refusal
             if code and entering_brazil_refusal(row.jurisdiction_country, code):
                 code = None
-            # Japan (ZP-JP-ENG-001 Phase 1 dormancy): never back-fill INTO Japan.
-            from app.modules.payroll.japan_dormancy import entering_japan_refusal
-            if code and entering_japan_refusal(row.jurisdiction_country, code):
-                code = None
-            # New Zealand (ZP-NZ-ENG-001 Phase 0 dormancy): never back-fill INTO NZ.
-            from app.modules.payroll.nz_dormancy import entering_nz_refusal
-            if code and entering_nz_refusal(row.jurisdiction_country, code, row.organization_id):
-                code = None
-            # Poland (ZP-PL-ENG-001 Phase 0 dormancy): never back-fill INTO Poland.
-            from app.modules.payroll.poland_dormancy import entering_poland_refusal
-            if code and entering_poland_refusal(row.jurisdiction_country, code, row.organization_id):
-                code = None
-            # Malaysia (ZP-MY-ENG-001 Phase 0 dormancy): never back-fill INTO Malaysia.
-            from app.modules.payroll.malaysia_dormancy import entering_malaysia_refusal
-            if code and entering_malaysia_refusal(row.jurisdiction_country, code, row.organization_id):
-                code = None
-            # Belgium (ZP-BE-ENG-001 Phase 1 dormancy): never back-fill INTO Belgium.
-            from app.modules.payroll.belgium_dormancy import entering_belgium_refusal
-            if code and entering_belgium_refusal(row.jurisdiction_country, code, row.organization_id):
-                code = None
+            # JP, NZ, PL, MY, BE have no dormancy switch (gate removal 2026-11-25).
             if code and row.jurisdiction_country != code:
                 row.jurisdiction_country = code
                 changed = True
@@ -38904,36 +38886,7 @@ def update_company_details(db: Session, organization_id: int, data: CompanyDetai
     br_refusal = entering_brazil_refusal(row.jurisdiction_country, incoming_country)
     if br_refusal:
         raise BadRequestException(br_refusal)
-    # Japan (ZP-JP-ENG-001 Phase 1): choosing Japan is refused the same way
-    # while Japan onboarding is disabled.
-    from app.modules.payroll.japan_dormancy import entering_japan_refusal
-    jp_refusal = entering_japan_refusal(row.jurisdiction_country, incoming_country)
-    if jp_refusal:
-        raise BadRequestException(jp_refusal)
-    # New Zealand (ZP-NZ-ENG-001 Phase 0): choosing New Zealand is refused the
-    # same way while New Zealand onboarding is disabled.
-    from app.modules.payroll.nz_dormancy import entering_nz_refusal
-    nz_refusal = entering_nz_refusal(row.jurisdiction_country, incoming_country, row.organization_id)
-    if nz_refusal:
-        raise BadRequestException(nz_refusal)
-    # Poland (ZP-PL-ENG-001 Phase 0): choosing Poland is refused the same way
-    # while Poland onboarding is disabled.
-    from app.modules.payroll.poland_dormancy import entering_poland_refusal
-    pl_refusal = entering_poland_refusal(row.jurisdiction_country, incoming_country, row.organization_id)
-    if pl_refusal:
-        raise BadRequestException(pl_refusal)
-    # Malaysia (ZP-MY-ENG-001 Phase 0): choosing Malaysia is refused the same
-    # way while Malaysia onboarding is disabled.
-    from app.modules.payroll.malaysia_dormancy import entering_malaysia_refusal
-    my_refusal = entering_malaysia_refusal(row.jurisdiction_country, incoming_country, row.organization_id)
-    if my_refusal:
-        raise BadRequestException(my_refusal)
-    # Belgium (ZP-BE-ENG-001 Phase 1): choosing Belgium is refused the same way
-    # while Belgium onboarding is disabled.
-    from app.modules.payroll.belgium_dormancy import entering_belgium_refusal
-    be_refusal = entering_belgium_refusal(row.jurisdiction_country, incoming_country, row.organization_id)
-    if be_refusal:
-        raise BadRequestException(be_refusal)
+    # JP, NZ, PL, MY, BE have no dormancy switch (gate removal 2026-11-25).
 
     field_map = {
         "name": "name", "type": "type", "taxNo": "tax_no", "employerId": "employer_id",

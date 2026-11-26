@@ -1,5 +1,7 @@
 # Malaysia release gates
 
+> **Superseded 2026-11-25 (gate removal, owner decision).** The release gates, evidence, sign-offs and parallel-run requirements described here no longer apply: this country goes live like Spain once its pack is Active. See `docs/GATE_REMOVAL.md` and `docs/malaysia/MALAYSIA_GAPS_AND_DECISIONS.md`. Kept for history.
+
 Malaysia (ZP-MY-ENG-001) stays switched off (`MY_TENANT_ONBOARDING_ENABLED=False`, `MY_CANARY_ORG_IDS` empty) and its service availability stays PLANNED until every gate below passes and the launch-blocking owner decision D-8 (retention) is recorded. The service-registry step to AVAILABLE is refused by the server until then.
 
 | Gate | Subject | Owner |

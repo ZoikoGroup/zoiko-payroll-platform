@@ -27,7 +27,7 @@ def test_poland_resolves_to_pl(value):
     from app.core.jurisdiction import REGISTRATION_COUNTRIES, get_jurisdiction_code
 
     assert get_jurisdiction_code(value) == "PL"
-    assert "Poland" not in REGISTRATION_COUNTRIES                     # never registrable while dormant
+    assert "Poland" in REGISTRATION_COUNTRIES                         # registrable since the gate removal
 
 
 @pytest.mark.parametrize("value", ["Poland", "poland", "Polska", "PL"])
@@ -110,20 +110,11 @@ def test_regon_check_digit(value, ok):
 
 
 # ── employee validation strategy (dormant) ────────────────────────────────
-def test_poland_is_not_an_employee_country_while_dormant():
-    from app.modules.payroll.employee_validation import _STRATEGIES, _dormant_strategy, is_supported_employee_country
-
-    assert "PL" not in _STRATEGIES
-    assert _dormant_strategy("PL") is None
-    assert is_supported_employee_country("PL") is False
-
-
 @pytest.fixture
 def pl_strategy(monkeypatch):
     from app.config import settings
     from app.modules.payroll.employee_validation import PLEmployeeValidation, get_employee_validation_strategy
 
-    monkeypatch.setattr(settings, "PL_TENANT_ONBOARDING_ENABLED", True)
     strategy = get_employee_validation_strategy("PL")
     assert strategy is PLEmployeeValidation
     return strategy
@@ -183,50 +174,6 @@ def test_bank_routing_uses_the_polish_iban():
 
 
 # ── dormancy ───────────────────────────────────────────────────────────────
-def test_entering_poland_is_refused_while_dormant(monkeypatch):
-    from app.config import settings
-    from app.modules.payroll import poland_dormancy as d
-
-    assert settings.PL_TENANT_ONBOARDING_ENABLED is False
-    assert d.entering_poland_refusal("India", "Poland") == d.DORMANT_MESSAGE
-    assert d.entering_poland_refusal(None, "PL") == d.DORMANT_MESSAGE
-    assert d.entering_poland_refusal("PL", "Poland") is None                     # already Polish
-    assert d.entering_poland_refusal("India", "Japan") is None                   # not Poland
-    monkeypatch.setattr(settings, "PL_TENANT_ONBOARDING_ENABLED", True)
-    assert d.entering_poland_refusal("India", "Poland") is None
-
-
-def test_country_change_into_poland_is_blocked(db):
-    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
-
-    assert "Poland is not open" in get_jurisdiction_change_block_reason(db, "India", "Poland")
-
-
-@pytest.mark.parametrize("value", ["PL", "Poland"])
-def test_company_jurisdiction_cannot_become_poland(db, value):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll import service
-    from app.modules.payroll.schemas import CompanyDetailsUpdate
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="PL Test Org", code="PLTEST", country=None)
-    service.get_company_details(db, t.org.id)
-    with pytest.raises(BadRequestException, match="Poland is not open"):
-        service.update_company_details(db, t.org.id, CompanyDetailsUpdate(jurisdictionCountry=value))
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("PL", "Poland")
-
-
-def test_backfill_never_makes_an_org_polish(db):
-    from app.modules.organizations.models import Organization
-    from app.modules.payroll import service
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="PL Backfill Org", code="PLBACK", country=None)
-    db.get(Organization, t.org.id).country = "Poland"
-    db.commit()
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("PL", "Poland")
-
-
 # ── fail-closed calculation dispatch ───────────────────────────────────────
 def test_poland_never_falls_through_to_the_generic_calculator():
     from app.modules.payroll.engine import standard
@@ -252,10 +199,10 @@ def test_every_calculation_mode_is_blocked(mode):
     assert raised.value.key == expected
 
 
-def test_registry_row_required():
+def test_registry_row_not_required():
     from app.modules.payroll.engine.tax_resolver import _REGISTRY_ROW_REQUIRED_COUNTRIES
 
-    assert "PL" in _REGISTRY_ROW_REQUIRED_COUNTRIES
+    assert "PL" not in _REGISTRY_ROW_REQUIRED_COUNTRIES                     # gate removal 2026-11-25
 
 
 def test_poland_has_a_statutory_module_from_phase_4():

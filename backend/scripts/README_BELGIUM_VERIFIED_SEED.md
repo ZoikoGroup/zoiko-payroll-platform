@@ -1,12 +1,13 @@
 # Loading verified Belgian values (`seed_belgium_verified_values.py`)
 
 The script loads a file of **verified** Belgian values into a **Draft** Belgian pack. It uses the same governed import
-as the Super Admin **Import from file** button: the same validation, all-or-nothing, a source on every row, and every
-row saved **unsigned** (`[PENDING G1]`). It never signs, approves, certifies or activates anything.
+as the Super Admin **Import from file** button: the same validation, all-or-nothing and a source on every row. Since
+the gate removal (owner decision 2026-11-25, `docs/GATE_REMOVAL.md`) a saved row is **in force**: there is no signing
+step and no `[PENDING G1]` marker. The script never approves or activates anything.
 
 ## 1. Prepare the file
 
-- Start from the import template (Readiness → Signing status → **CSV template** / **JSON template**, or
+- Start from the import template (Pack status → Signing status → **CSV template** / **JSON template**, or
   `scripts/templates/be_content_import_template.csv|json`), or from **Export workbook** for an XLSX.
 - Use one row per value: the catalogue key, the `rowId` (for scalar rows, from the exported workbook), the official
   figure and `sourceDocumentId`.
@@ -29,19 +30,13 @@ python -m scripts.seed_belgium_verified_values --pack BE-PAYROLL-2026 --file ver
   `scripts/_local_db_guard.py`.
 - Add `--version` when the pack id has several versions, and `--reason` to set the audit reason.
 
-## 3. After loading: each step by a different Super Admin
+## 3. After loading
 
-1. **Sign:** a second Super Admin (not the importer, and not anyone who edited those rows) reviews each row in the
-   Super Admin console and signs it. Use Readiness → Signing status → *Select pending cells* to bulk-sign. Each row
-   needs its own reviewed, archived source. Signing removes `[PENDING G1]`.
-2. **Certify:** once no row is pending and the authority examples replay exactly, use **Record certification run**
-   (Readiness → Golden certification). Activation needs a **PASS** run recorded for this pack, with its content
-   unchanged since: any later edit, signature or unsigning means a new run must be recorded.
-3. **Approve:** a Super Admin who neither edited nor signed this version records the approval (**Approve** in the
-   pack header). Belgium refuses self-approval.
-4. **Activate:** a **different** Super Admin from the approver sets the pack Active. That Super Admin must also not
-   have edited or signed this version. Belgium's approver may not activate, and Hotfix Activate is not offered.
-   Activation is refused while any row is pending, empty or without a source, or the certification is not PASS
-   (gate G1). Readiness shows every gate (G1–G7) and what each one still needs.
+There is no signing, golden-certification or release-gate step since the gate removal (owner decision 2026-11-25):
 
-Any later edit to a row clears the pack's approval and must be signed again.
+1. **Approve:** a Super Admin other than the pack's last editor records the approval (**Approve** in the pack
+   header). The pack's catalogue must be complete; rows may still be empty.
+2. **Activate:** set the pack Active. Activation needs only content in the pack (a DEMO pack is never activated).
+3. **Registry:** if Belgium's registry row is PLANNED, move it to AVAILABLE (reason required) so registration opens.
+
+A row still without a value blocks only the Belgian calculation that needs it, with a named reason.

@@ -327,6 +327,45 @@ def test_pending_rounding_blocks():
     assert exc.value.key == "jp_si_employee_share_rounding"
 
 
+def test_pending_ei_rounding_blocks():
+    rate_map = _base_rate_map()
+    rate_map["jp_ei_employee_share_rounding"].text_value = "PENDING_G1"
+    with pytest.raises(MissingComplianceConfigurationError) as exc:
+        japan.calculate(_context(rate_map=rate_map))
+    assert exc.value.key == "jp_ei_employee_share_rounding"
+    assert "not yet provided" in str(exc.value)
+
+
+def test_a_pending_g1_label_marker_no_longer_blocks():
+    """Gate removal: a row whose LABEL still carries "[PENDING G1]" calculates
+    when its value is present; only the value decides."""
+    plain = japan.calculate(_context())["jp_result"]
+    rate_map = _base_rate_map()
+    for key, row in rate_map.items():
+        row.label = f"{key} [PENDING G1]"
+    marked = japan.calculate(_context(rate_map=rate_map))["jp_result"]
+    assert marked["jp_employee_total"] == plain["jp_employee_total"]
+    assert marked["jp_wht_total"] == plain["jp_wht_total"]
+
+
+@pytest.mark.parametrize("raw,expected", [("100.50", "100"), ("100.51", "101"), ("100.49", "100")])
+def test_half_down_is_the_50_sen_rule(raw, expected):
+    for rounder in (social_insurance._rounder({"jp_si_employee_share_rounding": _rate(text_value="HALF_DOWN")},
+                                              None, "jp_si_employee_share_rounding"),
+                    employment_insurance._rounder({"jp_ei_employee_share_rounding": _rate(text_value="HALF_DOWN")},
+                                                  None)):
+        assert rounder(D(raw)) == D(expected)
+
+
+def test_shipped_si_and_ei_rounding_is_half_down():
+    rate_map = {}
+    for (key, *_rest) in content.JP_SCALAR_CONTENT:
+        rate_map[key] = _rest[4]
+    assert rate_map["jp_si_employee_share_rounding"] == "HALF_DOWN"
+    assert rate_map["jp_ei_employee_share_rounding"] == "HALF_DOWN"
+    assert rate_map["jp_care_split_rule"] == "EQUAL"
+
+
 def test_missing_ei_pair_blocks():
     ctx = _context(jp_employment_insurance_profile=SimpleNamespace(
         status="ACTIVE", effective_from=date(2026, 1, 1), insured=True,

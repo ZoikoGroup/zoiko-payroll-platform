@@ -23,8 +23,28 @@ def _pl(context):
 
 
 # ── content governance ─────────────────────────────────────────────────────
-def test_the_shipped_unsigned_pack_never_calculates():
-    _blocks(ctx(pack=build_pack(signed=False)), "PL_PACK_UNSIGNED")
+def test_a_legacy_pending_g1_label_no_longer_blocks():
+    # Packs seeded before the gate removal still carry "[PENDING G1]" labels:
+    # the value decides, the marker is ignored (Spain model, 2026-11-25).
+    rate_map, slabs = build_pack(signed=False)
+    assert rate_map["pl_rounding_pit"].label.endswith("[PENDING G1]")
+    for row in slabs:
+        row.rate_label = f"{row.rate_label} [PENDING G1]"
+    pl = _pl(ctx(pack=(rate_map, slabs)))
+    assert pl["hashes"]
+
+
+def test_the_shipped_content_calculates_without_test_fixtures():
+    rate_map, slabs = build_pack(signed=False)
+    for row in rate_map.values():
+        row.label = row.label.replace(" [PENDING G1]", "")
+    assert _pl(ctx(pack=(rate_map, slabs)))["hashes"]
+
+
+def test_a_pending_g1_value_still_blocks_under_a_plain_label():
+    rate_map, slabs = build_pack({"pl_fund_cap_rule": "PENDING_G1"})
+    assert "[PENDING G1]" not in rate_map["pl_fund_cap_rule"].label
+    _blocks(ctx(pack=(rate_map, slabs)), "PL_POLICY_PENDING:pl_fund_cap_rule")
 
 
 @pytest.mark.parametrize("key", ["pl_rounding_pit", "pl_rounding_zus", "pl_rounding_health", "pl_rounding_ppk"])

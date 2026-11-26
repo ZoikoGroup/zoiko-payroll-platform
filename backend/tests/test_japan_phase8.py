@@ -152,23 +152,29 @@ def test_run_exceptions_need_a_second_person_and_follow_the_payload(db, organiza
     assert not next(e for e in lifecycle.jp_run_exceptions(db, run) if e["key"] == key)["approved"]
 
 
-def test_approval_is_refused_while_an_exception_is_open(db, organization, employee):
+def test_approval_proceeds_while_an_exception_is_open(db, organization, employee):
+    """Exceptions stay listed but need no second person's approval (gate removal 2026-11-25)."""
+    from app.modules.payroll import japan_lifecycle
     from app.modules.payroll.models import PayrollStatus
 
     run = _run(db, organization, date(2026, 6, 25), status="Review")
     _payslip(db, organization, employee, run)
-    with pytest.raises(HTTPException) as exc:
-        jp.before_run_transition(db, run, PayrollStatus.APPROVED, 1)
-    assert exc.value.status_code == 409 and "exception" in exc.value.detail
+    assert [e for e in japan_lifecycle.jp_run_exceptions(db, run) if not e["approved"]]
+    jp.before_run_transition(db, run, PayrollStatus.APPROVED, 1)
+    assert run.jp_approval_fingerprint
 
 
 # ── corrections (JP-006) ────────────────────────────────────────────────────
 def test_corrections_block_while_the_policy_is_pending(db, organization, employee):
     run = _run(db, organization, date(2026, 6, 25))
-    item = _payslip(db, organization, employee, run)
+    item = _payslip(db, organization, employee, run, _ctx(policy="PENDING_G1"))
     with pytest.raises(BadRequestException, match="jp_correction_policy is PENDING_G1"):
         lifecycle.create_jp_correction(db, organization_id=organization.id, payslip_item_id=item.id,
                                        reason="late pay change", changes={"basic": "310000"}, actor_id=1)
+
+
+def test_shipped_policy_is_delta_payslip():
+    assert _base_rate_map()["jp_correction_policy"].text_value == "DELTA_PAYSLIP"
 
 
 def test_signed_policy_books_a_delta_payslip_and_never_edits_the_original(db, organization, employee):
@@ -203,7 +209,7 @@ def test_paid_run_records_each_obligation_once_with_signed_due_dates(db, organiz
     assert by_type["SI_REMITTANCE"].amount == D(42450 * 2)              # employee + employer
     assert by_type["SI_REMITTANCE"].due_on == date(2026, 7, 31)
     rt = by_type["RESIDENT_TAX_REMITTANCE"]
-    assert (rt.amount, rt.municipality_code, rt.due_on) == (D(10000), "131016", None)   # rule not signed
+    assert (rt.amount, rt.municipality_code, rt.due_on) == (D(10000), "131016", date(2026, 7, 10))
     assert filing.record_run_obligations(db, run, actor_id=1) == []                   # written once
 
     wht = by_type["WHT_REMITTANCE"]
@@ -215,6 +221,17 @@ def test_paid_run_records_each_obligation_once_with_signed_due_dates(db, organiz
         filing.record_obligation_receipt(db, organization.id, wht.id, accepted=True, receipt_ref="")
     assert filing.record_obligation_receipt(db, organization.id, wht.id, accepted=True,
                                             receipt_ref="RCPT-1")["status"] == "ACCEPTED"
+
+
+def test_resident_tax_due_date_is_empty_while_the_day_is_not_provided(db, organization, employee):
+    rate_map = _yea_rate_map()
+    rate_map["jp_resident_tax_remittance_due_day"].flat_amount = None
+    run = _run(db, organization, date(2026, 6, 25))
+    _payslip(db, organization, employee, run, _ctx(rate_map=rate_map))
+    created = filing.record_run_obligations(db, run, actor_id=1)
+    rt = {o.obligation_type: o for o in created}["RESIDENT_TAX_REMITTANCE"]
+    assert rt.due_on is None
+    assert "value not yet provided" in rt.detail["dueRule"]
 
 
 def test_small_employer_twice_yearly_scheme_is_refused(db, organization):
@@ -288,6 +305,20 @@ def test_shipped_content_blocks_the_year_end_calculation():
     assert exc.value.key == "JP_YEA_EID"
     with pytest.raises(MissingComplianceConfigurationError):
         year_end.yea_eligibility(FACTS, japan._Pack(_base_rate_map(), 7))       # limit is empty
+
+
+def test_year_end_tax_with_the_owner_approved_content_values():
+    # Content as shipped: surtax 2.1%, taxable DOWN_1000, annual DOWN_100. Only
+    # the still-empty limit / cap rows are filled synthetically.
+    rate_map = _base_rate_map()
+    rate_map["jp_yea_income_limit"].flat_amount = D(20000000)
+    rate_map["jp_yea_earthquake_cap"].flat_amount = D(50000)
+    assert rate_map["jp_reconstruction_surtax_pct"].flat_amount == D("2.1")
+    got = year_end.year_end_tax(FACTS, {}, _yea_rows(), japan._Pack(rate_map, 7))
+    # 1,512,600 -> 1,512,000; 10% = 151,200; +2.1% = 154,375.2 -> 154,300.
+    assert got.taxable == D(1512000)
+    assert got.annual_tax == D(154300)
+    assert got.trace["surtaxPct"] == "2.1"
 
 
 def test_unknown_declaration_fields_block():

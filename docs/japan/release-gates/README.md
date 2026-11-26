@@ -1,5 +1,7 @@
 # Japan release gates
 
+> **Superseded 2026-11-25 (gate removal, owner decision).** The release gates, evidence, sign-offs and parallel-run requirements described here no longer apply: this country goes live like Spain once its pack is Active. See `docs/GATE_REMOVAL.md` and `docs/japan/JAPAN_GAPS_AND_DECISIONS.md`. Kept for history.
+
 Japan (ZP-JP-ENG-001) stays switched off (`JP_TENANT_ONBOARDING_ENABLED=False`) and its service availability stays PLANNED until every gate below passes and owner decisions D-1 to D-5 are recorded.
 
 | Gate | Subject | Owner |

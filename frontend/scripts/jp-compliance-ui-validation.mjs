@@ -55,7 +55,6 @@ const JAPAN_FILES = [
   "modules/payroll/Compliances/JPYearEndPanel.jsx",
   "modules/payroll/Compliances/JPObligationsPanel.jsx",
   "modules/payroll/Compliances/JPParallelCyclesSection.jsx",
-  "components/jurisdiction/japan/JPReadinessTab.jsx",
 ];
 const files = Object.fromEntries(JAPAN_FILES.map((f) => [f, read(f)]));
 const service = read("service/payrollService.js");
@@ -160,11 +159,9 @@ check("Year-end declarations and filing previews never carry a My Number", () =>
 check("Every submission is recorded as made elsewhere: no Japan panel builds a filing file", () =>
   !/download|Blob\(|createObjectURL|\.xml|\.csv/i.test(files["modules/payroll/Compliances/JPObligationsPanel.jsx"]
     + files["modules/payroll/Compliances/JPYearEndPanel.jsx"]));
-check("The Readiness tab and the parallel-cycles section are mounted", () =>
-  /tab\("jp-readiness", "Readiness"/.test(files["config/jurisdictions/japanComplianceConfig.jsx"])
+check("No release-gate tab since the gate removal (2026-11-25); the parallel-cycles section is mounted", () =>
+  !/jp-readiness/.test(files["config/jurisdictions/japanComplianceConfig.jsx"])
   && files["modules/payroll/Compliances/JPComplianceCentreTab.jsx"].includes("<JPParallelCyclesSection />"));
-check("Gate state is shown as the server derives it — nothing is ticked in the browser", () =>
-  !/onClick|setState|post\(/.test(files["components/jurisdiction/japan/JPReadinessTab.jsx"]));
 check("A parallel cycle is accepted only when the server says it is clean", () =>
   files["modules/payroll/Compliances/JPParallelCyclesSection.jsx"].includes("disabled={state.busy || !data.clean}"));
 check("The employee detail opens the Japan statutory records for JP employees", () => {

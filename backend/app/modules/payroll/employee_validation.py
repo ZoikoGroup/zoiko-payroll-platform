@@ -1880,7 +1880,7 @@ def za_national_id_is_valid(value) -> bool:
 class ZAEmployeeValidation(EmployeeValidationStrategy):
     """South Africa (ZP-ZA-ENG-001 Phase 5) - identity and bank validation.
 
-    DORMANT: consulted only while ZA_TENANT_ONBOARDING_ENABLED is on.
+    An ordinary country validator (no dormancy switch since 2026-11-25).
     Exactly one of national_id / passport_number is required. The 13-digit
     national ID carries a real YYMMDD date and the standard Luhn check digit.
     The 10-digit SARS income-tax number is format-checked only: its check
@@ -1993,7 +1993,7 @@ def pl_regon_is_valid(value) -> bool:
 class PLEmployeeValidation(EmployeeValidationStrategy):
     """Poland (ZP-PL-ENG-001) - employee fields that are NOT vault-only.
 
-    DORMANT: consulted only while PL_TENANT_ONBOARDING_ENABLED is on.
+    An ordinary country validator (no dormancy switch since 2026-11-25).
     PESEL and NIP are held ONLY in the encrypted identifier vault
     (payroll_pl_identifier_vault via /api/payroll/poland/employees/{id}/
     identifiers, spec section 13, PL-025): a compliance field carrying either
@@ -2077,8 +2077,8 @@ def my_member_no_format_ok(value) -> bool:
 class MYEmployeeValidation(EmployeeValidationStrategy):
     """Malaysia (ZP-MY-ENG-001) - employee fields that are NOT vault-only.
 
-    DORMANT: consulted only while MY_TENANT_ONBOARDING_ENABLED is on (or a
-    canary organisation exists). MyKad/NRIC, TIN, EPF and SOCSO member numbers
+    An ordinary country validator (no dormancy switch since 2026-11-25).
+    MyKad/NRIC, TIN, EPF and SOCSO member numbers
     and work-pass numbers are held ONLY in the encrypted identifier vault
     (Phase 2, spec section 15): a compliance field carrying any of them is
     refused, never stored, and the refusal never echoes the value. Bank
@@ -2121,8 +2121,8 @@ class MYEmployeeValidation(EmployeeValidationStrategy):
 class BEEmployeeValidation(EmployeeValidationStrategy):
     """Belgium (ZP-BE-ENG-001 Phase 1) - the only employee field is the IBAN.
 
-    DORMANT: consulted only while BE_TENANT_ONBOARDING_ENABLED is on or a
-    canary organisation exists. NISS/INSZ is never an employee field: it is
+    An ordinary country validator (no dormancy switch since 2026-11-25).
+    NISS/INSZ is never an employee field: it is
     held ONLY in the encrypted identifier vault (Phase 4, D14, BE-040); a
     compliance field carrying it is refused, never stored, and the refusal
     never echoes the value. Worker category, Joint Committee and every other
@@ -2356,7 +2356,7 @@ _STRATEGIES = {
 class NZEmployeeValidation(EmployeeValidationStrategy):
     """New Zealand (ZP-NZ-ENG-001 Phase 4).
 
-    DORMANT: consulted only while NZ_TENANT_ONBOARDING_ENABLED is on. Every
+    An ordinary country validator (no dormancy switch since 2026-11-25). Every
     statutory fact (tax code, KiwiSaver, student loan, notices) lives in the
     effective-dated payroll_nz_* records with a second person's approval, and
     the IRD number lives ONLY in the encrypted IRD vault (NZ-023): a
@@ -2378,6 +2378,35 @@ class NZEmployeeValidation(EmployeeValidationStrategy):
         return super().validate(compliance)
 
 
+class JPEmployeeValidation(EmployeeValidationStrategy):
+    """Japan (ZP-JP-ENG-001) - added with the gate removal (owner decision
+    2026-11-25, P4b) so a Japanese employee can be created through the
+    ordinary employee flow, like Spain.
+
+    Every statutory fact (withholding declaration class, social-insurance
+    enrolment, resident-tax notices) lives in the effective-dated
+    payroll_jp_* records, and the My Number lives ONLY in the encrypted
+    vault (japan_my_number, /api/payroll/japan/employees/{id}/my-number): a
+    compliance field carrying it is refused, never stored, and the refusal
+    never echoes the value.
+    """
+
+    country_code = "JP"
+    SENSITIVE_FIELDS = ("my_number", "tax_number")
+    FIELD_SPECS = {}
+    _VAULT_ONLY = ("my_number", "mynumber", "my_no", "individual_number", "kojin_bango", "tax_number",
+                   "national_id")
+
+    @classmethod
+    def validate(cls, compliance: dict) -> dict:
+        keys = {str(k).strip().lower() for k in (compliance or {})}
+        if keys & set(cls._VAULT_ONLY):
+            raise BadRequestException("The Japanese My Number is held only in the encrypted vault "
+                                      "(/api/payroll/japan/employees/{id}/my-number), never as an "
+                                      "employee field.")
+        return super().validate(compliance)
+
+
 # Strategies built but dormant (Mexico, Phase 4b): consulted only while
 # their country's onboarding flag is on, and never listed in _STRATEGIES —
 # so the "Supported: …" message every other country sees never changes.
@@ -2385,17 +2414,19 @@ _DORMANT_STRATEGIES = {
     "MX": MXEmployeeValidation,
     # Brazil (ZP-BR-ENG-001 Phase 3): dormant until BR_TENANT_ONBOARDING_ENABLED.
     "BR": BREmployeeValidation,
-    # South Africa (ZP-ZA-ENG-001 Phase 5): dormant until the release gates.
-    "ZA": ZAEmployeeValidation,
-    # New Zealand (ZP-NZ-ENG-001 Phase 4): dormant until NZ_TENANT_ONBOARDING_ENABLED.
-    "NZ": NZEmployeeValidation,
-    # Poland (ZP-PL-ENG-001 Phase 0): dormant until PL_TENANT_ONBOARDING_ENABLED.
-    "PL": PLEmployeeValidation,
-    # Malaysia (ZP-MY-ENG-001 Phase 0): dormant until MY_TENANT_ONBOARDING_ENABLED.
-    "MY": MYEmployeeValidation,
-    # Belgium (ZP-BE-ENG-001 Phase 1): dormant until BE_TENANT_ONBOARDING_ENABLED.
-    "BE": BEEmployeeValidation,
 }
+
+# Ordinary countries (gate removal, owner decision 2026-11-25): no dormancy
+# switch, like Spain. Registered here because their classes are defined
+# after _STRATEGIES.
+_STRATEGIES.update({
+    "JP": JPEmployeeValidation,                 # P4b: Japan had no employee validator
+    "ZA": ZAEmployeeValidation,
+    "NZ": NZEmployeeValidation,
+    "PL": PLEmployeeValidation,
+    "MY": MYEmployeeValidation,
+    "BE": BEEmployeeValidation,
+})
 
 
 def _dormant_strategy(code: str):
@@ -2406,35 +2437,6 @@ def _dormant_strategy(code: str):
         from app.modules.payroll import brazil_dormancy
 
         return strategy if brazil_dormancy.onboarding_enabled() else None
-    if code == "ZA":
-        from app.modules.payroll import south_africa_dormancy
-
-        return strategy if south_africa_dormancy.onboarding_enabled() else None
-    if code == "NZ":
-        from app.modules.payroll import nz_dormancy
-
-        # The flag, or any Option 3 canary organisation: only an organisation the
-        # organisation-level gate admitted can hold a New Zealand employee.
-        return strategy if nz_dormancy.onboarding_enabled() or nz_dormancy.canary_organization_ids() else None
-    if code == "PL":
-        from app.modules.payroll import poland_dormancy
-
-        # The flag, or any canary organisation: only an organisation the
-        # organisation-level gate admitted can hold a Polish employee.
-        return strategy if poland_dormancy.onboarding_enabled() or poland_dormancy.canary_organization_ids() else None
-    if code == "MY":
-        from app.modules.payroll import malaysia_dormancy
-
-        # The flag, or any canary organisation: only an organisation the
-        # organisation-level gate admitted can hold a Malaysian employee.
-        return (strategy if malaysia_dormancy.onboarding_enabled() or malaysia_dormancy.canary_organization_ids()
-                else None)
-    if code == "BE":
-        from app.modules.payroll import belgium_dormancy
-
-        # The flag, or any canary organisation. Must stay ABOVE the Mexico
-        # fall-through below, which would otherwise apply Mexico's flag to BE.
-        return strategy if belgium_dormancy.onboarding_enabled() or belgium_dormancy.canary_organization_ids() else None
     from app.modules.payroll import mexico_dormancy
 
     # Phase 10e: the kill switch only — no session here. A Mexican employee

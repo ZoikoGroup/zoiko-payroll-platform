@@ -9,7 +9,6 @@ from app.config import settings
 from app.core.exceptions import BadRequestException
 from app.modules.payroll import japan_my_number as mn
 from app.modules.payroll import japan_parallel as parallel
-from app.modules.payroll import japan_readiness as readiness
 from app.modules.payroll import japan_service as jp
 from app.modules.payroll.models import (
     ContributionRate, PayrollEmployee, PayrollJpMyNumberVault, PayrollJpParallelImport,
@@ -39,57 +38,6 @@ def employee(db, organization):
 
 
 # ── release gates ───────────────────────────────────────────────────────────
-def test_a_freshly_seeded_pack_passes_only_the_scope_checks(db):
-    jp.seed_japan_pack(db)
-    db.commit()
-    state = readiness.jp_readiness(db)
-    gates = {g["gate"]: g for g in state["gates"]}
-    assert [c["ok"] for c in gates["G0"]["checks"]] == [True, True]
-    assert not gates["G0"]["passed"]                                  # evidence not recorded yet
-    for gate in ("G1", "G2", "G3", "G4", "G5", "G7"):
-        assert not all(c["ok"] for c in gates[gate]["checks"]), gate
-    assert state["allPassed"] is False
-    keys = {u["key"] for u in readiness.jp_unmet_requirements(db)}
-    assert {"G0", "G1", "G8", "D-1"} <= keys
-
-
-def test_a_signed_row_turns_its_check_green(db):
-    pack = jp.seed_japan_pack(db)
-    row = (db.query(ContributionRate)
-           .filter(ContributionRate.jurisdiction_pack_id == pack.id,
-                   ContributionRate.component_key == "jp_wht_rounding").one())
-    check = lambda: next(c for c in readiness.jp_code_checks(db)["G1"] if c["key"] == "jp_wht_rounding")  # noqa: E731
-    assert check()["ok"] is False
-    row.text_value = "DOWN"
-    assert check()["ok"] is False                                     # still labelled PENDING G1
-    row.label = row.label.replace(" [PENDING G1]", "")
-    db.commit()
-    assert check()["ok"] is True
-
-
-def test_prefecture_checks_need_all_47(db):
-    jp.seed_japan_pack(db)
-    check = next(c for c in readiness.jp_code_checks(db)["G4"] if c["key"] == "JP_MIN_WAGE")
-    assert check["ok"] is False and check["detail"].startswith("0/47")
-
-
-def test_key_presence_is_checked_without_reading_the_keys(db, monkeypatch):
-    monkeypatch.setattr(settings, "JP_MY_NUMBER_KEYRING", json.dumps({"1": KEY_1}))
-    monkeypatch.setattr(settings, "JP_MY_NUMBER_FINGERPRINT_KEY", FINGERPRINT_KEY)
-    checks = readiness.jp_code_checks(db)["G6"]
-    assert all(c["ok"] for c in checks)
-    assert KEY_1 not in json.dumps(checks) and FINGERPRINT_KEY not in json.dumps(checks)
-
-
-def test_service_availability_lists_every_unmet_gate(db):
-    from app.modules.payroll import jurisdiction_hooks
-
-    jp.seed_japan_pack(db)
-    unmet = readiness.jp_unmet_requirements(db)
-    assert [u["key"] for u in unmet][:9] == [f"G{i}" for i in range(9)]
-    assert jurisdiction_hooks.get("JP", "service_registry_transition") is not None
-
-
 # ── parallel cycles ─────────────────────────────────────────────────────────
 CSV = "Employee,Gross,Tax,SI,EI,RT,Net\nJP-P9-1,300000,5000,42450,1500,10000,{net}\n"
 MAPPING = {"employeeCode": "Employee", "gross": "Gross", "withholding": "Tax",
@@ -155,20 +103,6 @@ def test_only_committed_runs_are_compared(db, organization, employee):
     with pytest.raises(BadRequestException, match="committed"):
         parallel.import_jp_parallel(db, organization.id, {"payrollRunId": run.id, "sourceLabel": "x",
                                                     "csv": CSV.format(net=0), "columnMapping": MAPPING}, 1)
-
-
-def test_g7_needs_two_accepted_months(db, organization, employee):
-    for month in (5, 6):
-        run, item = _committed(db, organization, employee, month)
-        out = parallel.import_jp_parallel(db, organization.id, {"payrollRunId": run.id, "sourceLabel": "Incumbent",
-                                                          "csv": CSV.format(net=item.net_pay),
-                                                          "columnMapping": MAPPING}, 1)
-        db.commit()
-        # Before this month's acceptance there is at most one accepted month.
-        assert next(c for c in readiness.jp_code_checks(db)["G7"])["ok"] is False
-        parallel.accept_jp_parallel_import(db, organization.id, out["id"], 2)
-        db.commit()
-    assert next(c for c in readiness.jp_code_checks(db)["G7"])["ok"] is True
 
 
 # ── key rotation ────────────────────────────────────────────────────────────

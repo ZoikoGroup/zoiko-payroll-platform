@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  approveNzEmployerProfile, createNzEmployerProfile, getEmployees, getNzReadiness, getNzSummary,
+  approveNzEmployerProfile, createNzEmployerProfile, getEmployees, getNzSummary,
   grantNzFamilyViolenceView, listNzEmployerProfiles, listNzFamilyViolenceHolders, proposeNzPublicHolidays,
   revokeNzFamilyViolenceView, setNzEmployerIrdNumber, verifyNzEmployerProfile, vestNzEntitlements,
 } from "../../../service/payrollService";
@@ -30,11 +30,9 @@ const ask = (message) => {
 
 function SetupStatus() {
   const [summary, error] = useLoad(() => getNzSummary());
-  const [readiness] = useLoad(() => getNzReadiness());
   if (error) return <p role="alert" className="text-[12px] text-error">{error}</p>;
   if (!summary) return null;
   const pack = (summary.packs || [])[0];
-  const gates = readiness?.gates || [];
   return (
     <div className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-[12px] text-foreground-secondary" data-testid="nz-setup-status">
       <p className="font-semibold text-foreground">New Zealand payroll is not yet certified.</p>
@@ -48,13 +46,6 @@ function SetupStatus() {
         {summary.activeTaxProfiles ?? 0} tax profile(s), {summary.activeKiwiSaverElections ?? 0} KiwiSaver election(s),{" "}
         {summary.approvedNotices ?? 0} authority notice(s).
       </p>
-      {gates.length > 0 && (
-        <p className="mt-1" data-testid="nz-gates-passed">
-          Release gates: {gates.filter((g) => g.passed).length} of {gates.length} pass
-          {gates.some((g) => !g.passed) ? ` (open: ${gates.filter((g) => !g.passed).map((g) => g.gate).join(", ")})` : ""}.
-          New Zealand opens only when every gate passes.
-        </p>
-      )}
     </div>
   );
 }

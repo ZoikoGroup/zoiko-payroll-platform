@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, RefreshCw } from "lucide-react";
-import { getNzDecisions, getNzSigningStatus } from "../../../service/superAdminService";
+import { getNzSigningStatus } from "../../../service/superAdminService";
 import { card } from "../japan/jpFormat";
 import { ErrorNote } from "./nzShared";
 import NZSeedDraftPanel from "./NZSeedDraftPanel";
@@ -12,7 +12,6 @@ import NZSeedDraftPanel from "./NZSeedDraftPanel";
 
 export default function NZOverviewDashboard({ pack, onReload }) {
   const [status, setStatus] = useState(null);
-  const [decisions, setDecisions] = useState([]);
   const [error, setError] = useState(null);
 
   const load = useCallback(() => {
@@ -20,7 +19,6 @@ export default function NZOverviewDashboard({ pack, onReload }) {
     getNzSigningStatus(pack.id)
       .then((data) => { setStatus(data); setError(null); })
       .catch((e) => setError(e.message || "Could not load the signing status."));
-    getNzDecisions().then((rows) => setDecisions(rows || [])).catch(() => setDecisions([]));
   }, [pack]);
 
   useEffect(() => { load(); }, [load]);
@@ -90,19 +88,6 @@ export default function NZOverviewDashboard({ pack, onReload }) {
                   {t.table.replaceAll("_", " ")} <span className="text-foreground-muted">({t.gate}{t.employerContent ? ", employer" : ""})</span>
                 </span>
                 <span className={t.rows ? "font-mono text-foreground" : "font-semibold text-warning"}>{t.rows ? `${t.rows} rows` : "Empty"}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {decisions.length > 0 && (
-        <div className={card}>
-          <h3 className="mb-2 text-[14px] font-semibold text-foreground">Owner decisions</h3>
-          <ul className="space-y-1 text-[12px]">
-            {decisions.map((d) => (
-              <li key={d.key} className="flex justify-between gap-3">
-                <span>{d.key} — {d.label}</span>
-                <span className={d.state === "RECORDED" ? "text-success" : "text-warning"}>{d.state}</span>
               </li>
             ))}
           </ul>

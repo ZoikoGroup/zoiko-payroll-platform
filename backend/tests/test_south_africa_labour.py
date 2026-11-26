@@ -64,8 +64,9 @@ def test_at_or_above_minimum_wage_passes():
     assert out["status"] == labour.OK and out["hourly"] == "30.77"
 
 
-def test_premium_multiplier_left_empty_by_design_is_a_warning():
-    # The spec does not state the BCEA multipliers; the content row is empty.
+def test_premium_multiplier_left_empty_is_a_warning():
+    # A pack row with no multiplier value (e.g. an org override cleared) is
+    # NOT_CONFIGURED — never assumed.
     out = labour.validate_za_labour(hours={"ordinary": "195", "overtime": "10"}, ordinary_pay="6000",
                                     annual_remuneration="72000", overtime_paid="0", rate_map=_rows(**BASE))
     assert out["bcea"]["applicable"] is True
@@ -83,6 +84,33 @@ def test_configured_overtime_multiplier_is_enforced():
     paid = labour.validate_za_labour(hours=hours, ordinary_pay="6000", annual_remuneration="72000",
                                      overtime_paid="461.55", rate_map=rows)
     assert paid["status"] == labour.OK
+
+
+def _content_rows(*keys):
+    """The real catalogue values (owner-approved 2026-11-25) for `keys`."""
+    by_key = {row[0]: row for row in content.ZA_SCALAR_CONTENT}
+    slot = {"amount": 4, "employee_pct": 2, "text": 5}
+    return _rows(**{k: by_key[k][slot[content.ZA_PARAMETER_KEYS[k]]] for k in keys})
+
+
+def test_content_bcea_multipliers_are_read_and_enforced():
+    rows = {**_rows(**BASE), **_content_rows("za_bcea_overtime_multiplier", "za_bcea_sunday_multiplier",
+                                             "za_bcea_public_holiday_multiplier")}
+    hours = {"ordinary": "195", "overtime": "10", "sunday": "8", "public_holiday": "8"}
+    out = labour.validate_za_labour(hours=hours, ordinary_pay="6000", annual_remuneration="72000",
+                                    overtime_paid="461.55", rate_map=rows)
+    # hourly R30.77: overtime 10h x 1.5, Sunday 8h x 2.0, public holiday 8h x 2.0
+    assert out["bcea"]["premiums"] == {"overtime": "461.55", "sunday": "492.32", "public_holiday": "492.32"}
+    assert "ZA_BCEA_PREMIUM_NOT_CONFIGURED" not in _codes(out)
+    assert out["status"] == labour.OK
+
+
+def test_content_damage_limit_is_read_and_enforced():
+    rows = {**_rows(**BASE), **_content_rows("za_damage_deduction_limit_pct")}
+    ok = labour.evaluate_za_deductions([_order(order_type="DAMAGE", amount="2500")], "10000", rows)
+    assert ok["status"] == labour.OK
+    over = labour.evaluate_za_deductions([_order(order_type="DAMAGE", amount="2500.01")], "10000", rows)
+    assert "ZA_DAMAGE_LIMIT_EXCEEDED" in _codes(over)
 
 
 def test_bcea_premiums_do_not_apply_above_the_threshold():

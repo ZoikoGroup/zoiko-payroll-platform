@@ -261,7 +261,8 @@ def test_due_dates_come_from_signed_content_only(world):
     assert plf.zus_due_on(w.db, w.org, "2026-03", SimpleNamespace(zus_deadline_class="DAY_5")) == date(2026, 4, 5)
     assert plf.annual_due_on(w.db, w.org, 2026, "pl_pit11_authority_due") == date(2027, 1, 31)
     from app.modules.payroll import poland_settlement as pss
-    assert pss._due_on(w.db, w.org, "PIT", "2026-03", registration) is None    # remittance rule PENDING_G1
+    # pl_pit_remittance_due_rule now carries DAY_20_NEXT_MONTH, but settlement does not read it yet.
+    assert pss._due_on(w.db, w.org, "PIT", "2026-03", registration) is None
 
 
 # ── settlements and reconciliation ─────────────────────────────────────────

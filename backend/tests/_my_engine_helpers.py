@@ -1,8 +1,9 @@
 """Malaysia engine test helpers (ZP-MY-ENG-001 Phase 3).
 
-build_pack() turns malaysia_content.py into a SIGNED in-memory pack (labels
-without the [PENDING G1] marker). Where the specification gives no value, the
-TEST_TEXT / TEST_AMOUNTS below stand in, and the contribution schedules are
+build_pack() turns malaysia_content.py into an in-memory pack (labels without
+the legacy [PENDING G1] marker, which no longer blocks since the gate removal
+of 2026-11-25). The TEST_TEXT / TEST_TERRITORIAL values below stand in for
+some policies (several differ from the owner-approved content on purpose), and the contribution schedules are
 TEST rows — every one of them clearly labelled "TEST — not certifying". They
 exist only to exercise the engine; real rows come from the official documents
 (EPF Third Schedule, PERKESO / EIS schedules) and are signed at gate G1.
@@ -69,7 +70,8 @@ def _rate(row, territory, overrides):
 
 
 def build_pack(overrides=None, schedules=TEST_SCHEDULES, unsigned=(), treatments=None, holidays=TEST_HOLIDAYS):
-    """(rate_map, slabs): every row signed except keys in `unsigned`."""
+    """(rate_map, slabs). Keys in `unsigned` get the legacy " [PENDING G1]"
+    label marker (it must NOT block — gate removal 2026-11-25)."""
     overrides = overrides or {}
     rate_map = {}
     for row in content.MALAYSIA_SCALAR_CONTENT:

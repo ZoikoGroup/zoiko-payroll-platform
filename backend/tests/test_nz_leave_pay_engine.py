@@ -80,8 +80,13 @@ def test_unreviewed_gross_row_blocks():
     _blocked(lp.annual_leave_pay, 1, D("1200"), rows, END, _pack(), code="NZ_HOL_GROSS_UNREVIEWED")
 
 
-def test_shipped_content_blocks():
-    rate_map, slabs = build_pack()                                  # P3 TEST pack: P6 rows still empty
+def test_shipped_content_calculates_and_an_unprovided_method_blocks():
+    # Gate removal: the shipped content now carries the owner-approved methods
+    # and windows; a row whose value is not provided still blocks.
+    rate_map, slabs = build_pack()
+    pack = NzPack(rate_map, slabs, 1, date(2026, 10, 5))
+    assert lp.annual_leave_pay(1, D("1200"), ledger_rows(), END, pack).amount > 0
+    rate_map, slabs = build_pack(overrides={"nz_hol_owp_method": None})
     pack = NzPack(rate_map, slabs, 1, date(2026, 10, 5))
     _blocked(lp.annual_leave_pay, 1, D("1200"), ledger_rows(), END, pack, code="NZ_ROW_MISSING:nz_hol_owp_method")
 

@@ -2,9 +2,10 @@
 
 Every statutory value the engine uses is read here from ``ctx.rate_map`` /
 ``ctx.slabs`` (rows of the resolved pack: ORM objects or plain dicts). A row is
-selected by the PAY DATE. A row whose label still carries "[PENDING G1]"
-blocks even inside an Active pack, an empty value blocks, and a policy row
-still at "PENDING_G1" blocks: nothing is ever defaulted (spec page 1, G1).
+selected by the PAY DATE. An empty value blocks and a policy row still at
+"PENDING_G1" blocks ("value not yet provided"): nothing is ever defaulted.
+A legacy "[PENDING G1]" label marker (packs seeded before the gate removal,
+owner decision 2026-11-25) is ignored: the value decides, not the label.
 
 Rounding is never done with a bare quantize elsewhere in the engine: the rule
 text comes from the pack, one rule per obligation (PL-004), and only its
@@ -23,7 +24,7 @@ ZERO = Decimal("0")
 ONE = Decimal("1")
 HUNDRED = Decimal("100")
 GROSZ = Decimal("0.01")
-PENDING_MARK = "[PENDING G1]"
+PENDING_MARK = "[PENDING G1]"     # legacy label marker; no longer blocks (gate removal)
 PENDING = "PENDING_G1"
 
 # Rounding vocabulary: rule text (from the pack) -> (unit, mode). A parser, not
@@ -97,10 +98,6 @@ class PlPack:
     def block(self, key: str, reason: str):
         raise E.PLCalculationBlockedError(key, reason, self.organization_id)
 
-    def _signed(self, ident: str, label) -> None:
-        if label and PENDING_MARK in str(label):
-            self.block(E.keyed(E.PACK_UNSIGNED, ident), f"{ident} is not signed (gate G1)")
-
     def _note(self, kind: str, ident: str, row) -> None:
         start, end = as_date(field(row, "effective_from")), as_date(field(row, "effective_to"))
         names = (("employee_rate_pct", "employer_rate_pct", "flat_amount", "text_value") if kind == "rate"
@@ -115,7 +112,6 @@ class PlPack:
         row = self.rate_map.get(key)
         if row is None or not in_window(field(row, "effective_from"), field(row, "effective_to"), self.as_of):
             self.block(E.keyed(E.ROW_MISSING, key), "no parameter row is in force on the pay date")
-        self._signed(key, field(row, "label"))
         self._note("rate", key, row)
         return row
 
@@ -135,7 +131,7 @@ class PlPack:
     def text(self, key: str, allowed=None) -> str:
         value = upper(field(self.row(key), "text_value"))
         if not value or value == PENDING:
-            self.block(E.keyed(E.POLICY_PENDING, key), "policy is not signed (PENDING_G1)")
+            self.block(E.keyed(E.POLICY_PENDING, key), "policy value not yet provided (PENDING_G1)")
         if allowed is not None and value not in tuple(upper(a) for a in allowed):
             self.block(E.keyed(E.POLICY_PENDING, key), f"{value!r} is not one of {', '.join(allowed)}")
         return value
@@ -146,7 +142,7 @@ class PlPack:
     def rounder(self, key: str) -> Callable[[Decimal], Decimal]:
         rule = upper(field(self.row(key), "text_value"))
         if rule not in ROUNDING_RULES:
-            self.block(E.keyed(E.ROUNDING_PENDING, key), f"rounding rule {rule or PENDING!r} is not signed")
+            self.block(E.keyed(E.ROUNDING_PENDING, key), f"rounding rule {rule or PENDING!r}: value not yet provided")
         unit, mode = ROUNDING_RULES[rule]
 
         def _round(value: Decimal) -> Decimal:
@@ -165,7 +161,6 @@ class PlPack:
         for index, r in enumerate(rows):
             ident = (f"{rule_type}:{field(r, 'tax_regime') or ''}:{field(r, 'filing_status') or ''}"
                      f":{field(r, 'min_amount')}:{index}")
-            self._signed(ident, field(r, "rate_label"))
             self._note("slab", ident, r)
         return sorted(rows, key=lambda r: (dec(field(r, "min_amount")), field(r, "sort_order") or 0))
 

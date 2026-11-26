@@ -1,8 +1,8 @@
-"""Belgium (owner decision 2026-11-25): a Belgian pack cannot move to QA, In
-Review or Approved while any catalogue key is missing, and cannot be approved
-(Approve action, or Approved on the status list) until every catalogue row is
-valued, sourced and signed. Through the status list, the Approve action and
-create / edit alike; refusals audited. Stricter only, never retroactive.
+"""Belgium: a Belgian pack cannot move to QA, In Review or Approved while any
+catalogue key is missing (structural; status list, Approve action and create /
+edit alike). Since the gate removal, owner decision 2026-11-25, a complete catalogue may be approved with rows
+still empty: a row without a value blocks only the calculation that needs it,
+as in Spain. Stricter only, never retroactive.
 SYNTHETIC data only: no Belgian figure is used (rows are decided NOT_SUPPORTED)."""
 from datetime import date
 
@@ -55,7 +55,6 @@ def test_an_empty_pack_cannot_move_to_a_review_status(db, status):
     assert ".py" not in refused.value.message
     db.rollback()
     assert db.get(JurisdictionPack, pack.id).status == "Draft"
-    assert _refused(db, pack)[-1].new_value["attempted"] == status        # audited
 
 
 def test_an_empty_pack_cannot_be_approved(db):
@@ -66,7 +65,6 @@ def test_an_empty_pack_cannot_be_approved(db):
     db.rollback()
     pack = db.get(JurisdictionPack, pack.id)
     assert pack.status == "Draft" and pack.approved_by_id is None
-    assert _refused(db, pack)[-1].new_value["attempted"] == "approve"
 
 
 def test_a_partial_catalogue_is_refused_with_the_count(db, seeded):
@@ -78,17 +76,13 @@ def test_a_partial_catalogue_is_refused_with_the_count(db, seeded):
         service.set_jurisdiction_pack_status(db, seeded.id, "QA", actor_id=CHECKER)
 
 
-def test_a_complete_unsigned_catalogue_may_go_to_review_but_not_be_approved(db, seeded):
+def test_a_complete_catalogue_may_go_to_review_and_be_approved_with_empty_rows(db, seeded):
+    """gate removal, owner decision 2026-11-25: no row needs to be valued, sourced or signed before approval."""
     assert service.set_jurisdiction_pack_status(db, seeded.id, "In Review", actor_id=MAKER).status == "In Review"
     assert service.set_jurisdiction_pack_status(db, seeded.id, "QA", actor_id=MAKER).status == "QA"
-    with pytest.raises(BadRequestException) as refused:
-        service.set_jurisdiction_pack_approver(db, seeded.id, actor_id=CHECKER)
-    message = refused.value.message
-    n = len(_c().KEYS)
-    assert message.startswith("This pack cannot be approved yet:")
-    assert f"{n} rows empty" in message and f"{n} unsigned" in message and "earning classifications unsigned" in message
-    db.rollback()
-    assert db.get(JurisdictionPack, seeded.id).approved_by_id is None
+    assert bes.be_approval_content_refusal(db, seeded) is None
+    approved = service.set_jurisdiction_pack_approver(db, seeded.id, actor_id=CHECKER)
+    assert approved.approved_by_id == CHECKER
 
 
 def test_a_fully_valued_sourced_and_signed_pack_can_be_approved(db, seeded):
@@ -98,9 +92,10 @@ def test_a_fully_valued_sourced_and_signed_pack_can_be_approved(db, seeded):
     assert approved.status == "Approved" and approved.approved_by_id == CHECKER
 
 
-def test_the_status_list_runs_the_same_approval_check(db, seeded):
+def test_the_status_list_never_approves(db, seeded):
+    """Approved is reached only through the Approve action (platform rule, every country)."""
     service.set_jurisdiction_pack_status(db, seeded.id, "In Review", actor_id=MAKER)
-    with pytest.raises(BadRequestException, match="cannot be approved yet"):
+    with pytest.raises(BadRequestException, match="use the Approve button"):
         service.set_jurisdiction_pack_status(db, seeded.id, "Approved", actor_id=MAKER)
 
 
@@ -119,7 +114,6 @@ def test_create_or_edit_into_a_review_status_is_refused_without_a_catalogue(db):
         upsert("In Review")                                           # edit
     db.rollback()
     assert db.get(JurisdictionPack, pack.id).status == "Draft"
-    assert _refused(db, pack)[-1].new_value["attempted"] == "In Review"
 
 
 def test_existing_statuses_are_not_changed_retroactively(db):

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_EVEN, ROUND_HALF_UP, ROUND_UP
+from decimal import (Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_DOWN, ROUND_HALF_EVEN,
+                     ROUND_HALF_UP, ROUND_UP)
 
 from app.modules.payroll.engine.jurisdictions.japan.errors import JapanCalculationBlockedError
 
@@ -26,6 +27,9 @@ _MODES = {
     "HALF_EVEN": ROUND_HALF_EVEN,
     "BANKERS": ROUND_HALF_EVEN,
     "ROUND_HALF_EVEN": ROUND_HALF_EVEN,
+    # Japanese 50-sen rule for the employee share (<= 0.50 yen down, > 0.50 up).
+    "HALF_DOWN": ROUND_HALF_DOWN,
+    "ROUND_HALF_DOWN": ROUND_HALF_DOWN,
 }
 
 
@@ -98,7 +102,7 @@ def _rounder(pack, rounding):
         _block(pack, key, "no rounding row is configured")
     text = _upper(_field(row, "text_value"))
     if not text or text == PENDING:
-        _block(pack, key, "rounding is PENDING_G1")
+        _block(pack, key, "rounding value not yet provided")
     unit = Decimal("1")
     mode_name = text
     if text.startswith("DOWN_") and text[5:].isdigit():

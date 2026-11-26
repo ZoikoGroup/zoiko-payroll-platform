@@ -54,7 +54,7 @@ export function belgiumExtraTabs() {
     tab("be-policy", "Policy", Settings2, "be-slabs",
       rows(TAB_GROUPS.policy, "Scope, policy and rounding",
         "Supported scope and the rounding rules (signed pack rows only; unsigned rounding blocks the calculation).")),
-    tab("be-release", "Readiness", Gauge, "be-policy", ({ pack }) => <BEReleaseReadinessTab pack={pack} />),
+    tab("be-release", "Pack status", Gauge, "be-policy", ({ pack }) => <BEReleaseReadinessTab pack={pack} />),
     // ── "More" menu ──
     more("be-holiday-pay", "Holiday pay", Palmtree,
       rows(TAB_GROUPS.holidayPay, "Annual holiday pay",

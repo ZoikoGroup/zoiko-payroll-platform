@@ -56,54 +56,29 @@ class Settings(BaseSettings):
     # become Brazilian and the Brazil organisation API refuses. Leave UNSET in
     # production until G1–G8 are signed; tests / local harnesses set it.
     BR_TENANT_ONBOARDING_ENABLED: bool = False
-    # South Africa dormancy switch (ZP-ZA-ENG-001 Phase 5). False = no
-    # organisation can become South African and the ZA APIs refuse. Leave
-    # UNSET in production until the ZA release gates are signed.
-    ZA_TENANT_ONBOARDING_ENABLED: bool = False
-    # Japan dormancy switch (ZP-JP-ENG-001 Phase 1, japan_dormancy). False = no
-    # organisation can become Japanese. Leave UNSET in production until the
-    # JP release gates G0-G8 are signed.
-    JP_TENANT_ONBOARDING_ENABLED: bool = False
+    # ZA, JP, NZ, PL, MY and BE have no dormancy switch or canary list (gate
+    # removal, owner decision 2026-11-25): like Spain they open on an Active
+    # pack. Old *_TENANT_ONBOARDING_ENABLED / *_CANARY_ORG_IDS environment
+    # variables are ignored (extra="ignore") and can be removed from deployments.
     # Japan My Number vault (ZP-JP-ENG-001 Phase 2). JSON object mapping key
     # version -> 32-byte key, e.g. {"1": "<32-byte key>"} from Secret Manager.
-    # Empty = encrypt/decrypt/fingerprint refuse, which is fine while Japan is
-    # dormant; add the key before Phase 5 writes any number.
+    # Empty = encrypt/decrypt/fingerprint refuse, so set it before any My Number is
+    # written.
     JP_MY_NUMBER_KEYRING: str = ""
     # Japan My Number duplicate-detection key (32 bytes, Secret Manager). Never
     # rotated: fingerprints must stay comparable across keyring rotations.
     JP_MY_NUMBER_FINGERPRINT_KEY: str = ""
-    # New Zealand dormancy switch (ZP-NZ-ENG-001 Phase 0, nz_dormancy). False =
-    # no organisation can become a New Zealand employer and the NZ APIs refuse.
-    # Leave UNSET in production until the NZ release gates G1-G7 are signed.
-    NZ_TENANT_ONBOARDING_ENABLED: bool = False
-    # Option 3 canary (ZP-NZ-ENG-001 Phase 9): comma-separated organisation ids that may use New Zealand
-    # while the flag above is off and New Zealand stays PLANNED for everyone else. Empty by default.
-    NZ_CANARY_ORG_IDS: str = ""
     # New Zealand IRD-number vault (ZP-NZ-ENG-001 Phase 2, nz_ird_number). JSON
     # object mapping key version -> 32-byte key from Secret Manager. Empty =
-    # encrypt/decrypt/fingerprint refuse, which is fine while NZ is dormant.
+    # encrypt/decrypt/fingerprint refuse: set it before any IRD number is written.
     NZ_IRD_KEYRING: str = ""
     # IRD-number duplicate-detection key (32 bytes, Secret Manager). Never
     # rotated: fingerprints must stay comparable across keyring rotations.
     NZ_IRD_FINGERPRINT_KEY: str = ""
-    # Poland dormancy switch (ZP-PL-ENG-001 Phase 0, poland_dormancy). False = no
-    # organisation can become Polish and the Poland APIs refuse. Leave UNSET in
-    # production until the PL release gates G1-G7 are signed.
-    PL_TENANT_ONBOARDING_ENABLED: bool = False
-    # Canary (ZP-PL-ENG-001 Phase 9, AC-PL-08): comma-separated organisation ids that may use Poland
-    # while the flag above is off and Poland stays PLANNED for everyone else. Empty by default.
-    PL_CANARY_ORG_IDS: str = ""
-    # Belgium dormancy switch (ZP-BE-ENG-001 Phase 1, belgium_dormancy). False = no
-    # organisation can become Belgian. Leave UNSET in production until the BE
-    # release gates G1-G7 are signed.
-    BE_TENANT_ONBOARDING_ENABLED: bool = False
-    # Belgium canary: comma-separated organisation ids that may use Belgium while
-    # the flag above is off and Belgium stays PLANNED for everyone else. Empty by default.
-    BE_CANARY_ORG_IDS: str = ""
     # Belgium identifier vault (ZP-BE-ENG-001 Block A1, be_identifiers; spec §15, D14):
     # NISS / BIS and the employer's ONSS number are encrypted at rest. JSON object
     # mapping key version -> 32-byte key from Secret Manager. Empty = encrypt /
-    # decrypt / fingerprint refuse, which is fine while Belgium is dormant. No
+    # decrypt / fingerprint refuse: set it before any NISS is written. No
     # fallback to PAYROLL_SECRET_KEY or any other country's keyring.
     BE_IDENTIFIER_KEYRING: str = ""
     # Belgium duplicate-detection key (32 bytes, Secret Manager). Never rotated:
@@ -118,19 +93,12 @@ class Settings(BaseSettings):
     # Poland identifier vault (ZP-PL-ENG-001 Phase 2, pl_identifiers; spec §13):
     # PESEL, employee NIP and the employer's ZUS contribution account (NRS) are
     # encrypted at rest. JSON object mapping key version -> 32-byte key from
-    # Secret Manager. Empty = encrypt/decrypt/fingerprint refuse, which is fine
-    # while Poland is dormant. No fallback to PAYROLL_SECRET_KEY.
+    # Secret Manager. Empty = encrypt/decrypt/fingerprint refuse: set it before
+    # any PESEL/NIP is written. No fallback to PAYROLL_SECRET_KEY.
     PL_IDENTIFIER_KEYRING: str = ""
     # Poland duplicate-detection key (32 bytes, Secret Manager). Never rotated:
     # fingerprints must stay comparable across keyring rotations.
     PL_IDENTIFIER_FINGERPRINT_KEY: str = ""
-    # Malaysia dormancy switch (ZP-MY-ENG-001 Phase 0, malaysia_dormancy). False =
-    # no organisation can become Malaysian and the Malaysia APIs refuse. Leave
-    # UNSET in production until the MY release gates G1-G7 are signed.
-    MY_TENANT_ONBOARDING_ENABLED: bool = False
-    # Canary: comma-separated organisation ids that may use Malaysia while the
-    # flag above is off (only once Malaysia is AVAILABLE). Empty by default.
-    MY_CANARY_ORG_IDS: str = ""
     # Malaysia identifier vault (ZP-MY-ENG-001 §15, my_identifiers - Phase 2):
     # NRIC / passport / TIN / EPF / SOCSO / work-pass numbers are encrypted at
     # rest. JSON object mapping key version -> 32-byte key from Secret Manager.

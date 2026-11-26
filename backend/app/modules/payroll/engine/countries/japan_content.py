@@ -50,21 +50,22 @@ Conventions (the engine must match them):
     examples into source code").
 
 Rounding (JP-002): there is NO global rounding helper. Every statutory amount
-names its own rounding row; the only rule the specification states is the
-standard bonus amount (truncate below 1,000 yen). Every other rounding row is
-PENDING_G1 and the engine BLOCKS on it.
+names its own rounding row. The specification states the standard bonus amount
+rule (truncate below 1,000 yen); the social- and employment-insurance employee
+share (HALF_DOWN, the 50-sen rule) and the year-end taxable income / annual tax
+rules were approved by the owner on 2026-11-25 (gate removal, Spain model). A
+rounding row still PENDING_G1 (withholding) BLOCKS.
 
 Scope (spec §1): resident ordinary employees of one domestic employer on a
 MONTHLY JPY payroll. Daily tables, non-residents, directors with complex
 treatment, equity, retirement income, seafarers and the other deferred cases
 have NO rows on purpose — the engine BLOCKS them.
 
-Status is Draft throughout; the registry row stays PLANNED. The production
-safety rule (spec, page 1) is stricter than South Africa's: no rate, table,
-premium, due date or reporting field may be activated because it appears in
-the specification. EVERY row below is therefore pending_g1=True — signed
-effective-dated content, archived primary evidence, executable fixtures and
-an independent Japanese payroll/tax review come first (spec §14).
+Gate removal (owner decision 2026-11-25, "Spain model"): there is no signing
+gate. The `pending_g1` tuple field is kept for data-shape stability only; the
+seeder ignores it and writes no "[PENDING G1]" label marker. The engine blocks
+only on a value that is empty or literally PENDING_G1 and on an empty
+authority table (JP_EMPTY_TABLES).
 """
 
 from datetime import date
@@ -188,10 +189,14 @@ EI_CLASSES = ("GENERAL", "AGRICULTURE_SAKE", "CONSTRUCTION")
 # tables for every other path. Still subject to G1 sign-off.
 WITHHOLDING_METHODS = ("COMPUTER_PRIMARY_TABLES_OTHERS", "TABLES_ONLY", "PENDING_G1")
 SPLIT_RULES = ("EQUAL", "PENDING_G1")
-ROUNDING_RULES = ("PENDING_G1", "DOWN_1000")
+ROUNDING_RULES = ("PENDING_G1", "DOWN_1000", "DOWN_100", "HALF_DOWN")
 # JP-006: how a committed payslip is corrected. The only supported policy
 # books the difference as a linked delta payslip; PENDING_G1 blocks.
 CORRECTION_POLICIES = ("DELTA_PAYSLIP", "PENDING_G1")
+# How overtime, holiday and night premiums combine (Labour Standards Act art.
+# 37): ADDITIVE adds each premium on its own minutes (OT 25% + night 25% = 50%,
+# holiday 35% + night 25% = 60%) — what labour.premium_floor computes.
+PREMIUM_COMBINATION_RULES = ("ADDITIVE", "PENDING_G1")
 # Filing export formats (e-Tax, eLTAX, Japan Pension Service, Hello Work).
 # EMPTY until G5 certifies a schema: every submission file is refused and
 # only JSON previews are produced (the ZA BRS-catalogue pattern).
@@ -289,7 +294,7 @@ JP_SCALAR_CONTENT = (
      None, None, None, "COMPUTER_PRIMARY_TABLES_OTHERS", "S1", True, None, None),
     # JP-006: retroactive pay / correction treatment needs a documented policy.
     ("jp_correction_policy", "Japanese retro-pay and correction policy (JP-006)",
-     None, None, None, PENDING, "S2", True, None, None),
+     None, None, None, "DELTA_PAYSLIP", "S2", True, None, None),
     # NTA computer-calculation deductions (S1): present, deliberately empty.
     ("jp_wht_cmp_basic_deduction", "NTA computer method — basic employment-income deduction (JPY)",
      None, None, None, None, "S1", True, None, None),
@@ -305,9 +310,9 @@ JP_SCALAR_CONTENT = (
     ("jp_wht_rounding", "Withholding tax rounding (per the certified NTA method)",
      None, None, None, PENDING, "S1", True, None, None),
     ("jp_si_employee_share_rounding", "Social-insurance employee share rounding",
-     None, None, None, PENDING, "S6", True, None, None),
+     None, None, None, "HALF_DOWN", "S6", True, None, None),
     ("jp_ei_employee_share_rounding", "Employment-insurance employee share rounding",
-     None, None, None, PENDING, "S13", True, None, None),
+     None, None, None, "HALF_DOWN", "S13", True, None, None),
     ("jp_sba_rounding", "Standard bonus amount rounding (truncate below the unit)",
      None, None, None, "DOWN_1000", "S8", True, None, None),
     ("jp_sba_rounding_unit", "Standard bonus amount rounding unit (JPY)",
@@ -332,9 +337,10 @@ JP_SCALAR_CONTENT = (
 
     ("jp_kyokai_care_total", "Kyokai Kenpo FY2026 care insurance total rate (ages 40–64)",
      None, None, "1.6200", None, "S12", True, None, None),
-    # The specification states no split for care insurance.
+    # The specification states no split for care insurance; EQUAL (50:50)
+    # approved by the owner 2026-11-25.
     ("jp_care_split_rule", "Care insurance employee / employer split",
-     None, None, None, PENDING, "S12", True, None, None),
+     None, None, None, "EQUAL", "S12", True, None, None),
     ("jp_care_min_age", "Care insurance covered population — from age", None, None, "40", None, "S12", True,
      None, None),
     ("jp_care_max_age", "Care insurance covered population — through age", None, None, "64", None, "S12", True,
@@ -391,9 +397,10 @@ JP_SCALAR_CONTENT = (
      None, None),
     # The specification states the individual premiums but not how they
     # combine when more than one applies, nor when a statutory holiday is
-    # substituted. Both are policy choices signed at G1/G4, never inferred.
+    # substituted. ADDITIVE approved by the owner 2026-11-25; the holiday
+    # substitution rule is an employer work-rules choice and stays PENDING_G1.
     ("jp_premium_combination_rule", "How overtime, holiday and night premiums combine",
-     None, None, None, PENDING, "S14", True, None, None),
+     None, None, None, "ADDITIVE", "S14", True, None, None),
     ("jp_holiday_substitute_rule", "When a statutory holiday is substituted for another day",
      None, None, None, PENDING, "S14", True, None, None),
 
@@ -420,18 +427,20 @@ JP_SCALAR_CONTENT = (
      None, None, None, None, "S3", True, None, None),
     ("jp_yea_earthquake_cap", "Year-end adjustment — earthquake insurance premium deduction cap (JPY)",
      None, None, None, None, "S3", True, None, None),
+    # Owner-approved 2026-11-25: surtax 2.1 (a PERCENT of the income tax, to
+    # 2037), taxable income DOWN_1000, annual tax DOWN_100, earliest month 12.
     ("jp_reconstruction_surtax_pct", "Special reconstruction income tax (% of the income tax)",
-     None, None, None, None, "S3", True, None, None),
+     None, None, "2.1", None, "S3", True, None, None),
     ("jp_yea_taxable_rounding", "Year-end adjustment — taxable income rounding",
-     None, None, None, PENDING, "S3", True, None, None),
+     None, None, None, "DOWN_1000", "S3", True, None, None),
     ("jp_yea_rounding", "Year-end adjustment — annual tax rounding",
-     None, None, None, PENDING, "S3", True, None, None),
+     None, None, None, "DOWN_100", "S3", True, None, None),
     ("jp_yea_earliest_month", "Year-end adjustment — earliest pay month it may be applied in (MM)",
-     None, None, None, PENDING, "S3", True, None, None),
-    # Not stated by the specification: empty, so a resident-tax remittance is
-    # recorded without a due date until it is signed.
+     None, None, None, "12", "S3", True, None, None),
+    # Not stated by the specification; owner-approved 2026-11-25: the 10th of
+    # the month after collection.
     ("jp_resident_tax_remittance_due_day", "Resident tax special collection remitted by day of the following month",
-     None, None, None, None, "S16", True, None, None),
+     None, None, "10", None, "S16", True, None, None),
 )
 
 # Rows that are deliberately empty: present so "not configured" is explicit,
@@ -440,8 +449,7 @@ JP_EMPTY_BY_DESIGN = frozenset({
     "jp_ei_agriculture_sake", "jp_ei_construction",
     "jp_wht_cmp_basic_deduction", "jp_wht_cmp_dependant_deduction",
     "jp_wht_bonus_special_multiple", "jp_smr_min_payment_base_days", "jp_smr_adhoc_grade_gap",
-    "jp_yea_income_limit", "jp_yea_earthquake_cap", "jp_reconstruction_surtax_pct",
-    "jp_resident_tax_remittance_due_day",
+    "jp_yea_income_limit", "jp_yea_earthquake_cap",
 })
 
 # ── Authority tables not reproduced by the specification ──────────────────

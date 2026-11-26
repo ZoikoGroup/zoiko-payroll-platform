@@ -302,7 +302,7 @@ def apply_case(db: Session, organization_id: int, case_id: int, run_id: int, act
     earliest = str((frozen_rates.get("jp_yea_earliest_month") or {}).get("text_value") or "").strip()
     if not earliest.isdigit() or not 1 <= int(earliest) <= 12:
         raise BadRequestException(f"Year-end adjustment blocked: jp_yea_earliest_month is "
-                                  f"{earliest or 'not configured'} (signed at G1).")
+                                  f"{earliest or 'not configured'} (value not yet provided).")
     if run.pay_date.month < int(earliest):
         raise BadRequestException(f"A year-end adjustment is applied no earlier than month {int(earliest):02d}.")
     case.state, case.applied_run_id = "APPLIED", run.id
