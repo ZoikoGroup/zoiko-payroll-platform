@@ -10,24 +10,20 @@ import {
 } from "recharts";
 import { Loader2 } from "lucide-react";
 import { getDashboardTrend } from "../../../service/payrollService";
-import { getCurrencySymbol } from "../../../utils/currency";
+import { formatCompactCurrency, formatCurrency } from "../../../utils/currency";
 
-// Lakh/Crore abbreviations are an India-specific numbering convention \u2014
-// kept exactly as-is for INR, but every other currency uses the more
-// universal K/M (thousand/million) abbreviation instead.
-// A null currencyCode (mixed-currency totals) formats the bare number.
-function fmt(n, currencyCode) {
-  const v = Number(n || 0);
-  const symbol = currencyCode ? getCurrencySymbol(currencyCode) : "";
-  if (currencyCode === "INR") {
-    if (v >= 10000000) return `${symbol} ${(v / 10000000).toFixed(1)}Cr`;
-    if (v >= 100000) return `${symbol} ${(v / 100000).toFixed(1)}L`;
-    if (v >= 1000) return `${symbol} ${(v / 1000).toFixed(0)}K`;
-    return `${symbol} ${v.toLocaleString("en-IN")}`;
-  }
-  if (v >= 1000000) return `${symbol}${(v / 1000000).toFixed(1)}M`;
-  if (v >= 1000) return `${symbol}${(v / 1000).toFixed(0)}K`;
-  return `${symbol}${v.toLocaleString()}`;
+// Tooltip: the exact amount, locale-grouped (₹1,00,000.00). Axis ticks: the
+// compact form — lakh/crore for INR, K/M elsewhere (formatCompactCurrency).
+const fmt = (n, currencyCode) => formatCurrency(Number(n || 0), currencyCode);
+
+// A "nice" axis ceiling (1/2/2.5/5 x 10^n) above the data, so ticks read
+// cleanly in any currency.
+function niceCeiling(max) {
+  if (max <= 0) return 1000;
+  const target = max * 1.1;
+  const pow = 10 ** Math.floor(Math.log10(target));
+  const step = [1, 2, 2.5, 5, 10].find((m) => m * pow >= target);
+  return step * pow;
 }
 
 function ChartTooltip({ active, payload, label, currencyCode }) {
@@ -97,14 +93,15 @@ function buildJanToCurrentData(rawData) {
   return result;
 }
 
-// `mixedCurrencies` (dashboard summary byCountry.length > 1): the trend
-// endpoint adds amounts across currencies, so no currency symbol is shown
-// and a note says the figures are combined.
-export default function CostTrendChart({ refreshTick, currencyCode: orgCurrencyCode, mixedCurrencies = false }) {
-  const currencyCode = mixedCurrencies ? null : orgCurrencyCode;
+// Always ONE currency: `country` asks the trend endpoint for that country's
+// payslips only (points come back with their `currency`); without it the org
+// is single-currency and `currencyCode` names it. `scopeNote` says which
+// country a multi-currency org is looking at.
+export default function CostTrendChart({ refreshTick, currencyCode: viewCurrencyCode, country = null, scopeNote = "" }) {
   const [series, setSeries] = useState("both");
   const [trendData, setTrendData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [serverCurrency, setServerCurrency] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,10 +110,11 @@ export default function CostTrendChart({ refreshTick, currencyCode: orgCurrencyC
         const now = new Date();
         const currentMonth = now.getMonth() + 1;
         const currentYear = now.getFullYear();
-        const res = await getDashboardTrend({ months: currentMonth, year: currentYear, month: currentMonth });
+        const res = await getDashboardTrend({ months: currentMonth, year: currentYear, month: currentMonth, country: country || undefined });
         if (!cancelled) {
           const rawData = Array.isArray(res) ? res : [];
           setTrendData(buildJanToCurrentData(rawData));
+          setServerCurrency(rawData.find((d) => d.currency)?.currency || null);
         }
       } catch {
         if (!cancelled) setTrendData([]);
@@ -125,8 +123,9 @@ export default function CostTrendChart({ refreshTick, currencyCode: orgCurrencyC
       }
     })();
     return () => { cancelled = true; };
-  }, [refreshTick]);
+  }, [refreshTick, country]);
 
+  const currencyCode = serverCurrency || viewCurrencyCode || null;
   const showGross = series === "gross" || series === "both";
   const showNet = series === "net" || series === "both";
 
@@ -139,14 +138,19 @@ export default function CostTrendChart({ refreshTick, currencyCode: orgCurrencyC
   // reach higher up the chart than Gross when toggled individually.
   const allValues = trendData.flatMap((d) => [Number(d.gross) || 0, Number(d.net) || 0]);
   const rawMax = Math.max(0, ...allValues);
-  const yAxisMax = rawMax === 0 ? 1000 : Math.ceil((rawMax * 1.1) / 50000) * 50000;
+  const yAxisMax = niceCeiling(rawMax);
 
   return (
     <div className="rounded-[18px] border border-border bg-surface p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="mb-6 flex items-center justify-between">
-        <h3 className="text-[15px] font-bold text-foreground">
-          Payroll Cost Trend
-        </h3>
+        <div>
+          <h3 className="text-[15px] font-bold text-foreground">
+            Payroll Cost Trend
+          </h3>
+          <p className="mt-0.5 text-[12px] font-medium text-foreground-muted" data-testid="trend-currency">
+            {currencyCode ? `Amounts in ${currencyCode}` : "Currency not set"}{scopeNote ? ` · ${scopeNote}` : ""}
+          </p>
+        </div>
         <PillToggle
           options={[
             { id: "gross", label: "Gross" },
@@ -158,11 +162,6 @@ export default function CostTrendChart({ refreshTick, currencyCode: orgCurrencyC
         />
       </div>
 
-      {mixedCurrencies && (
-        <p className="-mt-3 mb-4 text-[12px] font-medium text-foreground-muted">
-          Combines amounts paid in different currencies — use the by-country totals above for exact figures.
-        </p>
-      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-24">
@@ -172,7 +171,7 @@ export default function CostTrendChart({ refreshTick, currencyCode: orgCurrencyC
         <EmptyState message="No payroll trend data yet. Complete a payroll run to see trends." />
       ) : (
         <ResponsiveContainer width="100%" height={320}>
-          <AreaChart data={trendData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+          <AreaChart data={trendData} margin={{ top: 10, right: 20, left: 12, bottom: 0 }}>
             <defs>
               <linearGradient id="gradGross" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={GROSS_COLOR} stopOpacity={0.15} />
@@ -197,8 +196,12 @@ export default function CostTrendChart({ refreshTick, currencyCode: orgCurrencyC
               tick={{ fontSize: 11, fill: "var(--color-foreground-muted)", fontWeight: 500 }}
               axisLine={false}
               tickLine={false}
-              tickFormatter={(v) => `${currencyCode ? getCurrencySymbol(currencyCode) : ""}${(v / 1000).toFixed(0)}k`}
-              width={55}
+              tickFormatter={(v) => formatCompactCurrency(v, currencyCode)}
+              width={70}
+              label={currencyCode ? {
+                value: `Amount (${currencyCode})`, angle: -90, position: "insideLeft", offset: -4,
+                style: { fontSize: 11, fill: "var(--color-foreground-muted)", fontWeight: 600, textAnchor: "middle" },
+              } : undefined}
             />
             <Tooltip content={<ChartTooltip currencyCode={currencyCode} />} />
             {showGross && (

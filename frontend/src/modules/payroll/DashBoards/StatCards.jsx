@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Wallet, Users, Receipt, Building2, TrendingUp, Minus, TrendingDown } from "lucide-react";
 import { getDashboardSummary } from "../../../service/payrollService";
-import { formatCurrency } from "../../../utils/currency";
+import { formatCurrency, getCountryNameFromCode, getCurrencyForJurisdiction } from "../../../utils/currency";
 import CountryTotalsTable from "../../../components/payroll/CountryTotalsTable";
 
 // Per-country breakdown columns (summary.byCountry) for an org paying
@@ -12,15 +12,27 @@ const BY_COUNTRY_COLUMNS = [
   { key: "totalTaxes", label: "Taxes", money: true, accent: "text-error" },
   { key: "totalNet", label: "Net", money: true, accent: "text-primary" },
 ];
-const MULTI_CURRENCY_LABEL = "Multiple currencies";
 
-function fmtCurrency(n, currencyCode) {
-  if (n == null) return formatCurrency(0, currencyCode);
-  const v = Number(n);
-  return formatCurrency(v, currencyCode);
+const countryName = (code) => getCountryNameFromCode(code) || code;
+const deductionsOf = (row) => (Number(row?.totalTaxes) || 0) + (Number(row?.totalAttendanceDeduction) || 0);
+
+// One money value per country, each in its own currency — never summed.
+function PerCountryValue({ rows, pick }) {
+  return (
+    <span className="block space-y-1">
+      {rows.map((r) => (
+        <span key={r.country} className="flex items-baseline justify-between gap-3 text-[15px] font-bold tracking-normal">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">{countryName(r.country)}</span>
+          <span>{formatCurrency(pick(r), r.currency)}</span>
+        </span>
+      ))}
+    </span>
+  );
 }
 
-export default function StatCards({ filter, refreshTick, currencyCode, onMixedCurrenciesChange }) {
+// country: "ALL" or one payroll country code. primaryCurrency: the org's own
+// currency (server-resolved summary.currency wins once loaded).
+export default function StatCards({ filter, refreshTick, country = "ALL", primaryCurrency, onSummary }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -41,12 +53,15 @@ export default function StatCards({ filter, refreshTick, currencyCode, onMixedCu
     return () => { cancelled = true; };
   }, [filter?.year, filter?.month, refreshTick]);
 
-  // Tells the dashboard whether this summary spans several currencies, so the
-  // trend/breakdown charts (cross-currency sums) can say so.
-  const spansCurrencies = (data?.byCountry?.length || 0) > 1;
+  // Lets the dashboard know the primary currency + whether this period mixes
+  // currencies, so the trend chart picks a single-currency view.
   useEffect(() => {
-    onMixedCurrenciesChange?.(spansCurrencies);
-  }, [spansCurrencies, onMixedCurrenciesChange]);
+    if (data) onSummary?.({
+      currency: data.currency || null,
+      defaultCountry: data.defaultCountry || null,
+      mixedCurrencies: Boolean(data.mixedCurrencies) || (data.byCountry?.length || 0) > 1,
+    });
+  }, [data, onSummary]);
 
   if (loading) {
     return (
@@ -62,32 +77,45 @@ export default function StatCards({ filter, refreshTick, currencyCode, onMixedCu
     );
   }
 
-  // The top-level money totals add every country's currency together, so
-  // with more than one country they're replaced by the by-country table.
   const byCountry = data?.byCountry || [];
-  const isMultiCountry = byCountry.length > 1;
-  const changePct = isMultiCountry ? null : data?.totalPayrollCostChangePct;
-  const isUp = changePct != null && changePct > 0;
-  const isDown = changePct != null && changePct < 0;
-  const isStable = changePct == null || changePct === 0;
+  const orgCurrency = data?.currency || primaryCurrency || null;
+  const singleCountry = country !== "ALL";
+  // One country selected: that country's own totals in its own currency (a
+  // country with no payslips this period shows zeros in its currency).
+  const countryRow = singleCountry
+    ? byCountry.find((r) => r.country === country) || {
+      country, totalGross: 0, totalNet: 0, totalTaxes: 0, totalAttendanceDeduction: 0,
+      currency: country === data?.defaultCountry ? orgCurrency : getCurrencyForJurisdiction(country)?.code || null,
+    }
+    : null;
+  // "All" with several currencies: per-country values, never a blind sum.
+  const perCountry = !singleCountry && byCountry.length > 1;
+  const viewCurrency = singleCountry ? countryRow.currency : (byCountry[0]?.currency || orgCurrency);
+  const money = (pick, combined) => {
+    if (data?.unavailable) return "—";
+    if (perCountry) return <PerCountryValue rows={byCountry} pick={pick} />;
+    return formatCurrency(singleCountry ? pick(countryRow) : combined, viewCurrency);
+  };
 
-  const totalDeductions = (Number(data?.totalTaxes) || 0) + (Number(data?.totalAttendanceDeduction) || 0);
-  const attendanceDed = Number(data?.totalAttendanceDeduction) || 0;
+  // Month-on-month change is only meaningful for one currency.
+  const changePct = perCountry || singleCountry ? null : data?.totalPayrollCostChangePct;
+  const isUp = changePct != null && changePct > 0;
+  const isStable = changePct == null || changePct === 0;
+  const attendanceDed = singleCountry ? Number(countryRow.totalAttendanceDeduction) || 0 : Number(data?.totalAttendanceDeduction) || 0;
+  const periodWord = isAllTime ? "All Time" : "This Month";
+  const scopeNote = singleCountry
+    ? `${countryName(country)} · ${viewCurrency || "currency not set"}`
+    : perCountry ? "Each country in its own currency" : viewCurrency ? `In ${viewCurrency}` : "";
 
   const cards = [
     {
       key: "total",
       icon: Wallet,
       label: isAllTime ? "Total Payroll (All Time)" : "Total Payroll (Net)",
-      value: isMultiCountry ? MULTI_CURRENCY_LABEL : fmtCurrency(data?.totalNet ?? data?.totalPayrollCost, currencyCode),
-      indicator: isMultiCountry
-        ? "See totals by country below"
-        : changePct != null ? `${isUp ? "+" : ""}${changePct}% vs last month` : "No prior data",
-      indicatorColor: isStable
-        ? "text-foreground-muted"
-        : isUp
-          ? "text-primary"
-          : "text-error",
+      value: money((r) => r.totalNet, data?.totalNet ?? data?.totalPayrollCost),
+      indicator: data?.unavailable ? "Figures could not be loaded" : changePct != null
+        ? `${isUp ? "+" : ""}${changePct}% vs last month` : scopeNote || "No prior data",
+      indicatorColor: isStable ? "text-foreground-muted" : isUp ? "text-primary" : "text-error",
       iconBg: "bg-primary/10",
       iconColor: "text-primary",
       trendIcon: isStable ? Minus : isUp ? TrendingUp : TrendingDown,
@@ -97,7 +125,7 @@ export default function StatCards({ filter, refreshTick, currencyCode, onMixedCu
       icon: Users,
       label: "Active Employees",
       value: String(data?.activeCount ?? 0),
-      indicator: `${data?.headcount ?? 0} total \u00b7 ${data?.onLeaveCount ?? 0} on leave`,
+      indicator: `${data?.headcount ?? 0} total · ${data?.onLeaveCount ?? 0} on leave`,
       indicatorColor: "text-foreground-muted",
       iconBg: "bg-info/10",
       iconColor: "text-info",
@@ -106,12 +134,12 @@ export default function StatCards({ filter, refreshTick, currencyCode, onMixedCu
     {
       key: "deduction",
       icon: Receipt,
-      label: isAllTime ? "Deduction (All Time)" : "Deduction (This Month)",
-      value: isMultiCountry ? MULTI_CURRENCY_LABEL : fmtCurrency(totalDeductions, currencyCode),
-      indicator: attendanceDed > 0 && !isMultiCountry
-        ? `${fmtCurrency(attendanceDed, currencyCode)} attendance`
+      label: `Deduction (${periodWord})`,
+      value: money(deductionsOf, (Number(data?.totalTaxes) || 0) + (Number(data?.totalAttendanceDeduction) || 0)),
+      indicator: attendanceDed > 0 && !perCountry
+        ? `${formatCurrency(attendanceDed, viewCurrency)} attendance`
         : `${data?.pendingApprovals ?? 0} runs pending approval`,
-      indicatorColor: attendanceDed > 0 && !isMultiCountry ? "text-error" : "text-warning",
+      indicatorColor: attendanceDed > 0 && !perCountry ? "text-error" : "text-warning",
       iconBg: "bg-error/10",
       iconColor: "text-error",
       trendIcon: Minus,
@@ -119,9 +147,9 @@ export default function StatCards({ filter, refreshTick, currencyCode, onMixedCu
     {
       key: "gross",
       icon: Building2,
-      label: isAllTime ? "Gross Pay (All Time)" : "Gross Pay (This Month)",
-      value: isMultiCountry ? MULTI_CURRENCY_LABEL : fmtCurrency(data?.totalGross, currencyCode),
-      indicator: isMultiCountry ? "See totals by country below" : "Before deductions",
+      label: `Gross Pay (${periodWord})`,
+      value: money((r) => r.totalGross, data?.totalGross),
+      indicator: perCountry ? "Not added together across currencies" : "Before deductions",
       indicatorColor: "text-foreground-muted",
       iconBg: "bg-category-teal/10",
       iconColor: "text-category-teal",
@@ -130,7 +158,7 @@ export default function StatCards({ filter, refreshTick, currencyCode, onMixedCu
   ];
 
   const cardGrid = (
-    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4" data-testid="dashboard-stat-cards">
       {cards.map((card) => {
         const Icon = card.icon;
         const TrendIcon = card.trendIcon;
@@ -147,12 +175,12 @@ export default function StatCards({ filter, refreshTick, currencyCode, onMixedCu
                 <Icon size={18} className={card.iconColor} strokeWidth={2} />
               </div>
             </div>
-            <p className="mt-4 text-[26px] font-extrabold tracking-tight text-foreground">
+            <div className="mt-4 text-[26px] font-extrabold tracking-tight text-foreground">
               {card.value}
-            </p>
+            </div>
             <p className={`mt-2 flex items-center gap-1.5 text-[12px] font-semibold ${card.indicatorColor}`}>
               <TrendIcon size={13} strokeWidth={2.5} />
-              {card.indicator.replace(/^[+\u2191\u2014]\s*/, "")}
+              {card.indicator.replace(/^[+↑—]\s*/, "")}
             </p>
           </div>
         );
@@ -160,7 +188,7 @@ export default function StatCards({ filter, refreshTick, currencyCode, onMixedCu
     </div>
   );
 
-  if (!isMultiCountry) return cardGrid;
+  if (!perCountry) return cardGrid;
 
   return (
     <div className="space-y-5">
@@ -170,7 +198,8 @@ export default function StatCards({ filter, refreshTick, currencyCode, onMixedCu
           {isAllTime ? "Payroll by Country (All Time)" : "Payroll by Country (This Month)"}
         </p>
         <p className="mt-1 mb-3 text-[12px] text-foreground-muted">
-          Employees are paid in {byCountry.length} countries — each total is in that country&apos;s own currency and they are not added together.
+          Employees are paid in {byCountry.length} countries — each total is in that country&apos;s own currency and they
+          are not added together (no combined total is shown: Zoiko Payroll has no exchange-rate source to convert them).
         </p>
         <CountryTotalsTable rows={byCountry} columns={BY_COUNTRY_COLUMNS} />
       </div>

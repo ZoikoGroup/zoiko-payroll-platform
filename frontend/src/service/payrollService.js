@@ -14,7 +14,7 @@ export const getCompanyProfile = async () => {
     const currencyInfo = getCurrencyForCountry(jurisdiction);
     return {
       ...company,
-      currency: currencyInfo?.code || "USD",
+      currency: currencyInfo?.code || null,  // unknown country: no currency, never a guessed USD
     };
   } catch {
     return null;
@@ -241,15 +241,20 @@ export const getDashboardSummary = async ({ year, month } = {}) => {
     if (month) params.month = month;
     return await api.get("/api/payroll/dashboard/summary", { params });
   } catch {
-    return { totalPayrollCost: 0, headcount: 0, activeCount: 0, pendingApprovals: 0, totalGross: 0, totalTaxes: 0, totalNet: 0 };
+    // `unavailable` lets the cards say the figures could not be loaded instead
+    // of presenting zeros as real totals.
+    return { totalPayrollCost: 0, headcount: 0, activeCount: 0, pendingApprovals: 0, totalGross: 0, totalTaxes: 0, totalNet: 0, unavailable: true };
   }
 };
 
-export const getDashboardTrend = async ({ months = 6, year, month } = {}) => {
+// country (ISO code): that country's payslips only, every point in its
+// currency (points then carry `currency`). Omitted: whole runs, all currencies.
+export const getDashboardTrend = async ({ months = 6, year, month, country } = {}) => {
   try {
     const params = { months };
     if (year) params.year = year;
     if (month) params.month = month;
+    if (country) params.country = country;
     const res = await api.get("/api/payroll/dashboard/trend", { params });
     return Array.isArray(res) ? res : [];
   } catch {

@@ -348,6 +348,20 @@ def test_09_dashboard_breaks_the_month_down_per_country(client, headers):
     assert {c: row["currency"] for c, row in by_country.items()} == {"IN": "INR", "US": "USD", "UK": "GBP"}
     for code, item in _STATE["items"].items():
         assert Decimal(str(by_country[code]["totalNet"])) == item.net_pay
+        assert Decimal(str(by_country[code]["totalDeductions"])) == Decimal(str(item.total_deductions or 0))
+    # The dashboard's own currency is the primary country's — never a default USD —
+    # and the top-level totals are flagged as mixing currencies.
+    body = r.json()
+    assert (body["defaultCountry"], body["currency"], body["mixedCurrencies"]) == ("IN", "INR", True)
+
+
+def test_09b_dashboard_trend_for_one_country_is_in_that_currency(client, headers):
+    r = client.get("/api/payroll/dashboard/trend", headers=headers,
+                   params={"year": 2026, "month": 1, "months": 1, "country": "UK"})
+    assert r.status_code == 200, r.text
+    (point,) = r.json()
+    assert (point["country"], point["currency"]) == ("UK", "GBP")
+    assert Decimal(str(point["net"])) == _STATE["items"]["UK"].net_pay
 
 
 def test_10_statutory_reports_cover_every_country_and_only_that_countrys_employees(client, headers):

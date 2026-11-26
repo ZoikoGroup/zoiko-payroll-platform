@@ -4938,10 +4938,12 @@ def dashboard_trend(
     months: int = Query(6, ge=1, le=24),
     year: Optional[int] = Query(None, ge=2020, le=2099, description="Center trend around this year"),
     month: Optional[int] = Query(None, ge=1, le=12, description="Center trend around this month"),
+    country: Optional[str] = Query(None, description="One payroll country (ISO code): its payslips only, in its currency"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return service.get_dashboard_trend(db, current_user.organization_id, months=months, year=year, month=month)
+    return service.get_dashboard_trend(db, current_user.organization_id, months=months, year=year, month=month,
+                                       country=country)
 
 
 @payroll_router.get(

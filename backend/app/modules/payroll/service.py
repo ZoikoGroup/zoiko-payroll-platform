@@ -39971,6 +39971,8 @@ def get_dashboard_summary(db: Session, organization_id: int = None, year: int = 
         change_pct = None
         window = (all_start, all_end)
 
+    by_country = _dashboard_country_breakdown(db, organization_id, *window)
+    default_country = _resolve_org_country(db, organization_id) if organization_id else None
     return {
         "totalPayrollCost": total_net,
         "totalPayrollCostChangePct": change_pct,
@@ -39985,7 +39987,15 @@ def get_dashboard_summary(db: Session, organization_id: int = None, year: int = 
         "pendingApprovals": pending_approvals,
         # Multi-country orgs: the totals above add every currency together;
         # this is the same period per country, each in its own currency.
-        "byCountry": _dashboard_country_breakdown(db, organization_id, *window),
+        "byCountry": by_country,
+        # The org's primary (default-country) currency, Organization.currency
+        # override included — what a single-country dashboard is shown in.
+        # Never a hardcoded USD.
+        "defaultCountry": default_country,
+        "currency": _country_currency_code(db, organization_id, default_country, default_country) if default_country else None,
+        # True when the period's payslips span more than one currency: the
+        # top-level totals above are then NOT a meaningful single figure.
+        "mixedCurrencies": len({c["currency"] for c in by_country}) > 1,
     }
 
 
@@ -40003,6 +40013,8 @@ def _dashboard_country_breakdown(db: Session, organization_id: Optional[int], st
             sa_func.coalesce(sa_func.sum(PayslipItem.gross_pay), 0),
             sa_func.coalesce(sa_func.sum(PayslipItem.net_pay), 0),
             sa_func.coalesce(sa_func.sum(PayslipItem.tds), 0),
+            sa_func.coalesce(sa_func.sum(PayslipItem.attendance_deduction), 0),
+            sa_func.coalesce(sa_func.sum(PayslipItem.total_deductions), 0),
         )
         .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
         .filter(
@@ -40014,19 +40026,21 @@ def _dashboard_country_breakdown(db: Session, organization_id: Optional[int], st
         .all()
     )
     merged: Dict[str, dict] = {}
-    for code, count, gross, net, taxes in rows:
+    money_keys = ("totalGross", "totalNet", "totalTaxes", "totalAttendanceDeduction", "totalDeductions")
+    for code, count, gross, net, taxes, attendance, deductions in rows:
         country = _normalize_country(code or default_country or "")
-        entry = merged.setdefault(country, {"country": country, "payslips": 0, "totalGross": Decimal("0"),
-                                            "totalNet": Decimal("0"), "totalTaxes": Decimal("0")})
+        entry = merged.setdefault(country, {"country": country, "payslips": 0, **{k: Decimal("0") for k in money_keys}})
         entry["payslips"] += int(count)
         entry["totalGross"] += Decimal(str(gross))
         entry["totalNet"] += Decimal(str(net))
         entry["totalTaxes"] += Decimal(str(taxes))
+        entry["totalAttendanceDeduction"] += Decimal(str(attendance))
+        entry["totalDeductions"] += Decimal(str(deductions))
     result = []
     for country in _sort_org_countries(db, organization_id, merged):
         entry = merged[country]
         entry["currency"] = _country_currency_code(db, organization_id, country, default_country)
-        for key in ("totalGross", "totalNet", "totalTaxes"):
+        for key in money_keys:
             entry[key] = _round2(entry[key])
         result.append(entry)
     return result
@@ -40064,7 +40078,12 @@ def _compute_attendance_deductions(db: Session, organization_id: int = None, yea
     return _round2(Decimal(str(total)))
 
 
-def get_dashboard_trend(db: Session, organization_id: int = None, months: int = 6, year: int = None, month: int = None) -> List[dict]:
+def get_dashboard_trend(db: Session, organization_id: int = None, months: int = 6, year: int = None, month: int = None,
+                        country: Optional[str] = None) -> List[dict]:
+    """Monthly gross/net. Without `country` it sums whole runs (every
+    currency together — only meaningful for a single-currency org); with
+    `country` it sums that country's payslips only, so every point is in one
+    currency, returned on each point as `currency`."""
     if year and month:
         start_m = month - months + 1
         start_y = year
@@ -40090,13 +40109,35 @@ def get_dashboard_trend(db: Session, organization_id: int = None, months: int = 
             window_start = date(now.year, now.month, 1)
         window_end = date(now.year, now.month + 1, 1) if now.month < 12 else date(now.year + 1, 1, 1)
 
-    query = db.query(
-        sa_func.extract("year", PayrollRun.period_start).label("y"),
-        sa_func.extract("month", PayrollRun.period_start).label("m"),
-        sa_func.coalesce(sa_func.sum(PayrollRun.total_gross), 0).label("gross"),
-        sa_func.coalesce(sa_func.sum(PayrollRun.total_net), 0).label("net"),
-    )
-    query = _apply_org_filter(query, PayrollRun, organization_id)
+    currency = None
+    if country and organization_id is not None:
+        country = _normalize_country(country)
+        default_country = _resolve_org_country(db, organization_id)
+        currency = _country_currency_code(db, organization_id, country, default_country)
+        country_filter = PayslipItem.country_code == country
+        if country == default_country:
+            # Payslips from before country_code was recorded belong to the default country.
+            country_filter = or_(country_filter, PayslipItem.country_code.is_(None))
+        query = (
+            db.query(
+                sa_func.extract("year", PayrollRun.period_start).label("y"),
+                sa_func.extract("month", PayrollRun.period_start).label("m"),
+                sa_func.coalesce(sa_func.sum(PayslipItem.gross_pay), 0).label("gross"),
+                sa_func.coalesce(sa_func.sum(PayslipItem.net_pay), 0).label("net"),
+            )
+            .select_from(PayslipItem)
+            .join(PayrollRun, PayslipItem.payroll_run_id == PayrollRun.id)
+            .filter(PayrollRun.organization_id == organization_id, country_filter,
+                    PayslipItem.status != PayslipStatus.FAILED)
+        )
+    else:
+        query = db.query(
+            sa_func.extract("year", PayrollRun.period_start).label("y"),
+            sa_func.extract("month", PayrollRun.period_start).label("m"),
+            sa_func.coalesce(sa_func.sum(PayrollRun.total_gross), 0).label("gross"),
+            sa_func.coalesce(sa_func.sum(PayrollRun.total_net), 0).label("net"),
+        )
+        query = _apply_org_filter(query, PayrollRun, organization_id)
     query = query.filter(PayrollRun.period_start >= window_start, PayrollRun.period_start < window_end)
     rows = query.group_by(
         sa_func.extract("year", PayrollRun.period_start),
@@ -40115,6 +40156,7 @@ def get_dashboard_trend(db: Session, organization_id: int = None, months: int = 
             "month": f"{month_name[m][:3]} {y}",
             "gross": buckets[(y, m)]["gross"],
             "net": buckets[(y, m)]["net"],
+            **({"currency": currency, "country": country} if currency else {}),
         }
         for (y, m) in ordered_keys
     ]

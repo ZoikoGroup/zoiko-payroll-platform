@@ -442,10 +442,14 @@ function WorkforceRing({ total, active, hrAdmins }) {
 const EMPLOYEE_STATUS_DOT = { teal: "#178A50", amber: "#D9791E", off: "#9D96AB" };
 const ACTIVITY_DOT = { SUCCESS: "#178A50", PENDING: "#D9791E", INFO: "#087CC1" };
 
+// Whole units, grouped the currency's own way (₹1,00,000 / A$100,000) —
+// never a "$" for an org whose currency is unknown.
 function fmtCurrency(amount, currencyCode) {
   if (amount == null) return "—";
-  const symbol = getCurrencyInfo(currencyCode)?.symbol || "$";
-  return `${symbol}${Math.round(Number(amount)).toLocaleString("en-US")}`;
+  const info = getCurrencyInfo(currencyCode);
+  const symbol = info?.symbol || currencyCode || "";
+  const grouped = Math.round(Number(amount)).toLocaleString(`${info?.locale || "en-US"}-u-nu-latn`);
+  return `${symbol}${/[A-Za-z]$/.test(symbol) ? " " : ""}${grouped}`;
 }
 
 function timeAgo(isoString) {
