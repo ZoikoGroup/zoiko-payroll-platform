@@ -177,7 +177,7 @@ def test_holidays_act_baseline():
 def test_scope_and_policy():
     assert _scalar("nz_supported_pay_frequencies")[5] == ",".join(content.PAY_FREQUENCIES)
     assert _scalar("nz_correction_policy")[5] == "COMPENSATING_DELTA"
-    assert _scalar("nz_deduction_precedence")[5] == "PAYE,ACC_LEVY,STUDENT_LOAN,KS_EMPLOYEE,CHILD_SUPPORT"
+    assert _scalar("nz_deduction_precedence")[5] == "STATUTORY_ORDER"      # = the statutory order (fits String(50))
     assert content.NZ_EXPORT_SCHEMAS == {}
 
 
@@ -188,7 +188,7 @@ def test_owner_approved_values_use_the_engine_vocabulary():
     from app.modules.payroll.nz_lifecycle import CORRECTION_POLICY
 
     assert _scalar("nz_correction_policy")[5] == CORRECTION_POLICY
-    order = _scalar("nz_deduction_precedence")[5].split(",")
+    order = prec.expand(_scalar("nz_deduction_precedence")[5].split(","))
     assert sorted(order) == sorted(prec.STATUTORY) and order[-1] == "CHILD_SUPPORT"
     assert {k: _scalar(k)[4] for k in ("nz_ks_employer_max_age", "nz_hol_awe_lookback_months",
                                        "nz_hol_awe_divisor_weeks", "nz_hol_owp_fallback_weeks",
@@ -365,3 +365,15 @@ def test_activation_refusal_ignores_other_countries(db):
 
     assert svc.nz_pack_activation_refusal(db, SimpleNamespace(jurisdiction_country="JP", id=1, pack_id="x")) is None
     assert svc.nz_pack_activation_refusal(db, None) is None
+
+
+# ── P8 fix (2026-11-26): the deduction order is a named order that fits String(50) ──
+def test_deduction_precedence_is_a_named_order_that_expands_to_the_statutory_order():
+    from app.modules.payroll.engine.countries import new_zealand_content as content
+    from app.modules.payroll.engine.jurisdictions.new_zealand import deduction_precedence as prec
+
+    row = next(r for r in content.NZ_SCALAR_CONTENT if r[0] == "nz_deduction_precedence")
+    assert row[5] == "STATUTORY_ORDER" and len(row[5]) <= 50
+    assert prec.expand(["STATUTORY_ORDER"]) == list(prec.STATUTORY)
+    assert prec.expand(list(prec.STATUTORY)) == list(prec.STATUTORY)          # the explicit list still works
+    assert prec.expand(["SOMETHING_ELSE"]) == ["SOMETHING_ELSE"]              # unknown names are not expanded

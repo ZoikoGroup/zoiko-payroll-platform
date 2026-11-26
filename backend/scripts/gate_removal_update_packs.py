@@ -159,7 +159,7 @@ def plan_and_apply(db, reference: dict, countries, *, include_approved: bool, ap
                              jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference="gate removal P5",
                              old_value={"labelsWithMarker": entry["labelsStripped"]},
                              new_value={"labelsStripped": entry["labelsStripped"], "filled": entry["filled"]},
-                             reason=REASON)
+                             reason=REASON, auto_commit=False)          # one transaction: all or nothing
         report["packs"].append(entry)
     return report
 
