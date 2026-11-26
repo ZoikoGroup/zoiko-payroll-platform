@@ -4,9 +4,12 @@ scripts/seed_belgium_canonical_packs.py
 Belgium (ZP-BE-ENG-001 Phase 3A): writes the Draft BE-PAYROLL-2026 canonical
 pack from engine/countries/belgium_content.py:
 
-  * every catalogue key as one "[PENDING G1]" row with EVERY value field empty
-    (a spec figure appears only in the label as "spec-proposed: ...");
-  * every (obligation, component) earning-classification row as REVIEW, pending;
+  * every catalogue key as one row labelled "<label> (spec: ...)" (no
+    "[PENDING G1]" marker since the gate removal of 2026-11-25); the
+    owner-approved spec figures (belgium_content.VALUES) are written as the
+    row's value, every other key stays EMPTY and blocks in the engine until a
+    value is entered;
+  * every (obligation, component) earning-classification row as REVIEW;
   * the evidence register S1-S24 as payroll_source_artifacts (title + URL, NO
     checksum: not archived);
   * the PLANNED jurisdiction_service_registry row (create-only).
@@ -37,7 +40,7 @@ def seed_belgium(db) -> dict:
         jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference=belgium_service.SPEC,
         old_value=None, new_value={"status": pack.status, "availability": availability},
         reason=f"Canonical Belgium pack {pack.pack_id} v{pack.version} seeded from {belgium_service.SPEC} "
-               "(scripts/seed_belgium_canonical_packs.py) — Draft, every row [PENDING G1].",
+               "(scripts/seed_belgium_canonical_packs.py) — Draft; approved spec values seeded, other rows empty.",
         auto_commit=False,
     )
     db.flush()

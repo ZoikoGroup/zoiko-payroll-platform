@@ -50,7 +50,7 @@ def build(pay: dict, classes: dict, pack: PlPack) -> dict:
                            "the component is not classified for this obligation")
             if treatment == "REVIEW" and amount != ZERO:
                 pack.block(E.keyed(E.EARNING_CLASS_REVIEW, f"{obligation}:{component}"),
-                           "the treatment is not signed; a non-zero amount cannot be calculated")
+                           "the treatment is not yet provided; a non-zero amount cannot be calculated")
             if treatment == "INCLUDED":
                 base += amount
             lines.append({"component": component, "amount": money(amount), "treatment": treatment})

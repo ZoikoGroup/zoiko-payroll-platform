@@ -5,9 +5,9 @@ Organisation API for New Zealand statutory setup (ZP-NZ-ENG-001 Phase 4),
 mounted inside payroll_router as /api/payroll/new-zealand. Same house rules as
 the Japan organisation router:
 
-  * Dormancy: the router-level guard refuses EVERY route with 404 while
-    NZ_TENANT_ONBOARDING_ENABLED is off, or when the caller's payroll
-    jurisdiction is not New Zealand. New Zealand is dormant, not forbidden.
+  * Scope: the router-level guard refuses EVERY route with 404 when the
+    caller's payroll jurisdiction is not New Zealand. There is no onboarding
+    switch (gate removal, owner decision 2026-11-25).
   * The organisation is always the caller's own; no route takes an org id,
     and every child id is checked against that organisation in the service.
   * Reads need a payroll operator; writes need an org admin and a reason
@@ -31,14 +31,14 @@ from app.modules.payroll import new_zealand_service as nz
 
 
 def require_nz_tenant(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
-    from app.modules.payroll import nz_dormancy, service
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.payroll import service
 
     org_id = getattr(current_user, "organization_id", None)
-    if not nz_dormancy.onboarding_enabled(org_id):
-        raise NotFoundException(nz_dormancy.DORMANT_MESSAGE)
     if org_id is None:
         return
-    if not nz_dormancy.is_new_zealand(service._resolve_org_country(db, org_id)):
+    country = service._resolve_org_country(db, org_id)
+    if not country or get_jurisdiction_code(country) != "NZ":
         raise NotFoundException("The New Zealand API is only available to organisations whose payroll "
                                 "jurisdiction is New Zealand.")
 
@@ -98,13 +98,6 @@ def _run(db: Session, organization_id: int, run_id: int):
 @router.get("/summary", summary="New Zealand statutory setup summary (read-only)")
 def nz_summary(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
     return nz.statutory_summary(db)
-
-
-@router.get("/readiness", summary="New Zealand release gates G1-G7 with checks and evidence (read-only)")
-def nz_readiness(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
-    from app.modules.payroll import nz_readiness as readiness
-
-    return readiness.nz_readiness(db)
 
 
 # ── employer profiles ───────────────────────────────────────────────────────

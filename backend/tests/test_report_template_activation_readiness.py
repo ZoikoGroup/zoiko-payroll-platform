@@ -83,12 +83,8 @@ def _scenarios(db, a, b, c):
     out.append(("four-eyes R1 (self-approval)",
                 _force(db, _template(db, a, "DE", "RD-R1"), status="Published", approved_by_id=a.id), c,
                 "four_eyes", None))
-    for country, gate in (("BE", "G3"), ("MY", "G3"), ("NZ", "G3"), ("PL", "G4"), ("JP", None)):
-        out.append((f"{country} country gate", _published(db, _template(db, a, country, f"RD-{country}"), b), c,
-                    "jurisdiction_gate", gate))
+    # BE / MY / NZ / PL / JP / ZA have no country gate since the gate removal 2026-11-25.
     out.append(("BR not built", _published(db, _template(db, a, "BR", "RD-BR"), b), c, "not_built", None))
-    out.append(("ZA BRS catalogue", _published(db, _template(db, a, "ZA", "RD-ZA", "ZA_IRP5_PREVIEW"), b), c,
-                "jurisdiction_gate", None))
     out.append(("HK no source evidence", _published(db, _template(db, a, "HK", "RD-HK"), b), c,
                 "jurisdiction_gate", None))
     out.append(("MX gates (service-view report)", _published(db, _template(db, a, "MX", "RD-MX-IDSE", "MX_IDSE"), b),
@@ -111,7 +107,7 @@ def test_readiness_matches_every_current_refusal(db, admins):
     service.set_report_template_status(db, first.id, "Active", actor_id=c.id)
     scenarios.append(("conflict (slot taken)", _published(db, _template(db, a, "DE", "RD-SLOT-2", "RD_SLOT"), b), c,
                       "conflict", None))
-    assert len(scenarios) >= 16
+    assert len(scenarios) >= 10
     for label, t, actor, kind, gate in scenarios:
         ready = _readiness(db, t, actor)
         assert set(ready) == READINESS_KEYS, label
@@ -133,11 +129,11 @@ def test_readiness_allows_what_the_status_change_allows(db, admins):
 
 def test_country_gate_is_reported_whatever_the_status(db, admins):
     a, _, c = admins
-    ready = _readiness(db, _template(db, a, "BE", "RD-BE-DRAFT"), c)          # Draft: transition comes first ...
+    ready = _readiness(db, _template(db, a, "HK", "RD-HK-DRAFT"), c)          # Draft: transition comes first ...
     assert ready["blockerKind"] == "transition" and ready["nextStatuses"] == ["Review", "Approved"]
-    gate = ready["countryGate"]                                                # ... but the badge knows G3 already
-    assert (gate["allowed"], gate["blockerKind"], gate["gate"]) == (False, "jurisdiction_gate", "G3")
-    assert "gate G3" in gate["message"]
+    gate = ready["countryGate"]                                                # ... but the badge knows the gate
+    assert (gate["allowed"], gate["blockerKind"], gate["gate"]) == (False, "jurisdiction_gate", None)
+    assert "source evidence" in gate["message"]
 
 
 def test_readiness_depends_on_who_asks(db, admins):
@@ -188,7 +184,7 @@ def test_the_real_refusal_still_writes_its_audit_row(db, admins):
     from app.modules.payroll.models import TaxConfigurationAudit
 
     a, b, c = admins
-    t = _published(db, _template(db, a, "BE", "RD-AUDIT"), b)
+    t = _published(db, _template(db, a, "HK", "RD-AUDIT"), b)
     q = db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "report_template",
                                                TaxConfigurationAudit.entity_id == t.id,
                                                TaxConfigurationAudit.action == "refused")
@@ -224,14 +220,14 @@ def test_detail_and_list_responses(db, admins):
     from app.modules.super_admin import router
 
     a, b, c = admins
-    be = _published(db, _template(db, a, "BE", "RD-WIRE-BE"), b)
+    be = _published(db, _template(db, a, "HK", "RD-WIRE-HK"), b)
     me = SimpleNamespace(id=c.id)
     detail = ReportTemplateResponse.model_validate(router.get_report_template_detail(be.id, current_user=me, db=db))
     out = detail.model_dump(by_alias=True)["activationReadiness"]
-    assert set(out) == READINESS_KEYS and out["gate"] == "G3" and out["canActivate"] is False
-    rows = router.list_report_templates(country="BE", state=None, reportingYear=None, reportType=None, status=None,
+    assert set(out) == READINESS_KEYS and out["gate"] is None and out["canActivate"] is False
+    rows = router.list_report_templates(country="HK", state=None, reportingYear=None, reportType=None, status=None,
                                         search=None, includeStates=True, current_user=me, db=db)
     listed = [ReportTemplateResponse.model_validate(r).model_dump(by_alias=True) for r in rows]
     mine = next(r for r in listed if r["id"] == be.id)["activationReadiness"]
     assert mine["partial"] is True and set(mine) == {"countryGate", "partial"}
-    assert (mine["countryGate"]["blockerKind"], mine["countryGate"]["gate"]) == ("jurisdiction_gate", "G3")
+    assert (mine["countryGate"]["blockerKind"], mine["countryGate"]["gate"]) == ("jurisdiction_gate", None)

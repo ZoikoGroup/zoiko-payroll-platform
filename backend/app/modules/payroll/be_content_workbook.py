@@ -152,9 +152,9 @@ def _pack_rows(db: Session, pack):
 
 
 def _state(label: Optional[str], empty: bool = False) -> str:
-    if _content().PENDING_MARK in (label or ""):
-        return "EMPTY" if empty else "PENDING"
-    return "SIGNED"
+    """EMPTY or SET. There is no signing step since the gate removal (owner
+    decision 2026-11-25): an old "[PENDING G1]" label marker means nothing."""
+    return "EMPTY" if empty else "SET"
 
 
 def _schema_keys() -> dict:
@@ -853,41 +853,3 @@ def _row_editors(db: Session, kind: str, row_id: int) -> set:
                                                       A.entity_id == row_id) if a is not None}
 
 
-def be_bulk_sign_rows(db: Session, pack_row_id: int, data: dict, actor_id) -> dict:
-    """Sign the selected rows ([{kind: rate|slab, id}]) in one action. Refused
-    as a whole when the signer imported or edited any of them; each row is then
-    signed individually (own reviewed, archived source; own audit row)."""
-    from app.modules.payroll.models import ContributionRate, TaxSlab
-
-    sa = _sa()
-    pack = sa._pack(db, pack_row_id)
-    data = dict(data or {})
-    reason = (data.get("reason") or "").strip()
-    if not reason:
-        raise BadRequestException("A reason is required to sign.")
-    selected = [(str(r.get("kind")), int(r.get("id"))) for r in (data.get("rows") or [])
-                if str(r.get("kind")) in ("rate", "slab") and str(r.get("id") or "").isdigit()]
-    if not selected:
-        raise BadRequestException("Select at least one row to sign.")
-    refused = []
-    rows = []
-    for kind, row_id in selected:
-        model = ContributionRate if kind == "rate" else TaxSlab
-        row = db.get(model, row_id)
-        if row is None or row.jurisdiction_pack_id != pack.id or row.organization_id is not None:
-            raise NotFoundException("Belgium statutory row", row_id)
-        if actor_id in _row_editors(db, kind, row_id):
-            refused.append(f"{kind} #{row_id}")
-        rows.append((kind, row))
-    if refused:
-        raise BadRequestException("Four-eyes: you imported or edited " + ", ".join(refused[:10])
-                                  + (" (+more)" if len(refused) > 10 else "")
-                                  + "; another Super Admin must sign them.")
-    signed = []
-    for kind, row in rows:
-        if row.source_document_id is None:
-            raise BadRequestException(f"{kind} #{row.id} has no source document; set one before signing.")
-        sa.update_row(db, kind, row.id, {"specialistVerified": True, "sourceDocumentId": row.source_document_id,
-                                         "reason": reason}, actor_id)
-        signed.append({"kind": kind, "id": row.id})
-    return {"packRowId": pack.id, "signed": signed}

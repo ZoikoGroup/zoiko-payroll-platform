@@ -310,14 +310,11 @@ export const addNzTableRow = (packRowId, ruleType, payload) =>
   apiFetch(`${NZ_SA}/packs/${packRowId}/tables/${ruleType}/rows`, { method: "POST", body: payload });
 export const deleteNzTableRow = (rowId, reason) =>
   apiFetch(`${NZ_SA}/configuration/table-rows/${rowId}`, { method: "DELETE", params: { reason } });
-export const getNzDecisions = () => apiFetch(`${NZ_SA}/decisions`);
 // Creates the Draft pack from the specification — only while no NZ pack exists (reason; audited).
 // Replays a pack's Inland Revenue examples through the engine (read-only; gate G1).
 export const runNzGoldenCheck = (packRowId) => apiFetch(`${NZ_SA}/packs/${packRowId}/golden-check`, { method: "POST" });
 export const seedNzDraftPack = (reason) => apiFetch(`${NZ_SA}/seed-draft`, { method: "POST", body: { reason } });
 
-export const getZaReadiness = () => apiFetch(`${ZA_SA}/readiness`);
-export const getZaGateChecklists = () => apiFetch(`${ZA_SA}/readiness/gate-checklists`);
 
 export const listBrOrganizations = () => apiFetch(`${BR_SA}/organizations`);
 export const listBrEmployees = (orgId) => apiFetch(`${BR_SA}/employees`, { params: { org_id: orgId } });
@@ -1123,7 +1120,6 @@ export const getPlConfiguration = (packRowId) => apiFetch(`${PL_SA}/packs/${pack
 export const getPlSigningStatus = (packRowId) => apiFetch(`${PL_SA}/packs/${packRowId}/signing-status`);
 export const updatePlRow = (kind, rowId, payload) =>
   apiFetch(`${PL_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
-export const getPlDecisions = () => apiFetch(`${PL_SA}/decisions`);
 export const seedPlDraftPack = (reason) => apiFetch(`${PL_SA}/seed-draft`, { method: "POST", body: { reason } });
 // Poland Phase 9 — authority examples and the golden check (gate G1, AC-PL-02).
 export const addPlAuthorityExample = (packRowId, payload) =>
@@ -1140,9 +1136,6 @@ export const getMyConfiguration = (packRowId) => apiFetch(`${MY_SA}/packs/${pack
 export const getMySigningStatus = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/signing-status`);
 export const updateMyRow = (kind, rowId, payload) =>
   apiFetch(`${MY_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
-export const signMyRows = (refs, reason, sourceDocumentId) =>
-  apiFetch(`${MY_SA}/configuration/sign`, { method: "POST", body: { refs, reason, sourceDocumentId } });
-export const getMyDecisions = () => apiFetch(`${MY_SA}/decisions`);
 export const seedMyDraftPack = (reason) => apiFetch(`${MY_SA}/seed-draft`, { method: "POST", body: { reason } });
 export const getMyRolloverPlan = (packRowId) => apiFetch(`${MY_SA}/packs/${packRowId}/rollover`);
 export const rolloverMyPack = (packRowId, reason) =>
@@ -1190,16 +1183,12 @@ export const getBeSummary = () => apiFetch("/api/super-admin/compliance/jurisdic
 export const listBePacks = () => apiFetch(`${BE_SA}/packs`);
 export const getBeConfiguration = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/configuration`);
 export const getBeSigningStatus = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/signing-status`);
-// "Set up Belgian catalogue": the standard catalogue (every row empty, unsigned) into a Draft pack
-// that lacks it. Reason required; audited; never copies or invents a value.
+// "Set up Belgian catalogue": the standard catalogue (approved spec values, other rows empty) into a
+// Draft pack that lacks it. Reason required; audited; never copies or invents a value.
 export const setUpBeCatalogue = (packRowId, reason) =>
   apiFetch(`${BE_SA}/packs/${packRowId}/catalogue-setup`, { method: "POST", body: { reason } });
-// Read-only: every row / condition blocking activation, why, and who clears it.
-export const getBeActivationReadiness = (packRowId) =>
-  apiFetch(`${BE_SA}/packs/${packRowId}/activation-readiness`);
 export const updateBeRow = (kind, rowId, payload) =>
   apiFetch(`${BE_SA}/configuration/rows/${kind}/${rowId}`, { method: "PUT", body: payload });
-export const getBeDecisions = () => apiFetch(`${BE_SA}/decisions`);
 export const seedBeDraftPack = (reason) => apiFetch(`${BE_SA}/seed-draft`, { method: "POST", body: { reason } });
 export const addBeAuthorityExample = (packRowId, payload) =>
   apiFetch(`${BE_SA}/packs/${packRowId}/authority-examples`, { method: "POST", body: payload });
@@ -1208,24 +1197,10 @@ export const addBeSlabRow = (packRowId, key, payload) =>
 export const retireBeSlabRow = (rowId, reason) =>
   apiFetch(`${BE_SA}/configuration/slab-rows/${rowId}`, { method: "DELETE", params: { reason } });
 export const listBeJointCommittees = () => apiFetch(`${BE_SA}/joint-committees`);
-// Block C2: golden replay of the authority examples, the shared BE certification
-// run the activation reads, and the release gates computed from evidence.
+// Block C2: golden replay of the authority examples and the BE certification run.
 export const getBeGoldenCheck = (packRowId) => apiFetch(`${BE_SA}/packs/${packRowId}/golden-check`);
 export const runBeGoldenCertification = (packRowId) =>
   apiFetch(`${BE_SA}/packs/${packRowId}/golden-certification`, { method: "POST", body: {} });
-export const getBeReadiness = () => apiFetch(`${BE_SA}/readiness`);
-// Block K2: release-gate evidence (recorded by one Super Admin, accepted / rejected by another).
-export const listBeGateEvidence = () => apiFetch(`${BE_SA}/gate-evidence`);
-export const recordBeGateEvidence = (payload) => apiFetch(`${BE_SA}/gate-evidence`, { method: "POST", body: payload });
-export const decideBeGateEvidence = (evidenceId, outcome, reason) =>
-  apiFetch(`${BE_SA}/gate-evidence/${evidenceId}/decide`, { method: "POST", body: { outcome, reason } });
-// Block K3: decision records (proposer != decider; a later decision supersedes).
-export const listBeDecisionRecords = () => apiFetch(`${BE_SA}/decision-records`);
-export const proposeBeDecision = (payload) => apiFetch(`${BE_SA}/decision-records`, { method: "POST", body: payload });
-export const importBeDecisionProposals = () =>
-  apiFetch(`${BE_SA}/decision-records/import-proposals`, { method: "POST", body: {} });
-export const decideBeDecision = (decisionId, decidedValue, reason) =>
-  apiFetch(`${BE_SA}/decision-records/${decisionId}/decide`, { method: "POST", body: { decidedValue, reason } });
 // Block D3: content intake workbook (XLSX) and bulk signing. The import is a
 // dry run unless dryRun is false; it never signs and only targets Draft packs.
 async function beFetchRaw(path, init = {}) {
@@ -1274,5 +1249,3 @@ export async function importBeContentWorkbook(packRowId, file, reason, dryRun = 
     { method: "POST", body: form });
   return res.json();
 }
-export const bulkSignBeRows = (packRowId, rows, reason) =>
-  apiFetch(`${BE_SA}/packs/${packRowId}/bulk-sign`, { method: "POST", body: { rows, reason } });

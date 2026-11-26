@@ -115,16 +115,58 @@ def test_every_row_names_its_date_basis():
     assert content.date_basis("pl_min_wage_monthly") == "PAYROLL_MONTH"
 
 
-# ── policy the spec leaves open stays PENDING_G1 ───────────────────────────
-@pytest.mark.parametrize("key", ["pl_rounding_pit", "pl_rounding_zus", "pl_rounding_health", "pl_rounding_ppk",
-                                 "pl_health_limitation_rule", "pl_ppk_employer_pit_treatment",
-                                 "pl_fp_fs_min_base_rule", "pl_fund_cap_rule", "pl_fund_exemption_rules",
-                                 "pl_night_supplement_basis", "pl_overtime_premium_map",
-                                 "pl_leave_part_time_rounding", "pl_sick_age_rule",
-                                 "pl_leave_pay_reference_rule", "pl_pit_remittance_due_rule"])
-def test_policy_the_spec_does_not_give_is_pending_g1(key):
+# ── policy the spec leaves open: owner-approved values (gate removal 2026-11-25,
+# docs/poland/GATE_REMOVAL_INVENTORY.md section B) in the engine's own tokens ──
+APPROVED_POLICY = {
+    "pl_rounding_pit": ("FULL_PLN_HALF_UP", None),
+    "pl_rounding_zus": ("GROSZ_HALF_UP", None),
+    "pl_rounding_health": ("GROSZ_HALF_UP", None),
+    "pl_rounding_ppk": ("GROSZ_HALF_UP", None),
+    "pl_health_limitation_rule": ("NONE", content.HEALTH_LIMITATION_RULES),
+    "pl_ppk_employer_pit_treatment": ("TAXABLE_EMPLOYEE_INCOME", content.PPK_EMPLOYER_PIT_TREATMENTS),
+    "pl_fp_fs_min_base_rule": ("BASE_AT_LEAST_MIN_WAGE", content.FP_FS_MIN_BASE_RULES),
+    "pl_fund_cap_rule": ("CAPPED_WITH_PENSION_BASE", content.FUND_CAP_RULES),
+    "pl_fund_exemption_rules": ("STATUTORY", content.FUND_EXEMPTION_RULES),
+    "pl_night_supplement_basis": ("MIN_WAGE_HOURLY_20PCT", content.NIGHT_SUPPLEMENT_RULES),
+    "pl_overtime_premium_map": ("LABOUR_CODE_151_1", tuple(content.OVERTIME_PREMIUM_MAPS)),
+    "pl_leave_part_time_rounding": ("ROUND_UP_FULL_DAY", content.LEAVE_PART_TIME_ROUNDING),
+    "pl_sick_age_rule": ("FROM_YEAR_AFTER_REACHING_AGE", content.SICK_AGE_RULES),
+    "pl_leave_pay_reference_rule": ("VARIABLE_COMPONENTS_3_MONTHS", content.LEAVE_PAY_REFERENCE_RULES),
+    "pl_pit_remittance_due_rule": ("DAY_20_NEXT_MONTH", content.PIT_REMITTANCE_DUE_RULES),
+}
+
+
+@pytest.mark.parametrize("key", sorted(APPROVED_POLICY))
+def test_policy_the_spec_does_not_give_carries_the_approved_token(key):
+    from app.modules.payroll.engine.jurisdictions.poland.pack import ROUNDING_RULES
+
+    value, vocabulary = APPROVED_POLICY[key]
     row = _scalar(key)
-    assert row[5] == "PENDING_G1" and row[7] is True
+    assert row[5] == value and row[7] is True                  # flag = "not stated by the spec", informational
+    assert value in (vocabulary if vocabulary is not None else tuple(ROUNDING_RULES))
+
+
+def test_no_scalar_row_is_still_pending_g1():
+    assert [row[0] for row in content.POLAND_SCALAR_CONTENT if row[5] == "PENDING_G1"] == []
+
+
+def test_overtime_named_map_covers_every_event_kind_with_a_tier():
+    named = content.OVERTIME_PREMIUM_MAPS["LABOUR_CODE_151_1"]
+    assert set(named) == set(content.OVERTIME_EVENT_KINDS)
+    assert named["DAILY"] == "STANDARD"
+    assert {named[k] for k in ("WEEKLY", "NIGHT", "SUNDAY_HOLIDAY", "COMP_TIME_FAILED")} == {"HIGH"}
+
+
+def test_gate_only_rows_stay_empty():
+    assert content.POLAND_EMPTY_BY_DESIGN == {"pl_reconciliation_tolerance", "pl_parallel_materiality_amount"}
+
+
+@pytest.mark.parametrize("key, value", [
+    ("pl_ppk_reenrolment_cycle_years", "4"), ("pl_benefit_reference_months", "12"),
+    ("pl_record_retention_years", "10"),
+])
+def test_approved_statutory_amounts(key, value):
+    assert _amount(key) == Decimal(value)
 
 
 def test_rounding_is_per_obligation_never_one_helper():
@@ -180,9 +222,11 @@ def test_published_top_band_base_nets_the_tax_reducing_amount():
 def test_employee_deductible_costs():
     assert _amount("pl_costs_standard_monthly") == Decimal("250")
     assert _amount("pl_costs_commuter_monthly") == Decimal("300")
-    for key in ("pl_costs_standard_annual_cap", "pl_costs_standard_multi_annual_cap",
-                "pl_costs_commuter_annual_cap", "pl_costs_commuter_multi_annual_cap", "pl_pit0_annual_limit"):
-        assert key in content.POLAND_EMPTY_BY_DESIGN                  # spec gives no figure
+    # Not in the spec; statutory values approved by the owner (PIT Act art. 22(2), art. 21).
+    for key, value in (("pl_costs_standard_annual_cap", "3000"), ("pl_costs_standard_multi_annual_cap", "4500"),
+                       ("pl_costs_commuter_annual_cap", "3600"), ("pl_costs_commuter_multi_annual_cap", "5400"),
+                       ("pl_pit0_annual_limit", "85528")):
+        assert key not in content.POLAND_EMPTY_BY_DESIGN and _amount(key) == Decimal(value), key
 
 
 def test_zus_social_and_health_rates():
@@ -308,7 +352,7 @@ def test_ppk_and_fep_follow_the_pension_base():
 _LITERALS = ("4806", "282600", "282,600", "9.76", "120000", "10800", "31.40")
 
 
-@pytest.mark.parametrize("path", ["app/modules/payroll/poland_service.py", "app/modules/payroll/poland_dormancy.py",
+@pytest.mark.parametrize("path", ["app/modules/payroll/poland_service.py",
                                   "app/modules/payroll/engine/countries/poland.py"])
 def test_no_statutory_value_outside_content(path):
     tree = ast.parse((BACKEND / path).read_text(encoding="utf-8"))
@@ -338,10 +382,11 @@ def test_seed_writes_a_draft_pack_with_every_row(db):
     assert by_key["pl_zus_rentowe"].employer_rate_pct == Decimal("6.5")
     assert by_key["pl_min_wage_monthly"].effective_from == date(2026, 1, 1)
     assert by_key["pl_supported_contract_types"].text_value == "UMOWA_O_PRACE"
-    assert by_key["pl_rounding_pit"].label.endswith("[PENDING G1]")
-    assert not by_key["pl_zus_annual_cap"].label.endswith("[PENDING G1]")
-    assert by_key["pl_pit0_annual_limit"].total == "NOT CONFIGURED"
-    assert by_key["pl_pit0_annual_limit"].flat_amount is None
+    assert not any("[PENDING G1]" in (r.label or "") for r in rates)          # labels written plain
+    assert by_key["pl_rounding_pit"].text_value == "FULL_PLN_HALF_UP"
+    assert by_key["pl_pit0_annual_limit"].flat_amount == Decimal("85528")
+    assert by_key["pl_reconciliation_tolerance"].total == "NOT CONFIGURED"
+    assert by_key["pl_reconciliation_tolerance"].flat_amount is None
     assert all(r.source_document_id is not None for r in rates)
 
     slabs = db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id).all()
@@ -404,32 +449,27 @@ def test_seed_only_writes_draft(db):
 
 
 # ── activation refusal (becomes the pack_activation_refusal hook in P4) ────
-def test_activation_is_refused_while_any_row_is_unsigned(db):
+def test_unsigned_rows_no_longer_block_activation(db):
+    """Structural check only (gate removal 2026-11-25)."""
     from app.modules.payroll import poland_service as svc
 
     pack = svc.seed_poland_pack(db)
-    refusal = svc.pl_pack_activation_refusal(db, pack)
-    assert refusal and "unsigned or unconfigured" in refusal and "G1" in refusal
+    assert svc.pl_pack_activation_refusal(db, pack) is None
 
 
-def test_activation_refusal_clears_only_when_every_row_is_signed_and_configured(db):
+def test_activation_still_needs_content_and_a_pit_scale(db):
+    """Unsourced rows no longer block; a missing PIT scale still does (gate removal 2026-11-25)."""
     from app.modules.payroll import poland_service as svc
-    from app.modules.payroll.models import ContributionRate
+    from app.modules.payroll.models import ContributionRate, TaxSlab
 
     pack = svc.seed_poland_pack(db)
     rows = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id).all()
-    # Simulate a fully signed pack (what the G1 console does in Phase 7).
-    for r in rows:
-        r.label = r.label.replace(svc.PENDING_G1_SUFFIX, "")
-        if r.total == svc.NOT_CONFIGURED:
-            r.flat_amount, r.total = Decimal("1"), "1"
-        if r.text_value == "PENDING_G1":
-            r.text_value = "SIGNED"
-    db.flush()
-    assert svc.pl_pack_activation_refusal(db, pack) is None
     rows[0].source_document_id = None
     db.flush()
-    assert "without a source document" in svc.pl_pack_activation_refusal(db, pack)
+    assert svc.pl_pack_activation_refusal(db, pack) is None
+    db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id, TaxSlab.rule_type == "PL_PIT_BAND").delete()
+    db.flush()
+    assert "no PIT scale" in svc.pl_pack_activation_refusal(db, pack)
 
 
 def test_activation_refusal_ignores_other_countries(db):

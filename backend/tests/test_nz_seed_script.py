@@ -60,8 +60,8 @@ def test_apply_seeds_draft_packs_and_registry_and_is_repeatable(db, run):
     summary = nzs.nz_seed_summary(db)
     main = next(p for p in summary["packs"] if p["packId"] == content.NZ_2026_27[0])
     assert main["rates"] == summary["content"]["rates"] and main["slabs"] == summary["content"]["slabs"]
-    assert main["pending"] == main["rates"] + main["slabs"]                 # every row PENDING G1
-    assert "PENDING G1" in main["activationRefusal"] and summary["registry"] == "PLANNED"
+    assert main["pending"] == 0                                             # plain labels (gate removal)
+    assert main["activationRefusal"] is None and summary["registry"] == "PLANNED"       # gate removal 2026-11-25
     assert summary["blockers"] == []
     code, _ = run("--apply")                                                 # unchanged re-run
     assert code == 0 and nzs.nz_seed_summary(db)["packs"] == summary["packs"]
@@ -71,7 +71,7 @@ def test_verify_is_read_only_and_reports_the_activation_refusal(db, run):
     run("--apply")
     before = db.query(TaxConfigurationAudit).count()
     code, out = run("--verify")
-    assert code == 0 and "verify — nothing written" in out.out and "PENDING G1" in out.out
+    assert code == 0 and "verify — nothing written" in out.out and "nothing blocks it" in out.out   # gate removal 2026-11-25
     assert db.query(TaxConfigurationAudit).count() == before
 
 
@@ -155,6 +155,5 @@ def test_demo_builds_an_active_pack_through_the_governed_path(db):
     assert pack.status == "Active" and pack.change_summary == demo.DEMO_NOTE
     assert nzs.nz_pack_activation_refusal(db, pack) is None
     assert demo.build_demo_pack(db).id == pack.id                            # re-run: already Active
-    editors = nzs._nz_statutory_editors(db, pack)
-    assert pack.approved_by_id not in editors and len(editors) == 1          # maker signed; checker approved
+    assert nzs._nz_statutory_editors(db, pack) == set()                    # no editor exclusion (gate removal 2026-11-25)
 

@@ -1,21 +1,20 @@
 import { inputClass, labelClass } from "../constants";
 import { reviewed } from "./nzForm";
 
-// The governance fields every New Zealand statutory change carries: an
-// existing source document, a change reason and — to SIGN the row (remove
-// "[PENDING G1]") — "specialist verified", which the backend accepts only for a
-// stored, hashed source reviewed by a Super Admin other than its uploader.
+// The governance fields every statutory change carries (shared by NZ, PL, MY
+// and BE): a change reason and, optionally, the source document it rests on.
+// There is no signing step since the gate removal (owner decision 2026-11-25):
+// a saved value is in force.
 
 export function GovernanceFields({ value, onChange, sources }) {
   const set = (patch) => onChange({ ...value, ...patch });
-  const chosen = sources.find((s) => String(s.id) === String(value.sourceDocumentId));
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface-muted p-3">
       <div>
-        <label className={labelClass}>Source document *</label>
+        <label className={labelClass}>Source document (optional)</label>
         <select className={inputClass} value={value.sourceDocumentId || ""}
-          onChange={(e) => set({ sourceDocumentId: e.target.value, specialistVerified: false })}>
-          <option value="">Select the official source…</option>
+          onChange={(e) => set({ sourceDocumentId: e.target.value })}>
+          <option value="">No source document</option>
           {sources.map((s) => (
             <option key={s.id} value={s.id}>
               {s.agency} — {s.title}{reviewed(s) ? " (reviewed)" : " (not reviewed)"}
@@ -29,32 +28,27 @@ export function GovernanceFields({ value, onChange, sources }) {
           onChange={(e) => set({ reason: e.target.value })}
           placeholder="What changed and on what authority" />
       </div>
-      <label className="flex items-start gap-2 text-[12px] text-foreground">
-        <input type="checkbox" checked={Boolean(value.specialistVerified)} disabled={!reviewed(chosen)}
-          onChange={(e) => set({ specialistVerified: e.target.checked })} />
-        <span>
-          Specialist verified — <strong>sign</strong> this row (removes PENDING G1).
-          {!reviewed(chosen) && (
-            <span className="block text-foreground-muted">
-              Needs a stored, hashed source reviewed by a different Super Admin.
-            </span>
-          )}
-        </span>
-      </label>
     </div>
   );
 }
 
+// Value state of a row. There is no signing step since the gate removal
+// (owner decision 2026-11-25), so an old "[PENDING G1]" label marker means
+// nothing: a row either has a value (in force) or does not (blocks only the
+// calculation that needs it).
+const VALUE_FIELDS = ["flatAmount", "textValue", "employeeRatePct", "employerRatePct", "ratePct", "minAmount",
+  "maxAmount", "taxFormula", "treatment"];
+
 export function SignedPill({ row }) {
-  const label = String(row?.label || row?.rateLabel || "");
-  if (label.includes("[PENDING G1]")) {
+  const hasValue = VALUE_FIELDS.some((key) => row?.[key] != null && row?.[key] !== "");
+  if (!hasValue) {
     return (
       <span className="inline-flex rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
-        PENDING G1
+        No value
       </span>
     );
   }
-  return <span className="inline-flex rounded border border-success/40 bg-success/10 px-1.5 py-0.5 text-[10px] font-semibold text-success">Signed</span>;
+  return <span className="inline-flex rounded border border-success/40 bg-success/10 px-1.5 py-0.5 text-[10px] font-semibold text-success">Set</span>;
 }
 
 export function ErrorNote({ message }) {

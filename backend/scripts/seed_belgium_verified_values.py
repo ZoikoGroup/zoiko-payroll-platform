@@ -4,10 +4,10 @@ scripts/seed_belgium_verified_values.py
 Load VERIFIED Belgian values from a file into a Draft Belgian pack, through the
 SAME governed import the Super Admin "Import from file" button uses
 (be_content_workbook.be_content_workbook_import): the same validation, the same
-all-or-nothing behaviour, a source for every changed row, and every imported row
-saved UNSIGNED ([PENDING G1]). There is no other write path here. Nothing is
-signed, approved, certified or activated (see scripts/README_BELGIUM_VERIFIED_SEED.md
-for those steps).
+all-or-nothing behaviour and a source for every changed row. Since the gate removal
+(owner decision 2026-11-25) an imported row is in force as saved: there is no signing
+step and no "[PENDING G1]" marker. There is no other write path here. Nothing is
+approved or activated (see scripts/README_BELGIUM_VERIFIED_SEED.md for those steps).
 
 On top of the import's own checks this script refuses, before anything runs:
   * the AI-drafted workbook BE_2026_AI_DRAFT.xlsx, by file name;
@@ -219,7 +219,7 @@ def _print(out: dict, apply: bool) -> None:
     for key in out["missingKeys"]:
         print(f"  - {key}")
     if apply:
-        print("Written: unsigned ([PENDING G1]); a second Super Admin must sign them." if out["applied"]
+        print("Written: the rows are in force (no signing step); approve and activate the pack next." if out["applied"]
               else "NOT written: fix the refusals / errors above (all-or-nothing).")
 
 

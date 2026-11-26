@@ -446,16 +446,15 @@ def test_retention_template_activation_and_summary_hooks(world):
     settings = retention_service.settings("MY")
     assert settings.country == "MY" and settings.period_decision == "D-8"
     template = SimpleNamespace(jurisdiction_country="MY", report_type="MY_PCB_MONTHLY")
-    assert "G3" in jurisdiction_hooks.call("MY", "template_activation_refusal", w.db, template, None)
+    assert jurisdiction_hooks.call("MY", "template_activation_refusal", w.db, template, None) is None  # gate removal 2026-11-25
     assert jurisdiction_hooks.call("MY", "template_activation_refusal", w.db,
                                    SimpleNamespace(jurisdiction_country="PL", report_type="PL_DRA"), None) is None
     pack = SimpleNamespace(jurisdiction_country="MY", id=0, pack_id="MY-PAYROLL-2026")
     assert jurisdiction_hooks.call("MY", "pack_activation_refusal", w.db, pack, None)
     assert jurisdiction_hooks.call("MY", "statutory_editors", w.db, pack) == set()
     summary = jurisdiction_hooks.call("MY", "statutory_summary", w.db)
-    assert summary["available"] is False                                       # Phase 10: the real gates
-    assert [u["key"] for u in summary["unmet"]][:7] == ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
-    assert summary["readiness"]["allPassed"] is False
+    assert summary["available"] is False                                       # no Active pack
+    assert "unmet" not in summary and "readiness" not in summary               # no gates since 2026-11-25
 
 
 def test_malaysia_cannot_be_opened_before_the_gates(world):
@@ -463,22 +462,6 @@ def test_malaysia_cannot_be_opened_before_the_gates(world):
 
     with pytest.raises(Exception):
         jurisdiction_hooks.call("MY", "service_registry_transition", world.db, "AVAILABLE", "launch", world.a)
-
-
-def test_router_is_dormant_and_malaysia_only(world, monkeypatch):
-    from app.config import settings
-    from app.modules.payroll.my_org_router import require_my_tenant
-    from tests._mx_employer_helpers import make_org, principal
-
-    w = world
-    with pytest.raises(NotFoundException):
-        require_my_tenant(principal(w.org), w.db)
-    monkeypatch.setattr(settings, "MY_CANARY_ORG_IDS", str(w.org))                 # canary: this org only
-    assert require_my_tenant(principal(w.org), w.db) is None
-    monkeypatch.setattr(settings, "MY_TENANT_ONBOARDING_ENABLED", True)
-    other = make_org(w.db, name="Other", code="MYOTHER", country="PL")
-    with pytest.raises(NotFoundException, match="only available"):
-        require_my_tenant(principal(other.org.id), w.db)
 
 
 def test_router_exposes_identifiers_only_masked():

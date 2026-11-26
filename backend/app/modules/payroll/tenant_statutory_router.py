@@ -723,10 +723,7 @@ def preview_ch_calculation_for_tenant(
 # -- South Africa (ZP-ZA-ENG-001 Phase 5) -------------------------------------
 
 def _za_org(organization_id: int = Depends(get_organization_id)) -> int:
-    from app.modules.payroll import south_africa_dormancy
-
-    if not south_africa_dormancy.onboarding_enabled():
-        raise BadRequestException(south_africa_dormancy.DORMANT_MESSAGE)
+    # No dormancy switch since the gate removal (owner decision 2026-11-25).
     return organization_id
 
 

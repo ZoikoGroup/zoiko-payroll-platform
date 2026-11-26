@@ -2,9 +2,10 @@
 
 Every statutory value the engine uses is read here from ``ctx.rate_map`` /
 ``ctx.slabs`` (rows of the resolved pack: ORM objects or plain dicts). A row is
-selected by the PAYDAY (NZ-008). A row whose label still carries
-"[PENDING G1]" blocks even inside an Active pack, an empty value blocks, and an
-empty authority table blocks: nothing is ever defaulted (fail-closed).
+selected by the PAYDAY (NZ-008). An empty value (or the literal PENDING_G1)
+blocks and an empty authority table blocks: nothing is ever defaulted
+(fail-closed). A label marker ("[PENDING G1]", as older seeded packs carry) no
+longer blocks (gate removal, owner decision 2026-11-25).
 
 Rounding is never done with a bare quantize elsewhere in the engine: the rule
 text comes from the pack and only its vocabulary lives here (spec §3).
@@ -22,7 +23,6 @@ ZERO = Decimal("0")
 ONE = Decimal("1")
 HUNDRED = Decimal("100")
 CENT = Decimal("0.01")
-PENDING_MARK = "[PENDING G1]"
 
 # Platform pay_frequency values ("Weekly", "Fortnightly", "FourWeekly",
 # "Monthly") mapped to the content vocabulary.
@@ -122,10 +122,6 @@ class NzPack:
     def block(self, key: str, reason: str):
         raise E.NZCalculationBlockedError(key, reason, self.organization_id)
 
-    def _signed(self, ident: str, label) -> None:
-        if label and PENDING_MARK in str(label):
-            self.block(E.PACK_UNSIGNED, f"{ident} is not signed (gate G1)")
-
     def _note(self, kind: str, ident: str, row) -> None:
         start, end = as_date(field(row, "effective_from")), as_date(field(row, "effective_to"))
         self._used[(kind, ident)] = {"kind": kind, "id": ident,
@@ -139,7 +135,6 @@ class NzPack:
             if required:
                 self.block(E.keyed(E.ROW_MISSING, key), "no parameter row is in force on the payday")
             return None
-        self._signed(key, field(row, "label"))
         self._note("rate", key, row)
         return row
 
@@ -156,7 +151,7 @@ class NzPack:
     def text(self, key: str, allowed=None) -> str:
         value = upper(field(self.row(key), "text_value"))
         if not value or value == content.PENDING:
-            self.block(E.keyed(E.ROW_MISSING, key), "value is not configured (PENDING_G1)")
+            self.block(E.keyed(E.ROW_MISSING, key), "value not yet provided")
         if allowed and value not in tuple(upper(a) for a in allowed):
             self.block(E.keyed(E.ROW_MISSING, key), f"{value!r} is not one of {', '.join(allowed)}")
         return value
@@ -167,7 +162,8 @@ class NzPack:
     def rounder(self, key: str) -> Callable[[Decimal], Decimal]:
         rule = upper(field(self.row(key), "text_value"))
         if rule not in ROUNDING_RULES:
-            self.block(E.keyed(E.ROUNDING_PENDING, key), f"rounding rule {rule or 'PENDING_G1'!r} is not signed")
+            self.block(E.keyed(E.ROUNDING_PENDING, key),
+                       f"rounding rule value not yet provided ({rule or 'PENDING_G1'!r} is not a known rule)")
         unit, mode = ROUNDING_RULES[rule]
 
         def _round(value: Decimal) -> Decimal:
@@ -186,20 +182,18 @@ class NzPack:
             self.block(E.keyed(E.TABLE_EMPTY, table_name), f"{table_name} has no rows in force (release gate)")
         for index, r in enumerate(rows):
             ident = f"{rule_type}:{field(r, 'id') if field(r, 'id') is not None else field(r, 'filing_status') or index}"
-            self._signed(ident, field(r, "rate_label"))
             self._note("slab", ident, r)
         return sorted(rows, key=lambda r: (dec(field(r, "min_amount")), field(r, "sort_order") or 0))
 
     def dated_rows(self, rule_type: str, table_name: str) -> list:
         """Every row of a table whose rows are themselves dated events (public
         holidays: effective_from IS the holiday), not filtered by the payday
-        window. Empty blocks; an unsigned row blocks."""
+        window. Empty blocks."""
         rows = [r for r in self.slabs if upper(field(r, "rule_type")) == rule_type]
         if not rows:
             self.block(E.keyed(E.TABLE_EMPTY, table_name), f"{table_name} has no rows (release gate)")
         for index, r in enumerate(rows):
             ident = f"{rule_type}:{field(r, 'id') if field(r, 'id') is not None else index}"
-            self._signed(ident, field(r, "rate_label"))
             self._note("slab", ident, r)
         return rows
 

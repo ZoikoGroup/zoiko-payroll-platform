@@ -10350,23 +10350,6 @@
    "overridden": false
   },
   {
-   "method": "GET",
-   "path": "/api/payroll/japan/readiness",
-   "data_class": "tenant_config",
-   "action": "read",
-   "resource": "readiness",
-   "principals": [
-    "org_admin",
-    "payroll_admin"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
    "method": "POST",
    "path": "/api/payroll/japan/resident-tax-notices/{assessment_id}/approve",
    "data_class": "worker",
@@ -11957,11 +11940,9 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
-    "payroll_my_identifier_vault",
     "payroll_my_tax_declarations",
     "payroll_my_work_assignments",
-    "payroll_my_worker_profiles",
-    "payslip_items"
+    "payroll_my_worker_profiles"
    ],
    "overridden": false
   },
@@ -17313,25 +17294,6 @@
   },
   {
    "method": "GET",
-   "path": "/api/payroll/new-zealand/readiness",
-   "data_class": "worker",
-   "action": "read",
-   "resource": "readiness",
-   "principals": [
-    "org_admin",
-    "payroll_admin"
-   ],
-   "scope_level": "tenant",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [
-    "payroll_nz_ird_vault"
-   ],
-   "overridden": false
-  },
-  {
-   "method": "GET",
    "path": "/api/payroll/new-zealand/remittances",
    "data_class": "tenant_config",
    "action": "read",
@@ -17610,7 +17572,6 @@
    "scan_worker_tables": [
     "payroll_nz_authority_deductions",
     "payroll_nz_employee_tax_profiles",
-    "payroll_nz_ird_vault",
     "payroll_nz_kiwisaver_elections"
    ],
    "overridden": false
@@ -18936,7 +18897,6 @@
    "note": null,
    "scan_worker_tables": [
     "payroll_pl_declarations",
-    "payroll_pl_identifier_vault",
     "payroll_pl_worker_profiles"
    ],
    "overridden": false
@@ -23673,134 +23633,6 @@
   },
   {
    "method": "GET",
-   "path": "/api/super-admin/compliance/belgium/decision-records",
-   "data_class": "platform",
-   "action": "read",
-   "resource": "decision-records",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/super-admin/compliance/belgium/decision-records",
-   "data_class": "platform",
-   "action": "create",
-   "resource": "decision-records",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/super-admin/compliance/belgium/decision-records/import-proposals",
-   "data_class": "platform",
-   "action": "create",
-   "resource": "import-proposals",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/super-admin/compliance/belgium/decision-records/{decision_id}/decide",
-   "data_class": "platform",
-   "action": "create",
-   "resource": "decide",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/super-admin/compliance/belgium/decisions",
-   "data_class": "platform",
-   "action": "read",
-   "resource": "decisions",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/super-admin/compliance/belgium/gate-evidence",
-   "data_class": "platform",
-   "action": "read",
-   "resource": "gate-evidence",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/super-admin/compliance/belgium/gate-evidence",
-   "data_class": "platform",
-   "action": "create",
-   "resource": "gate-evidence",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/super-admin/compliance/belgium/gate-evidence/{evidence_id}/decide",
-   "data_class": "platform",
-   "action": "create",
-   "resource": "decide",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
    "path": "/api/super-admin/compliance/belgium/joint-committees",
    "data_class": "platform",
    "action": "read",
@@ -23944,43 +23776,11 @@
    "overridden": false
   },
   {
-   "method": "GET",
-   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/activation-readiness",
-   "data_class": "platform",
-   "action": "read",
-   "resource": "activation-readiness",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
    "method": "POST",
    "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/authority-examples",
    "data_class": "platform",
    "action": "create",
    "resource": "authority-examples",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "POST",
-   "path": "/api/super-admin/compliance/belgium/packs/{pack_row_id}/bulk-sign",
-   "data_class": "platform",
-   "action": "create",
-   "resource": "bulk-sign",
    "principals": [
     "super_admin"
    ],
@@ -24182,26 +23982,6 @@
    "note": null,
    "scan_worker_tables": [],
    "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/super-admin/compliance/belgium/readiness",
-   "data_class": "aggregate",
-   "action": "read",
-   "resource": "readiness",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": "Belgium release gates G1-G7: counts and organisation ids only (G2 counts uncovered employment lines)",
-   "scan_worker_tables": [
-    "payroll_be_employment_classifications",
-    "payroll_be_worker_profiles",
-    "payroll_employees"
-   ],
-   "overridden": true
   },
   {
    "method": "POST",
@@ -27013,38 +26793,6 @@
    "overridden": false
   },
   {
-   "method": "POST",
-   "path": "/api/super-admin/compliance/malaysia/configuration/sign",
-   "data_class": "platform",
-   "action": "create",
-   "resource": "sign",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/super-admin/compliance/malaysia/decisions",
-   "data_class": "platform",
-   "action": "read",
-   "resource": "decisions",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
    "method": "GET",
    "path": "/api/super-admin/compliance/malaysia/packs",
    "data_class": "platform",
@@ -28221,20 +27969,16 @@
     "payroll_jp_social_insurance_enrollments",
     "payroll_jp_social_insurance_events",
     "payroll_jp_worker_tax_profiles",
-    "payroll_my_identifier_vault",
     "payroll_my_tax_declarations",
     "payroll_my_work_assignments",
     "payroll_my_worker_profiles",
     "payroll_nz_authority_deductions",
     "payroll_nz_employee_tax_profiles",
-    "payroll_nz_ird_vault",
     "payroll_nz_kiwisaver_elections",
     "payroll_pl_declarations",
-    "payroll_pl_identifier_vault",
     "payroll_pl_worker_profiles",
     "payroll_za_eti_ledger",
-    "payroll_za_tax_directives",
-    "payslip_items"
+    "payroll_za_tax_directives"
    ],
    "overridden": true
   },
@@ -28967,22 +28711,6 @@
   },
   {
    "method": "GET",
-   "path": "/api/super-admin/compliance/new-zealand/decisions",
-   "data_class": "platform",
-   "action": "read",
-   "resource": "decisions",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
    "path": "/api/super-admin/compliance/new-zealand/packs",
    "data_class": "platform",
    "action": "read",
@@ -29083,22 +28811,6 @@
    "data_class": "platform",
    "action": "update",
    "resource": "rows",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/super-admin/compliance/poland/decisions",
-   "data_class": "platform",
-   "action": "read",
-   "resource": "decisions",
    "principals": [
     "super_admin"
    ],
@@ -30100,38 +29812,6 @@
    "data_class": "platform",
    "action": "create",
    "resource": "upload",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/super-admin/compliance/south-africa/readiness",
-   "data_class": "platform",
-   "action": "read",
-   "resource": "readiness",
-   "principals": [
-    "super_admin"
-   ],
-   "scope_level": "platform",
-   "field_classes": [],
-   "retired_reason": null,
-   "note": null,
-   "scan_worker_tables": [],
-   "overridden": false
-  },
-  {
-   "method": "GET",
-   "path": "/api/super-admin/compliance/south-africa/readiness/gate-checklists",
-   "data_class": "platform",
-   "action": "read",
-   "resource": "gate-checklists",
    "principals": [
     "super_admin"
    ],

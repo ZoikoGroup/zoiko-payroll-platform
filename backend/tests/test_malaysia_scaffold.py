@@ -25,7 +25,7 @@ def test_malaysia_resolves_to_my(value):
     from app.core.jurisdiction import REGISTRATION_COUNTRIES, get_jurisdiction_code
 
     assert get_jurisdiction_code(value) == "MY"
-    assert "Malaysia" not in REGISTRATION_COUNTRIES                     # never registrable while dormant
+    assert "Malaysia" in REGISTRATION_COUNTRIES                         # registrable since the gate removal
 
 
 @pytest.mark.parametrize("value", ["Malaysia", "malaysia", "MYS", "MY"])
@@ -94,31 +94,14 @@ def test_tin_format_only(value, ok):
 
 
 # ── employee validation strategy (dormant) ────────────────────────────────
-def test_malaysia_is_not_an_employee_country_while_dormant():
-    from app.modules.payroll.employee_validation import _STRATEGIES, _dormant_strategy, is_supported_employee_country
-
-    assert "MY" not in _STRATEGIES
-    assert _dormant_strategy("MY") is None
-    assert is_supported_employee_country("MY") is False
-
-
 @pytest.fixture
 def my_strategy(monkeypatch):
     from app.config import settings
     from app.modules.payroll.employee_validation import MYEmployeeValidation, get_employee_validation_strategy
 
-    monkeypatch.setattr(settings, "MY_TENANT_ONBOARDING_ENABLED", True)
     strategy = get_employee_validation_strategy("MY")
     assert strategy is MYEmployeeValidation
     return strategy
-
-
-def test_canary_organisations_make_the_strategy_available(monkeypatch):
-    from app.config import settings
-    from app.modules.payroll.employee_validation import MYEmployeeValidation, _dormant_strategy
-
-    monkeypatch.setattr(settings, "MY_CANARY_ORG_IDS", "41")
-    assert _dormant_strategy("MY") is MYEmployeeValidation
 
 
 def test_valid_malaysian_employee_is_cleaned(my_strategy):
@@ -178,62 +161,6 @@ def test_bank_routing_uses_swift_and_account():
 
 
 # ── dormancy ───────────────────────────────────────────────────────────────
-def test_is_malaysia_does_not_depend_on_the_flag():
-    from app.config import settings
-    from app.modules.payroll import malaysia_dormancy as d
-
-    assert settings.MY_TENANT_ONBOARDING_ENABLED is False
-    assert d.is_malaysia("Malaysia") and d.is_malaysia("MY") and not d.is_malaysia("Morocco")
-
-
-def test_entering_malaysia_is_refused_while_dormant(monkeypatch):
-    from app.config import settings
-    from app.modules.payroll import malaysia_dormancy as d
-
-    assert d.entering_malaysia_refusal("India", "Malaysia") == d.DORMANT_MESSAGE
-    assert d.entering_malaysia_refusal(None, "MY") == d.DORMANT_MESSAGE
-    assert d.entering_malaysia_refusal("MY", "Malaysia") is None                 # already Malaysian
-    assert d.entering_malaysia_refusal("India", "Japan") is None                 # not Malaysia
-    monkeypatch.setattr(settings, "MY_CANARY_ORG_IDS", " 7, x, ")
-    assert d.canary_organization_ids() == frozenset({7})
-    assert d.entering_malaysia_refusal("India", "Malaysia", 7) is None           # canary organisation
-    assert d.entering_malaysia_refusal("India", "Malaysia", 8) == d.DORMANT_MESSAGE
-    assert d.onboarding_enabled() is False
-    monkeypatch.setattr(settings, "MY_TENANT_ONBOARDING_ENABLED", True)
-    assert d.entering_malaysia_refusal("India", "Malaysia") is None
-
-
-def test_country_change_into_malaysia_is_blocked(db):
-    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
-
-    assert "Malaysia is not open" in get_jurisdiction_change_block_reason(db, "India", "Malaysia")
-
-
-@pytest.mark.parametrize("value", ["MY", "Malaysia"])
-def test_company_jurisdiction_cannot_become_malaysia(db, value):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll import service
-    from app.modules.payroll.schemas import CompanyDetailsUpdate
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="MY Test Org", code="MYTEST", country=None)
-    service.get_company_details(db, t.org.id)
-    with pytest.raises(BadRequestException, match="Malaysia is not open"):
-        service.update_company_details(db, t.org.id, CompanyDetailsUpdate(jurisdictionCountry=value))
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("MY", "Malaysia")
-
-
-def test_backfill_never_makes_an_org_malaysian(db):
-    from app.modules.organizations.models import Organization
-    from app.modules.payroll import service
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="MY Backfill Org", code="MYBACK", country=None)
-    db.get(Organization, t.org.id).country = "Malaysia"
-    db.commit()
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("MY", "Malaysia")
-
-
 # ── fail-closed calculation dispatch ───────────────────────────────────────
 def test_malaysia_never_falls_through_to_the_generic_calculator():
     from app.modules.payroll.engine import standard
@@ -257,7 +184,7 @@ def test_every_calculation_mode_is_blocked(mode):
     assert raised.value.key == expected
 
 
-def test_registry_row_required():
+def test_registry_row_not_required():
     from app.modules.payroll.engine.tax_resolver import _REGISTRY_ROW_REQUIRED_COUNTRIES
 
-    assert "MY" in _REGISTRY_ROW_REQUIRED_COUNTRIES
+    assert "MY" not in _REGISTRY_ROW_REQUIRED_COUNTRIES                     # gate removal 2026-11-25

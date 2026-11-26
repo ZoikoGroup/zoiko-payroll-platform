@@ -167,7 +167,7 @@ def build_za_emp201(db: Session, organization_id: int, period_key: str) -> dict:
     else:
         eti_utilised = ZERO
         if eti_available > ZERO:
-            warnings.append("ETI is available but not utilised: the ETI offset policy is PENDING_G1.")
+            warnings.append("ETI is available but not utilised: the ETI offset policy value is not yet provided.")
     due, blocked = za_due_date(db, organization_id, period_key)
     amount_due = totals["paye"] - eti_utilised + totals["sdl"] + totals["uif"]
     return {

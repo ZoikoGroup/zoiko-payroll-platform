@@ -97,7 +97,9 @@ def test_filing_due_on_electronic_paper_and_unsigned(db, signed):
     assert fil.filing_due_on(db, PAYDAY, "PAYDAY_GATEWAY") == date(2026, 10, 13)
     assert fil.filing_due_on(db, PAYDAY, "PAPER") == date(2026, 10, 23)
     assert fil.filing_due_on(db, date(2026, 12, 24), "MYIR_FILE_UPLOAD") == date(2027, 1, 19)
-    rate_map["nz_working_day_rule"].label += " [PENDING G1]"
+    rate_map["nz_working_day_rule"].label += " [PENDING G1]"            # legacy marker no longer hides it
+    assert fil.filing_due_on(db, PAYDAY, "PAYDAY_GATEWAY") == date(2026, 10, 13)
+    rate_map["nz_working_day_rule"].text_value = None                     # value not provided
     assert fil.filing_due_on(db, PAYDAY, "PAYDAY_GATEWAY") is None
 
 
@@ -113,7 +115,9 @@ def test_remittance_periods_and_due_dates(signed):
     assert due(rate_map, date(2026, 10, 1), date(2026, 10, 15), "TWICE_MONTHLY") == date(2026, 10, 20)
     assert due(rate_map, date(2026, 10, 16), date(2026, 10, 31), "TWICE_MONTHLY") == date(2026, 11, 5)
     assert due(rate_map, date(2026, 12, 16), date(2026, 12, 31), "TWICE_MONTHLY") == date(2027, 1, 15)
-    rate_map["nz_remit_monthly_due_day"].label += " [PENDING G1]"
+    rate_map["nz_remit_monthly_due_day"].label += " [PENDING G1]"       # legacy marker no longer hides it
+    assert due(rate_map, date(2026, 10, 1), date(2026, 10, 31), "MONTHLY") == date(2026, 11, 20)
+    rate_map["nz_remit_monthly_due_day"].flat_amount = None               # value not provided
     assert due(rate_map, date(2026, 10, 1), date(2026, 10, 31), "MONTHLY") is None
 
 

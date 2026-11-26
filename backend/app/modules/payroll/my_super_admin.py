@@ -15,7 +15,6 @@ import (my_workbook_adapter):
   * replace_table — load a whole table (EPF / PERKESO / EIS / foreign-worker
     schedule, public holidays) into a Draft pack, all-or-nothing, every row
     UNSIGNED with its source document and page.
-  * sign_rows — sign many rows at once; all or nothing.
 
 Text values must come from the engine's vocabulary; a policy with no
 vocabulary yet can only be signed NOT_SUPPORTED (the feature stays blocked).
@@ -119,29 +118,28 @@ def _reason(data: dict) -> str:
     return reason[:300]
 
 
-def _source(db: Session, source_id, verify: bool):
+def _source(db: Session, source_id, verify: bool = False):
+    """The source document of a statutory change - optional provenance since the
+    gate removal, owner decision 2026-11-25: no reviewed-source signing step exists."""
     from app.modules.payroll.models import SourceArtifact
 
+    if source_id in (None, ""):
+        return None
     try:
-        source = db.get(SourceArtifact, int(source_id)) if source_id not in (None, "") else None
+        source = db.get(SourceArtifact, int(source_id))
     except (TypeError, ValueError):
         source = None
     if source is None:
-        raise BadRequestException("A statutory change needs the official source document (an existing SourceArtifact).")
+        raise BadRequestException(f"Source document {source_id} does not exist.")
     if source.superseded_by_id is not None:
         raise BadRequestException(f"Source document {source.id} has been superseded; use its replacement.")
-    if verify and not (source.checksum_sha256 and source.file_path and source.reviewer_id
-                       and source.reviewer_id != source.created_by_id and "[UNVERIFIED" not in (source.title or "")):
-        raise BadRequestException("Signing needs a stored, hashed source document reviewed by a Super Admin other "
-                                  "than its uploader (and not itself marked UNVERIFIED).")
     return source
 
 
-def _marked(label: Optional[str], signed: bool, limit: int) -> str:
-    base = " ".join((label or "").replace(MARK, " ").split())
-    if signed:
-        return base[:limit]
-    return (base[:limit - len(MARK) - 1] + " " + MARK).strip()
+def _marked(label: Optional[str], signed: bool = True, limit: int = 150) -> str:
+    """The plain label: no row is ever marked "[PENDING G1]" again (gate removal, owner decision 2026-11-25);
+    an old marker on an already-seeded row is stripped on its next edit."""
+    return " ".join((label or "").replace(MARK, " ").split())[:limit]
 
 
 def _audit(db: Session, pack, actor_id, entity_type: str, entity_id: int, old: dict, new: dict, reason: str):
@@ -171,7 +169,7 @@ def rate_view(row) -> dict:
             "employerRatePct": _json(row.employer_rate_pct), "flatAmount": _json(row.flat_amount),
             "textValue": row.text_value, "effectiveFrom": _json(row.effective_from),
             "effectiveTo": _json(row.effective_to), "sourceDocumentId": row.source_document_id,
-            "signed": MARK not in (row.label or "")}
+            "signed": True}
 
 
 def slab_view(row) -> dict:
@@ -180,7 +178,7 @@ def slab_view(row) -> dict:
             "side": row.tax_regime, "treatment": row.assessment_basis, "state": row.jurisdiction_state,
             "minAmount": _json(row.min_amount), "maxAmount": _json(row.max_amount),
             "flatAmount": _json(row.flat_amount), "detail": row.tax_formula,
-            "sourceDocumentId": row.source_document_id, "signed": MARK not in (row.rate_label or "")}
+            "sourceDocumentId": row.source_document_id, "signed": True}
 
 
 RATE_FIELDS = {"employeeRatePct": "employee_rate_pct", "employerRatePct": "employer_rate_pct",
@@ -233,7 +231,7 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id) -> dic
     pack = _pack(db, row.jurisdiction_pack_id)
     _require_editable_pack(pack)
     reason = _reason(data)
-    verify = data.get("specialistVerified") is True
+    verify = False                       # no signing step (gate removal, owner decision 2026-11-25)
     source = _source(db, data.get("sourceDocumentId"), verify)
     if kind == "rate":
         allowed = dict(RATE_FIELDS)
@@ -284,17 +282,18 @@ def update_row(db: Session, kind: str, row_id: int, data: dict, actor_id) -> dic
             raise BadRequestException(f"{row.component_key} is still PENDING_G1: choose a value or NOT_SUPPORTED.")
     label_col = "label" if kind == "rate" else "rate_label"
     was_signed = MARK not in (getattr(row, label_col) or "")
-    signed = verify or (was_signed and not changed)
+    signed = True                        # every saved row is in force (no signing)
     setattr(row, label_col, _marked(getattr(row, label_col), signed, 100 if kind == "rate" else 150))
     if kind == "rate":
         row.employee_share = (f"{row.employee_rate_pct}%" if row.employee_rate_pct is not None else "—")[:50]
         row.employer_share = (f"{row.employer_rate_pct}%" if row.employer_rate_pct is not None else "—")[:50]
         row.total = _rate_total(row)
     old["signed"], new["signed"] = was_signed, signed
-    old["sourceDocumentId"], new["sourceDocumentId"] = row.source_document_id, source.id
+    if source is not None:
+        old["sourceDocumentId"], new["sourceDocumentId"] = row.source_document_id, source.id
+        row.source_document_id = source.id
     if data.get("page"):
         new["page"] = str(data["page"]).strip()[:60]
-    row.source_document_id = source.id
     _audit(db, pack, actor_id, f"my_statutory_{kind}", row.id, old, new, reason)
     return rate_view(row) if kind == "rate" else slab_view(row)
 
@@ -426,27 +425,6 @@ def replace_table(db: Session, pack_row_id: int, rule_type: str, rows: list, act
     return written
 
 
-def sign_rows(db: Session, refs: list, actor_id, reason: str, source_document_id=None) -> dict:
-    """Sign many rows at once through update_row (specialistVerified). All or
-    nothing: the first refusal raises, and the caller's transaction must be
-    rolled back (the API layer commits only on success)."""
-    if not refs:
-        raise BadRequestException("Choose at least one row to sign.")
-    signed = []
-    for ref in refs:
-        kind, row_id = ref.get("kind"), ref.get("id")
-        source_id = ref.get("sourceDocumentId", source_document_id)
-        if source_id is None:
-            from app.modules.payroll.models import ContributionRate, TaxSlab
-
-            model = {"rate": ContributionRate, "slab": TaxSlab}.get(kind)
-            row = db.get(model, row_id) if model is not None else None
-            source_id = getattr(row, "source_document_id", None)
-        signed.append(update_row(db, kind, row_id, {"reason": reason, "sourceDocumentId": source_id,
-                                                    "specialistVerified": True}, actor_id))
-    return {"signed": len(signed), "rows": signed}
-
-
 # Audit entity types written by this console (row edits, signatures, table
 # replacements); everyone behind one is a statutory editor of that pack.
 AUDIT_TYPES = ("my_statutory_rate", "my_statutory_slab", "my_statutory_table")
@@ -502,10 +480,8 @@ def signing_status(db: Session, pack_row_id: int) -> dict:
     pending_slabs, table_rows = {}, {}
     for s in slabs:
         table_rows[s.rule_type] = table_rows.get(s.rule_type, 0) + 1
-        if MARK in (s.rate_label or ""):
-            pending_slabs[s.rule_type] = pending_slabs.get(s.rule_type, 0) + 1
     return {"packId": pack.pack_id, "packRowId": pack.id, "version": pack.version, "status": pack.status,
-            "pendingRates": sorted(r.component_key for r in rates if MARK in (r.label or "")),
+            "pendingRates": [],                  # no signing: only empty / PENDING_G1 values block
             "emptyValues": sorted(r.component_key for r in rates if r.flat_amount is None and not r.text_value
                                   and r.employee_rate_pct is None and r.employer_rate_pct is None),
             "pendingPolicies": sorted(r.component_key for r in rates if (r.text_value or "") == "PENDING_G1"),
@@ -620,7 +596,7 @@ def add_golden_example(db: Session, pack_row_id: int, data: dict, actor_id) -> d
     row = TaxSlab(jurisdiction_pack_id=pack.id, organization_id=None, jurisdiction_country=MY, rule_type=rule,
                   min_amount=Decimal("0"), max_amount=None, rate_pct=Decimal("0"), filing_status=name,
                   rate_label=f"Authority example {name}"[:150], tax_formula=formula,
-                  source_document_id=source.id, sort_order=9000)
+                  source_document_id=source.id if source else None, sort_order=9000)
     db.add(row)
     db.flush()
     _audit(db, pack, actor_id, "my_statutory_slab", row.id, {}, {"ruleType": rule, "name": name,

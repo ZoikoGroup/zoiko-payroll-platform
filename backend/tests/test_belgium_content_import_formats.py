@@ -84,7 +84,7 @@ def test_csv_dry_run_then_import_writes_unsigned_rows(db, seeded):
     out = _run(db, seeded, data, "content.csv", dry_run=False)
     db.commit()
     rate = _rate(db, seeded, "be_rounding_onss")
-    assert out["written"] and rate.text_value == "CENT_HALF_UP" and c.PENDING_MARK in rate.label   # never signed
+    assert out["written"] and rate.text_value == "CENT_HALF_UP" and c.PENDING_MARK not in rate.label  # no marker: no signing since 2026-11-25
 
 
 def test_json_import_is_the_same_path(db, seeded):
@@ -94,7 +94,7 @@ def test_json_import_is_the_same_path(db, seeded):
                "content.json", dry_run=False)
     db.commit()
     assert out["written"] and out["errors"] == 0
-    assert c.PENDING_MARK in _rate(db, seeded, "be_rounding_onss").label
+    assert c.PENDING_MARK not in _rate(db, seeded, "be_rounding_onss").label  # no marker: no signing since 2026-11-25
 
 
 def test_a_changed_row_without_a_source_is_refused_and_nothing_is_written(db, seeded):

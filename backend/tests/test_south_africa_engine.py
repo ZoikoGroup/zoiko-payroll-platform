@@ -98,8 +98,31 @@ def test_section_7b_same_period_is_derived_not_claimed():
     assert out["items"][0]["earnedTo"] == "2026-09-30"
 
 
-def test_section_7b_outside_period_blocks_while_the_basis_is_pending():
+def test_section_7b_outside_period_blocks_while_the_basis_is_still_pending_g1():
+    # The narrow "value not yet provided" block: a basis that is still the
+    # literal PENDING_G1 blocks variable pay earned outside the pay period.
     ctx = _variable_context("2026-08-01", "2026-08-31")
+    ctx.rate_map["za_variable_remuneration_basis"].text_value = "PENDING_G1"
+    with pytest.raises(za.ZACalculationBlockedError) as exc:
+        za.calculate(ctx)
+    assert exc.value.key == "za_variable_remuneration_basis"
+    assert "value not yet provided" in exc.value.reason and "sign" not in exc.value.reason
+
+
+def test_section_7b_outside_period_passes_the_timing_check_under_payment_date():
+    # The owner-approved content value (PAYMENT_DATE, s7B accrues when paid):
+    # a prior-month bonus is timed by its payment, not blocked.
+    assert {r[0]: r for r in content.ZA_SCALAR_CONTENT}["za_variable_remuneration_basis"][5] == "PAYMENT_DATE"
+    ctx = _variable_context("2026-08-01", "2026-08-31")
+    assert ctx.rate_map["za_variable_remuneration_basis"].text_value == "PAYMENT_DATE"
+    pack = za._Pack(ctx.rate_map, None)
+    out = za.check_variable_remuneration(ctx, za.pay_components(ctx, pack), pack)
+    assert (out["basis"], out["samePeriod"]) == ("PAYMENT_DATE", False)
+
+
+def test_section_7b_empty_basis_still_blocks():
+    ctx = _variable_context("2026-09-01", "2026-09-30")
+    ctx.rate_map["za_variable_remuneration_basis"].text_value = None
     with pytest.raises(za.ZACalculationBlockedError) as exc:
         za.calculate(ctx)
     assert exc.value.key == "za_variable_remuneration_basis"
@@ -248,11 +271,44 @@ def test_age_65_reached_on_the_last_day_of_the_tax_year_earns_the_secondary_reba
     assert za.age_on(date(1962, 3, 1), date(2027, 2, 28)) == 64
 
 
-def test_signed_payment_date_basis_resolves_a_cross_year_payment():
+def test_payment_date_basis_resolves_a_cross_year_payment():
+    # The owner-approved content value is carried by the fixture as-is.
     ctx = _f1_context(pay_date="2027-03-01", period_end="2027-02-28")
-    ctx.rate_map["za_paye_tax_year_date_basis"].text_value = "PAYMENT_DATE"
+    assert ctx.rate_map["za_paye_tax_year_date_basis"].text_value == "PAYMENT_DATE"
     out = za.calculate(ctx)
     assert out["za_result"]["trace"]["taxYearEnd"] == "2028-02-29"
+
+
+def test_cross_year_payment_blocks_while_the_basis_is_still_pending_g1():
+    ctx = _f1_context(pay_date="2027-03-01", period_end="2027-02-28")
+    ctx.rate_map["za_paye_tax_year_date_basis"].text_value = "PENDING_G1"
+    with pytest.raises(za.ZACalculationBlockedError) as exc:
+        za.calculate(ctx)
+    assert exc.value.key == "za_paye_tax_year_date_basis"
+    assert "value not yet provided" in exc.value.reason
+
+
+def test_empty_tax_year_basis_blocks():
+    ctx = _f1_context()
+    ctx.rate_map["za_paye_tax_year_date_basis"].text_value = ""
+    with pytest.raises(za.ZACalculationBlockedError) as exc:
+        za.calculate(ctx)
+    assert exc.value.key == "za_paye_tax_year_date_basis"
+
+
+def test_a_row_still_labelled_pending_g1_calculates_when_its_value_is_present():
+    # Packs seeded before the gate removal (2026-11-25) still carry the
+    # "[PENDING G1]" label marker; the marker no longer blocks — only the value
+    # is read.
+    from types import SimpleNamespace
+
+    plain = za.calculate(_f1_context())
+    ctx = _f1_context()
+    ctx.rate_map = {key: SimpleNamespace(**vars(row), label=f"{key} [PENDING G1]")
+                    for key, row in ctx.rate_map.items()}
+    marked = za.calculate(ctx)
+    assert marked["tds"] == plain["tds"] == Decimal("11075.58")
+    assert marked["employee_esi"] == plain["employee_esi"] == Decimal("177.12")
 
 
 # ── platform wiring ─────────────────────────────────────────────────────────

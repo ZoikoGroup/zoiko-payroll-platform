@@ -2821,7 +2821,7 @@ export async function uploadBrCertificate(credentialId, file) {
 
 // ── South Africa (ZP-ZA-ENG-001; "ZA" — "SA" above is Saudi Arabia) ────────
 // Tenant routes in tenant_statutory_router.py. Every rule (four-eyes approval,
-// evidence, dormancy while ZA_TENANT_ONBOARDING_ENABLED is off) is enforced
+// evidence) is enforced
 // server-side; these calls only fetch or submit operator input. Rows come back
 // with snake_case keys, exactly as the router serialises them.
 const ZA = "/api/payroll/south-africa";
@@ -2884,7 +2884,7 @@ export const acceptZaParallelDifference = (diffId) => api.post(`${ZA}/parallel-d
 
 // Japan (ZP-JP-ENG-001) — routes in backend/app/modules/payroll/japan_org_router.py,
 // mounted under /api/payroll/japan. Every route acts on the caller's own
-// organisation and answers 404 while JP_TENANT_ONBOARDING_ENABLED is off.
+// organisation and answers 404 unless its payroll jurisdiction is Japan.
 // Four-eyes rules (creator != approver, requester != revealer's approver) are
 // enforced server-side; these calls only submit the operator's decision.
 // Payload keys are the backend's snake_case field names.
@@ -2974,7 +2974,6 @@ export const getJpSalaryPaymentReports = async (taxYear) =>
 export const getJpBonusReport = async (paidOn) => jpOne(await api.get(`${JP}/filings/bonus-report/${paidOn}`));
 export const getJpAnnualDetermination = async (year) => jpOne(await api.get(`${JP}/filings/annual-determination/${year}`));
 // Japan Phase 9 — release gates and parallel cycles (G7).
-export const getJpReadiness = async () => jpOne(await api.get(`${JP}/readiness`));
 export const listJpParallelImports = async () => jpList(await api.get(`${JP}/parallel-imports`));
 export const createJpParallelImport = (payload) => api.post(`${JP}/parallel-imports`, payload);
 export const getJpParallelImport = async (id) => jpOne(await api.get(`${JP}/parallel-imports/${id}`));
@@ -2986,7 +2985,7 @@ export const acceptJpParallelDifference = (id) => api.post(`${JP}/parallel-diffe
 
 // New Zealand (ZP-NZ-ENG-001) — routes in backend/app/modules/payroll/nz_org_router.py,
 // mounted under /api/payroll/new-zealand. Every route acts on the caller's own
-// organisation and answers 404 while NZ_TENANT_ONBOARDING_ENABLED is off.
+// organisation and answers 404 unless its payroll jurisdiction is New Zealand.
 // Writes carry a `reason` (NZ-024); four-eyes approvals are enforced
 // server-side. The IRD number is only ever sent on create; responses are
 // masked except the single-use reveal. Payload keys are the backend's
@@ -2995,7 +2994,6 @@ const NZ = "/api/payroll/new-zealand";
 const nzList = (res) => (Array.isArray(res) ? res : res?.data || []);
 const nzOne = (res) => res?.data ?? res;
 export const getNzSummary = async () => nzOne(await api.get(`${NZ}/summary`));
-export const getNzReadiness = async () => nzOne(await api.get(`${NZ}/readiness`));
 export const listNzEmployerProfiles = async () => nzList(await api.get(`${NZ}/employer-profiles`));
 export const createNzEmployerProfile = (body) => api.post(`${NZ}/employer-profiles`, body);
 export const approveNzEmployerProfile = (id) => api.post(`${NZ}/employer-profiles/${id}/approve`, {});
@@ -3142,8 +3140,7 @@ const mxPdf = async (path, filename) => {
 };
 // Belgium (ZP-BE-ENG-001 Block A4) — routes in backend/app/modules/payroll/be_org_router.py,
 // mounted under /api/payroll/belgium. Every route acts on the caller's own
-// organisation and answers 404 while Belgium is dormant (BE_TENANT_ONBOARDING_ENABLED
-// off and the org not on the canary list). Versioned writes carry a `reason`;
+// organisation and answers 404 unless its payroll jurisdiction is Belgium. Versioned writes carry a `reason`;
 // four-eyes approvals and the single-use identifier reveal are enforced
 // server-side. NISS / BIS / the ONSS number are only ever sent on create;
 // responses are masked except the reveal. Payload keys are the backend's
@@ -3274,7 +3271,7 @@ export const acceptBeParallelDifference = (id) => api.post(`${BE}/parallel-diffe
 
 // Poland (ZP-PL-ENG-001) — routes in backend/app/modules/payroll/pl_org_router.py,
 // mounted under /api/payroll/poland. Every route acts on the caller's own
-// organisation and answers 404 while PL_TENANT_ONBOARDING_ENABLED is off.
+// organisation and answers 404 unless its payroll jurisdiction is Poland.
 // Versioned writes carry a `reason`; four-eyes approvals and the single-use
 // identifier reveal are enforced server-side. PESEL / NIP / NRS are only ever
 // sent on create; responses are masked except the reveal. Payload keys are the
@@ -3394,8 +3391,8 @@ export const analyzePayslipPdf = (formData) => api.post(`${PST}/import-pdf/analy
 export const createPayslipTemplateFromPdf = (payload) => api.post(`${PST}/import-pdf/create`, payload);
 
 // ── Malaysia (ZP-MY-ENG-001 Phase 8b) — organisation statutory setup ──────
-// Every route lives in my_org_router (/api/payroll/malaysia), dormant (404)
-// until Malaysia onboarding is enabled. Versioned records are captured as
+// Every route lives in my_org_router (/api/payroll/malaysia); 404 unless the
+// organisation's payroll jurisdiction is Malaysia. Versioned records are captured as
 // DRAFT and count only after a second user approves them; identifiers go to
 // the encrypted vault and come back masked.
 const MYP = "/api/payroll/malaysia";

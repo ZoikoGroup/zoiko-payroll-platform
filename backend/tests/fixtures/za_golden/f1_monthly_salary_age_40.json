@@ -26,10 +26,10 @@
         "text_value": "MONTHLY"
       },
       "za_paye_tax_year_date_basis": {
-        "text_value": "PENDING_G1"
+        "text_value": "PAYMENT_DATE"
       },
       "za_variable_remuneration_basis": {
-        "text_value": "PENDING_G1"
+        "text_value": "PAYMENT_DATE"
       },
       "za_rounding_mode": {
         "text_value": "HALF_UP"

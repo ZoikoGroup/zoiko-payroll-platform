@@ -59,7 +59,6 @@ def pl_world(world, monkeypatch):
     from app.modules.payroll.models import CompanyComplianceDetails
     from tests._pl_engine_helpers import ctx
 
-    monkeypatch.setattr(settings, "PL_TENANT_ONBOARDING_ENABLED", True)
     monkeypatch.setattr(settings, "PL_IDENTIFIER_KEYRING", json.dumps({"1": "k" * 32}))
     monkeypatch.setattr(settings, "PL_IDENTIFIER_FINGERPRINT_KEY", "p" * 32)
     db = world.db

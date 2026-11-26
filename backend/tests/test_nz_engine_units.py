@@ -45,9 +45,19 @@ def test_row_missing_and_out_of_window_block():
     _blocked(lambda: early.amount("nz_ks_default_rate"), "NZ_ROW_MISSING:nz_ks_default_rate")   # NZ-008
 
 
-def test_pending_label_blocks_even_when_values_exist():
-    pack = NzPack(*build_pack(pending=True), 1, PAYDAY)
-    _blocked(lambda: pack.amount("nz_acc_earner_levy_rate"), E.PACK_UNSIGNED)
+def test_a_pending_label_marker_no_longer_blocks_when_the_value_exists():
+    pack = NzPack(*build_pack(marked=True), 1, PAYDAY)
+    assert "[PENDING G1]" in pack.rate_map["nz_acc_earner_levy_rate"].label
+    assert pack.amount("nz_acc_earner_levy_rate") == D("1.75")
+    assert pack.rounder("nz_paye_rounding")(D("1.005")) == D("1.01")
+    assert pack.table("NZ_PAYE_METHOD", "paye_main_method")
+
+
+def test_a_marked_row_with_an_empty_or_pending_value_still_blocks():
+    pack = NzPack(*build_pack(marked=True, overrides={"nz_ks_employer_max_age": None,
+                                                     "nz_correction_policy": "PENDING_G1"}), 1, PAYDAY)
+    _blocked(lambda: pack.amount("nz_ks_employer_max_age"), "NZ_ROW_MISSING:nz_ks_employer_max_age")
+    _blocked(lambda: pack.text("nz_correction_policy"), "NZ_ROW_MISSING:nz_correction_policy")
 
 
 def test_an_empty_value_blocks_never_zero():

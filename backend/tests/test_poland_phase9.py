@@ -36,13 +36,12 @@ def test_examples_are_validated(text, message):
         poland_golden.parse_example(text)
 
 
-def test_examples_need_a_reviewed_source_and_replay_exactly(console):
+def test_examples_need_a_reason_and_replay_exactly(console):
     c = console
     add = lambda **d: c.psa.add_golden_example(c.db, c.pack, {"name": "F1", "taxFormula": F1,  # noqa: E731
                                                              "sourceDocumentId": c.source, "reason": "AC-PL-02", **d},
                                                c.editor)
-    with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        add(sourceDocumentId=c.draft_source)
+    # Gate removal (2026-11-25): the source document is optional provenance (no reviewed-source requirement).
     with pytest.raises(BadRequestException, match="change reason"):
         add(reason="")
     with pytest.raises(BadRequestException, match="taxFormula"):
@@ -52,8 +51,9 @@ def test_examples_need_a_reviewed_source_and_replay_exactly(console):
     add()
     with pytest.raises(BadRequestException, match="already has"):
         add()
-    blocked = c.psa.golden_check(c.db, c.pack)
-    assert blocked["examples"] == 1 and blocked["passed"] is False and blocked["results"][0]["error"]  # unsigned pack
+    seeded = c.psa.golden_check(c.db, c.pack)
+    # Gate removal (2026-11-25): the seeded pack carries the approved values, so it already replays F1.
+    assert seeded["examples"] == 1 and seeded["passed"] is True and seeded["results"][0]["error"] is None
     _sign_everything(c)
     out = c.psa.golden_check(c.db, c.pack)
     assert out["passed"] is True and out["results"][0]["failures"] == []
@@ -75,76 +75,6 @@ def _gate(state, key):
 
 def _check(gate, key):
     return next(c for c in gate["checks"] if c["key"] == key)
-
-
-def test_nothing_passes_on_a_fresh_draft_pack(console):
-    from app.modules.payroll import poland_readiness as r
-    from app.modules.payroll import poland_service as pl
-
-    state = r.pl_readiness(console.db)
-    assert state["allPassed"] is False and [g["gate"] for g in state["gates"]] == [g for g, _l, _o in r.GATES]
-    assert all(not g["passed"] for g in state["gates"])
-    g1 = _gate(state, "G1")
-    assert _check(g1, "pack_seeded")["ok"] and not _check(g1, "no_pending_rows")["ok"]
-    assert _check(g1, "authority_examples_match")["detail"].endswith("none recorded")
-    assert not _check(_gate(state, "G2"), "no_review_treatments")["ok"]
-    g4 = _check(_gate(state, "G4"), "form_schemas_archived")
-    assert not g4["ok"] and "DRA" in g4["detail"] and "PIT11" in g4["detail"]
-    assert "0 legal employer(s)" in _check(_gate(state, "G6"), "parallel_cycles")["detail"]
-    assert [e["tag"] for e in _gate(state, "G7")["evidence"]] == ["PL-GATE-G7", "PL-SIGNOFF-PRODUCT",
-                                                                  "PL-SIGNOFF-COMPLIANCE", "PL-SIGNOFF-ENGINEERING",
-                                                                  "PL-SIGNOFF-COMMERCIAL"]
-    unmet = pl.pl_unmet_requirements(console.db)
-    assert [u["key"] for u in unmet] == ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "PL-DECISION-D-7"]
-    assert all(u["detail"] for u in unmet)
-    summary = pl.statutory_summary(console.db)
-    assert summary["readiness"]["allPassed"] is False and len(summary["readiness"]["gates"]) == 7
-
-
-def test_g1_passes_only_with_signed_content_matching_examples_and_reviewed_evidence(console):
-    from app.modules.payroll import poland_readiness as r
-    from app.modules.payroll.models import SourceArtifact
-
-    c = console
-    c.psa.add_golden_example(c.db, c.pack, {"name": "F1", "taxFormula": F1, "sourceDocumentId": c.source,
-                                            "reason": "AC-PL-02"}, c.editor)
-    _sign_everything(c)
-    g1 = _gate(r.pl_readiness(c.db), "G1")
-    assert all(check["ok"] for check in g1["checks"]), g1["checks"]
-    assert g1["passed"] is False and g1["evidence"][0]["state"] == "OPEN"
-    evidence = SourceArtifact(agency="Zoiko", title="G1 signed register", form_number="PL-GATE-G1",
-                              checksum_sha256="b" * 64, file_path="evidence/pl-g1.pdf", created_by_id=c.editor)
-    c.db.add(evidence)
-    c.db.commit()
-    assert _gate(r.pl_readiness(c.db), "G1")["evidence"][0]["state"] == "SUBMITTED"
-    evidence.reviewer_id = c.editor                                          # the uploader cannot review it
-    c.db.commit()
-    assert _gate(r.pl_readiness(c.db), "G1")["passed"] is False
-    evidence.reviewer_id = c.approver
-    c.db.commit()
-    assert _gate(r.pl_readiness(c.db), "G1")["passed"] is True
-
-
-def test_the_registry_cannot_open_poland_while_a_gate_is_unmet(console):
-    from app.modules.billing.models import JurisdictionServiceRegistry
-    from app.modules.payroll import poland_service as pl
-    from app.modules.payroll import service
-
-    with pytest.raises(Exception) as raised:
-        pl._pl_service_registry_transition(console.db, service.SERVICE_REGISTRY_OPEN, "launch", console.editor)
-    assert "G1" in str(getattr(raised.value, "detail", raised.value))
-    console.db.rollback()
-    assert console.db.query(JurisdictionServiceRegistry).filter_by(country="PL").one().availability == "PLANNED"
-
-
-def test_g4_form_schemas_follow_the_catalogue(console, monkeypatch):
-    from app.modules.payroll import poland_readiness as r
-    from app.modules.payroll.engine.countries import poland_content as content
-
-    catalog = {k: {**v, "versions": {"1.0": {"effective_from": "2026-01-01"}}}
-               for k, v in content.PL_FORM_SCHEMA_CATALOG.items()}
-    monkeypatch.setattr(content, "PL_FORM_SCHEMA_CATALOG", catalog)
-    assert _check(_gate(r.pl_readiness(console.db), "G4"), "form_schemas_archived")["ok"] is True
 
 
 # ── G5: identifier key rotation ────────────────────────────────────────────
@@ -262,25 +192,6 @@ def test_g6_needs_two_employers_each_with_two_months(world):
 
 
 # ── AC-PL-08: canary ───────────────────────────────────────────────────────
-def test_canary_admits_only_the_listed_organisations(world, monkeypatch):
-    from app.config import settings
-    from app.modules.payroll import poland_dormancy as d
-    from app.modules.payroll.pl_org_router import require_pl_tenant
-    from tests._mx_employer_helpers import principal
-
-    w = world
-    assert d.onboarding_enabled(w.org) is False and d.entering_poland_refusal("MX", "PL", w.org)
-    monkeypatch.setattr(settings, "PL_CANARY_ORG_IDS", f" {w.org}, x, ")
-    assert d.canary_organization_ids() == frozenset({w.org})
-    assert d.onboarding_enabled(w.org) is True and d.onboarding_enabled(w.org + 1) is False
-    assert d.onboarding_enabled() is False                                   # no organisation, no canary
-    assert d.entering_poland_refusal("MX", "PL", w.org) is None
-    assert d.entering_poland_refusal("MX", "PL", w.org + 1) == d.DORMANT_MESSAGE
-    assert require_pl_tenant(principal(w.org), w.db) is None
-    with pytest.raises(NotFoundException, match="not open"):
-        require_pl_tenant(principal(w.org + 1), w.db)
-
-
 def test_phase_9_routes_are_exposed():
     from app.modules.payroll.pl_org_router import router
     from app.modules.super_admin.router import router as sa_router

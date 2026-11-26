@@ -4,7 +4,6 @@ import ZAPayeTab from "../../components/jurisdiction/southAfrica/ZAPayeTab";
 import ZAContributionsTab from "../../components/jurisdiction/southAfrica/ZAContributionsTab";
 import ZAEtiTab from "../../components/jurisdiction/southAfrica/ZAEtiTab";
 import ZALabourTab from "../../components/jurisdiction/southAfrica/ZALabourTab";
-import ZAReadinessTab from "../../components/jurisdiction/southAfrica/ZAReadinessTab";
 import EarningClassMatrix from "../../components/jurisdiction/EarningClassMatrix";
 import SourceEvidencePanel from "../../components/jurisdiction/SourceEvidencePanel";
 import TestCertificationPanel from "../../components/jurisdiction/TestCertificationPanel";
@@ -35,8 +34,7 @@ export function southAfricaExtraTabs() {
     tab("za-labour", "Labour & filing", ShieldCheck, "za-earning", ({ rates }) => (
       <ZALabourTab rates={rates} />
     )),
-    tab("za-readiness", "Readiness", Gauge, "za-labour", () => <ZAReadinessTab />),
-    tab("sources", "Sources", FileCheck2, "za-readiness", () => <SourceEvidencePanel />),
+    tab("sources", "Sources", FileCheck2, "za-labour", () => <SourceEvidencePanel />),
     tab("tests", "Tests", ShieldCheck, "sources", () => (
       <TestCertificationPanel
         jurisdiction="ZA"

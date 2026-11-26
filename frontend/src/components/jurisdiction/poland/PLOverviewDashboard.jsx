@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
-import { getPlDecisions, getPlSigningStatus, listPlPacks, seedPlDraftPack } from "../../../service/superAdminService";
+import { getPlSigningStatus, listPlPacks, seedPlDraftPack } from "../../../service/superAdminService";
 import { inputClass, labelClass } from "../constants";
 import { card } from "../japan/jpFormat";
 import { ErrorNote } from "../new_zealand/nzShared";
@@ -74,7 +74,6 @@ export function SeedDraftPanel() {
 
 export default function PLOverviewDashboard({ pack, onReload }) {
   const [status, setStatus] = useState(null);
-  const [decisions, setDecisions] = useState([]);
   const [error, setError] = useState(null);
 
   const load = useCallback(() => {
@@ -82,7 +81,6 @@ export default function PLOverviewDashboard({ pack, onReload }) {
     getPlSigningStatus(pack.id)
       .then((data) => { setStatus(data); setError(null); })
       .catch((e) => setError(e.message || "Could not load the signing status."));
-    getPlDecisions().then((rows) => setDecisions(rows || [])).catch(() => setDecisions([]));
   }, [pack]);
 
   useEffect(() => { load(); }, [load]);
@@ -131,17 +129,6 @@ export default function PLOverviewDashboard({ pack, onReload }) {
             ))}
         </div>
       )}
-      <div className={card} data-testid="pl-decisions">
-        <h3 className="mb-2 text-[14px] font-semibold text-foreground">Owner decisions</h3>
-        <ul className="space-y-1">
-          {decisions.map((d) => (
-            <li key={d.key} className="flex items-start justify-between gap-3 text-[12px]">
-              <span className="text-foreground">{d.key} — {d.label}{d.blocksLaunch ? " (blocks launch)" : ""}</span>
-              <span className={d.state === "RECORDED" ? "text-success" : "text-warning"}>{d.state}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
     </div>
   );
 }

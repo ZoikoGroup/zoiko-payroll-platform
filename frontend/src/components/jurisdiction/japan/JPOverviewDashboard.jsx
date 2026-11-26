@@ -1,10 +1,9 @@
 import { useMemo } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
-import { getJpStatutorySummary } from "../../../service/superAdminService";
-import { card, isPending, useLoad } from "./jpFormat";
+import { card, isPending } from "./jpFormat";
 
 // Japan pack overview (ZP-JP-ENG-001). Counts come from the selected pack's
-// canonical rows; the owner decisions come from the Japan statutory summary.
+// canonical rows.
 
 const TABLES = [
   ["JP_WHT_MONTHLY", "NTA monthly table", "G1"], ["JP_WHT_CMP_EID", "Computer method: income deduction", "G1"],
@@ -14,7 +13,6 @@ const TABLES = [
 ];
 
 export default function JPOverviewDashboard({ pack, rates, slabs, onReload }) {
-  const [summary] = useLoad(() => getJpStatutorySummary());
   const stats = useMemo(() => {
     if (!pack) return null;
     const all = [...(rates || []), ...(slabs || [])];
@@ -68,19 +66,6 @@ export default function JPOverviewDashboard({ pack, rates, slabs, onReload }) {
           ))}
         </ul>
       </div>
-      {summary?.decisions && (
-        <div className={card}>
-          <h3 className="mb-2 text-[14px] font-semibold text-foreground">Owner decisions</h3>
-          <ul className="space-y-1 text-[12px]">
-            {summary.decisions.map((d) => (
-              <li key={d.key} className="flex justify-between gap-3">
-                <span>{d.key} — {d.label}</span>
-                <span className={d.state === "RECORDED" ? "text-success" : "text-warning"}>{d.state}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }

@@ -5,7 +5,7 @@
 
 Steps (each create-only, nothing existing is ever changed):
   1. the jurisdiction_service_registry row for BE exists as PLANNED (an existing row is left exactly as it is);
-  2. the Draft pack BE-PAYROLL-2026 is seeded if NO Belgian pack exists (every row [PENDING G1], audited);
+  2. the Draft pack BE-PAYROLL-2026 is seeded if NO Belgian pack exists (approved spec values, other rows empty; audited);
   3. the evidence register S1-S24 is registered as source artifacts (title + URL, not archived);
   4. the read-only verification of DEPLOY_NOTES.md §3 is printed (exit 1 when a check fails).
 
@@ -87,7 +87,7 @@ def apply(db, actor_id=None) -> list:
                          jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference=be.SPEC,
                          old_value=None, new_value={"status": pack.status},
                          reason=f"Canonical {pack.pack_id} seeded as Draft by scripts/belgium_post_deploy_setup.py "
-                                "(every row [PENDING G1]).", auto_commit=False)
+                                "(approved spec values seeded, other rows empty).", auto_commit=False)
         done.append(f"pack: seeded {pack.pack_id} v{pack.version} as {pack.status}")
     else:
         done.append("pack: a Belgian pack exists — not seeded")

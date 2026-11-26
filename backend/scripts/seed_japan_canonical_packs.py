@@ -8,8 +8,9 @@ jurisdiction_service_registry row as PLANNED.
 
 Source: ZP-JP-ENG-001 v1.0 — the implementation specification.
 Every value is traceable to SOURCE_REFERENCES S1–S17 in japan_content.py
-and every row is PENDING G1. String scalars (MONTHLY, EQUAL, 06-05,
-PENDING_G1) live in ContributionRate.text_value, never flat_amount. The
+and no label carries a "[PENDING G1]" marker (gate removal, 2026-11-25).
+String scalars (MONTHLY, EQUAL, 06-05, PENDING_G1) live in
+ContributionRate.text_value, never flat_amount. The
 authority tables the specification does not reproduce (NTA tables, SMR
 grades, prefectural health rates, minimum wages) write no rows.
 

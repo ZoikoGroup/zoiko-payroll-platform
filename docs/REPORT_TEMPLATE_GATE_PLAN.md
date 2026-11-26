@@ -1,5 +1,7 @@
 # Report templates blocked by a country activation gate: plan
 
+> **Superseded 2026-11-25 (gate removal, owner decision).** The release gates, evidence, sign-offs and parallel-run requirements described here no longer apply: this country goes live like Spain once its pack is Active. See `docs/GATE_REMOVAL.md` and (for JP, NZ, PL, MY, ZA and BE: their template hooks no longer refuse). Kept for history.
+
 *Read-only analysis, 2026-11-18. No code, data, evidence, gate or decision was created, changed, verified or signed.*
 
 **Scope:** 38 Published report templates that the read-only dry run (`python -m scripts.report_stuck_published_templates`, group B) lists as refused by their country's `template_activation_refusal` hook:

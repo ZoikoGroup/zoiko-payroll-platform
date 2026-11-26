@@ -8,7 +8,7 @@ def test_new_zealand_resolves_to_nz(value):
     from app.core.jurisdiction import REGISTRATION_COUNTRIES, get_jurisdiction_code
 
     assert get_jurisdiction_code(value) == "NZ"
-    assert "New Zealand" not in REGISTRATION_COUNTRIES                # never registrable while dormant
+    assert "New Zealand" in REGISTRATION_COUNTRIES                    # registrable since the gate removal
 
 
 @pytest.mark.parametrize("value", ["New Zealand", "new zealand", "NZ", "Aotearoa"])
@@ -43,55 +43,6 @@ def test_ird_number_check_digit_rejects_invalid_numbers(value):
 
 
 # ── dormancy ───────────────────────────────────────────────────────────────
-def test_entering_new_zealand_is_refused_while_dormant(monkeypatch):
-    from app.config import settings
-    from app.modules.payroll import nz_dormancy as d
-
-    assert settings.NZ_TENANT_ONBOARDING_ENABLED is False
-    assert d.entering_nz_refusal("India", "New Zealand") == d.DORMANT_MESSAGE
-    assert d.entering_nz_refusal("NZ", "New Zealand") is None                   # already New Zealand
-    assert d.entering_nz_refusal("India", "Japan") is None                      # not New Zealand
-    monkeypatch.setattr(settings, "NZ_TENANT_ONBOARDING_ENABLED", True)
-    assert d.entering_nz_refusal("India", "New Zealand") is None
-
-
-def test_country_change_into_new_zealand_is_blocked(db):
-    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_change_block_reason
-
-    assert "New Zealand is not open" in get_jurisdiction_change_block_reason(db, "India", "New Zealand")
-
-
-@pytest.mark.parametrize("value", ["NZ", "New Zealand"])
-def test_company_jurisdiction_cannot_become_new_zealand(db, value):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll import service
-    from app.modules.payroll.schemas import CompanyDetailsUpdate
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="NZ Test Org", code="NZTEST", country=None)
-    service.get_company_details(db, t.org.id)
-    with pytest.raises(BadRequestException, match="New Zealand is not open"):
-        service.update_company_details(db, t.org.id, CompanyDetailsUpdate(jurisdictionCountry=value))
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("NZ", "New Zealand")
-
-
-def test_backfill_never_makes_an_org_new_zealand(db):
-    from app.modules.organizations.models import Organization
-    from app.modules.payroll import service
-    from tests._mx_employer_helpers import make_org
-
-    t = make_org(db, name="NZ Backfill Org", code="NZBACK", country=None)
-    db.get(Organization, t.org.id).country = "New Zealand"
-    db.commit()
-    assert (service.get_company_details(db, t.org.id).jurisdiction_country or "") not in ("NZ", "New Zealand")
-
-
-def test_new_zealand_is_not_an_employee_country_while_dormant():
-    from app.modules.payroll.employee_validation import is_supported_employee_country
-
-    assert is_supported_employee_country("NZ") is False
-
-
 # ── fail-closed calculation dispatch ───────────────────────────────────────
 def test_nz_never_falls_through_to_the_generic_calculator():
     from app.modules.payroll.engine import standard
@@ -121,7 +72,7 @@ def test_nz_registered_with_shared_gates():
     from app.modules.payroll.engine.tax_resolver import _REGISTRY_ROW_REQUIRED_COUNTRIES
 
     assert "NZ" in _VALIDATION_ENABLED_COUNTRIES
-    assert "NZ" in _REGISTRY_ROW_REQUIRED_COUNTRIES
+    assert "NZ" not in _REGISTRY_ROW_REQUIRED_COUNTRIES                # gate removal 2026-11-25
 
 
 @pytest.mark.parametrize("mode", ["simple", "standard", "enterprise"])

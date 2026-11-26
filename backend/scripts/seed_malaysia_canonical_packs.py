@@ -7,16 +7,17 @@ and one row per labour territory) and every earning-class row from
 engine/countries/malaysia_content.py, plus Malaysia's
 jurisdiction_service_registry row as PLANNED.
 
-Source: ZP-MY-ENG-001 v1.0. Every row is written UNSIGNED ([PENDING G1]);
-contribution schedules, public holidays and PCB tables are NOT seeded — they
-are loaded from the official documents through the statutory workbook and
-signed in the Super Admin console.
+Source: ZP-MY-ENG-001 v1.0. Rows are written WITHOUT the [PENDING G1] label
+marker (gate removal, owner decision 2026-11-25, Spain model): a row with a
+value calculates; an empty / PENDING_G1 value still blocks. Contribution
+schedules, public holidays and PCB tables are NOT seeded — they are loaded
+from the official documents through the statutory workbook.
 
 Governance: nothing is ever set Active here — activation follows signing, a
 distinct approver and my_pack_activation_refusal. The registry row is created
 only when missing (an existing row is never changed). A pack that has left
-Draft, or a Draft already being signed (a console edit or signature, a signed
-row, or any schedule / holiday / table row), is never re-seeded: that work
+Draft, or a Draft already being edited (a console edit or signature, or any
+schedule / holiday / table row), is never re-seeded: that work
 would be erased. The Super Admin console offers the same seed
 (POST /api/super-admin/compliance/malaysia/seed-draft) while no pack exists —
 the preferred production path (no shell, no environment file).
@@ -103,7 +104,7 @@ def seed_malaysia(db) -> dict:
         jurisdiction_pack_id=pack.id, tax_version=pack.version, legal_reference=SPEC,
         old_value=None, new_value={"status": pack.status, "availability": availability},
         reason=f"Canonical Malaysia pack {pack.pack_id} v{pack.version} seeded from {SPEC} "
-               "(scripts/seed_malaysia_canonical_packs.py) — Draft, every row unsigned.",
+               "(scripts/seed_malaysia_canonical_packs.py) — Draft.",
         auto_commit=False,
     )
     db.flush()

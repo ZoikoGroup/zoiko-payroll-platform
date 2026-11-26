@@ -5,9 +5,9 @@ Organisation API for Belgium statutory setup (ZP-BE-ENG-001 Block A1, D4),
 mounted inside payroll_router as /api/payroll/belgium. Same house rules as the
 Poland organisation router:
 
-  * Dormancy: the router-level guard refuses EVERY route with 404 unless
-    belgium_dormancy admits the caller's organisation (flag or canary) AND the
-    organisation's payroll jurisdiction is Belgium.
+  * Scope: the router-level guard refuses EVERY route with 404 when the
+    caller's payroll jurisdiction is not Belgium. There is no onboarding
+    switch (gate removal, owner decision 2026-11-25).
   * The organisation is always the caller's own; no route takes an org id, and
     every child id is checked against that organisation in the service.
   * Reads need a payroll operator; writes need an org admin and a reason;
@@ -30,14 +30,14 @@ from app.modules.payroll import belgium_service as be
 
 
 def require_be_tenant(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
-    from app.modules.payroll import belgium_dormancy, service
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.payroll import service
 
     org_id = getattr(current_user, "organization_id", None)
-    if not belgium_dormancy.onboarding_enabled(org_id):
-        raise NotFoundException(belgium_dormancy.DORMANT_MESSAGE)
     if org_id is None:
         return
-    if not belgium_dormancy.is_belgium(service._resolve_org_country(db, org_id)):
+    country = service._resolve_org_country(db, org_id)
+    if not country or get_jurisdiction_code(country) != "BE":
         raise NotFoundException("The Belgium API is only available to organisations whose payroll "
                                 "jurisdiction is Belgium.")
 

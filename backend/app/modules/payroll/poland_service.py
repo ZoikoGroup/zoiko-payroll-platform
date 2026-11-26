@@ -39,7 +39,7 @@ from app.core.exceptions import BadRequestException, NotFoundException
 
 PL = "PL"
 SPEC = "ZP-PL-ENG-001 v1.0"
-PENDING_G1_SUFFIX = " [PENDING G1]"
+PENDING_G1_SUFFIX = " [PENDING G1]"   # legacy label marker: no longer written, never blocks
 NOT_CONFIGURED = "NOT CONFIGURED"
 STATUS_DRAFT, STATUS_ACTIVE, STATUS_SUPERSEDED = "DRAFT", "ACTIVE", "SUPERSEDED"
 
@@ -51,7 +51,8 @@ def seed_poland_pack(db: Session, *, effective_from: date = date(2026, 1, 1),
       * every scalar parameter (ContributionRate) with its value in the slot its
         kind names (employee/employer pct, flat_amount, text_value) and its own
         legal effective_from / effective_to where it has one; empty-by-design
-        rows are written as NOT CONFIGURED and pending;
+        rows are written as NOT CONFIGURED (they block only the calculation
+        that needs them); labels never carry a "[PENDING G1]" marker;
       * the PIT scale (TaxSlab rule_type="PL_PIT_BAND", published bases);
       * every earning-classification row (TaxSlab rule_type="PL_EARNING_CLASS",
         filing_status = component, tax_regime = obligation,
@@ -103,11 +104,10 @@ def seed_poland_pack(db: Session, *, effective_from: date = date(2026, 1, 1),
     def dec(value):
         return Decimal(str(value)) if value is not None else None
 
-    def pending(label, flag, limit):
-        return (label[:limit - len(PENDING_G1_SUFFIX)] + PENDING_G1_SUFFIX) if flag else label[:limit]
-
     order = 0
-    for (key, label, ee, er, flat, text, src, is_pending, eff_from, eff_to, _basis) in content.POLAND_SCALAR_CONTENT:
+    # Labels are written plain: no "[PENDING G1]" marker (gate removal, owner
+    # decision 2026-11-25). The content tuple's not-in-spec flag is informational.
+    for (key, label, ee, er, flat, text, src, _not_in_spec, eff_from, eff_to, _basis) in content.POLAND_SCALAR_CONTENT:
         order += 1
         ee_shown = f"{ee}%" if ee is not None else "—"
         er_shown = f"{er}%" if er is not None else "—"
@@ -119,7 +119,7 @@ def seed_poland_pack(db: Session, *, effective_from: date = date(2026, 1, 1),
             total = text if text is not None else str(flat)
         db.add(ContributionRate(
             jurisdiction_pack_id=pack.id, organization_id=None, jurisdiction_country=PL,
-            component_key=key, label=pending(label, is_pending, 100),
+            component_key=key, label=label[:100],
             employee_share=ee_shown[:50], employer_share=er_shown[:50], total=total[:50],
             employee_rate_pct=dec(ee), employer_rate_pct=dec(er),
             flat_amount=dec(flat), text_value=text,
@@ -152,30 +152,18 @@ def seed_poland_pack(db: Session, *, effective_from: date = date(2026, 1, 1),
 def pl_pack_activation_refusal(db: Session, pack, actor_id: Optional[int] = None) -> Optional[str]:
     """Why a Polish pack must NOT be activated, or None.
 
-    A pack is refused while ANY canonical row still carries the [PENDING G1]
-    marker or is NOT CONFIGURED (spec §15 G1: NO-GO if any supported result
-    relies on guessed or uncited content), or while a scalar row has no
-    source document. Becomes the `pack_activation_refusal` hook in Phase 4;
-    four-eyes approval is enforced separately by the shared approval lists."""
+    Structural checks only (gate removal, owner decision 2026-11-25): the pack holds content and a
+    PIT scale. No signing / source-document gate: a row without a value
+    blocks only the calculation that needs it."""
     from app.modules.payroll.models import ContributionRate, TaxSlab
 
     if (getattr(pack, "jurisdiction_country", None) or "").upper() != PL:
         return None
     rates = (db.query(ContributionRate)
              .filter(ContributionRate.jurisdiction_pack_id == pack.id,
-                     ContributionRate.organization_id.is_(None)).all())
+                     ContributionRate.organization_id.is_(None)).count())
     if not rates:
         return "This pack has no Polish statutory rows yet. Set up the catalogue and load values first."
-    unsigned = sorted(r.component_key for r in rates
-                      if (r.label or "").endswith(PENDING_G1_SUFFIX.strip()) or r.total == NOT_CONFIGURED
-                      or (r.text_value or "") == "PENDING_G1")
-    if unsigned:
-        shown = ", ".join(unsigned[:8]) + (f" (+{len(unsigned) - 8} more)" if len(unsigned) > 8 else "")
-        return (f"Poland pack {pack.pack_id} still has {len(unsigned)} unsigned or unconfigured row(s): "
-                f"{shown}. Gate G1 must sign them before activation (ZP-PL-ENG-001 §15).")
-    unsourced = sorted(r.component_key for r in rates if r.source_document_id is None)
-    if unsourced:
-        return f"Poland pack {pack.pack_id} has rows without a source document: {', '.join(unsourced[:8])}."
     slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
                                       TaxSlab.organization_id.is_(None)).all())
     if not any(s.rule_type == "PL_PIT_BAND" for s in slabs):
@@ -1409,14 +1397,9 @@ def _pl_pack_holidays(db: Session, year: int) -> list:
 
 
 def _pl_template_activation_refusal(db: Session, template, actor_id=None) -> Optional[str]:
-    country = (getattr(template, "jurisdiction_country", None) or "").upper()
-    report_type = str(getattr(template, "report_type", "") or "").upper()
-    if country != PL and not report_type.startswith("PL_"):
-        return None
-    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
-
-    return ActivationRefusal("Poland ZUS / PIT form templates stay inactive until the official schemas are archived "
-                             "and the filing path is certified (gate G4, PL-019).", JURISDICTION_GATE, gate="G4")
+    """Report templates follow the normal template governance, like every other
+    country (gate removal, owner decision 2026-11-25): no jurisdiction gate refuses them."""
+    return None
 
 
 def _pl_payment_treatment(db: Session, organization_id: int, run, items: list) -> dict:
@@ -1428,11 +1411,9 @@ def _pl_payslip_hold_view(item) -> Optional[dict]:
 
 
 def _pl_statutory_editors(db: Session, pack) -> set:
-    """Super Admins who edited or signed a statutory row of this pack version
-    (Phase 7a signing console): the pack approval refuses every one of them."""
-    from app.modules.payroll import pl_super_admin
-
-    return pl_super_admin.statutory_editors(db, pack)
+    """No extra editor exclusion (gate removal, owner decision 2026-11-25): the platform-wide rule that the
+    approver is not the pack's last editor still applies."""
+    return set()
 
 
 def ensure_pl_service_registry_row(db: Session) -> str:
@@ -1534,22 +1515,8 @@ def _pl_retention_settings():
         has_statutory_profile=_has_statutory_profile, report_matches=_is_report)
 
 
-def pl_unmet_requirements(db: Session) -> list:
-    """[{key, label, detail}] of every unmet release gate G1-G7 and launch-
-    blocking owner decision, re-derived now (poland_readiness, Phase 9)."""
-    from app.modules.payroll import poland_readiness
-
-    return poland_readiness.pl_unmet_requirements(db)
-
-
-def _pl_readiness_overview(db: Session) -> dict:
-    from app.modules.payroll import poland_readiness
-
-    state = poland_readiness.pl_readiness(db)
-    return {"allPassed": state["allPassed"], "gates": state["gates"]}
-
-
 def statutory_summary(db: Session) -> dict:
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
     from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSlab
 
     m = _models()
@@ -1566,7 +1533,7 @@ def statutory_summary(db: Session) -> dict:
         return db.query(model).filter(model.status == STATUS_ACTIVE).count()
 
     return {
-        "jurisdiction": PL, "spec": SPEC, "available": False,
+        "jurisdiction": PL, "spec": SPEC, "available": get_jurisdiction_onboarding_block_reason(db, PL) is None,
         "packs": [{"id": p.id, "packId": p.pack_id, "version": p.version, "status": p.status,
                    "effectiveFrom": p.effective_from.isoformat() if p.effective_from else None,
                    "effectiveTo": p.effective_to.isoformat() if p.effective_to else None} for p in packs],
@@ -1578,10 +1545,7 @@ def statutory_summary(db: Session) -> dict:
         "activeWorkerProfiles": active(m.PayrollPlWorkerProfile),
         "approvedStatements": db.query(m.PayrollPlDeclaration).filter(
             m.PayrollPlDeclaration.status == "APPROVED").count(),
-        "decisions": owner_decisions(db),
-        "readiness": _pl_readiness_overview(db),
-        "unmet": pl_unmet_requirements(db),
-        "note": "Poland stays PLANNED until every release gate G1-G7 and owner decision passes.",
+        "note": "Poland opens like Spain once an Active pack exists (no release gates since 2026-11-25).",
     }
 
 
@@ -1589,7 +1553,9 @@ def _pl_service_registry_transition(db: Session, target: str, reason: str, actor
     from app.modules.payroll import service
 
     def readiness():
-        return pl_unmet_requirements(db), {}
+        # No release gates, evidence or owner decisions (gate removal, owner
+        # decision 2026-11-25): only the reason and a named Super Admin remain.
+        return [], None
 
     return service.transition_service_registry(
         db, PL, target, reason, actor_id, label="Poland", readiness=readiness,

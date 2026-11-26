@@ -137,11 +137,6 @@ def test_g4_needs_two_accepted_months_for_every_launch_employer(world, monkeypat
         ok, detail = bp.be_g4_state(w.db, frozenset({w.org}))
     assert ok and "1 of 1" in detail
     assert bp.be_g4_state(w.db, frozenset({w.org, 999}))[0] is False
-    monkeypatch.setattr(settings, "BE_CANARY_ORG_IDS", str(w.org))
-    from app.modules.payroll import belgium_readiness
-
-    g4 = [c for c in belgium_readiness.be_code_checks(w.db)["G4"]]
-    assert g4 and g4[0]["ok"]
 
 
 # ── golden replay (G1) ─────────────────────────────────────────────────────
@@ -224,49 +219,3 @@ def test_a_mismatch_or_a_missing_case_fails_and_blocks_activation(db, monkeypatc
 
 
 # ── readiness G1-G7 ────────────────────────────────────────────────────────
-def test_every_gate_is_red_without_evidence_and_available_is_refused(db):
-    from app.modules.payroll import belgium_readiness as r
-    from app.modules.payroll import belgium_service as be
-
-    state = r.be_readiness(db)
-    assert [g["gate"] for g in state["gates"]] == ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
-    assert not any(g["passed"] for g in state["gates"]) and not state["allPassed"]
-    checks = {g["gate"]: {c["key"]: c for c in g["checks"]} for g in state["gates"]}
-    assert checks["G3"]["transmission_adapter"]["ok"] is False
-    assert checks["G1"]["pack_seeded"]["ok"] is False
-    assert {"be-owner-content", "be-owner-specialist"} <= set(checks["G7"])
-    unmet = be.be_unmet_requirements(db)
-    assert {u["key"] for u in unmet} >= {"G1", "G2", "G3", "G4", "G5", "G6", "G7"}
-    summary = be.be_statutory_summary(db)
-    assert summary["status"] == "NOT_CERTIFIED" and set(summary["gates"].values()) == {"NOT MET"}
-    assert len(summary["gateDetails"]) == 7
-    be.ensure_be_service_registry_row(db)
-    db.commit()
-    with pytest.raises((BadRequestException, HTTPException)):
-        be._be_service_registry_transition(db, "AVAILABLE", "TEST ONLY go live")
-
-
-def test_g2_sector_coverage_names_each_uncovered_line(world, monkeypatch):
-    from app.config import settings
-    from app.modules.payroll import belgium_readiness as r
-
-    w = world
-    monkeypatch.setattr(settings, "BE_CANARY_ORG_IDS", str(w.org))
-    g2 = {c["key"]: c for c in r.be_code_checks(w.db)["G2"]}
-    assert g2["launch_employers_named"]["ok"]
-    detail = g2["sector_coverage"]["detail"]
-    assert not g2["sector_coverage"]["ok"] and "1 without certified" in detail and f"[{w.org}]" in detail
-    assert f"#{w.employee.id}" not in detail and w.employee.name not in detail          # counts only
-    assert g2["no_special_regimes"]["ok"]
-
-
-def test_g5_counts_accepted_filings_of_launch_employers(world, monkeypatch):
-    from app.config import settings
-    from app.modules.payroll import belgium_readiness as r
-
-    w = world
-    monkeypatch.setattr(settings, "BE_CANARY_ORG_IDS", str(w.org))
-    g5 = {c["key"]: c for c in r.be_code_checks(w.db)["G5"]}
-    assert g5["accepted_dimona"]["ok"]                      # the fixture's accepted Dimona IN
-    assert not g5["accepted_dmfa"]["ok"] and not g5["reconciled_obligation"]["ok"]
-    assert not g5["be-filing-e2e"]["ok"]

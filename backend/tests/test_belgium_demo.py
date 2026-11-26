@@ -92,7 +92,7 @@ def test_the_demo_pack_is_labelled_signed_active_and_the_real_pack_is_untouched(
     assert "DEMO PLACEHOLDER" in by_key["be_wht_applicability_rule"].label           # NOT FOUND -> fake placeholder
     assert _demo().be_seed_demo_pack(db).id == pack.id                               # idempotent
     real_rates = db.query(ContributionRate).filter_by(jurisdiction_pack_id=real.id).all()
-    assert real.status == "Draft" and all(c.PENDING_MARK in r.label for r in real_rates)
+    assert real.status == "Draft" and not any(c.PENDING_MARK in r.label for r in real_rates)
 
 
 def test_governed_activation_and_assignment_refuse_the_demo_pack(db, demo_org):

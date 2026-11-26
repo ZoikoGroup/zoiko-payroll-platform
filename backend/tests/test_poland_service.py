@@ -411,13 +411,13 @@ def test_retention_registry_template_and_activation_hooks(world):
     settings = retention_service.settings("PL")
     assert settings.country == "PL" and settings.period_decision == "D-7"
     template = SimpleNamespace(jurisdiction_country="PL", report_type="PL_DRA")
-    assert "G4" in jurisdiction_hooks.call("PL", "template_activation_refusal", w.db, template, None)
+    assert jurisdiction_hooks.call("PL", "template_activation_refusal", w.db, template, None) is None  # gate removal 2026-11-25
     assert jurisdiction_hooks.call("PL", "template_activation_refusal", w.db,
                                    SimpleNamespace(jurisdiction_country="ZA", report_type="ZA_EMP201"), None) is None
     pack = SimpleNamespace(jurisdiction_country="PL", id=0, pack_id="PL-PAYROLL-2026")
     assert "no Polish statutory rows yet" in jurisdiction_hooks.call("PL", "pack_activation_refusal", w.db, pack, None)
     summary = jurisdiction_hooks.call("PL", "statutory_summary", w.db)
-    assert summary["available"] is False and [u["key"] for u in summary["unmet"]][:2] == ["G1", "G2"]
+    assert summary["available"] is False and "unmet" not in summary             # no gates since 2026-11-25
 
 
 def test_poland_cannot_be_opened_before_the_gates(world):
@@ -425,21 +425,6 @@ def test_poland_cannot_be_opened_before_the_gates(world):
 
     with pytest.raises(Exception):
         jurisdiction_hooks.call("PL", "service_registry_transition", world.db, "AVAILABLE", "launch", world.a)
-
-
-def test_router_is_dormant_and_poland_only(world, monkeypatch):
-    from app.config import settings
-    from app.modules.payroll.pl_org_router import require_pl_tenant
-    from tests._mx_employer_helpers import make_org, principal
-
-    w = world
-    with pytest.raises(NotFoundException, match="not open"):
-        require_pl_tenant(principal(w.org), w.db)
-    monkeypatch.setattr(settings, "PL_TENANT_ONBOARDING_ENABLED", True)
-    assert require_pl_tenant(principal(w.org), w.db) is None
-    other = make_org(w.db, name="Other", code="PLOTHER", country="MX")
-    with pytest.raises(NotFoundException, match="only available"):
-        require_pl_tenant(principal(other.org.id), w.db)
 
 
 def test_router_exposes_identifiers_only_masked():

@@ -9,10 +9,10 @@ from engine/countries/malaysia_content.py, the activation refusal that keeps
 a pack carrying any unsigned, unconfigured or empty content from ever
 becoming Active, and Malaysia's PLANNED service-registry row.
 
-Every seeded row is UNSIGNED ("[PENDING G1]"): a value taken from a document
-— even the specification — is "extracted", not verified. Rows become usable
-only when signed through my_super_admin (source stored, hashed and reviewed
-by a second Super Admin).
+Gate removal (owner decision 2026-11-25, Spain model): seeded rows no longer
+carry the "[PENDING G1]" label marker, and a row with a value calculates.
+Only an empty value or a policy still at "PENDING_G1" blocks (the calculation
+that needs it).
 """
 
 from datetime import date, timedelta
@@ -34,8 +34,10 @@ def _content():
 
 
 def pending_label(label: str, limit: int) -> str:
-    """An UNSIGNED label: the [PENDING G1] marker always fits."""
-    return label[:limit - len(PENDING_G1_SUFFIX)] + PENDING_G1_SUFFIX
+    """The label a seeded / loaded row is written with. Gate removal (owner
+    decision 2026-11-25, Spain model): the "[PENDING G1]" marker is no longer
+    appended — any legacy marker is stripped — and the label is cut to fit."""
+    return " ".join((label or "").replace(PENDING_G1_SUFFIX.strip(), " ").split())[:limit]
 
 
 def rate_total(ee, er, flat, text) -> str:
@@ -77,7 +79,7 @@ def seed_malaysia_pack(db: Session, *, effective_from: date = date(2026, 1, 1),
       * every earning-classification row (TaxSlab rule_type="MY_EARNING_CLASS");
       * NO schedule, holiday or PCB-table rows — those come from the official
         documents through the workbook.
-    Every row is written UNSIGNED. Draft only; a pack that has left Draft is
+    No row carries the "[PENDING G1]" marker (gate removal 2026-11-25). Draft only; a pack that has left Draft is
     never rewritten, and a Draft pack's canonical rows are replaced wholesale
     (organisation-scoped rows are never touched)."""
     from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSlab
@@ -140,44 +142,18 @@ def seed_malaysia_pack(db: Session, *, effective_from: date = date(2026, 1, 1),
 def my_pack_activation_refusal(db: Session, pack, actor_id: Optional[int] = None) -> Optional[str]:
     """Why a Malaysian pack must NOT be activated, or None.
 
-    Refused while ANY canonical row is unsigned ([PENDING G1]), NOT
-    CONFIGURED or PENDING_G1, while a row has no source document, or while a
-    required table (EPF / PERKESO / EIS / foreign-worker schedules, public
-    holidays) holds no rows (spec §16 G1: NO-GO if a supported result relies
-    on guessed or uncited content; MY-005 schedules are legal content)."""
-    from app.modules.payroll.models import ContributionRate, TaxSlab
+    Structural check only (gate removal, owner decision 2026-11-25): the pack holds content. No
+    signing / source-document / schedule-completeness gate: a missing value
+    or schedule blocks only the calculation that needs it."""
+    from app.modules.payroll.models import ContributionRate
 
     if (getattr(pack, "jurisdiction_country", None) or "").upper() != MY:
         return None
-    content = _content()
-    marker = PENDING_G1_SUFFIX.strip()
     rates = (db.query(ContributionRate)
              .filter(ContributionRate.jurisdiction_pack_id == pack.id,
-                     ContributionRate.organization_id.is_(None)).all())
+                     ContributionRate.organization_id.is_(None)).count())
     if not rates:
         return "This pack has no Malaysian statutory rows yet. Set up the catalogue and load values first."
-    unsigned = sorted(r.component_key for r in rates
-                      if marker in (r.label or "") or r.total == NOT_CONFIGURED
-                      or (r.text_value or "") == content.PENDING)
-    if unsigned:
-        shown = ", ".join(unsigned[:8]) + (f" (+{len(unsigned) - 8} more)" if len(unsigned) > 8 else "")
-        return (f"Malaysia pack {pack.pack_id} still has {len(unsigned)} unsigned or unconfigured row(s): "
-                f"{shown}. Gate G1 must sign them before activation (ZP-MY-ENG-001 §16).")
-    unsourced = sorted(r.component_key for r in rates if r.source_document_id is None)
-    if unsourced:
-        return f"Malaysia pack {pack.pack_id} has rows without a source document: {', '.join(unsourced[:8])}."
-    slabs = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
-                                      TaxSlab.organization_id.is_(None)).all())
-    unsigned_slabs = [s for s in slabs if marker in (s.rate_label or "")]
-    if unsigned_slabs:
-        kinds = sorted({s.rule_type for s in unsigned_slabs})
-        return (f"Malaysia pack {pack.pack_id} still has {len(unsigned_slabs)} unsigned table row(s) "
-                f"({', '.join(kinds)}).")
-    present = {s.rule_type for s in slabs}
-    missing = [rule for rule in content.REQUIRED_TABLES if rule not in present]
-    if missing:
-        return (f"Malaysia pack {pack.pack_id} has no rows for: {', '.join(missing)} — load them from the "
-                "official schedules (MY-005).")
     return None
 
 
@@ -207,42 +183,38 @@ def _my_seeded_packs(db: Session) -> list:
 def my_seed_blockers(db: Session) -> list:
     """Why seeding now would be wrong. seed_malaysia_pack replaces a Draft
     pack's canonical rows wholesale, so a pack that has left Draft — or a
-    Draft a Super Admin has already started signing (any console edit or
-    signature, any signed row, or any schedule / holiday / PCB / example row
+    Draft a Super Admin has already started editing (any console edit or
+    signature, or any schedule / holiday / PCB / example row
     loaded from the official documents or the workbook) — is never re-seeded:
     that work would be erased."""
     from app.modules.payroll import my_super_admin
-    from app.modules.payroll.models import ContributionRate, TaxSlab
+    from app.modules.payroll.models import TaxSlab
 
     content = _content()
-    marker = f"%{PENDING_G1_SUFFIX.strip()}%"
     blockers = []
     for pack in _my_seeded_packs(db):
         if pack.status != "Draft":
             blockers.append(f"{pack.pack_id} is {pack.status}, not Draft — it is never rewritten")
             continue
         editors = my_super_admin.statutory_editors(db, pack)
-        signed = (db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == pack.id,
-                                                    ContributionRate.organization_id.is_(None),
-                                                    ~ContributionRate.label.like(marker)).count()
-                  + db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
-                                             TaxSlab.organization_id.is_(None),
-                                             ~TaxSlab.rate_label.like(marker)).count())
+        # Gate removal (2026-11-25): seeded labels no longer carry the
+        # "[PENDING G1]" marker, so an unmarked label is no longer evidence of
+        # signing work; console edits (editors) and loaded tables still are.
         tables = (db.query(TaxSlab).filter(TaxSlab.jurisdiction_pack_id == pack.id,
                                            TaxSlab.organization_id.is_(None),
                                            TaxSlab.rule_type != content.MY_EARNING_CLASS_RULE).count())
-        if editors or signed or tables:
-            blockers.append(f"{pack.pack_id} is already being signed ({len(editors)} editor(s), {signed} signed "
-                            f"row(s), {tables} schedule/holiday/table row(s)) — re-seeding would erase that work")
+        if editors or tables:
+            blockers.append(f"{pack.pack_id} is already being edited ({len(editors)} editor(s), "
+                            f"{tables} schedule/holiday/table row(s)) — re-seeding would erase that work")
     return blockers
 
 
 # ── Year rollover (copy a pack to the next tax year as Draft) ───────────────
 # Malaysia's tax year is the calendar year. The next year's pack is a Draft
-# copy of the previous one with EVERY row re-marked [PENDING G1]: values are
-# prefilled for convenience but nothing is calculable until a Super Admin
-# re-signs each row against the new year's official source, and a distinct
-# approver activates it (my_pack_activation_refusal). Year-specific tables —
+# copy of the previous one with its values prefilled (gate removal 2026-11-25:
+# no row is re-marked [PENDING G1]; a legacy marker is stripped). A Super
+# Admin reviews the values against the new year's official sources before
+# activation (my_pack_activation_refusal). Year-specific tables —
 # public holidays, PCB tables, authority examples — are NOT copied: they must
 # be loaded fresh for the new year. Rows that expired before the new year are
 # dropped; rows that started earlier start on 1 January of the new year.
@@ -260,8 +232,9 @@ def _rollover_window(source) -> tuple:
 
 
 def _repend(label: Optional[str], limit: int) -> str:
-    base = " ".join((label or "").replace(PENDING_G1_SUFFIX.strip(), " ").split())
-    return pending_label(base, limit)
+    """The rolled-over label: since the gate removal (2026-11-25) no marker
+    is re-added; a legacy marker is stripped."""
+    return pending_label(label, limit)
 
 
 def _rollover_rows(db: Session, source, start: date) -> tuple:
@@ -322,7 +295,7 @@ def rollover_malaysia_pack(db: Session, source, actor_id=None, reason: str = "")
                             currency=source.currency, regulatory_authority=source.regulatory_authority,
                             source_document_id=source.source_document_id,
                             change_summary=(f"Rolled over from {source.pack_id} v{source.version} — every row "
-                                            f"PENDING G1 until re-signed against {start.year} sources.")[:500])
+                                            f"to be reviewed against {start.year} sources.")[:500])
     if actor_id is not None:
         pack.updated_by_id = actor_id
     db.add(pack)
@@ -345,7 +318,7 @@ def rollover_malaysia_pack(db: Session, source, actor_id=None, reason: str = "")
                      old_value={"sourcePackId": source.pack_id, "sourceStatus": source.status},
                      new_value={"status": pack.status, "rates": len(rates), "slabs": len(slabs)},
                      reason=(f"{reason} - " if reason else "") + f"{target_id} rolled over from {source.pack_id} "
-                            "as Draft; every row PENDING G1; holidays, PCB tables and authority examples not copied.",
+                            "as Draft; values prefilled; holidays, PCB tables and authority examples not copied.",
                      auto_commit=False)
     db.flush()
     return pack
@@ -1460,22 +1433,15 @@ def _my_pack_holidays(db: Session, year: int) -> list:
 
 
 def _my_template_activation_refusal(db: Session, template, actor_id=None) -> Optional[str]:
-    country = (getattr(template, "jurisdiction_country", None) or "").upper()
-    report_type = str(getattr(template, "report_type", "") or "").upper()
-    if country != MY and not report_type.startswith("MY_"):
-        return None
-    from app.modules.payroll.template_activation import JURISDICTION_GATE, ActivationRefusal
-
-    return ActivationRefusal("Malaysia statutory form templates stay inactive until the official authority layouts are "
-                             "archived and the filing path is certified (gate G3, MY-022).", JURISDICTION_GATE, gate="G3")
+    """Report templates follow the normal template governance, like every other
+    country (gate removal, owner decision 2026-11-25): no jurisdiction gate refuses them."""
+    return None
 
 
 def _my_statutory_editors(db: Session, pack) -> set:
-    """Super Admins who edited or signed a statutory row of this pack version:
-    the pack approval refuses every one of them."""
-    from app.modules.payroll import my_super_admin
-
-    return my_super_admin.statutory_editors(db, pack)
+    """No extra editor exclusion (gate removal, owner decision 2026-11-25): the platform-wide rule that the
+    approver is not the pack's last editor still applies."""
+    return set()
 
 
 MY_RETENTION_CATEGORIES = (
@@ -1568,21 +1534,6 @@ def _my_retention_settings():
         has_statutory_profile=_has_statutory_profile, report_matches=_is_report)
 
 
-def my_unmet_requirements(db: Session) -> list:
-    """[{key, label, detail}] of every unmet release gate G1-G7 and launch-
-    blocking owner decision, re-derived now (malaysia_readiness, Phase 10)."""
-    from app.modules.payroll import malaysia_readiness
-
-    return malaysia_readiness.my_unmet_requirements(db)
-
-
-def _my_readiness_overview(db: Session) -> dict:
-    from app.modules.payroll import malaysia_readiness
-
-    state = malaysia_readiness.my_readiness(db)
-    return {"allPassed": state["allPassed"], "gates": state["gates"]}
-
-
 def my_vault_stale_rows(db: Session) -> Optional[int]:
     """ACTIVE vault rows not under the newest key version, or None when no
     keyring is configured (presence only; no key is read into a result)."""
@@ -1599,6 +1550,7 @@ def my_vault_stale_rows(db: Session) -> Optional[int]:
 
 
 def statutory_summary(db: Session) -> dict:
+    from app.modules.payroll.engine.tax_resolver import get_jurisdiction_onboarding_block_reason
     from app.modules.payroll.models import ContributionRate, JurisdictionPack, TaxSlab
 
     m = _models()
@@ -1615,7 +1567,7 @@ def statutory_summary(db: Session) -> dict:
         return db.query(model).filter(model.status == STATUS_ACTIVE).count()
 
     return {
-        "jurisdiction": MY, "spec": SPEC, "available": False,
+        "jurisdiction": MY, "spec": SPEC, "available": get_jurisdiction_onboarding_block_reason(db, MY) is None,
         "packs": [{"id": p.id, "packId": p.pack_id, "version": p.version, "status": p.status,
                    "effectiveFrom": p.effective_from.isoformat() if p.effective_from else None,
                    "effectiveTo": p.effective_to.isoformat() if p.effective_to else None} for p in packs],
@@ -1628,10 +1580,7 @@ def statutory_summary(db: Session) -> dict:
         "activeWorkAssignments": active(m.PayrollMyWorkAssignment),
         "approvedDeclarations": db.query(m.PayrollMyTaxDeclaration).filter(
             m.PayrollMyTaxDeclaration.status == "APPROVED").count(),
-        "decisions": owner_decisions(db),
-        "readiness": _my_readiness_overview(db),
-        "unmet": my_unmet_requirements(db),
-        "note": "Malaysia stays PLANNED until every release gate G1-G7 and owner decision passes.",
+        "note": "Malaysia opens like Spain once an Active pack exists (no release gates since 2026-11-25).",
     }
 
 
@@ -1639,7 +1588,9 @@ def _my_service_registry_transition(db: Session, target: str, reason: str, actor
     from app.modules.payroll import service
 
     def readiness():
-        return my_unmet_requirements(db), {}
+        # No release gates, evidence or owner decisions (gate removal, owner
+        # decision 2026-11-25): only the reason and a named Super Admin remain.
+        return [], None
 
     return service.transition_service_registry(
         db, MY, target, reason, actor_id, label="Malaysia", readiness=readiness,

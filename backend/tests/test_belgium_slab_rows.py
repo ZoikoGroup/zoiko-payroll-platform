@@ -107,8 +107,6 @@ def test_dimension_format_is_canonical_and_round_trips():
 def test_add_band_row_needs_source_reason_and_fields(db, seeded, source):
     from app.core.exceptions import BadRequestException
 
-    with pytest.raises(BadRequestException, match="source document"):
-        _add(db, seeded, "be_red_social_work_bonus", reason="r", minAmount="0", ratePct="1")
     with pytest.raises(BadRequestException, match="reason"):
         _add(db, seeded, "be_red_social_work_bonus", sourceDocumentId=source.id, minAmount="0", ratePct="1")
     with pytest.raises(BadRequestException, match="needs: ratePct or flatAmount"):
@@ -120,23 +118,7 @@ def test_add_band_row_needs_source_reason_and_fields(db, seeded, source):
              ratePct="1")
     view = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="0",
                 maxAmount="100", ratePct="1")
-    assert view["ruleType"] == "BE_RED_SOCIAL_WORK_BONUS" and view["signed"] is False
-
-
-def test_signing_needs_a_reviewed_source(db, seeded, source):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll.models import SourceArtifact
-
-    unarchived = db.query(SourceArtifact).filter(SourceArtifact.form_number == "ZP-BE-ENG-001 S24").one()
-    pending = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=unarchived.id,
-                   minAmount="0", ratePct="1")
-    with pytest.raises(BadRequestException, match="reviewed by a Super Admin"):
-        _sign_slab(db, pending["id"], unarchived.id)
-    db.rollback()
-    view = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="1",
-                ratePct="1")
-    assert view["signed"] is False
-    assert _sign_slab(db, view["id"], source.id)["signed"] is True
+    assert view["ruleType"] == "BE_RED_SOCIAL_WORK_BONUS" and view["signed"] is True     # in force on save
 
 
 def test_onss_employer_dimensions_need_the_signed_code_lists(db, seeded, source):
@@ -145,7 +127,7 @@ def test_onss_employer_dimensions_need_the_signed_code_lists(db, seeded, source)
     row = dict(reason="r", sourceDocumentId=source.id, minAmount="0", ratePct="1")
     with pytest.raises(BadRequestException, match="exactly the dimensions EC, WC"):
         _add(db, seeded, "be_onss_employer_base_rate", **row)
-    with pytest.raises(BadRequestException, match="not signed yet"):
+    with pytest.raises(BadRequestException, match="has no value yet"):
         _add(db, seeded, "be_onss_employer_base_rate", dimension="EC=EC1;WC=WC1", **row)
     _sign_codes(db, seeded, source)
     with pytest.raises(BadRequestException, match="EC=EC9 is not in the signed"):
@@ -208,9 +190,7 @@ def test_slab_editors_cannot_approve_and_edits_invalidate_approval(db, seeded, s
     _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="0", ratePct="1")
     db.refresh(seeded)
     assert seeded.approved_by_id is None                          # shared _invalidate_pack_approval_on_edit
-    assert EDITOR in jurisdiction_hooks.call("BE", "statutory_editors", db, seeded)
-    with pytest.raises(BadRequestException):
-        service.set_jurisdiction_pack_approver(db, seeded.id, actor_id=EDITOR)
+    assert jurisdiction_hooks.call("BE", "statutory_editors", db, seeded) == set()      # gate removal 2026-11-25
 
 
 def test_retire_is_draft_only_with_a_full_before_image(db, seeded, source):
@@ -265,28 +245,16 @@ def _sign_everything(db, pack, source_id):
     db.commit()
 
 
-def test_activation_refused_while_a_band_key_has_no_signed_rows(db, seeded, source):
+def test_a_band_key_without_signed_rows_no_longer_blocks_activation(db, seeded, source):
+    """Structural activation check only (gate removal 2026-11-25): missing slab rows block the
+    calculation that needs them, not the activation."""
     from app.modules.payroll import belgium_service
 
     _sign_everything(db, seeded, source.id)
     marker = _rate(db, seeded, "be_red_social_work_bonus")
     marker.text_value = "SLAB_ROWS"
     db.commit()
-    assert "be_red_social_work_bonus (slab rows missing or unsigned)" in \
-        belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER)
-    _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="0", ratePct="1")
-    assert "be_red_social_work_bonus (slab rows missing or unsigned)" in \
-        belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER)   # added but unsigned
-    added = _add(db, seeded, "be_red_social_work_bonus", reason="r", sourceDocumentId=source.id, minAmount="10",
-                 ratePct="1")
-    _sign_slab(db, added["id"], source.id)
-    from app.modules.payroll.models import TaxSlab
-
-    for s in db.query(TaxSlab).filter(TaxSlab.rule_type == "BE_RED_SOCIAL_WORK_BONUS"):
-        s.rate_label = s.rate_label.replace(_c().PENDING_MARK, "").strip()
-    db.commit()
-    # content complete: what remains is the Block C2 golden gate (no authority example yet)
-    assert "the authority examples do not replay exactly" in belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER)
+    assert belgium_service.be_pack_activation_refusal(db, seeded, actor_id=APPROVER) is None
 
 
 # ── BePack over slab rows ──────────────────────────────────────────────────
@@ -323,10 +291,10 @@ def test_band_lookup_by_dimension_never_falls_back(db):
         pack.band("be_wage_rmmmg")                                         # not a band key
 
 
-def test_unsigned_slab_rows_block(db):
-    with _blocked("BE_CONTENT_PENDING"):
-        _pack(_MARKER, [_band_row("EC=EC1;WC=WC1", "10", label="x [PENDING G1]")]).band(
-            "be_onss_employer_base_rate", EC="EC1", WC="WC1")
+def test_a_legacy_pending_label_on_a_slab_row_no_longer_blocks(db):
+    rows = _pack(_MARKER, [_band_row("EC=EC1;WC=WC1", "10", label="x [PENDING G1]")]).band(
+        "be_onss_employer_base_rate", EC="EC1", WC="WC1")
+    assert [r["rate_pct"] for r in rows] == ["10"]
 
 
 def test_band_row_dates_select_by_pay_date():
@@ -343,20 +311,20 @@ def _holiday(day, label="Synthetic day"):
             "tax_formula": label}
 
 
-def test_public_holidays_are_signed_only_and_block_when_pending_or_not_supported():
+def test_public_holidays_block_when_the_marker_is_empty_or_not_supported():
     marker = {"be_public_holidays": {"component_key": "be_public_holidays", "label": "x", "text_value": "SLAB_ROWS"}}
     days = [_holiday(date(2026, 3, 3)), _holiday(date(2026, 1, 2)), _holiday(date(2025, 12, 31))]
     assert _pack(marker, days).public_holidays(2026) == [(date(2026, 1, 2), "Synthetic day"),
                                                          (date(2026, 3, 3), "Synthetic day")]
-    with _blocked("BE_CONTENT_PENDING"):
-        _pack(marker, days + [_holiday(date(2026, 5, 5), "x [PENDING G1]")]).public_holidays(2026)
+    assert (date(2026, 5, 5), "x [PENDING G1]") in _pack(                # legacy label: display only
+        marker, days + [_holiday(date(2026, 5, 5), "x [PENDING G1]")]).public_holidays(2026)
     with _blocked("BE_TABLE_EMPTY"):
         _pack(marker, days).public_holidays(2030)
     with _blocked("BE_FEATURE_BLOCKED"):
         _pack({"be_public_holidays": dict(marker["be_public_holidays"], text_value="NOT_SUPPORTED")},
               days).public_holidays(2026)
     with _blocked("BE_CONTENT_PENDING"):
-        _pack({"be_public_holidays": dict(marker["be_public_holidays"], label="x [PENDING G1]")},
+        _pack({"be_public_holidays": dict(marker["be_public_holidays"], label="x [PENDING G1]", text_value="")},
               days).public_holidays(2026)
 
 

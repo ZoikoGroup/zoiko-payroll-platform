@@ -23,7 +23,7 @@ _LITERAL = re.compile(r"""["'](BE_[A-Z0-9_]+)["']""")
 
 # Literals that are names, not operational codes (each says what it is).
 IDENTIFIERS = {
-    "BE_TENANT_ONBOARDING_ENABLED": "setting", "BE_CANARY_ORG_IDS": "setting", "BE_DEMO_PACKS_ENABLED": "setting",
+    "BE_DEMO_PACKS_ENABLED": "setting",
     "BE_DEMO_ORG_IDS": "setting", "BE_IDENTIFIER_KEYRING": "setting", "BE_IDENTIFIER_FINGERPRINT_KEY": "setting",
     "BE_ABS_MATERNITY_MULTIPLE": "pack rule type", "BE_AUTHORITY_EXAMPLE": "pack rule type",
     "BE_EARNING_CLASS": "pack rule type", "BE_PUBLIC_HOLIDAY": "pack rule type",

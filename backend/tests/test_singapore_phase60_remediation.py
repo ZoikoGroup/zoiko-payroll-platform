@@ -279,8 +279,9 @@ def test_f2_opt_in_is_singapore_only():
     decision 2026-11-25, four-eyes). No other country is silently widened."""
     from app.modules.payroll.service import _APPROVER_NOT_ACTIVATOR_COUNTRIES
 
+    # ZA, PL, MY and BE left the list with the gate removal, owner decision 2026-11-25.
     assert _APPROVER_NOT_ACTIVATOR_COUNTRIES == (
-        "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "ZA", "PL", "MY", "BE", "DE")
+        "SG", "SE", "HK", "CH", "SA", "NL", "MX", "BR", "DE")
 
 
 # ══ F3 — 2026 / 2027 pack effective periods ════════════════════════════════

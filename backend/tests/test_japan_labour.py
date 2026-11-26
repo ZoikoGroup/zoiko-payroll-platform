@@ -473,10 +473,26 @@ def test_night_minutes_come_from_the_signed_window_and_clock_pair():
     assert D(trace["premiumFloor"]) == D("2187.5")                 # 7h x 1,250 x 25%
 
 
-def test_two_premium_categories_need_the_signed_combination_rule():
+def test_two_premium_categories_combine_additively():
+    # Owner-approved ADDITIVE (2026-11-25): 2h overtime that is also night time
+    # = 2h x 1,250 x (100% + 25% + 25%) = 3,750.
     day = {"worked_minutes": 600, "scheduled_minutes": 480, "statutory_day_off": False,
            "night_minutes": 120}
-    _blocks(_ctx(gross=D(305000), basic=D(300000), overtime=D(5000),
+    result = japan.calculate(_ctx(gross=D(305000), basic=D(300000), overtime=D(5000),
+                                  slabs=_signed_overtime(_ctx().slabs),
+                                  jp_hours=[day], jp_hours_approved=True))["jp_result"]
+    assert D(result["trace"]["labour"]["premiumFloor"]) == D(3750)
+
+
+@pytest.mark.parametrize("rule", ["PENDING_G1", None, "MULTIPLICATIVE"])
+def test_two_premium_categories_block_without_a_supported_combination_rule(rule):
+    from tests.test_japan_engine import _base_rate_map
+
+    rate_map = _base_rate_map()
+    rate_map["jp_premium_combination_rule"].text_value = rule
+    day = {"worked_minutes": 600, "scheduled_minutes": 480, "statutory_day_off": False,
+           "night_minutes": 120}
+    _blocks(_ctx(gross=D(305000), basic=D(300000), overtime=D(5000), rate_map=rate_map,
                  slabs=_signed_overtime(_ctx().slabs),
                  jp_hours=[day], jp_hours_approved=True),
             "jp_premium_combination_rule")

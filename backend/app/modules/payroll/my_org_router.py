@@ -5,10 +5,9 @@ Organisation API for Malaysia statutory setup (ZP-MY-ENG-001 Phase 5), mounted
 inside payroll_router as /api/payroll/malaysia. Same house rules as the Poland
 organisation router:
 
-  * Dormancy: the router-level guard refuses EVERY route with 404 while
-    Malaysia onboarding is off (MY_TENANT_ONBOARDING_ENABLED, or the canary
-    allow-list), or when the caller's payroll jurisdiction is not Malaysia.
-    Malaysia is dormant, not forbidden.
+  * Scope: the router-level guard refuses EVERY route with 404 when the
+    caller's payroll jurisdiction is not Malaysia. There is no onboarding
+    switch (gate removal, owner decision 2026-11-25).
   * The organisation is always the caller's own; no route takes an org id,
     and every child id is checked against that organisation in the service.
   * Reads need a payroll operator; writes need an org admin and a reason;
@@ -33,14 +32,14 @@ from app.modules.payroll import malaysia_service as my
 
 
 def require_my_tenant(current_user=Depends(get_current_payroll_operator), db: Session = Depends(get_db)):
-    from app.modules.payroll import malaysia_dormancy, service
+    from app.core.jurisdiction import get_jurisdiction_code
+    from app.modules.payroll import service
 
     org_id = getattr(current_user, "organization_id", None)
-    if not malaysia_dormancy.onboarding_enabled(org_id):
-        raise NotFoundException(malaysia_dormancy.DORMANT_MESSAGE)
     if org_id is None:
         return
-    if not malaysia_dormancy.is_malaysia(service._resolve_org_country(db, org_id)):
+    country = service._resolve_org_country(db, org_id)
+    if not country or get_jurisdiction_code(country) != "MY":
         raise NotFoundException("The Malaysia API is only available to organisations whose payroll "
                                 "jurisdiction is Malaysia.")
 

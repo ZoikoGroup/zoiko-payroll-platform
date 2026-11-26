@@ -1,4 +1,7 @@
-"""A new Belgian pack version copies its base version's rows UNSIGNED.
+"""A new Belgian pack version copies its base version's rows as they are.
+
+Gate removal (owner decision 2026-11-25): there is no signing step, so copied
+rows are no longer marked "[PENDING G1]". The history below is kept for context.
 
 service._clone_pack_rates copies every column, the label included, and a
 Belgian row's signed state is the absence of the "[PENDING G1]" label marker
@@ -36,36 +39,35 @@ def _new_version(db, base):
         effectiveFrom=base.effective_from, effectiveTo=base.effective_to, taxYear=base.tax_year), actor_id=701)
 
 
-def test_copied_rows_arrive_unsigned_with_their_values(db, seeded):
+def test_copied_rows_arrive_in_force_with_their_values(db, seeded):
+    """Gate removal (2026-11-25): no signing step, so a new version's copied rows are
+    not marked - values, sources and labels arrive exactly as in the base version."""
     from app.modules.payroll.models import TaxConfigurationAudit
 
     mark = _c().PENDING_MARK
     src = _verified_source(db)
     rates, _slabs = _rows(db, seeded)
-    signed = rates[0]
-    signed.text_value, signed.source_document_id = "SYNTHETIC", src.id
-    _sign_directly(db, signed)
-    assert mark not in signed.label
+    base_row = rates[0]
+    base_row.text_value, base_row.source_document_id = "SYNTHETIC", src.id
+    _sign_directly(db, base_row)
 
     new = _new_version(db, seeded)
     new_rates, _ = _rows(db, new)
     assert len(new_rates) == len(rates)
-    assert all(mark in r.label for r in new_rates)                         # every copied row: unsigned
-    copy = next(r for r in new_rates if r.component_key == signed.component_key)
+    assert not any(mark in (r.label or "") for r in new_rates)              # nothing marked
+    copy = next(r for r in new_rates if r.component_key == base_row.component_key)
     assert copy.text_value == "SYNTHETIC" and copy.source_document_id == src.id   # values / sources kept
-    db.refresh(signed)
-    assert mark not in signed.label                                        # the base version is untouched
-    audit = (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "jurisdiction_pack",
-                                                    TaxConfigurationAudit.entity_id == new.id,
-                                                    TaxConfigurationAudit.action == "update").one())
-    assert audit.actor_id == 701 and audit.new_value["unsignedRows"] >= 1 and "signs them again" in audit.reason
+    assert copy.label == base_row.label
+    marking = (db.query(TaxConfigurationAudit).filter(TaxConfigurationAudit.entity_type == "jurisdiction_pack",
+                                                      TaxConfigurationAudit.entity_id == new.id,
+                                                      TaxConfigurationAudit.action == "update").all())
+    assert not any("unsignedRows" in (a.new_value or {}) for a in marking)  # no "set unsigned" audit
     assert new.status == "Draft"                                           # nothing activated
 
 
-def test_copied_slab_rows_arrive_unsigned(db, seeded):
+def test_copied_slab_rows_keep_their_label(db, seeded):
     from app.modules.payroll.models import TaxSlab
 
-    mark = _c().PENDING_MARK
     row = TaxSlab(jurisdiction_pack_id=seeded.id, organization_id=None, jurisdiction_country="BE",
                   rule_type="SYNTHETIC_BAND", rate_label="Synthetic band", min_amount=0, rate_pct=0, tax_formula="SYNTHETIC")
     db.add(row)
@@ -73,7 +75,7 @@ def test_copied_slab_rows_arrive_unsigned(db, seeded):
     new = _new_version(db, seeded)
     _rates, slabs = _rows(db, new)
     copy = next(s for s in slabs if s.rule_type == "SYNTHETIC_BAND")
-    assert copy.rate_label == f"Synthetic band {mark}"
+    assert copy.rate_label == "Synthetic band"
 
 
 def test_the_marker_survives_a_full_length_label():

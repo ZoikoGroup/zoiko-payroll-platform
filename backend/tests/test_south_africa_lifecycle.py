@@ -142,8 +142,8 @@ def test_business_exceptions_are_detected(db, organization):
     r = run(db, organization)
     e1 = employee(db, organization, "ZA-X1")
     item = payslip(db, organization, r, e1, "directive_fixed_amount_8000")
-    # The engine itself BLOCKS a bonus today (BONUS is REVIEW for UIF and the 7B
-    # timing rule is PENDING_G1), so the variable pay and a retro earned period
+    # The engine itself BLOCKS a bonus today (BONUS is REVIEW for UIF — a value
+    # not yet provided), so the variable pay and a retro earned period
     # are planted in the stored context to prove the exception checks.
     snap = dict(item.za_calculation_snapshot)
     frozen = {**snap["frozenContext"], "ctx": {**snap["frozenContext"]["ctx"], "za_components": {"BONUS": "5000"},

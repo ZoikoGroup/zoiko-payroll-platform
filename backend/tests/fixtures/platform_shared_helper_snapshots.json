@@ -9,7 +9,7 @@
   "hk_registry_transition": "2026-10-13",
   "hk_statutory_summary": "2026-10-15",
   "sg_registry_transition": "2026-10-14",
-  "sg_statutory_summary": "2026-10-16"
+  "sg_statutory_summary": "2026-11-25"
  },
  "hk_activation_evidence_refusal": {
   "audits": [],
@@ -2030,7 +2030,7 @@
       "effectIfDifferent": "ALL_COUNTRIES widens the opt-in control sets to every jurisdiction — a separate cross-jurisdiction change with its own review",
       "evidenceRecorded": [],
       "evidenceTag": "SG-DECISION-D3",
-      "inForce": "SG_ONLY (plus per-country opt-ins: BE, BR, CH, DE, HK, MX, MY, NL, PL, SA, SE, ZA)",
+      "inForce": "SG_ONLY (plus per-country opt-ins: BR, CH, DE, HK, MX, NL, SA, SE)",
       "inForceValue": "SG_ONLY",
       "key": "D3",
       "label": "Scope of the Singapore-only governance controls",
@@ -2267,7 +2267,7 @@
      },
      {
       "basis": "runtime",
-      "evidence": "database [] vs code ['b7a1c9e3d5f2']",
+      "evidence": "database [] vs code ['c8d2f6a4e1b9']",
       "key": "migration",
       "label": "Migration",
       "status": "BLOCKED"
@@ -2359,7 +2359,7 @@
        "met": true
       },
       {
-       "detail": "database [] vs code ['b7a1c9e3d5f2']",
+       "detail": "database [] vs code ['c8d2f6a4e1b9']",
        "key": "migration",
        "label": "Database at the code's Alembic head",
        "met": false

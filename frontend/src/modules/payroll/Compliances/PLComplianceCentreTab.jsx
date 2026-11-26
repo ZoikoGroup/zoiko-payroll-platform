@@ -42,16 +42,6 @@ function SetupStatus() {
         ({summary.verifiedEmployerRegistrations ?? 0} verified), {summary.activeWorkerProfiles ?? 0} worker profile(s),{" "}
         {summary.approvedStatements ?? 0} statement(s).
       </p>
-      {(summary.readiness?.gates || []).length > 0 && (
-        <p className="mt-1" data-testid="pl-gates-passed">
-          Release gates: {summary.readiness.gates.filter((g) => g.passed).length} of {summary.readiness.gates.length} pass
-          {summary.readiness.gates.some((g) => !g.passed)
-            ? ` (open: ${summary.readiness.gates.filter((g) => !g.passed).map((g) => g.gate).join(", ")})` : ""}.
-        </p>
-      )}
-      {(summary.unmet || []).length > 0 && (
-        <p className="mt-1">Not yet met: {summary.unmet.map((u) => u.label).join("; ")}. Poland opens only when all pass.</p>
-      )}
     </div>
   );
 }

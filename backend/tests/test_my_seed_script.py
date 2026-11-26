@@ -56,8 +56,8 @@ def test_apply_seeds_a_draft_pack_and_registry_and_is_repeatable(db, run):
     summary = mys.my_seed_summary(db)
     main = summary["packs"][0]
     assert main["rates"] == summary["content"]["rates"] and main["slabs"] == summary["content"]["slabs"]
-    assert main["pending"] == main["rates"] + main["slabs"]                 # every row PENDING G1
-    assert main["activationRefusal"] and summary["registry"] == "PLANNED" and summary["blockers"] == []
+    assert main["pending"] == 0                                             # gate removal: no [PENDING G1] marker
+    assert main["activationRefusal"] is None and summary["registry"] == "PLANNED" and summary["blockers"] == []
     code, _ = run("--apply")                                                 # untouched Draft: safe re-run
     assert code == 0 and mys.my_seed_summary(db)["packs"] == summary["packs"]
 
@@ -107,18 +107,23 @@ def _seeded(db, run):
     return _packs(db)[content.MY_2026[0]]
 
 
-def test_a_signed_row_blocks_a_re_seed(db, run):
+def test_an_edited_row_blocks_a_re_seed_but_an_unmarked_label_alone_does_not(db, run):
+    """Gate removal (2026-11-25): seeded labels carry no marker, so an unmarked
+    label is not evidence of work; a console edit (audited) still is."""
     pack = _seeded(db, run)
     row = db.query(ContributionRate).filter_by(jurisdiction_pack_id=pack.id, component_key="my_min_wage_monthly",
                                                organization_id=None).one()
-    row.label = row.label.replace(mys.PENDING_G1_SUFFIX, "")
+    assert "[PENDING G1]" not in row.label and mys.my_seed_blockers(db) == []
+    row.flat_amount = 1800
+    db.add(TaxConfigurationAudit(actor_id=7, action="update", entity_type="my_statutory_rate", entity_id=row.id,
+                                 jurisdiction_pack_id=pack.id, reason="TEST edit"))
     db.commit()
-    assert "already being signed" in mys.my_seed_blockers(db)[0]
+    assert "already being edited" in mys.my_seed_blockers(db)[0]
     code, out = run("--apply")
     assert code == 2 and "refused — nothing written" in out.out
     assert run()[0] == 2                                                     # the dry run says it would refuse
     db.refresh(row)
-    assert not row.label.endswith("[PENDING G1]")                            # the signed work survived
+    assert row.flat_amount == 1800                                           # the edited work survived
 
 
 def test_a_loaded_schedule_or_holiday_row_blocks_a_re_seed(db, run):

@@ -81,13 +81,7 @@ def _t(**kw):
 
 
 @pytest.mark.parametrize("country,template,kind,gate", [
-    ("BE", _t(jurisdiction_country="BE"), "jurisdiction_gate", "G3"),
     ("BR", _t(jurisdiction_country="BR"), "not_built", None),
-    ("JP", _t(jurisdiction_country="JP"), "jurisdiction_gate", None),
-    ("MY", _t(jurisdiction_country="MY"), "jurisdiction_gate", "G3"),
-    ("NZ", _t(jurisdiction_country="NZ"), "jurisdiction_gate", "G3"),
-    ("PL", _t(jurisdiction_country="PL"), "jurisdiction_gate", "G4"),
-    ("ZA", _t(jurisdiction_country="ZA", report_type="ZA_IRP5_PREVIEW"), "jurisdiction_gate", None),
 ])
 def test_static_country_hooks_carry_kind_and_gate(country, template, kind, gate):
     from app.modules.payroll import jurisdiction_hooks
@@ -96,6 +90,19 @@ def test_static_country_hooks_carry_kind_and_gate(country, template, kind, gate)
     refusal = jurisdiction_hooks.call(country, "template_activation_refusal", None, template, 1)
     assert isinstance(refusal, ActivationRefusal), country
     assert (refusal.blocker_kind, refusal.gate) == (kind, gate)
+
+
+
+@pytest.mark.parametrize("country,template", [
+    ("BE", _t(jurisdiction_country="BE")), ("JP", _t(jurisdiction_country="JP")),
+    ("MY", _t(jurisdiction_country="MY")), ("NZ", _t(jurisdiction_country="NZ")),
+    ("PL", _t(jurisdiction_country="PL")), ("ZA", _t(jurisdiction_country="ZA", report_type="ZA_IRP5_PREVIEW")),
+])
+def test_gate_removed_countries_have_no_template_gate(country, template):
+    """gate removal 2026-11-25: these countries' templates follow the normal governance."""
+    from app.modules.payroll import jurisdiction_hooks
+
+    assert jurisdiction_hooks.call(country, "template_activation_refusal", None, template, 1) is None
 
 
 def test_hong_kong_hook_kinds(db):
@@ -155,9 +162,9 @@ def test_country_gate_check(db, admins):
     from app.modules.payroll import service
 
     a, b, c = admins
-    t = _to_published(db, _template(db, a, "BE", "AC-BE"), a, b)
+    t = _to_published(db, _template(db, a, "HK", "AC-HK"), a, b)          # HK: no source evidence linked
     check = service.report_template_status_check(db, t, "Active", c.id)
-    assert (check["blockerKind"], check["gate"]) == ("jurisdiction_gate", "G3")
+    assert (check["blockerKind"], check["gate"]) == ("jurisdiction_gate", None)
     assert check["message"] == _refusal_of(db, t, "Active", c)
 
 

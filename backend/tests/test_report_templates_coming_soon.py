@@ -184,8 +184,8 @@ def test_seeds_land_draft_and_rerun_writes_nothing(db, capsys):
 
 
 def test_activation_gates_are_unchanged(db):
-    """BE / JP / MY / NZ / PL refuse every template of theirs; SA has no extra
-    gate; FR / IT have no statutory module (maker-checker only)."""
+    """No country gate refuses BE / JP / MY / NZ / PL / SA templates (gate removal 2026-11-25);
+    FR / IT have no statutory module (maker-checker only)."""
     from app.modules.payroll import jurisdiction_hooks
     from app.modules.payroll.models import ReportTemplate
 
@@ -198,10 +198,7 @@ def test_activation_gates_are_unchanged(db):
             assert not jurisdiction_hooks.has_module(country)
             continue
         refusal = jurisdiction_hooks.call(country, "template_activation_refusal", db, template, None)
-        if country == "SA":
-            assert refusal is None
-        else:
-            assert refusal, template.template_key
+        assert refusal is None, template.template_key
 
 
 # ── every new path exists in a real engine result ────────────────────────────

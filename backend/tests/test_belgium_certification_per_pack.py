@@ -71,17 +71,6 @@ def test_a_pass_run_followed_by_a_row_edit_no_longer_counts(db, seeded):
     assert why.startswith("content changed after the last certification run for BE-PAYROLL-2026 v1.0")
 
 
-def test_signing_or_unsigning_a_row_also_invalidates_the_run(db, seeded):
-    from app.modules.payroll.models import ContributionRate
-
-    mark = _c().PENDING_MARK
-    _run(db, seeded)
-    row = db.query(ContributionRate).filter(ContributionRate.jurisdiction_pack_id == seeded.id).first()
-    row.label = row.label.replace(mark, "").strip()                   # signed (label marker removed)
-    db.commit()
-    assert _g().be_certification_for(db, seeded)[1].startswith("content changed after")
-
-
 def test_a_fail_run_never_counts(db, seeded):
     run = _run(db, seeded, status="FAIL")
     assert _g().be_certification_for(db, seeded) == (
@@ -99,18 +88,6 @@ def test_the_newest_run_for_the_pack_decides(db, seeded):
     latest = _run(db, seeded, status="FAIL")                         # ... superseded by a FAIL
     assert _g().be_certification_for(db, seeded)[0] == latest
     assert _g().be_certification_for(db, seeded)[1].endswith("is FAIL")
-
-
-def test_g1_and_activation_use_the_per_pack_rule(db, seeded, monkeypatch):
-    from app.modules.payroll import belgium_readiness as r
-
-    monkeypatch.setattr(r, "_today", lambda: date(2026, 11, 25))
-    _run(db, _other_pack(db, "BE-OTHER"))                             # a PASS elsewhere must not satisfy G1
-    gate = next(g for g in r.be_readiness(db)["gates"] if g["gate"] == "G1")
-    check = next(c for c in gate["checks"] if c["key"] == "golden_certification")
-    assert check["ok"] is False and "the last certification run was for BE-OTHER v1.0" in check["detail"]
-    refusal = _g().be_golden_refusal(db, seeded)                      # activation: refused (no examples first)
-    assert refusal and refusal.startswith("Belgium pack BE-PAYROLL-2026:")
 
 
 def test_recording_a_run_stores_the_pack_and_its_fingerprint(db, seeded):

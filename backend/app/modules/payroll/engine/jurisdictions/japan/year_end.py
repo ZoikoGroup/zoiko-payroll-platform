@@ -16,8 +16,8 @@ APPROVED declarations, and returns the difference against what was withheld:
     -> annual tax, rounded by jp_yea_rounding
     difference = withheld - annual tax  (positive: refund; negative: collect)
 
-Every table and value ships empty / PENDING_G1, so every case BLOCKS until G1
-signs them. No statutory number lives in this file.
+A case BLOCKS while a table it needs is empty or a value it reads is not yet
+provided (empty or literally PENDING_G1). No statutory number lives in this file.
 """
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def _rows(slabs, rule_type, as_of):
 def _table(slabs, rule_type, amount, pack, as_of):
     rows = _rows(slabs, rule_type, as_of)
     if not rows:
-        _wht._block(pack, rule_type, f"the {rule_type} table is empty (signed at G1)")
+        _wht._block(pack, rule_type, f"the {rule_type} table is empty (value not yet provided)")
     return _wht._band(rows, amount, rule_type, pack)
 
 
@@ -161,7 +161,7 @@ def year_end_tax(facts: dict, declarations: dict, slabs, pack, as_of=None) -> YE
         for category, count in sorted(categories.items()):
             row = rows.get(str(category).upper())
             if row is None or _wht._field(row, "flat_amount") is None:
-                _wht._block(pack, "JP_YEA_DEPENDANT", f"no signed deduction for dependant category {category}")
+                _wht._block(pack, "JP_YEA_DEPENDANT", f"no deduction value provided for dependant category {category}")
             if not isinstance(count, int) or count < 0:
                 _wht._block(pack, "JP_YEA_DEPENDANT", f"count for {category} is not a whole number")
             total += _wht._dec(_wht._field(row, "flat_amount")) * count

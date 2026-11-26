@@ -1,5 +1,5 @@
 {
-  "description": "February work paid on 1 March: the date that selects the tax year is PENDING_G1.",
+  "description": "February work paid on 1 March while the date that selects the tax year is still the literal PENDING_G1 (value not yet provided): BLOCKS. The content value is PAYMENT_DATE (see test_south_africa_engine.py).",
   "source": "ZP-ZA-ENG-001 v1.0 (22 Sep 2026) ZA-006.",
   "context": {
     "country": "ZA",
@@ -30,7 +30,7 @@
         "text_value": "PENDING_G1"
       },
       "za_variable_remuneration_basis": {
-        "text_value": "PENDING_G1"
+        "text_value": "PAYMENT_DATE"
       },
       "za_rounding_mode": {
         "text_value": "HALF_UP"

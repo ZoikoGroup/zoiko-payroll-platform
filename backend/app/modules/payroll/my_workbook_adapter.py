@@ -203,7 +203,7 @@ class MalaysiaWorkbookAdapter:
             results.append(wbk.RowResult(PARAMETERS, key, "CHANGED", ", ".join(f"{c}={v}" for c, v in new.items()
                                                                                  if v is not None),
                                          change={"kind": "rate", "id": rate.id, "values": new,
-                                                 "source": int(row["source_document_id"]),
+                                                 "source": (int(row["source_document_id"]) if row.get("source_document_id") not in (None, "") else None),
                                                  "page": row.get("page")}))
         return results
 
@@ -296,7 +296,7 @@ class MalaysiaWorkbookAdapter:
                 continue
             results.append(wbk.RowResult(EARNING, ref, "CHANGED", f"{slab.assessment_basis} -> {treatment}",
                                          change={"kind": "slab", "id": slab.id, "treatment": treatment,
-                                                 "source": int(row["source_document_id"]), "page": row.get("page")}))
+                                                 "source": (int(row["source_document_id"]) if row.get("source_document_id") not in (None, "") else None), "page": row.get("page")}))
         return results
 
     # ── apply (unsigned writes through my_super_admin) ───────────────────

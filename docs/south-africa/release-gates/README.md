@@ -1,5 +1,7 @@
 # South Africa Release Gates (G0–G7)
 
+> **Superseded 2026-11-25 (gate removal, owner decision).** The release gates, evidence, sign-offs and parallel-run requirements described here no longer apply: this country goes live like Spain once its pack is Active. See `docs/GATE_REMOVAL.md` and `docs/south-africa/SOUTH_AFRICA_GAPS_AND_DECISIONS.md`. Kept for history.
+
 This directory defines the release gates for South Africa (ZA) per ZP-ZA-ENG-001 §13–§14.
 
 ## How a gate is signed

@@ -5,23 +5,23 @@ Belgium (ZP-BE-ENG-001) statutory content CATALOGUE — keys and vocabularies
 only. Pure data, no ORM import. Shared by:
 
   * belgium_service.seed_belgium_pack (scripts/seed_belgium_canonical_packs.py
-    and the Super Admin "seed Draft" action) — writes one placeholder row per
-    key into the BE-PAYROLL-2026 canonical pack (Draft);
+    and the Super Admin "seed Draft" action) — writes one row per key into the
+    BE-PAYROLL-2026 canonical pack (Draft), with its VALUES entry when it has one;
   * engine/jurisdictions/belgium/pack.py (BePack) — the only reader of pack
     rows inside the engine;
   * be_super_admin.py — the governed signing console (vocabulary checks).
 
-NO STATUTORY VALUE LIVES HERE OR ANYWHERE IN CODE (ZP-BE-ENG-001 §3, BE-010,
-BE-039; plan rule 2). Every rate, threshold, band, rounding rule and date is a
-signed, effective-dated pack row. Seeded rows carry NO value at all: every
-value field is empty and the label carries "[PENDING G1]", so the engine
-blocks (BE_CONTENT_PENDING) until a Belgian specialist signs the row at gate
-G1. Where the specification states a figure, it is shown to the signer as
-display text only — SPEC_PROPOSED below — and is written into the row LABEL as
-"spec-proposed: ...", never into a value field. A value the specification does
-not give is "none in spec" and stays empty until signed or NOT_SUPPORTED.
+The engine reads every rate, threshold, band, rounding rule and date from an
+effective-dated pack row, never from code (ZP-BE-ENG-001 §3, BE-010, BE-039).
+Gate removal (owner decision 2026-11-25, "Spain model"): there is no G1 signing
+gate any more. The specification figures the owner approved (VALUES below,
+promoted from SPEC_PROPOSED) are SEEDED as row values; every other key is
+seeded EMPTY and the engine blocks on it (BE_CONTENT_PENDING: value not yet
+provided) until a value is entered or the key is recorded NOT_SUPPORTED. The
+spec text (SPEC_PROPOSED) stays display text in the row label. The legacy
+"[PENDING G1]" label marker is no longer written and no longer blocks.
 
-Value kinds and where a SIGNED value is stored:
+Value kinds and where a value is stored:
   rate         ContributionRate employee_rate_pct / employer_rate_pct (percent)
   amount       ContributionRate flat_amount
   text-choice  ContributionRate text_value (one of the key's vocabulary)
@@ -30,7 +30,7 @@ Value kinds and where a SIGNED value is stored:
                the content itself as TaxSlab rows of rule_type RULE_TYPES[key]
   table        TaxSlab rows of rule_type RULE_TYPES[key] (one row per entry);
                the ContributionRate row is the signed "complete" marker
-NOT_SUPPORTED is a signed decision for every key: the feature stays blocked
+NOT_SUPPORTED is a recorded decision for every key: the feature stays blocked
 at calculation time (BE_FEATURE_BLOCKED).
 
 ONSS employer keys are REFERENCE ONLY: the authoritative rate is resolved by
@@ -52,12 +52,11 @@ CURRENCY = "EUR"
 BE_2026 = ("BE-PAYROLL-2026", date(2026, 1, 1), date(2026, 12, 31))
 TAX_YEAR = "2026"
 
-# TODO(BE-SIGNED-STATUS): a Belgian row's signed / unsigned state is stored as
-# this marker inside its label (ContributionRate.label / TaxSlab.rate_label):
-# present = unsigned. It should become a real status field (e.g. signed_by_id /
-# signed_at / status) in a future migration; until then every reader (signing
-# console, activation gate, readiness G1, new-version clone, overview counts)
-# relies on the marker. Not changed now — see docs/belgium/BELGIUM_GAPS_AND_DECISIONS.md.
+# Legacy "unsigned" label marker (ContributionRate.label / TaxSlab.rate_label).
+# Gate removal 2026-11-25: the seed no longer writes it and the engine (BePack)
+# no longer blocks on it — only an empty value blocks. Rows seeded earlier still
+# carry it as display text; the signing console (be_super_admin.py, removed in a
+# later step) and the new-version clone still use it.
 PENDING_MARK = "[PENDING G1]"
 NOT_SUPPORTED = "NOT_SUPPORTED"
 SLAB_ROWS = "SLAB_ROWS"
@@ -158,7 +157,7 @@ ACCUMULATORS = ("WITHHOLDING_TAXABLE", "WITHHOLDING", "WITHHOLDING_EXCEPTIONAL_T
 
 # Earning classification (BE-006 / BE-007 / BE-008 / BE-009): one row per
 # (obligation, component); treatment INCLUDED / EXCLUDED / REVIEW. Every row is
-# seeded REVIEW + [PENDING G1]; a non-zero REVIEW component blocks.
+# seeded REVIEW; a non-zero REVIEW component blocks.
 COMPONENTS = ("SALARY", "HOURLY_PAY", "OVERTIME_PREMIUM", "SUNDAY_HOLIDAY_PREMIUM", "SECTOR_PREMIUM", "BONUS",
               "THIRTEENTH_MONTH", "HOLIDAY_PAY_SIMPLE", "HOLIDAY_PAY_DOUBLE", "DEPARTURE_HOLIDAY_PAY",
               "GUARANTEED_SALARY", "BIRTH_LEAVE_PAY", "BENEFIT_IN_KIND", "MEAL_VOUCHER_EMPLOYER", "ECOCHEQUE",
@@ -335,10 +334,10 @@ CHOICE_VOCABULARIES = {
     "be_rounding_holiday": ROUNDING_RULES,
 }
 
-# ── Display text only (NOT values) ────────────────────────────────────────
-# What the specification itself states, shown to the G1 signer in the row
-# LABEL as "spec-proposed: ...". Never written to a value field and never read
-# by the engine. Keys absent here are "none in spec".
+# ── Display text (the specification's own wording) ────────────────────────
+# What the specification itself states, shown in the row LABEL as
+# "spec: ...". Never read by the engine. Keys absent here are "none in spec".
+# The owner-approved figures are promoted to row values in VALUES below.
 SPEC_PROPOSED = {
     "be_supported_worker_categories": "MANUAL,EMPLOYEE (special regimes blocked)",
     "be_onss_employee_rate": "13.07% ordinary",
@@ -372,6 +371,55 @@ SPEC_PROPOSED = {
     "be_public_holidays": "ten statutory holidays; dates none in spec (G-09)",
     "be_filing_dmfa_schema_versions": "2026/2 to 30 Sep, 2026/3 from 1 Oct",
 }
+
+# ── Seeded values (owner decision 2026-11-25: spec figures promoted) ──────
+# key -> (value field, value, effective_from ISO or None). Only keys whose spec
+# text gives ONE unambiguous value of the key's kind, in the unit and on the
+# side its engine reader uses (percent; employee / employer as read by
+# onss.py / holiday.py / wages.py / working_time.py / absence.py). Spec text
+# that is a range, a note or a structure (band / formula / table / schema
+# version) is NOT promoted: those keys stay empty and block until a value is
+# entered. Parallel-run tolerances (group "parallel") stay empty (gate only).
+VALUES = {
+    "be_supported_worker_categories": ("text_value", "MANUAL,EMPLOYEE", None),
+    "be_onss_employee_rate": ("employee_rate_pct", "13.07", None),
+    "be_onss_manual_base_uplift": ("employee_rate_pct", "8", None),          # 108 % = base + 8 %
+    "be_onss_special_160": ("employer_rate_pct", "1.60", None),
+    "be_onss_pension_special": ("employer_rate_pct", "8.86", None),
+    "be_hol_entitlement_weeks": ("flat_amount", "4", None),
+    "be_hol_wc_double_pct": ("employee_rate_pct", "92", None),
+    "be_hol_manual_quarterly_contribution": ("employer_rate_pct", "5.57", None),
+    "be_hol_manual_annual_debit": ("employer_rate_pct", "10.27", None),
+    "be_wage_rmmmg": ("flat_amount", "2233.61", "2026-07-01"),
+    "be_wage_rmmmg_min_age": ("flat_amount", "18", None),
+    "be_wage_index_centime_threshold": ("flat_amount", "4000", "2026-06-01"),
+    "be_wage_norm_margin": ("employer_rate_pct", "0", None),
+    "be_wt_daily_limit_hours": ("flat_amount", "8", None),
+    "be_wt_weekly_limit_hours": ("flat_amount", "40", None),
+    "be_wt_weekly_reduced_hours": ("flat_amount", "38", None),
+    "be_ot_premium_weekday": ("employee_rate_pct", "50", None),
+    "be_ot_premium_sunday_holiday": ("employee_rate_pct", "100", None),
+    "be_abs_wc_guaranteed_days": ("flat_amount", "30", None),
+    "be_abs_wc_guaranteed_pct": ("employer_rate_pct", "100", None),
+    "be_abs_relapse_window_weeks": ("flat_amount", "8", "2026-01-01"),
+    "be_abs_maternity_weeks": ("flat_amount", "15", None),
+    "be_abs_birth_leave_days": ("flat_amount", "20", None),
+    "be_abs_birth_leave_window_months": ("flat_amount", "4", None),
+    "be_abs_birth_leave_employer_days": ("flat_amount", "3", None),
+}
+# Spec figures NOT promoted, and why (the keys stay empty and block).
+VALUES_SKIPPED = {
+    "be_onss_manual_base_categories": "'MANUAL + assimilated' is not one list: 'assimilated' names no category code",
+    "be_onss_employer_base_rate": "band key: needs EC x WC band rows (or the ONSS rate table), not one rate",
+    "be_abs_wc_min_contract_months": "'indefinite or >= 3 months' is a condition, not one value (owner to confirm 3)",
+    "be_abs_maternity_multiple_weeks": "band key: '17-19 weeks' is a range by number of children",
+    "be_public_holidays": "table key: the spec gives no dates (G-09)",
+    "be_filing_dmfa_schema_versions": "schema-version key: needs dated version slab rows, not a scalar",
+}
+# Kind -> the value fields a VALUES entry may use.
+VALUE_FIELDS = {KIND_RATE: ("employee_rate_pct", "employer_rate_pct"), KIND_AMOUNT: ("flat_amount",),
+                KIND_TEXT: ("text_value",), KIND_DATE: ("text_value",)}
+
 
 # ── Owner decisions (shown OPEN until reviewed evidence BE-DECISION-<key>) ──
 OWNER_DECISIONS = (
@@ -411,11 +459,12 @@ def is_reference_only(key: str) -> bool:
 
 
 def key_label(key: str) -> str:
-    """The seeded label: short label + spec-proposed display text (if any),
-    plus the reference-only marker on onss_employer rate / band keys."""
+    """The seeded label: short label + the spec's display text (if any), plus
+    the reference-only marker on onss_employer rate / band keys. Never carries
+    the legacy PENDING_MARK."""
     _g, _kind, _ref, label = KEYS[key]
     proposed = SPEC_PROPOSED.get(key)
-    text = f"{label} (spec-proposed: {proposed})" if proposed else f"{label} (none in spec)"
+    text = f"{label} (spec: {proposed})" if proposed else f"{label} (none in spec)"
     return f"{text} {REFERENCE_MARKER}" if is_reference_only(key) else text
 
 

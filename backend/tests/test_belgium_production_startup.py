@@ -4,7 +4,8 @@ A fresh interpreter (so nothing from this test session leaks in) boots the real 
 throwaway SQLite file, ENVIRONMENT=production and every BE_* setting unset:
 
   * startup completes (create_all, startup guards, schedulers);
-  * every /api/payroll/belgium route answers 404 (dormant), for a Belgian organisation's own admin;
+  * every /api/payroll/belgium route answers 404 for an organisation whose payroll jurisdiction is not Belgium
+    (no dormancy switch since the gate removal, 2026-11-25: the routes are scoped by jurisdiction);
   * the Super Admin Belgium console's read-only views load without error (no pack, nothing seeded);
   * no Belgian pack, registry row or payroll_be_* row exists after startup (nothing is seeded automatically).
 """
@@ -23,7 +24,7 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.main import app
 
-out = {"settings": {k: getattr(settings, k) for k in ("BE_TENANT_ONBOARDING_ENABLED", "BE_CANARY_ORG_IDS",
+out = {"settings": {k: getattr(settings, k) for k in (
        "BE_DEMO_PACKS_ENABLED", "BE_DEMO_ORG_IDS", "BE_IDENTIFIER_KEYRING", "BE_IDENTIFIER_FINGERPRINT_KEY")}}
 with TestClient(app) as client:
     from app.core.security import hash_password
@@ -57,9 +58,8 @@ with TestClient(app) as client:
         if res.status_code != 404:
             out.setdefault("why", {})[f"{method} {path}"] = res.text[:200]
     out["console"] = {}
-    for path in ("/api/super-admin/compliance/belgium/packs", "/api/super-admin/compliance/belgium/decisions",
-                 "/api/super-admin/compliance/belgium/joint-committees",
-                 "/api/super-admin/compliance/belgium/readiness"):
+    for path in ("/api/super-admin/compliance/belgium/packs",
+                 "/api/super-admin/compliance/belgium/joint-committees"):
         res = client.get(path, headers=headers["SA"])
         out["console"][path] = [res.status_code, res.text[:300]]
     from app.modules.payroll.models import JurisdictionPack
@@ -101,8 +101,7 @@ def test_app_starts_with_no_belgian_settings_and_belgium_is_dormant(tmp_path):
     line = next((ln for ln in done.stdout.splitlines() if ln.startswith("STARTUP-RESULT ")), None)
     assert done.returncode == 0 and line, (done.stdout[-3000:], done.stderr[-5000:])
     out = json.loads(line[len("STARTUP-RESULT "):])
-    assert out["settings"] == {"BE_TENANT_ONBOARDING_ENABLED": False, "BE_CANARY_ORG_IDS": "",
-                               "BE_DEMO_PACKS_ENABLED": False, "BE_DEMO_ORG_IDS": "",
+    assert out["settings"] == {"BE_DEMO_PACKS_ENABLED": False, "BE_DEMO_ORG_IDS": "",
                                "BE_IDENTIFIER_KEYRING": "", "BE_IDENTIFIER_FINGERPRINT_KEY": ""}
     assert out["beRoutes"] >= 20
     assert set(out["beStatuses"].values()) == {404}, out.get("why")

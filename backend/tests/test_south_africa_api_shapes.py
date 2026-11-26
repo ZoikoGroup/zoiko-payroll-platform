@@ -36,9 +36,7 @@ UI_PAYLOAD = {
 
 @pytest.fixture()
 def za_on(monkeypatch):
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "ZA_TENANT_ONBOARDING_ENABLED", True)
+    """No-op since the gate removal (2026-11-25): South Africa has no onboarding switch."""
 
 
 def _employee(db, organization):

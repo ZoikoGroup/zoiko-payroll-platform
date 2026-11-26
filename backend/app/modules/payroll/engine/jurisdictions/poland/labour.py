@@ -11,12 +11,13 @@ money on their own:
     for absence, so the reviewer must look at it (warning, never a guess);
   * overtime (PL-016): every overtime amount needs the event that created it
     (DAILY / WEEKLY / NIGHT / SUNDAY_HOLIDAY / COMP_TIME_FAILED with hours and
-    the hourly rate). The event -> premium mapping is a signed policy
-    (pl_overtime_premium_map); the same legal excess (event reference) never
+    the hourly rate). The event -> premium mapping is a pack policy
+    (pl_overtime_premium_map: KIND=pct list or a named map); the same legal excess (event reference) never
     earns two premiums; the components must equal normal pay + premium of the
     events they claim to be;
-  * night supplement: the formula is not in the specification — a non-zero
-    supplement blocks until a signed rule exists;
+  * night supplement: the basis must be a known rule (NIGHT_SUPPLEMENT_RULES);
+    a missing / PENDING_G1 basis blocks a non-zero supplement. The amount
+    itself is not recomputed here;
   * pay timing: monthly pay is due by the signed day of the following month.
     The "preceding working day" shift needs the Polish holiday calendar
     (signed content, not yet seeded), so only the outer deadline is checked.
@@ -62,7 +63,13 @@ def minimum_wage(pack: PlPack, bases: dict, profile, unpaid_leave_days) -> dict:
 
 
 def _premium_map(pack: PlPack) -> dict:
-    allowed = {pack.pct("pl_overtime_premium_standard", "employee"), pack.pct("pl_overtime_premium_high", "employee")}
+    standard = pack.pct("pl_overtime_premium_standard", "employee")
+    high = pack.pct("pl_overtime_premium_high", "employee")
+    allowed = {standard, high}
+    named = content.OVERTIME_PREMIUM_MAPS.get(pack.text("pl_overtime_premium_map"))
+    if named is not None:
+        # A named map gives tiers only; the percentages come from the pack rows.
+        return {kind: standard if tier == "STANDARD" else high for kind, tier in named.items()}
     out = {}
     for part in pack.text_list("pl_overtime_premium_map"):
         kind, _, pct = part.partition("=")
@@ -93,7 +100,7 @@ def overtime(pack: PlPack, pay: dict, events) -> dict:
         ref = str(field(event, "event_ref") or "").strip()
         hours, rate = dec(field(event, "hours")), dec(field(event, "hourly_rate"))
         if kind not in premiums:
-            pack.block(E.keyed(E.OVERTIME_EVENT_INVALID, kind or "NONE"), "the event kind has no signed premium")
+            pack.block(E.keyed(E.OVERTIME_EVENT_INVALID, kind or "NONE"), "the event kind has no premium in pl_overtime_premium_map")
         if not ref or hours <= ZERO or rate <= ZERO:
             pack.block(E.keyed(E.OVERTIME_EVENT_INVALID, kind), "an overtime event needs a reference, hours and rate")
         if ref in seen:

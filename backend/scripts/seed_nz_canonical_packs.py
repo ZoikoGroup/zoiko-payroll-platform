@@ -9,8 +9,9 @@ engine/countries/new_zealand_content.py; the empty NZ-ELA-2028 staging pack
 Zealand's jurisdiction_service_registry row as PLANNED.
 
 Source: ZP-NZ-ENG-001 v1.0 — the implementation specification. Every value
-is traceable to SOURCE_REFERENCES S1–S10 in new_zealand_content.py and every
-row is PENDING G1. The authority tables the specification does not reproduce
+is traceable to SOURCE_REFERENCES S1–S10 in new_zealand_content.py; rows are
+written with plain labels (no "[PENDING G1]" marker since the gate removal of
+2026-11-25). The authority tables the specification does not reproduce
 (IRD PAYE method, secondary/ND rates, IETC, child-support variation codes,
 lump-sum method, official examples, public holidays) write no rows.
 

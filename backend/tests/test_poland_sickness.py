@@ -133,9 +133,11 @@ def test_unsigned_sickness_policy_blocks(key):
                      pack=build_pack({key: "PENDING_G1"}, classes=SICK_CLASSES)), f"PL_POLICY_PENDING:{key}")
 
 
-def test_the_shipped_unsigned_pack_never_pays_sick_pay():
-    _blocks(sick_ctx("2000", [episode(date(2026, 3, 2), date(2026, 3, 11))],
-                     pack=build_pack(signed=False, classes=SICK_CLASSES)), "PL_PACK_UNSIGNED")
+def test_a_legacy_pending_g1_label_still_pays_sick_pay():
+    # Gate removal (2026-11-25): a "[PENDING G1]" label no longer blocks; the value decides.
+    pack = build_pack(signed=False, classes=SICK_CLASSES)
+    assert pack[0]["pl_sick_age_rule"].label.endswith("[PENDING G1]")
+    assert calculate(sick_ctx("2000", [episode(date(2026, 3, 2), date(2026, 3, 11))], pack=pack))["pl_result"]
 
 
 def test_the_zus_benefit_itself_is_not_paid_here():

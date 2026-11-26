@@ -129,7 +129,7 @@ def test_index_centime_limitation_and_wage_norm_warning_only():
     within = _calc(context(be_indexation={"increase": "5", "increasePct": "1"})).be_result
     assert "BE_INDEXATION_ABOVE_LIMIT" not in _codes(within) and within["warnings"] == []
     pending = build_pack(rates_over={"be_wage_index_centime_threshold": dict(
-        build_pack()[0]["be_wage_index_centime_threshold"], label="x [PENDING G1]")})
+        build_pack()[0]["be_wage_index_centime_threshold"], label="x [PENDING G1]", flat_amount=None)})
     assert _blocked(context(pack=pending, be_indexation={"increase": "5"})) == \
         "BE_CONTENT_PENDING:be_wage_index_centime_threshold"
     assert _calc(context(pack=pending)).be_result["trace"]["wages"]["indexation"] == {"applied": False}
@@ -224,8 +224,8 @@ def test_the_holidays_hook_returns_signed_rows_only(world, monkeypatch):
     assert jurisdiction_hooks.call("BE", "pack_holidays", world.db, 2026) == [
         {"date": TEST_HOLIDAY, "name": "TEST ONLY holiday"}]
     assert jurisdiction_hooks.call("BE", "pack_holidays", world.db, 2027) == []               # none signed
-    pending = build_pack(rates_over={"be_public_holidays": rate("be_public_holidays", text="SLAB_ROWS",
-                                                                label="x [PENDING G1]")})
+    pending = build_pack(rates_over={"be_public_holidays": rate("be_public_holidays", text=None,
+                                                                label="x [PENDING G1]")})     # no value
     monkeypatch.setattr(be, "_be_pack_for", lambda db, org, on: BePack(*pending, org, on))
     assert jurisdiction_hooks.call("BE", "pack_holidays", world.db, 2026) == []
 

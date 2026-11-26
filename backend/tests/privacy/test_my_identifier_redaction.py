@@ -62,7 +62,6 @@ def my_world(world, monkeypatch):
     from tests._my_engine_helpers import ctx
 
     monkeypatch.setattr(pcb, "compute", lambda pack, **_: {"pcb": Decimal("100.00"), "trace": {"stub": True}})
-    monkeypatch.setattr(settings, "MY_TENANT_ONBOARDING_ENABLED", True)
     monkeypatch.setattr(settings, "MY_IDENTIFIER_KEYRING", json.dumps({"1": "k" * 32}))
     monkeypatch.setattr(settings, "MY_IDENTIFIER_FINGERPRINT_KEY", "m" * 32)
     db = world.db

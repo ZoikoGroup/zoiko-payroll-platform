@@ -12,8 +12,8 @@ Scope of v1 (spec §1):
      employer registration on record. Anything missing or unsupported BLOCKS
      with a reason key — never guessed: weekly / fortnightly pay, non-residents,
      non-standard employment, and a section 7B variable payment whose earned
-     period is missing or falls outside the pay period while the timing rule is
-     unsigned.
+     period is missing or falls outside the pay period while the timing rule
+     value is not yet provided.
   2. Independent bases (spec §4). Every pay component is classified per
      obligation by ZA_EARNING_CLASS rows: PAYE remuneration, UIF remuneration
      and SDL leviable remuneration are separate sums, never one "taxable
@@ -213,8 +213,9 @@ def age_on(born: date, on: date) -> int:
 
 def resolve_tax_year(ctx: PayrollContext, pack: _Pack) -> dict:
     """The date that selects the tax year. Earning date and payment date are
-    distinct (ZA-006); when they fall in different tax years the signed
-    za_paye_tax_year_date_basis decides, and PENDING_G1 BLOCKS."""
+    distinct (ZA-006); when they fall in different tax years
+    za_paye_tax_year_date_basis decides, and a value still "PENDING_G1" (not
+    yet provided) BLOCKS."""
     paid = ctx.pay_date
     earned = getattr(ctx, "period_end", None) or paid
     basis = pack.require_text("za_paye_tax_year_date_basis", _content.DATE_BASES)
@@ -223,7 +224,7 @@ def resolve_tax_year(ctx: PayrollContext, pack: _Pack) -> dict:
     elif basis == BASIS_PENDING:
         pack.block("za_paye_tax_year_date_basis",
                    f"earned {earned} and paid {paid} fall in different tax years and the date that "
-                   "selects the tax year is PENDING_G1 (ZA-006)")
+                   "selects the tax year is a value not yet provided (ZA-006)")
     else:
         anchor = paid if basis == BASIS_PAYMENT_DATE else earned
     return {"anchor": anchor, "taxYearEnd": tax_year_end(anchor), "basis": basis,
@@ -317,8 +318,8 @@ def obligation_base(obligation: str, components: list, classes: dict, pack: _Pac
                        f"pay component {component} ({amount}) has no {obligation} classification row")
         if treatment == TREATMENT_REVIEW:
             pack.block(f"za_earning_class:{obligation}:{component}",
-                       f"pay component {component} ({amount}) is classified REVIEW for {obligation} — a "
-                       "signed treatment is required before it can be calculated (spec §4)")
+                       f"pay component {component} ({amount}) is classified REVIEW for {obligation} — its "
+                       "treatment is a value not yet provided, so it cannot be calculated (spec §4)")
         if treatment == TREATMENT_INCLUDED:
             counted = amount
         elif treatment == TREATMENT_EXCLUDED:
@@ -469,8 +470,9 @@ def check_variable_remuneration(ctx: PayrollContext, components: list, pack: _Pa
     (`za_variable_items`: component, amount, earned_from, earned_to) and those
     items must account for the paid amount. The same-period fact is DERIVED
     from the periods, never taken from the caller. While the paid/accrual
-    timing rule is PENDING_G1, variable pay not earned inside the pay period
-    BLOCKS; under an EARNING_DATE basis, a prior-period item is a correction
+    timing rule value is not yet provided (still "PENDING_G1"), variable pay
+    not earned inside the pay period BLOCKS; under an EARNING_DATE basis, a
+    prior-period item is a correction
     run (P9) and also BLOCKS."""
     variable = [(n, a) for n, a in components if n in VARIABLE_COMPONENTS]
     basis = pack.require_text("za_variable_remuneration_basis", _content.DATE_BASES)
@@ -519,7 +521,8 @@ def check_variable_remuneration(ctx: PayrollContext, components: list, pack: _Pa
         names = ", ".join(sorted({i["component"] for i in outside}))
         pack.block("za_variable_remuneration_basis",
                    f"section 7B variable remuneration ({names}) was not earned inside "
-                   f"{period_start}..{period_end} and the paid/accrual timing rule is PENDING_G1 (ZA-006)")
+                   f"{period_start}..{period_end} and the paid/accrual timing rule is a value not yet provided "
+                   "(ZA-006)")
     prior = [i for i in outside if i["earned_to"] < period_start]
     if basis == BASIS_EARNING_DATE and prior:
         pack.block("za_variable_remuneration_basis",

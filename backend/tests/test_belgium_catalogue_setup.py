@@ -40,17 +40,20 @@ def _setup(db, pack, reason=REASON):
     return out
 
 
-def test_sets_up_every_catalogue_row_empty_and_unsigned(db):
+def test_sets_up_every_catalogue_row_with_the_approved_values_and_no_marker(db):
+    """gate removal, owner decision 2026-11-25: the same rows as the seed - approved spec values filled
+    (belgium_content.VALUES), every other row empty, no "[PENDING G1]" marker."""
     c = _c()
     pack = _pack(db)
     out = _setup(db, pack)
     rates, classes = _rows(db, pack)
     assert out["rows"] == len(c.KEYS) == len(rates)
     assert out["earningClasses"] == len(c.OBLIGATIONS) * len(c.COMPONENTS) == len(classes)
-    for row in rates.values():
-        assert all(getattr(row, f) is None for f in VALUE_FIELDS), row.component_key     # no value at all
-        assert c.PENDING_MARK in row.label
-    assert all(c.PENDING_MARK in s.rate_label and s.assessment_basis == "REVIEW" for s in classes)
+    for key, row in rates.items():
+        filled = any(getattr(row, f) is not None for f in VALUE_FIELDS)
+        assert filled is (key in c.VALUES), key                                    # only approved values
+        assert c.PENDING_MARK not in row.label
+    assert all(c.PENDING_MARK not in s.rate_label and s.assessment_basis == "REVIEW" for s in classes)
     assert bes.be_catalogue_refusal(db, pack) is None
 
 
@@ -107,9 +110,9 @@ def test_create_only_a_row_already_held_is_never_touched(db):
     assert (kept.label, kept.text_value) == ("SYNTHETIC kept row", "SYNTHETIC")
 
 
-def test_after_set_up_the_pack_may_go_to_review_but_still_not_be_approved(db):
+def test_after_set_up_the_pack_may_go_to_review_and_be_approved(db):
+    """gate removal, owner decision 2026-11-25: a complete catalogue may be approved with rows still empty."""
     pack = _pack(db)
     _setup(db, pack)
     assert service.set_jurisdiction_pack_status(db, pack.id, "In Review", actor_id=ADMIN).status == "In Review"
-    with pytest.raises(BadRequestException, match="cannot be approved yet"):
-        service.set_jurisdiction_pack_approver(db, pack.id, actor_id=CHECKER)
+    assert service.set_jurisdiction_pack_approver(db, pack.id, actor_id=CHECKER).approved_by_id == CHECKER

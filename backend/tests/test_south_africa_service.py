@@ -234,10 +234,9 @@ def test_statutory_summary_stays_planned_and_counts_workflows(db, organization):
     _registration(db, organization)
     summary = svc.statutory_summary(db)
     assert summary["jurisdiction"] == "ZA"
-    assert summary["available"] is False
-    assert "PLANNED" in summary["note"]
+    assert summary["available"] is False                                       # no Active pack
+    assert "decisions" not in summary and "gates" not in summary               # no gates since 2026-11-25
     assert summary["activeEmployerRegistrations"] == 0
-    assert summary["decisions"]
 
 
 def test_za_validation_accepts_a_real_id_and_exactly_one_identity():
@@ -287,14 +286,3 @@ def test_za_tenant_routes_are_registered_with_the_tenant_guard():
             assert "get_current_payroll_operator" in deps, key
 
 
-def test_za_tenant_guard_refuses_while_onboarding_is_closed(monkeypatch):
-    from app.core.exceptions import BadRequestException
-    from app.modules.payroll import south_africa_dormancy
-    from app.modules.payroll.tenant_statutory_router import _za_org
-
-    monkeypatch.setattr(south_africa_dormancy, "onboarding_enabled", lambda: False)
-    with pytest.raises(BadRequestException, match="not open for onboarding"):
-        _za_org(organization_id=1)
-
-    monkeypatch.setattr(south_africa_dormancy, "onboarding_enabled", lambda: True)
-    assert _za_org(organization_id=7) == 7

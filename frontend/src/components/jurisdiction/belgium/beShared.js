@@ -85,18 +85,6 @@ export function slabRowsFor(config, key) {
   return spec ? config?.slabRows?.[spec.ruleType] || [] : [];
 }
 
-// Release gates as the backend reports them ({ G1: "MET" | "NOT MET", ... }).
-export function gateCounts(summary) {
-  const states = Object.values(summary?.gates || {});
-  return { met: states.filter((s) => s === "MET").length, total: states.length };
-}
-
-// The backend engine status code shown in words (NOT_CERTIFIED -> Not certified).
-export function engineStatusLabel(status) {
-  const words = String(status || "unknown").replace(/_/g, " ").toLowerCase();
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
 // Overview cards from the Belgium configuration (GET .../configuration):
 // catalogue rows by group, slab rows by key — each with how many still await
 // a second Super Admin's signature. Counts only; no value is read or shown.
