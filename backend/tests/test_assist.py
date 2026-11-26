@@ -32,6 +32,21 @@ os.environ["ASSIST_SWEEP_ENABLED"] = "false"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Import a FRESH app bound to this file's SQLite database. If an earlier test
+# file already imported app.*, `from app.database import engine` below would
+# otherwise return that file's engine (bound to backend/.env's database) and
+# collection failed with "tests must not connect to a non-local database".
+# Same isolation as tests/test_checkout_flow.py: purge now, restore the other
+# files' modules once this module is set up, and swap this file's own modules
+# back in while its tests run (_own_app_modules below).
+_saved_app_modules = {
+    _mod: _module
+    for _mod, _module in sys.modules.items()
+    if _mod == "app" or _mod.startswith("app.")
+}
+for _mod in list(_saved_app_modules):
+    del sys.modules[_mod]
+
 from datetime import date  # noqa: E402
 
 import pytest  # noqa: E402
@@ -162,6 +177,42 @@ _db.add(
     )
 )
 _db.commit()
+
+# This file's own app.* modules (see the note above the imports).
+_fresh_app_modules = {
+    _mod: _module
+    for _mod, _module in sys.modules.items()
+    if _mod == "app" or _mod.startswith("app.")
+}
+
+# Restore pre-purge app modules so other test files don't get class-identity conflicts
+for _mod in list(sys.modules):
+    if _mod == "app" or _mod.startswith("app."):
+        del sys.modules[_mod]
+sys.modules.update(_saved_app_modules)
+del _saved_app_modules
+
+
+def _app_module_names():
+    return [m for m in sys.modules if m == "app" or m.startswith("app.")]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _own_app_modules():
+    """While this file's tests run, sys.modules holds THIS file's app.*
+    modules (lazy imports inside the app resolve to the same database and
+    classes as `app`); afterwards every other test file's modules are put
+    back exactly as they were."""
+    outside = {m: sys.modules[m] for m in _app_module_names()}
+    for m in outside:
+        del sys.modules[m]
+    sys.modules.update(_fresh_app_modules)
+    try:
+        yield
+    finally:
+        for m in _app_module_names():
+            del sys.modules[m]
+        sys.modules.update(outside)
 
 
 @pytest.fixture(scope="module")
