@@ -165,7 +165,7 @@ export default function SocialSignInButtons({ mode = "login", compact = false })
         mode === "register" ? " to create your account" : ""} instead.`);
       return;
     }
-    window.location.href = `${API_BASE}/api/auth/${provider.key}/${mode === "register" ? "register" : "login"}`;
+    window.location.assign(`${API_BASE}/api/auth/${provider.key}/${mode === "register" ? "register" : "login"}`);
   }
 
   return (
