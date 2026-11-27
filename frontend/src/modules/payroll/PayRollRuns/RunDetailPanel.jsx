@@ -5,7 +5,8 @@ import { useToast } from "../ToastContext";
 import { getPayrollLabels, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
 import { formatCurrency, createCurrencyFormatterForCode, getCountryNameFromCode, getCurrencyForJurisdiction } from "../../../utils/currency";
 import CountryTotalsTable from "../../../components/payroll/CountryTotalsTable";
-import RunStatusTimeline from "./RunStatusTimeline";
+import RunWorkflowTracker, { RunNextAction } from "./RunWorkflowTracker";
+import useRunAdvance from "./useRunAdvance";
 import AssistInlinePanel from "../../assist/AssistInlinePanel";
 import SGRunPreflightPanel from "./SGRunPreflightPanel";
 import HKRunPreflightPanel from "./HKRunPreflightPanel";
@@ -431,7 +432,7 @@ function EmployeeRow({ item, leave, fmtCurrency: orgFmtCurrency, currencyByCount
   );
 }
 
-export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
+export default function RunDetailPanel({ run, onClose, fmtCurrency, canOperate = false, onRunChanged }) {
   const [detail, setDetail] = useState(null);
   const [items, setItems] = useState([]);
   const [leaveSummary, setLeaveSummary] = useState({});
@@ -464,6 +465,13 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
     load();
   }, [load]);
 
+  // Move this run forward from here, with the same dialogs and server checks
+  // as the Payroll Runs list (useRunAdvance); refresh this view and the list.
+  const { requestAdvance, advancingId, dialog: advanceDialog } = useRunAdvance({
+    fmtCurrency,
+    onAdvanced: () => { load(); onRunChanged?.(); },
+  });
+
   const totalsByCountry = detail?.totalsByCountry || [];
   const isMultiCountry = totalsByCountry.length > 1;
   const currencyByCountry = Object.fromEntries(
@@ -481,6 +489,7 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/60" onClick={onClose}>
+      {advanceDialog && <div onClick={(e) => e.stopPropagation()}>{advanceDialog}</div>}
       <div
         className="flex h-full max-h-[96vh] w-full max-w-[96vw] xl:max-w-7xl 2xl:max-w-[1560px] flex-col rounded-2xl bg-surface border border-border shadow-[0_24px_60px_rgba(0,0,0,0.25)] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
@@ -529,7 +538,23 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency }) {
             </div>
           ) : (
             <>
-              <RunStatusTimeline run={detail || run} />
+              <div className="mb-5 rounded-[18px] bg-surface-muted p-5">
+                <h4 className="mb-4 text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Run progress</h4>
+                <div className="grid gap-4 lg:grid-cols-[1fr_260px] lg:items-center">
+                  <RunWorkflowTracker
+                    run={detail || run}
+                    orientation="horizontal"
+                    canOperate={canOperate}
+                    showNextAction={false}
+                  />
+                  <RunNextAction
+                    run={detail || run}
+                    canOperate={canOperate}
+                    onAdvance={requestAdvance}
+                    busy={advancingId === (detail || run).id}
+                  />
+                </div>
+              </div>
 
               {detail?.attendanceOverrideReason && (
                 <div className="rounded-[14px] border border-warning/30 bg-warning/10 px-4 py-3 mb-5 text-[13px] text-foreground">
