@@ -1478,9 +1478,9 @@ export const submitPublicForm = async (token, values) => {
 // — the org only ever selects a jurisdiction/year/period/run/report and
 // generates; it never authors template structure (that's superAdminService.js).
 
-// Mirrors backend PAYROLL_STATUS_ORDER (models.py) — kept as its own local
-// copy, same convention RunStatusTimeline.jsx already uses, rather than
-// importing across files for a single constant.
+// Mirrors backend PAYROLL_STATUS_ORDER (models.py). The frontend's ONE copy:
+// the payroll-run workflow UI (PayRollRuns/runWorkflow.js) imports it, and
+// scripts/run-workflow-validation.mjs fails if it drifts from the backend.
 export const PAYROLL_STATUS_ORDER = ["Draft", "Review", "Approved", "Authorized", "Paid", "Closed"];
 
 export const isRunFinalized = (run) => PAYROLL_STATUS_ORDER.indexOf(run?.status) >= PAYROLL_STATUS_ORDER.indexOf("Approved");

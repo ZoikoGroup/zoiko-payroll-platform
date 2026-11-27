@@ -1,21 +1,10 @@
 import { useState } from "react";
 import { Eye, CheckCircle2, Trash2, Loader2 } from "lucide-react";
-import { approveRun, deletePayRun } from "../../../service/payrollService";
-import ApprovalDialog from "./ApprovalDialog";
-import { useToast } from "../ToastContext";
+import { deletePayRun } from "../../../service/payrollService";
+import { nextStatus as nextStatusLabel } from "./runWorkflow";
 import { formatCurrency, createCurrencyFormatterForCode, getCountryNameFromCode, getCurrencyForJurisdiction } from "../../../utils/currency";
 import RunCurrencyAmount from "../../../components/payroll/RunCurrencyAmount";
 import { getPayrollLabels } from "../../../utils/jurisdictionLabels";
-
-// Mirrors backend PAYROLL_STATUS_ORDER (models.py) — a run can advance one
-// step at a time all the way through Closed; only Closed itself is terminal.
-const PAYROLL_STATUS_ORDER = ["Draft", "Review", "Approved", "Authorized", "Paid", "Closed"];
-
-function nextStatusLabel(status) {
-  const idx = PAYROLL_STATUS_ORDER.indexOf(status);
-  if (idx === -1 || idx >= PAYROLL_STATUS_ORDER.length - 1) return null;
-  return PAYROLL_STATUS_ORDER[idx + 1];
-}
 
 function fmtCurrencyLocal(n, fmtCurrency) {
   if (fmtCurrency) return fmtCurrency(n);
@@ -97,52 +86,32 @@ export default function RunsTable({
   toggleEmployee,
   toggleAllEmployees,
   onSelect,
+  // List mode: clicking a row selects it for the "Run progress" panel (the
+  // eye icon still opens View). Falls back to onSelect when not provided.
+  onRowClick,
+  selectedRunId = null,
+  // Lights up this run's Advance (✓) button: the panel's current step / Next
+  // action is hovered, or the run was just created.
+  highlightRunId = null,
+  // The shared advance action (useRunAdvance) - same dialogs/permissions as
+  // the progress panel and the run detail view.
+  onAdvance,
+  advancingId = null,
   onDelete,
   isWizardMode = false,
   fmtCurrency,
   calculationMode = "standard",
   jurisdictionCountry = "IN",
 }) {
-  const { addToast } = useToast();
-  const [approvingId, setApprovingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [approvalDialogRun, setApprovalDialogRun] = useState(null);
 
   if (!isWizardMode && runs.length === 0) return <EmptyState />;
   if (isWizardMode && employees.length === 0) return <EmptyState />;
 
-  const handleApprove = async (e, run) => {
-    e.stopPropagation();
-    if (approvingId) return;
-    const runId = run.id;
-    const landedOn = nextStatusLabel(run.status);
-    setApprovingId(runId);
-    try {
-      await approveRun(runId);
-      addToast?.(landedOn ? `Payroll run advanced to ${landedOn}.` : "Payroll run advanced.", "success");
-      onDelete?.("approve-refresh");
-    } catch {
-      addToast?.("Failed to advance payroll run.", "error");
-    } finally {
-      setApprovingId(null);
-    }
-  };
-
-  // The single "Approve" action advances a run through several lifecycle
-  // steps (Draft→Review→Approved→Authorized→Paid→Closed). The three steps
-  // that matter for tracking (landing on Approved/Authorized/Paid) get the
-  // richer confirmation dialog (summary, and — only for Approved — the bank
-  // transfer file); Draft→Review and Paid→Closed keep the direct-call
-  // behavior since there's nothing to confirm/track there.
-  const DIALOG_STATUSES = ["Review", "Approved", "Authorized"];
   const handleApproveClick = (e, run) => {
     e.stopPropagation();
-    if (DIALOG_STATUSES.includes(run.status)) {
-      setApprovalDialogRun(run);
-      return;
-    }
-    handleApprove(e, run);
+    onAdvance?.(run);
   };
 
   const handleDelete = async (runId) => {
@@ -316,7 +285,7 @@ export default function RunsTable({
           <thead>
             <tr className="bg-surface-muted border-b border-border">
               {listColumns.map((col) => (
-                <th key={col} className={`px-5 py-3.5 text-[10px] font-bold uppercase tracking-widest text-foreground-muted ${col === "Gross" || col === "Deductions" || col === "Net" || col === "Submitted" ? "text-right" : col === "Actions" ? "text-center" : "text-left"}`}>
+                <th key={col} className={`px-3 py-3.5 text-[10px] font-bold uppercase tracking-widest text-foreground-muted ${col === "Gross" || col === "Deductions" || col === "Net" || col === "Submitted" ? "text-right" : col === "Actions" ? "text-center" : "text-left"}`}>
                   {col}
                 </th>
               ))}
@@ -324,23 +293,33 @@ export default function RunsTable({
           </thead>
           <tbody className="divide-y divide-border">
             {runs.map((run) => (
-              <tr key={run.id} className="cursor-pointer transition-colors hover:bg-background dark:hover:bg-surface-muted" onClick={() => onSelect?.(run)}>
-                <td className="px-5 py-4 text-xs font-semibold text-foreground">{run.period}</td>
-                <td className="px-5 py-4 text-xs text-foreground-muted">{run.employees?.toLocaleString()}</td>
-                <td className="px-5 py-4 text-xs font-semibold text-foreground text-right">
+              <tr
+                key={run.id}
+                aria-selected={selectedRunId === run.id}
+                className={`cursor-pointer transition-colors ${
+                  highlightRunId === run.id
+                    ? "bg-primary/10 shadow-[inset_3px_0_0_var(--color-primary)]"
+                    : selectedRunId === run.id
+                    ? "bg-primary/5 shadow-[inset_3px_0_0_var(--color-primary)] dark:bg-primary/10"
+                    : "hover:bg-background dark:hover:bg-surface-muted"}`}
+                onClick={() => (onRowClick ? onRowClick(run) : onSelect?.(run))}
+              >
+                <td className="px-3 py-4 text-xs font-semibold text-foreground whitespace-nowrap">{run.period}</td>
+                <td className="px-3 py-4 text-xs text-foreground-muted">{run.employees?.toLocaleString()}</td>
+                <td className="px-3 py-4 text-xs font-semibold text-foreground text-right">
                   <RunCurrencyAmount run={run} runField="gross" countryField="totalGross" fallbackFormat={(n) => fmtCurrencyLocal(n, fmtCurrency)} />
                 </td>
-                <td className="px-5 py-4 text-xs font-semibold text-error text-right">
+                <td className="px-3 py-4 text-xs font-semibold text-error text-right">
                   <RunCurrencyAmount run={run} runField="deductions" countryField="totalDeductions" fallbackFormat={(n) => fmtCurrencyLocal(n, fmtCurrency)} hideZero />
                 </td>
-                <td className="px-5 py-4 text-xs font-bold text-primary text-right">
+                <td className="px-3 py-4 text-xs font-bold text-primary text-right">
                   <RunCurrencyAmount run={run} runField="net" countryField="totalNet" fallbackFormat={(n) => fmtCurrencyLocal(n, fmtCurrency)} />
                 </td>
-                <td className="px-5 py-4">
+                <td className="px-3 py-4">
                   <StatusBadge status={run.status} />
                 </td>
-                <td className="px-5 py-4 text-xs text-foreground-muted text-right">{run.payDate}</td>
-                <td className="px-5 py-4">
+                <td className="px-3 py-4 text-xs text-foreground-muted text-right">{run.payDate}</td>
+                <td className="px-3 py-4">
                   <div className="flex items-center justify-center gap-1">
                     <button
                       onClick={(e) => { e.stopPropagation(); onSelect?.(run); }}
@@ -352,10 +331,14 @@ export default function RunsTable({
                     <button
                       onClick={(e) => handleApproveClick(e, run)}
                       title={nextStatusLabel(run.status) ? `Advance to ${nextStatusLabel(run.status)}` : "Already at final status"}
-                      disabled={approvingId === run.id || !nextStatusLabel(run.status)}
-                      className="rounded-[8px] p-1.5 text-foreground-muted hover:text-primary hover:bg-primary/10 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                      disabled={!onAdvance || advancingId === run.id || !nextStatusLabel(run.status)}
+                      data-highlighted={highlightRunId === run.id ? "true" : undefined}
+                      className={`rounded-[8px] p-1.5 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed ${
+                        highlightRunId === run.id && nextStatusLabel(run.status)
+                          ? "animate-pulse bg-primary/15 text-primary ring-2 ring-primary shadow-[0_0_0_4px_rgba(25,197,138,0.18)]"
+                          : "text-foreground-muted hover:text-primary hover:bg-primary/10"}`}
                     >
-                      {approvingId === run.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                      {advancingId === run.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); setConfirmDelete(run.id); }}
@@ -382,15 +365,6 @@ export default function RunsTable({
           message="Are you sure you want to delete this payroll run? This action cannot be undone."
           onConfirm={() => handleDelete(confirmDelete)}
           onCancel={() => setConfirmDelete(null)}
-        />
-      )}
-      {approvalDialogRun && (
-        <ApprovalDialog
-          run={approvalDialogRun}
-          targetStatus={nextStatusLabel(approvalDialogRun.status)}
-          fmtCurrency={fmtCurrency}
-          onApproved={() => onDelete?.("approve-refresh")}
-          onClose={() => setApprovalDialogRun(null)}
         />
       )}
     </>
