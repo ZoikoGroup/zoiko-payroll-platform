@@ -982,6 +982,10 @@ export const getEmployeeRoster = async (params = {}) => {
       name: emp.name,
       department: emp.department,
       designation: emp.designation,
+      // Effective country (own, else the organisation's): decides which
+      // holidays are days off for this employee — same rule as the payroll
+      // run's attendance check.
+      countryCode: emp.country_code || null,
       date: new Date().toISOString().split("T")[0],
       checkIn: "09:00",
       checkOut: "18:00",

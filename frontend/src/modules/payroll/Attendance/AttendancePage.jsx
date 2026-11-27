@@ -548,17 +548,45 @@ export default function AttendancePage() {
 
   useEffect(() => { loadHolidays(); }, [loadHolidays]);
 
+  // Every holiday date of the organisation, whatever its country — only for
+  // the range statistics on screen. Deciding whether an employee works on a
+  // day uses holidayCountriesByDate / isHolidayFor below.
   const holidayDates = useMemo(() => {
     const set = new Set();
     holidays.forEach((h) => { if (h.date) set.add(h.date); });
     return set;
   }, [holidays]);
 
-  function isWorkingDay(dateStr) {
+  // date -> countries the holiday applies to ("" = every country). The org's
+  // holiday list holds every country it pays in (IN, AU, IT, ...); a holiday
+  // is a day off only for employees of its own country — the same rule as the
+  // payroll run's attendance check (service.check_attendance_readiness).
+  // Skipping AU's New Year's Day for India employees left 1 January
+  // unrecorded and blocked the run.
+  const holidayCountriesByDate = useMemo(() => {
+    const map = new Map();
+    holidays.forEach((h) => {
+      if (!h.date) return;
+      if (!map.has(h.date)) map.set(h.date, new Set());
+      map.get(h.date).add(String(h.country || "").trim().toUpperCase());
+    });
+    return map;
+  }, [holidays]);
+
+  function isHolidayFor(dateStr, country) {
+    const countries = holidayCountriesByDate.get(dateStr);
+    if (!countries) return false;
+    const c = String(country || "").trim().toUpperCase();
+    return countries.has("") || !c || countries.has(c);
+  }
+
+  // country: the employee's (effective) country. Without one, a holiday of
+  // any country counts, as before.
+  function isWorkingDay(dateStr, country) {
     const d = new Date(dateStr + "T00:00:00");
     const day = d.getDay();
     if (excludeWeekends && (day === 0 || day === 6)) return false;
-    if (excludeHolidays && holidayDates.has(dateStr)) return false;
+    if (excludeHolidays && isHolidayFor(dateStr, country)) return false;
     return true;
   }
 
@@ -817,8 +845,9 @@ export default function AttendancePage() {
       const end = new Date(bulkEndDate + "T00:00:00");
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dateStr = toLocalDateStr(d);
-        if (!isWorkingDay(dateStr)) continue;
         targetEmployees.forEach((emp) => {
+          // Per employee: another country's holiday is a working day here.
+          if (!isWorkingDay(dateStr, emp.countryCode)) return;
           toSave.push({
             employeeId: emp.employeeId,
             name: emp.name,
@@ -889,10 +918,17 @@ export default function AttendancePage() {
     const co24 = to24h(bulkClockOut, bulkClockOutPeriod);
     const totalHours = calculateHours(bulkClockIn, bulkClockOut, bulkBreak, bulkClockInPeriod, bulkClockOutPeriod);
     const decimalHours = calculateDecimalHours(bulkClockIn, bulkClockOut, bulkBreak, bulkClockInPeriod, bulkClockOutPeriod);
+    // Countries of the employees being generated for: a date is left out only
+    // if it is a day off for all of them (generation itself checks each one).
+    const targets = bulkMode === "single"
+      ? records.filter((r) => r.employeeId === Number(bulkEmployeeId))
+      : records;
+    const countries = [...new Set(targets.map((r) => r.countryCode || ""))];
+    if (countries.length === 0) countries.push("");
     let skipped = 0;
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const dateStr = toLocalDateStr(d);
-      if (!isWorkingDay(dateStr)) { skipped++; continue; }
+      if (countries.every((c) => !isWorkingDay(dateStr, c))) { skipped++; continue; }
       preview.push({ date: dateStr, clockIn: ci24, clockOut: co24, break: bulkBreak || "0", hours: totalHours, decimalHours });
     }
     setBulkPreview(preview);
@@ -1072,6 +1108,7 @@ export default function AttendancePage() {
       code: e.employeeCode || "",
       name: (e.name || "").trim().toLowerCase(),
       department: e.department || "",
+      country: e.countryCode || "",
     }));
 
     function isMatrixSheet(headers) {
@@ -1117,14 +1154,25 @@ export default function AttendancePage() {
       const { grid, headerRowIdx, nameIdx, workingIdx, presentIdx, leaveIdx, absentIdx,
               idIdx, deptIdx, checkInIdx, checkOutIdx, breakIdx, hoursIdx } = headerInfo;
       const daysInMonth = new Date(uploadYear, monthFromSheet + 1, 0).getDate();
-      const workingDates = [];
-      for (let day = 1; day <= daysInMonth; day++) {
-        const d = new Date(uploadYear, monthFromSheet, day);
-        const dow = d.getDay();
-        if (dow === 0 || dow === 6) continue;
-        if (holidayDates.has(toLocalDateStr(d))) continue;
-        workingDates.push(toLocalDateStr(d));
-      }
+      // The month's working days for one country: weekends and that country's
+      // holidays (or holidays with no country) left out — so an AU holiday is
+      // still a working day for an India employee.
+      const workingDatesByCountry = new Map();
+      const workingDatesFor = (country) => {
+        const key = String(country || "").trim().toUpperCase();
+        if (!workingDatesByCountry.has(key)) {
+          const dates = [];
+          for (let day = 1; day <= daysInMonth; day++) {
+            const d = new Date(uploadYear, monthFromSheet, day);
+            const dow = d.getDay();
+            if (dow === 0 || dow === 6) continue;
+            if (isHolidayFor(toLocalDateStr(d), key)) continue;
+            dates.push(toLocalDateStr(d));
+          }
+          workingDatesByCountry.set(key, dates);
+        }
+        return workingDatesByCountry.get(key);
+      };
 
       const hasClockData = checkInIdx !== -1 && checkOutIdx !== -1;
       const hasFixedBreak = breakIdx !== -1 && hoursIdx !== -1;
@@ -1194,6 +1242,11 @@ export default function AttendancePage() {
           templateHours = hoursIdx !== -1 ? String(Number(row[hoursIdx]) || "") : "";
         }
 
+        const empCountry = empId
+          ? (records.find((rec) => String(rec.employeeId) === String(empId))?.countryCode
+             || employeeLookup.find((e) => String(e.id) === String(empId))?.country)
+          : null;
+        const workingDates = workingDatesFor(empCountry);
         let cursor = 0;
         const assign = (count, status) => {
           for (let i = 0; i < count && cursor < workingDates.length; i++, cursor++) {

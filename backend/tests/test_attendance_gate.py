@@ -171,6 +171,28 @@ def test_holidays_excluded_for_matching_country_only(db, organization):
     assert report["missing"][0]["missingDates"] == ["2026-09-09"]
 
 
+def test_roster_gives_each_employee_the_country_the_gate_uses(db, organization):
+    """The attendance screens skip holidays per employee country from the
+    roster; it must be the same effective country the gate uses (own, else
+    the organisation's), or an AU holiday (1 Jan) is skipped for India staff
+    and the run reports the day missing."""
+    from app.modules.payroll.service import _resolve_org_country, get_employee_roster
+
+    india = _employee(db, organization, "IN1")
+    au = _employee(db, organization, "AU1")
+    au.country_code = "au"
+    unset = _employee(db, organization, "XX1")
+    unset.country_code = None
+    db.commit()
+
+    by_code = {r["employee_code"]: r for r in get_employee_roster(db, organization.id)}
+    org_country = (_resolve_org_country(db, organization.id) or "").strip().upper() or None
+    assert by_code["IN1"]["country_code"] == "IN"
+    assert by_code["AU1"]["country_code"] == "AU"
+    assert by_code["XX1"]["country_code"] == org_country
+    assert set(by_code["IN1"]) == {"id", "name", "employee_code", "department", "designation", "country_code"}
+
+
 def test_policy_weekly_off_days_and_employment_type_scope(db, organization):
     from app.modules.payroll.service import check_attendance_readiness
 

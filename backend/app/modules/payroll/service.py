@@ -29117,8 +29117,14 @@ def get_employee_roster(db: Session, organization_id: int,
                         limit: int = None, offset: int = None) -> List[dict]:
     """Lightweight employee roster for attendance/leave screens.
     
-    Returns only the columns needed by attendance UI: id, name, employee_code, 
-    department, designation. Uses load_only to avoid loading all columns.
+    Returns only the columns needed by attendance UI: id, name, employee_code,
+    department, designation, country_code. Uses load_only to avoid loading all columns.
+
+    country_code is the employee's effective country — their own, else the
+    organisation's — exactly what check_attendance_readiness uses to decide
+    which holidays apply to them. The attendance screens need it so a holiday
+    of one country (e.g. AU New Year's Day) is not skipped for employees of
+    another (IN), which the readiness gate would then report as missing.
     """
     from sqlalchemy.orm import load_only
     query = _apply_employee_filter(
@@ -29129,6 +29135,7 @@ def get_employee_roster(db: Session, organization_id: int,
                 PayrollEmployee.employee_code,
                 PayrollEmployee.department,
                 PayrollEmployee.designation,
+                PayrollEmployee.country_code,
             )
         ), organization_id)
     if status:
@@ -29138,6 +29145,7 @@ def get_employee_roster(db: Session, organization_id: int,
         query = query.offset(offset)
     if limit:
         query = query.limit(limit)
+    org_country = (_resolve_org_country(db, organization_id) or "").strip().upper()
     # Convert to dict to avoid detached instance issues
     return [
         {
@@ -29146,6 +29154,7 @@ def get_employee_roster(db: Session, organization_id: int,
             "employee_code": emp.employee_code,
             "department": emp.department,
             "designation": emp.designation,
+            "country_code": (emp.country_code or org_country or "").strip().upper() or None,
         }
         for emp in query.all()
     ]
