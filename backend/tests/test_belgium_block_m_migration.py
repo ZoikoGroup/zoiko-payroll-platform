@@ -142,8 +142,9 @@ def test_literal_names_manifest_single_child_and_single_head():
     # a4c7e1f9b3d8 (report-field source_column VARCHAR(100)) is its single child; c3e8a1d5f7b2
     # (tax_slabs.tax_regime VARCHAR(40)) sits on it; UAE ad01fc67ce44 and the report-template content
     # editor d7a3f1c9e5b2 both grow from that; merge b5f3e8a1c6d9 joins them; Spain 86f1ec062709 and
-    # e4b7c2a9d1f3 (certification runs tied to a pack) grow from it, joined by merge c8d2f6a4e1b9 (the head).
-    assert script.get_heads() == ["c8d2f6a4e1b9"]
+    # e4b7c2a9d1f3 (certification runs tied to a pack) grow from it, joined by merge c8d2f6a4e1b9;
+    # d3f5a7c9e2b1 (Microsoft / Apple sign-in and Company SSO domain tables) is the head on top.
+    assert script.get_heads() == ["d3f5a7c9e2b1"]
     assert script.get_revision("ad01fc67ce44").down_revision == "c3e8a1d5f7b2"
     assert script.get_revision("c3e8a1d5f7b2").down_revision == "a4c7e1f9b3d8"
     assert script.get_revision("a4c7e1f9b3d8").down_revision == REVISION
@@ -160,5 +161,7 @@ def test_the_deploy_drift_filter_explains_every_new_table_and_column():
         tables, columns = pending_objects(PARENT)
     finally:
         os.chdir(here)
-    assert tables == set(NEW_TABLES)
+    # Every later revision's tables are pending from here too: d3f5a7c9e2b1 adds the
+    # social sign-in tables.
+    assert tables == set(NEW_TABLES) | {"user_oauth_identities", "oauth_pending", "organization_sso_domains"}
     assert set(columns.get(EMPLOYER, ())) == NEW_COLUMNS

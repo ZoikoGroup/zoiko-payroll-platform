@@ -105,7 +105,7 @@ def test_literal_names_manifest_single_child_and_single_head():
     # merge e3f9a7c1b5d2 rejoins it with this revision and is the single head.
     assert sorted(children) == sorted([FILENAME, "d6b2e8f4a1c9_merge_mexico_and_malaysia_heads.py"])
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert script.get_heads() == ["c8d2f6a4e1b9"]   # merge of Spain 86f1ec062709 + e4b7c2a9d1f3, on b5f3e8a1c6d9
+    assert script.get_heads() == ["d3f5a7c9e2b1"]   # social sign-in tables on merge c8d2f6a4e1b9 (Spain + e4b7c2a9d1f3)
     assert script.get_revision("ad01fc67ce44").down_revision == "c3e8a1d5f7b2"
     assert script.get_revision("c3e8a1d5f7b2").down_revision == "a4c7e1f9b3d8"
     assert script.get_revision("a4c7e1f9b3d8").down_revision == "e9c4b7a2d6f3"
