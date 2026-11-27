@@ -16,7 +16,14 @@ import { getCurrencyForJurisdiction, formatCurrency } from "../../../utils/curre
 import { usePayrollSetup } from "../PayrollSetupContext";
 import { useEntitledCountries } from "../EntitledCountriesContext";
 import { ATTENDANCE_OVERRIDE_MIN_REASON } from "./AttendanceReadinessPanel";
+import RunTrackerPanel from "./RunTrackerPanel";
+import useRunAdvance from "./useRunAdvance";
+import { canOperatePayroll } from "./runWorkflow";
+import { useAuth } from "../../../context/AuthContext";
 
+// Steps of the "Create New Run" wizard only (shown in the left panel while
+// creating a run). An existing run's progress is the real workflow
+// (Draft -> Closed) shown by RunTrackerPanel.
 const WIZARD_STEPS = [
   { id: 1, label: "Configure", icon: FileText },
   { id: 2, label: "Calculate", icon: List },
@@ -58,6 +65,11 @@ export default function PayrollRunsPage() {
   const [previewData, setPreviewData] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [selectedRun, setSelectedRun] = useState(null);
+  // The run the left "Run progress" panel follows (null = its default:
+  // this month's run, else the latest unfinished one).
+  const [trackedRunId, setTrackedRunId] = useState(null);
+  const { role } = useAuth();
+  const canOperate = canOperatePayroll(role);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   // Attendance gate (see AttendanceReadinessPanel / backend
   // check_attendance_readiness): checked when the Calculate step opens and
@@ -92,6 +104,13 @@ export default function PayrollRunsPage() {
     const data = await fetchRuns();
     setRuns(data);
   }, []);
+
+  // One shared "advance this run" action for the panel and the Actions column
+  // (same confirmation dialogs, same server-side permission checks).
+  const { requestAdvance, advancingId, dialog: advanceDialog } = useRunAdvance({
+    fmtCurrency,
+    onAdvanced: () => loadRuns(),
+  });
 
   useEffect(() => {
     loadRuns();
@@ -291,10 +310,25 @@ export default function PayrollRunsPage() {
   const isWizard = view === "wizard";
 
   return (
-    <div className="flex h-full min-h-screen bg-background font-sans">
-      <aside className="w-[200px] flex-shrink-0 flex flex-col border-r border-border bg-surface p-5">
+    <div className="flex h-full min-h-screen flex-col bg-background font-sans lg:flex-row">
+      <aside className="flex w-full flex-shrink-0 flex-col border-b border-border bg-surface p-5 lg:w-[248px] 2xl:w-[300px] lg:border-b-0 lg:border-r">
+        {!isWizard && (
+          <RunTrackerPanel
+            runs={runs}
+            trackedRunId={trackedRunId}
+            onTrack={setTrackedRunId}
+            activeCountries={activeCountries.length ? activeCountries : [{ code: jurisdictionCountry, name: jurisdictionCountry }]}
+            canOperate={canOperate}
+            onAdvance={requestAdvance}
+            advancingId={advancingId}
+            onCreateRun={startWizard}
+            creating={loadingEmployees}
+          />
+        )}
+        {isWizard && (
+        <>
         <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-5">
-          Run Progress
+          New run
         </p>
         <div className="flex-1 space-y-1">
           {WIZARD_STEPS.map((step, i) => {
@@ -328,6 +362,8 @@ export default function PayrollRunsPage() {
             );
           })}
         </div>
+        </>
+        )}
         {jurisdictionCountry && (
           <div className="mt-4 rounded-[12px] bg-surface-muted border border-border p-3">
             <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-1">
@@ -405,7 +441,17 @@ export default function PayrollRunsPage() {
                   <h3 className="text-[15px] font-bold text-foreground">Payroll Runs</h3>
                 </div>
                 <div className="px-5 pb-5">
-                  <RunsTable runs={runs} onSelect={setSelectedRun} onDelete={handleRunChanged} isWizardMode={false} fmtCurrency={fmtCurrency} />
+                  <RunsTable
+                    runs={runs}
+                    onSelect={setSelectedRun}
+                    onRowClick={(run) => setTrackedRunId(run.id)}
+                    selectedRunId={trackedRunId}
+                    onAdvance={requestAdvance}
+                    advancingId={advancingId}
+                    onDelete={handleRunChanged}
+                    isWizardMode={false}
+                    fmtCurrency={fmtCurrency}
+                  />
                 </div>
               </div>
             </div>
@@ -448,8 +494,16 @@ export default function PayrollRunsPage() {
       </div>
 
       {selectedRun && (
-        <RunDetailPanel run={selectedRun} onClose={() => setSelectedRun(null)} fmtCurrency={fmtCurrency} />
+        <RunDetailPanel
+          run={selectedRun}
+          onClose={() => setSelectedRun(null)}
+          fmtCurrency={fmtCurrency}
+          canOperate={canOperate}
+          onRunChanged={loadRuns}
+        />
       )}
+
+      {advanceDialog}
 
       {showConfirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
