@@ -3370,12 +3370,16 @@ export const downloadPayslipTemplateSamplePdf = async (payload) => {
   if (!res.ok) {
     let detail = "Could not create the sample PDF.";
     try { detail = (await res.json())?.detail || detail; } catch { /* not JSON */ }
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    // 409 / 422 carry a diagnostic {code, message, detail}: why this payslip
+    // would use the standard format, or why the PDF engine failed.
+    const err = new Error(typeof detail === "string" ? detail : detail?.message || JSON.stringify(detail));
+    if (detail && typeof detail === "object" && detail.code) err.diagnostics = detail;
+    throw err;
   }
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement("a");
   a.href = url;
-  a.download = "sample-payslip.pdf";
+  a.download = payload?.payslipId ? `payslip-${payload.payslipId}-template.pdf` : "sample-payslip.pdf";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -3387,7 +3391,9 @@ export const downloadMxPayHistory = (employeeId, start, end) =>
   mxPdf(`/api/payroll/mexico/employees/${employeeId}/pay-history?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&format=pdf`,
     `historial-${employeeId}.pdf`);
 // PDF design-match import: analyse (nothing stored), then create a draft from the confirmed analysis.
-export const analyzePayslipPdf = (formData) => api.post(`${PST}/import-pdf/analyze`, formData);
+// mode "exact": rebuild the PDF's ruled grid cell for cell; "style": a flowing layout in its colours/wording.
+export const analyzePayslipPdf = (formData, mode = "style") =>
+  api.post(`${PST}/import-pdf/analyze?mode=${mode === "exact" ? "exact" : "style"}`, formData);
 export const createPayslipTemplateFromPdf = (payload) => api.post(`${PST}/import-pdf/create`, payload);
 
 // ── Malaysia (ZP-MY-ENG-001 Phase 8b) — organisation statutory setup ──────

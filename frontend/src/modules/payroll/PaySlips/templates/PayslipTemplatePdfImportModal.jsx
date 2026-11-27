@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { FileText, UploadCloud, X } from "lucide-react";
+import { FileText, Grid3x3, Palette, UploadCloud, X } from "lucide-react";
 import { analyzePayslipPdf, createPayslipTemplateFromPdf } from "../../../../service/payrollService";
 import { useToast } from "../../ToastContext";
+import PayslipTemplateExactMapping from "./PayslipTemplateExactMapping";
 
 const MAX_BYTES = 5_000_000;
 
@@ -25,12 +26,21 @@ const PLACEHOLDER_NAMES = {
 
 const field = "w-full rounded-[8px] border border-border bg-surface px-2.5 py-1.5 text-[12px] text-foreground focus:outline-none focus:border-primary";
 
+const MODES = [
+  ["exact", Grid3x3, "Exact layout",
+    "Rebuilds your PDF's table cell for cell: same columns, rows, merged cells, borders, fills and fonts. Needs a ruled table (lines between cells)."],
+  ["style", Palette, "Same style",
+    "A flowing layout in your PDF's colours, logo and wording. Works for any PDF; looks similar, not identical."],
+];
+
 /** Build a payslip template from a PDF payslip's design. The PDF is read once
- * (nothing is stored); the user confirms colours, wording and which fields
- * map to which placeholders; a flowing template is created as a draft. */
-export default function PayslipTemplatePdfImportModal({ isOpen, onClose, onCreated }) {
+ * (nothing is stored). Exact layout: the ruled grid is rebuilt and the user
+ * maps each label to a field. Same style: the user confirms colours, wording
+ * and fields; a flowing template is created. Both create a draft. */
+export default function PayslipTemplatePdfImportModal({ isOpen, onClose, onCreated, fieldCatalogue = [] }) {
   const { addToast } = useToast();
   const inputRef = useRef(null);
+  const [mode, setMode] = useState("exact");
   const [busy, setBusy] = useState(false);
   const [fileName, setFileName] = useState("");
   const [analysis, setAnalysis] = useState(null);
@@ -51,9 +61,18 @@ export default function PayslipTemplatePdfImportModal({ isOpen, onClose, onCreat
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const a = await analyzePayslipPdf(formData);
+      const a = await analyzePayslipPdf(formData, mode);
       setFileName(file.name);
       setAnalysis(a);
+      if (a.mode === "exact") {
+        setForm({
+          name: file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " "),
+          primaryColor: a.primaryColor,
+          includeLogo: !!a.logoDataUri,
+          fields: a.fields.map((f) => ({ ...f })),
+        });
+        return;
+      }
       setForm({
         name: file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " "),
         title: a.title,
@@ -75,7 +94,13 @@ export default function PayslipTemplatePdfImportModal({ isOpen, onClose, onCreat
   const create = async () => {
     setBusy(true);
     try {
-      const created = await createPayslipTemplateFromPdf({
+      const { pageImage: _pageImage, ...exactAnalysis } = analysis;
+      const created = analysis.mode === "exact" ? await createPayslipTemplateFromPdf({
+        name: form.name,
+        description: `Built from ${fileName} (exact layout)`,
+        mode: "exact",
+        analysis: { ...exactAnalysis, primaryColor: form.primaryColor, includeLogo: form.includeLogo, fields: form.fields },
+      }) : await createPayslipTemplateFromPdf({
         name: form.name,
         description: `Built from ${fileName}`,
         analysis: {
@@ -109,8 +134,11 @@ export default function PayslipTemplatePdfImportModal({ isOpen, onClose, onCreat
           <div>
             <h3 className="text-[15px] font-bold text-foreground">Import a PDF payslip design</h3>
             <p className="text-[12px] text-foreground-muted">
-              Builds a template from your PDF&apos;s colours, logo and wording. It will look similar, not identical,
-              and works for every employee.
+              {analysis?.mode === "exact"
+                ? "Exact layout: your PDF's table rebuilt cell for cell. Check what each label shows, then create the draft."
+                : analysis
+                  ? "Same style: built from your PDF's colours, logo and wording. It will look similar, not identical."
+                  : "Builds a template from your PDF payslip that works for every employee."}
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close"
@@ -121,6 +149,16 @@ export default function PayslipTemplatePdfImportModal({ isOpen, onClose, onCreat
 
         {!analysis ? (
           <div className="p-6 space-y-4">
+            <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Import mode">
+              {MODES.map(([key, Icon, title, text]) => (
+                <button key={key} type="button" role="radio" aria-checked={mode === key} onClick={() => setMode(key)}
+                  className={`text-left rounded-[12px] border p-3 cursor-pointer transition-colors ${
+                    mode === key ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}>
+                  <span className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground"><Icon size={14} /> {title}</span>
+                  <span className="block text-[11px] text-foreground-muted mt-1">{text}</span>
+                </button>
+              ))}
+            </div>
             <button type="button" disabled={busy} onClick={() => inputRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); upload(e.dataTransfer.files?.[0]); }}
@@ -149,6 +187,21 @@ export default function PayslipTemplatePdfImportModal({ isOpen, onClose, onCreat
                 {analysis.notes.map((n) => <li key={n}>{n}</li>)}
               </ul>
             </div>
+            {analysis.mode === "exact" ? (
+            <div className="flex-1 overflow-auto p-5 space-y-5">
+              <PayslipTemplateExactMapping analysis={analysis} form={form} setForm={setForm} catalogue={fieldCatalogue} />
+              <div className="flex justify-end gap-2 pt-3 border-t border-border">
+                <button type="button" onClick={() => { setAnalysis(null); setForm(null); }} disabled={busy}
+                  className="px-4 py-2 rounded-[10px] text-[13px] font-semibold text-foreground-muted hover:bg-surface-muted cursor-pointer">
+                  Choose another PDF
+                </button>
+                <button type="button" onClick={create} disabled={busy || !form.name.trim()}
+                  className="px-4 py-2 rounded-[10px] bg-primary text-white text-[13px] font-semibold hover:bg-primary/90 disabled:opacity-50 cursor-pointer">
+                  {busy ? "Creating…" : "Create draft template"}
+                </button>
+              </div>
+            </div>
+            ) : (
             <div className="flex-1 overflow-auto p-5 space-y-5">
               <div className="grid grid-cols-2 gap-3">
                 <label className="block col-span-2">
@@ -272,6 +325,7 @@ export default function PayslipTemplatePdfImportModal({ isOpen, onClose, onCreat
                 </button>
               </div>
             </div>
+            )}
           </div>
         )}
       </div>

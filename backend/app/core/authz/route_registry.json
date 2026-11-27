@@ -17734,7 +17734,7 @@
   {
    "method": "POST",
    "path": "/api/payroll/payslip-templates/preview",
-   "data_class": "tenant_config",
+   "data_class": "worker",
    "action": "create",
    "resource": "preview",
    "principals": [
@@ -17745,13 +17745,16 @@
    "field_classes": [],
    "retired_reason": null,
    "note": null,
-   "scan_worker_tables": [],
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payslip_items"
+   ],
    "overridden": false
   },
   {
    "method": "POST",
    "path": "/api/payroll/payslip-templates/preview-pdf",
-   "data_class": "tenant_config",
+   "data_class": "worker",
    "action": "create",
    "resource": "preview-pdf",
    "principals": [
@@ -17762,7 +17765,10 @@
    "field_classes": [],
    "retired_reason": null,
    "note": null,
-   "scan_worker_tables": [],
+   "scan_worker_tables": [
+    "payroll_employees",
+    "payslip_items"
+   ],
    "overridden": false
   },
   {
@@ -17939,6 +17945,7 @@
    "retired_reason": null,
    "note": null,
    "scan_worker_tables": [
+    "payroll_employees",
     "payslip_items"
    ],
    "overridden": false

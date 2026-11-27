@@ -130,3 +130,43 @@ def test_word_and_pdf_imports_over_http(client, world):
     sa = _h(world, "SA")
     assert client.post("/api/payroll/payslip-templates/import-pdf/analyze", headers=sa,
                        files={"file": ("slip.pdf", make_payslip_pdf(), "application/pdf")}).status_code in (401, 403)
+
+
+def test_exact_layout_pdf_import_over_http(client, world):
+    from tests._payslip_import_fixtures import make_grid_payslip_pdf
+    ta = _h(world, "TA")
+    pdf = make_grid_payslip_pdf()
+    r = client.post("/api/payroll/payslip-templates/import-pdf/analyze?mode=exact", headers=ta,
+                    files={"file": ("grid.pdf", pdf, "application/pdf")})
+    assert r.status_code == 200, r.text
+    analysis = r.json()
+    assert analysis["mode"] == "exact" and len(analysis["table"]["colWidths"]) == 5
+    r = client.post("/api/payroll/payslip-templates/import-pdf/create", headers=ta,
+                    json={"name": "Exact grid", "mode": "exact", "analysis": analysis})
+    assert r.status_code == 201, r.text
+    version = r.json()["latestVersion"]
+    assert version["configurationJson"]["pdfFonts"] == "full"
+    assert version["configurationJson"]["fields"]["pan"]["label"] == "Pan No."
+    tid = r.json()["id"]
+    assert client.post(f"/api/payroll/payslip-templates/{tid}/publish", headers=ta).status_code == 200
+
+    r = client.post("/api/payroll/payslip-templates/import-pdf/analyze?mode=bogus", headers=ta,
+                    files={"file": ("grid.pdf", pdf, "application/pdf")})
+    assert r.status_code == 422
+    sa = _h(world, "SA")
+    assert client.post("/api/payroll/payslip-templates/import-pdf/analyze?mode=exact", headers=sa,
+                       files={"file": ("grid.pdf", pdf, "application/pdf")}).status_code in (401, 403)
+
+
+def test_preview_with_a_real_payslip_is_tenant_scoped(client, world):
+    pid = _payslip(world)
+    body = {"htmlContent": "<p>{{ employee.name }} {{ totals.net_pay_formatted }}</p>", "payslipId": pid}
+    r = client.post("/api/payroll/payslip-templates/preview", headers=_h(world, "TA"), json=body)
+    assert r.status_code == 200, r.text
+    assert "73,000.00" in r.json()["renderedHtml"] and r.json()["diagnostics"] is None
+    assert client.post("/api/payroll/payslip-templates/preview", headers=_h(world, "TB"), json=body).status_code == 404
+    assert client.post("/api/payroll/payslip-templates/preview-pdf", headers=_h(world, "TB"),
+                       json=body).status_code == 404
+    for who in ("EA", "SA"):
+        assert client.post("/api/payroll/payslip-templates/preview", headers=_h(world, who),
+                           json=body).status_code in (401, 403), who

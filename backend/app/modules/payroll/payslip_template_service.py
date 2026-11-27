@@ -258,6 +258,117 @@ STARTERS = {
 }
 
 
+# ── Field catalogue ──────────────────────────────────────────────────────────
+# The key / value pairs a field-aware template (an exact-layout import) can
+# show; the organisation includes or excludes each and may relabel it. Stored
+# per template version in configuration_json["fields"] as
+# {key: {include, label, code?}}; templates read config.fields.<key>.
+#   side/code: an earnings or deduction row placed by line code — every line
+#              not placed is summed into other_earnings / other_deductions.
+#   flag:      also needs this existing setting on (showEmployeeBank, ...).
+#   required:  always included (publish rules: name, net pay and the
+#              'any other' rows that keep every line on the payslip).
+# Labels are the fixture payslip's wording (Payslip_Blank_Template.pdf).
+
+def _f(key, label, value, group, default=True, required=False, side=None, code=None, flag=None, hint=None):
+    return {"key": key, "label": label, "value": value, "group": group, "defaultIncluded": default,
+            "required": required, "side": side, "code": code, "flag": flag, "hint": hint}
+
+
+FIELD_CATALOGUE = [
+    _f("title", "Pay Slip for the month of", "payroll.period", "header"),
+    _f("logo", "Company logo", "company.logo_data_uri", "header", flag="showCompanyLogo"),
+    _f("company_name", "Company name", "company.name", "header"),
+    _f("company_address", "Company address", "company.address", "header", default=False),
+    _f("employee_id", "Employee ID", "employee.id", "employee"),
+    _f("date_of_joining", "DOJ", "employee.date_of_joining", "employee"),
+    _f("name", "Name", "employee.name", "employee", required=True),
+    _f("pan", "Pan No.", "employee.pan", "employee"),
+    _f("designation", "Designation", "employee.designation", "employee"),
+    _f("paid_days", "Paid Days", "payroll.payable_days", "employee"),
+    _f("department", "Department", "employee.department", "employee"),
+    _f("bank_account", "Bank Account No.", "employee.bank_account", "employee", flag="showEmployeeBank"),
+    _f("month_days", "Month Days", "payroll.month_days", "employee"),
+    _f("ifsc", "IFSC", "employee.ifsc", "employee", flag="showEmployeeBank"),
+    _f("payment_mode", "Mode of Payment", "payment.mode", "employee"),
+    _f("bank_name", "Bank Name", "employee.bank_name", "employee", default=False, flag="showEmployeeBank"),
+    _f("basic", "Basic Salary", "earnings_by_code", "earnings", side="earnings", code="basic"),
+    _f("hra", "HRA", "earnings_by_code", "earnings", side="earnings", code="hra"),
+    _f("conveyance", "Conv. Allowance", "earnings_by_code", "earnings", side="earnings", code="allowance_conveyance",
+       hint="Uses the allowance with this code (allowance_<key> of the allowance component)."),
+    _f("special", "Special Allowance", "earnings_by_code", "earnings", side="earnings", code="special"),
+    _f("bonus", "Bonus", "earnings_by_code", "earnings", side="earnings", code="additional_compensation",
+       hint="Additional compensation: rewards, bonus and other compensation together."),
+    _f("other_earnings", "Other Earnings", "other_earnings", "earnings", required=True,
+       hint="Every earnings line without its own row; shown only when not zero."),
+    _f("employer_epf", "Employer Share of EPF", "employer.epf", "earnings",
+       hint="Employer's cost — not part of gross pay or net pay."),
+    _f("total_ctc", "Total CTC", "totals.ctc", "earnings",
+       hint="Annual CTC ÷ 12 from the employee record (current value, not frozen) — not part of gross pay."),
+    _f("gross", "Gross Earnings", "totals.gross_pay_formatted", "earnings", default=False),
+    _f("tds", "TDS", "deductions_by_code", "deductions", side="deductions", code="tds"),
+    _f("epf", "EPF Deduction", "deductions_by_code", "deductions", side="deductions", code="pf"),
+    _f("advance", "Advance Deduction", "deductions_by_code", "deductions", side="deductions", code="advance",
+       hint="No salary-advance deduction is recorded yet, so this shows '-'."),
+    _f("other_deductions", "Any other", "other_deductions", "deductions", required=True,
+       hint="Every deduction line without its own row (LOP, ESI, Professional Tax, ...)."),
+    _f("total_deductions", "Total Deductions", "totals.total_deductions_formatted", "deductions"),
+    _f("net_paid", "Net Paid", "totals.net_paid", "totals", required=True),
+    _f("net_in_words", "Paid amount in words :", "totals.net_pay_in_words", "totals", flag="showNetInWords"),
+    _f("note", "Note", "disclaimer", "footer"),
+]
+FIELDS_BY_KEY = {f["key"]: f for f in FIELD_CATALOGUE}
+FIELD_GROUPS = ["header", "employee", "earnings", "deductions", "totals", "footer"]
+_LABEL_UNSAFE = re.compile(r"[<>{}%=\"'`\\]")
+_CODE = re.compile(r"[a-z0-9_]{1,80}")
+
+
+def clean_label(value, limit: int = 80) -> str:
+    """A field label as plain text: markup / template / attribute characters
+    removed (same rule as the PDF importer)."""
+    return _LABEL_UNSAFE.sub("", str(value or ""))[:limit].strip()
+
+
+def normalize_fields(fields) -> dict:
+    """Every catalogue field -> {include, label, code?, side?}. Unknown keys
+    are dropped, required fields forced on, labels cleaned, codes checked."""
+    if fields is not None and not isinstance(fields, dict):
+        raise _bad_request("fields must be an object of field settings.")
+    out = {}
+    for f in FIELD_CATALOGUE:
+        setting = (fields or {}).get(f["key"])
+        setting = setting if isinstance(setting, dict) else {}
+        include = bool(setting["include"]) if "include" in setting else f["defaultIncluded"]
+        # The note is a sentence (the PDF's own footer wording); labels are short.
+        label = clean_label(setting.get("label"), 200 if f["key"] == "note" else 80) or f["label"]
+        entry = {"include": include or f["required"], "label": label}
+        if f["side"]:
+            code = str(setting.get("code") or f["code"]).strip().lower()
+            if not _CODE.fullmatch(code):
+                raise _bad_request(f"{f['label']}: line code must be lower-case letters, digits and _.")
+            entry.update(code=code, side=f["side"])
+        out[f["key"]] = entry
+    return out
+
+
+def resolved_fields(cfg: dict) -> dict:
+    """Field settings as templates see them: the template's own, or the
+    catalogue defaults; a field with a flag is shown only when that existing
+    setting (showEmployeeBank / showCompanyLogo / showNetInWords) is on too."""
+    fields = {k: dict(v) for k, v in (cfg.get("fields") or normalize_fields(None)).items()}
+    for key, entry in fields.items():
+        flag = FIELDS_BY_KEY[key]["flag"] if key in FIELDS_BY_KEY else None
+        if flag and not cfg.get(flag, True):
+            entry["include"] = False
+    return fields
+
+
+def field_catalogue() -> List[dict]:
+    """The catalogue for the editor (no template expressions)."""
+    return [{k: f[k] for k in ("key", "label", "group", "defaultIncluded", "required", "side", "code", "flag", "hint")}
+            for f in FIELD_CATALOGUE]
+
+
 def list_starters() -> List[dict]:
     return [
         {"key": key, "name": s["name"], "description": s["description"],
@@ -337,21 +448,41 @@ def _check_css(css: str) -> None:
 
 # Every placeholder a template may use — must match build_payslip_context /
 # sample_context. `None` = a plain value (no attributes of its own).
-_LINE = {"label": None, "amount": None, "amount_formatted": None}
+class _AnyKey(dict):
+    """Schema for a mapping keyed by data (line codes): any key, each value
+    shaped like `item`. A code a payslip doesn't have renders blank."""
+    def __init__(self, item):
+        super().__init__()
+        self.item = item
+
+
+_LINE = {"label": None, "amount": None, "amount_formatted": None,
+         "code": None, "entitled": None, "entitled_formatted": None}
 _IDENTIFIER = {"label": None, "value": None}
+_BUCKET = {"amount": None, "amount_formatted": None, "labels": [None], "count": None}
+_PAIR = {"entitled": None, "entitled_formatted": None, "paid": None, "paid_formatted": None}
 PLACEHOLDER_SCHEMA = {
     "company": {"name": None, "address": None, "tax_id": None, "registration_no": None, "logo_data_uri": None},
     "employee": {"name": None, "id": None, "department": None, "designation": None, "date_of_joining": None,
-                 "bank_name": None, "bank_account": None, "identifiers": [_IDENTIFIER]},
+                 "bank_name": None, "bank_account": None, "ifsc": None, "pan": None,
+                 "identifiers": [_IDENTIFIER]},
     "payroll": {"period": None, "pay_date": None, "payslip_number": None, "total_days": None,
-                "payable_days": None, "unpaid_days": None, "country": None},
+                "month_days": None, "payable_days": None, "unpaid_days": None, "country": None},
+    "payment": {"mode": None},
     "currency": {"code": None, "symbol": None},
     "earnings": [_LINE],
     "deductions": [_LINE],
+    "earnings_by_code": _AnyKey(_LINE),
+    "deductions_by_code": _AnyKey(_LINE),
+    "other_earnings": _BUCKET,
+    "other_deductions": _BUCKET,
+    "employer": {"epf": _PAIR},
     "totals": {"gross_pay": None, "gross_pay_formatted": None, "total_deductions": None,
                "total_deductions_formatted": None, "net_pay": None, "net_pay_formatted": None,
-               "net_pay_in_words": None},
-    "config": {key: None for key in DEFAULT_CONFIG},
+               "net_paid": None, "net_pay_in_words": None, "ctc": _PAIR},
+    "config": {**{key: None for key in DEFAULT_CONFIG}, "pdfFonts": None,
+               "fields": {f["key"]: {"include": None, "label": None, "code": None, "side": None}
+                          for f in FIELD_CATALOGUE}},
     "disclaimer": None,
     "generated_on": None,
 }
@@ -386,6 +517,10 @@ def _resolve(node, scope):
         full = f"{path}.{attr}"
         if parent is _ANY or parent is None:   # None: a plain value; its str methods are fine
             return _ANY, full
+        if isinstance(parent, _AnyKey):        # earnings_by_code.<any code>
+            if not re.fullmatch(r"[a-z0-9_]{1,80}", attr):
+                raise KeyError(full)
+            return parent.item, full
         if isinstance(parent, dict) and attr in parent:
             return parent[attr], full
         raise KeyError(full)
@@ -438,10 +573,29 @@ def _check_placeholders(tree) -> set:
     return used
 
 
+# A field-aware template shows the lines through the keyed views plus the
+# 'any other' row, which together are still every line of the payslip.
+_LINES_EQUIVALENT = {
+    "earnings": ("earnings_by_code", "other_earnings"),
+    "deductions": ("deductions_by_code", "other_deductions"),
+}
+
+
+def _missing(used: set) -> List[Tuple[str, str]]:
+    out = []
+    for path, label in REQUIRED_PLACEHOLDERS.items():
+        if path in used:
+            continue
+        alt = _LINES_EQUIVALENT.get(path)
+        if alt and all(p in used for p in alt):
+            continue
+        out.append((path, label))
+    return out
+
+
 def missing_required(fragment: str) -> List[str]:
     """Descriptions of the required placeholders a template does not use."""
-    used = _check_jinja(fragment)
-    return [label for path, label in REQUIRED_PLACEHOLDERS.items() if path not in used]
+    return [label for _path, label in _missing(_check_jinja(fragment))]
 
 
 def _check_jinja(source: str) -> set:
@@ -476,8 +630,16 @@ def normalize_html(html_content: str) -> Tuple[str, str]:
 
 
 def normalize_config(config: Optional[dict]) -> dict:
+    """The six display settings, plus — only for templates that have them —
+    field settings and the PDF font mode. A config without 'fields' normalises
+    exactly as before."""
     out = {**DEFAULT_CONFIG}
-    for key, value in (config or {}).items():
+    config = config or {}
+    if "fields" in config:
+        out["fields"] = normalize_fields(config["fields"])
+    if config.get("pdfFonts") == "full":
+        out["pdfFonts"] = "full"
+    for key, value in config.items():
         if key not in DEFAULT_CONFIG:
             continue
         if key in ("primaryColor", "accentColor"):
@@ -509,7 +671,7 @@ def validate_template(html_content: str, css_content: Optional[str]) -> Tuple[st
     if css:
         _check_css(css)
     warnings = [f"'{path}' ({label}) is not used — it must be before the template can be published."
-                for path, label in REQUIRED_PLACEHOLDERS.items() if path not in used]
+                for path, label in _missing(used)]
     return fragment, css, warnings
 
 
@@ -635,12 +797,13 @@ def _stamp_evaluation(pdf: bytes) -> bytes:
     return out.getvalue()
 
 
-def _pdf_resource_policy(fonts: Optional[Tuple[str, str]]):
-    """No network at all; local reads confined to the font directory; bounded
-    size, image pixels, element depth and render time."""
+def _pdf_resource_policy(fonts):
+    """No network at all; local reads confined to the font directories;
+    bounded size, image pixels, element depth and render time."""
     from pathlib import Path
     from xhtml2pdf.config.resources import ResourceAccessPolicy
 
+    fonts = tuple(fonts or ())
     font_dirs = sorted({str(Path(p).parent) for p in fonts}) if fonts else []
     return ResourceAccessPolicy(
         allow_remote=False,
@@ -649,11 +812,51 @@ def _pdf_resource_policy(fonts: Optional[Tuple[str, str]]):
         extra_roots=tuple(Path(d) for d in font_dirs[1:]),
         max_local_bytes=4_000_000,          # a 2 MB logo as a data: URI, or a font file
         max_image_pixels=25_000_000,
-        max_resources=4,
+        # Standard mode: 2 fonts + logo (unchanged); full fonts: up to 8 faces + logo.
+        max_resources=max(4, len(set(fonts)) + 2),
         max_render_seconds=20,
         max_document_bytes=2_000_000,
         max_depth=64,
     )
+
+
+# ── Full fonts (exact-layout templates: config.pdfFonts == "full") ──────────
+# Regular / bold / italic / bold-italic of a sans and a serif family, so
+# bold-italic labels and a serif company name survive the PDF engine. Only
+# templates that ask for it; every other template's PDF is unchanged.
+_FULL_SANS, _FULL_SERIF = "PayslipFullSans", "PayslipFullSerif"
+_SERIF_NAMES = re.compile(
+    r"(?<![\w-])(serif|times|times new roman|georgia|garamond|cambria|book antiqua|palatino|"
+    r"palatino linotype|dejavu serif|liberation serif|noto serif|bookman|century schoolbook)\b",
+    re.IGNORECASE)
+_FONT_SHORTHAND = re.compile(r"(?<![\w-])font\s*:\s*([^;}]*)", re.IGNORECASE)
+
+
+def _family_for(value: str) -> str:
+    return _FULL_SERIF if _SERIF_NAMES.search(value.replace('"', "").replace("'", "")) else _FULL_SANS
+
+
+def _full_font_css(css: str) -> str:
+    """font-family -> the full sans or serif family (by the families named);
+    the `font:` shorthand gets an explicit font-family after it."""
+    css = _FONT_DECL.sub(lambda m: f"font-family: {_family_for(m.group(0))}", css)
+    return _FONT_SHORTHAND.sub(lambda m: f"{m.group(0)}; font-family: {_family_for(m.group(1))}", css)
+
+
+def _full_font_faces() -> Tuple[str, List[str]]:
+    """(@font-face rules, font files) for full fonts; ('', []) if none exist."""
+    from app.modules.payroll import service as payroll_service
+    faces = payroll_service.pdf_font_faces()
+    rules, files = [], []
+    for family, name in (("sans", _FULL_SANS), ("serif", _FULL_SERIF)):
+        for style, path in (faces.get(family) or {}).items():
+            weight = " font-weight: bold;" if "bold" in style else ""
+            italic = " font-style: italic;" if "italic" in style else ""
+            rules.append(f'@font-face {{ font-family: {name}; src: url("{path.replace(chr(92), "/")}");{weight}{italic} }}')
+            files.append(path)
+    if not rules:
+        return "", []
+    return " ".join(rules) + f" body {{ font-family: {_FULL_SANS}; }} ", files
 
 
 def html_to_pdf(body_html: str, css: Optional[str], cfg: dict, watermark: bool = False) -> bytes:
@@ -662,18 +865,25 @@ def html_to_pdf(body_html: str, css: Optional[str], cfg: dict, watermark: bool =
     import os
     from xhtml2pdf import pisa
 
-    fonts = _font_files()
-    allowed = set()
-    face = ""
-    if fonts:
-        regular, bold = (p.replace("\\", "/") for p in fonts)
-        allowed = {os.path.normcase(os.path.normpath(p)) for p in fonts}
-        face = (f'@font-face {{ font-family: {_PDF_FONT}; src: url("{regular}"); }} '
-                f'@font-face {{ font-family: {_PDF_FONT}; src: url("{bold}"); font-weight: bold; }} '
-                f'body {{ font-family: {_PDF_FONT}; }} ')
+    if (cfg or {}).get("pdfFonts") == "full":
+        face, font_paths = _full_font_faces()
+        styles = _CSS_VAR.sub(lambda m: cfg["primaryColor"] if m.group(1) == "primary" else cfg["accentColor"],
+                              css or "")
+        styles = (_full_font_css(styles) if font_paths else styles).replace("</", "<\\/")
+        fonts = tuple(font_paths)
+    else:
+        fonts = _font_files()
+        face = ""
+        if fonts:
+            regular, bold = (p.replace("\\", "/") for p in fonts)
+            face = (f'@font-face {{ font-family: {_PDF_FONT}; src: url("{regular}"); }} '
+                    f'@font-face {{ font-family: {_PDF_FONT}; src: url("{bold}"); font-weight: bold; }} '
+                    f'body {{ font-family: {_PDF_FONT}; }} ')
+        styles = _pdf_css(css, cfg, bool(fonts))
+    allowed = {os.path.normcase(os.path.normpath(p)) for p in (fonts or ())}
     document = (
         "<html><head><meta charset=\"utf-8\"><style>"
-        "@page { size: A4; margin: 10mm; } " + face + _pdf_css(css, cfg, bool(fonts)) +
+        "@page { size: A4; margin: 10mm; } " + face + styles +
         f"</style></head><body>{body_html}</body></html>"
     )
     blocked = []
@@ -768,8 +978,102 @@ def _line(symbol: str, label: str, amount) -> dict:
     return {"label": label, "amount": float(amount or 0), "amount_formatted": _money(symbol, amount)}
 
 
+def _coded_line(symbol: str, code: str, label: str, amount) -> dict:
+    """A payslip line with its stable code. 'entitled' is the full-month
+    amount: stored components are never prorated (LOP is its own deduction
+    line), so it is the stored amount itself."""
+    line = _line(symbol, label, amount)
+    line.update(code=code, entitled=line["amount"], entitled_formatted=line["amount_formatted"])
+    return line
+
+
+def _by_code(symbol: str, lines: List[dict]) -> dict:
+    """{code: line}. Two lines with one code (e.g. two allowances with the
+    same key) are merged so the keyed view still adds up to the list."""
+    out: dict = {}
+    for line in lines:
+        code = line["code"]
+        if code in out:
+            merged = Decimal(str(out[code]["amount"])) + Decimal(str(line["amount"]))
+            out[code] = _coded_line(symbol, code, out[code]["label"], merged)
+        else:
+            out[code] = dict(line)
+    return out
+
+
+def _amount_pair(symbol: str, value) -> Optional[dict]:
+    """{entitled, paid} (+ _formatted) for a value shown outside the earnings
+    / deductions lists (employer EPF, CTC). None when there is no value."""
+    if value is None:
+        return None
+    v = float(value or 0)
+    f = _money(symbol, v)
+    return {"entitled": v, "entitled_formatted": f, "paid": v, "paid_formatted": f}
+
+
+def placed_codes(config: Optional[dict]) -> Tuple[set, set]:
+    """(earning codes, deduction codes) that have a row of their own in this
+    template's field settings — every other line is summed into
+    other_earnings / other_deductions."""
+    earn, ded = set(), set()
+    for setting in ((config or {}).get("fields") or {}).values():
+        if not isinstance(setting, dict) or not setting.get("include", True):
+            continue
+        target = earn if setting.get("side") == "earnings" else ded if setting.get("side") == "deductions" else None
+        if target is not None and setting.get("code"):
+            target.add(setting["code"])
+    return earn, ded
+
+
+def _bucket(symbol: str, lines: List[dict], placed: set) -> dict:
+    """Sum of the lines without a row of their own ('Any other')."""
+    rest = [line for line in lines if line["code"] not in placed]
+    total = sum((Decimal(str(line["amount"])) for line in rest), Decimal("0"))
+    return {"amount": float(total), "amount_formatted": _money(symbol, total),
+            "labels": [line["label"] for line in rest], "count": len(rest)}
+
+
+def _line_views(symbol: str, earnings: List[dict], deductions: List[dict], cfg: dict) -> dict:
+    """Keyed and 'any other' views of the lines. Derived from the same lists
+    the tie-out check uses, so they always add up to the stored totals."""
+    placed_earn, placed_ded = placed_codes(cfg)
+    return {
+        "earnings_by_code": _by_code(symbol, earnings),
+        "deductions_by_code": _by_code(symbol, deductions),
+        "other_earnings": _bucket(symbol, earnings, placed_earn),
+        "other_deductions": _bucket(symbol, deductions, placed_ded),
+    }
+
+
 class NotRepresentable(Exception):
-    """The payslip cannot be shown through a template; show the statutory one."""
+    """The payslip cannot be shown through a template; show the statutory one.
+    `reason` is a diagnostic code (TIE_OUT_MISMATCH, PAYSLIP_BLOCKED, BELGIUM);
+    `detail` explains it (amounts, missing lines)."""
+
+    def __init__(self, message: str, reason: str = "NOT_REPRESENTABLE", detail: Optional[dict] = None):
+        super().__init__(message)
+        self.reason = reason
+        self.detail = detail or {}
+
+
+def _tie_out_detail(data: dict, earned: Decimal, gross: Decimal, deducted: Decimal, total: Decimal) -> dict:
+    """What doesn't add up, in money, and the stored values that explain it."""
+    out = {
+        "earningsLines": float(earned), "storedGross": float(gross), "earningsDifference": float(gross - earned),
+        "deductionLines": float(deducted), "storedTotalDeductions": float(total),
+        "deductionsDifference": float(total - deducted),
+    }
+    # Stored amounts that are inside the totals but have no payslip line.
+    explained = []
+    lwf = Decimal(str(data.get("employeeLwf") or 0))
+    if lwf and abs((total - deducted) - lwf) <= _RECONCILE_TOLERANCE:
+        explained.append("Labour Welfare Fund (employee) is in total deductions but has no payslip line.")
+    if not explained and (total - deducted) and not (gross - earned):
+        explained.append("Total deductions include an amount that has no payslip line.")
+    if not explained and (gross - earned):
+        explained.append("Gross pay includes an amount that has no payslip line.")
+    out["explanation"] = explained
+    return out
 
 
 def build_payslip_context(db: Session, organization_id: int, payslip_id: int, config: Optional[dict] = None
@@ -781,17 +1085,19 @@ def build_payslip_context(db: Session, organization_id: int, payslip_id: int, co
 
     data, item, run = payroll_service.get_payslip_by_id(db, payslip_id, organization_id)
     if item.status in (PayslipStatus.FAILED, PayslipStatus.PARTIAL):
-        raise NotRepresentable("This payslip is blocked or partially calculated; it is shown in the standard format.")
+        raise NotRepresentable("This payslip is blocked or partially calculated; it is shown in the standard format.",
+                               "PAYSLIP_BLOCKED", {"status": str(getattr(item.status, "value", item.status))})
 
     country = payroll_service._normalize_country(data.get("country") or "IN")
-    earnings_items, deduction_items = payroll_service.payslip_line_items(dict(data), country)
+    earnings_items, deduction_items = payroll_service.payslip_line_items_coded(dict(data), country)
     gross = Decimal(str(data.get("salary") or 0))
     total_deductions = Decimal(str(data.get("totalDeductions") or 0))
-    earned = sum((Decimal(str(v or 0)) for _l, v in earnings_items), Decimal("0"))
-    deducted = sum((Decimal(str(v or 0)) for _l, v in deduction_items), Decimal("0"))
+    earned = sum((Decimal(str(v or 0)) for _c, _l, v in earnings_items), Decimal("0"))
+    deducted = sum((Decimal(str(v or 0)) for _c, _l, v in deduction_items), Decimal("0"))
     if abs(earned - gross) > _RECONCILE_TOLERANCE or abs(deducted - total_deductions) > _RECONCILE_TOLERANCE:
         raise NotRepresentable(
-            "This payslip's statutory breakdown has lines a template cannot show; it is shown in the standard format.")
+            "This payslip's statutory breakdown has lines a template cannot show; it is shown in the standard format.",
+            "TIE_OUT_MISMATCH", _tie_out_detail(data, earned, gross, deducted, total_deductions))
 
     symbol = payroll_service._get_currency_symbol(country)
     cfg = normalize_config(config)
@@ -807,6 +1113,19 @@ def build_payslip_context(db: Session, organization_id: int, payslip_id: int, co
     identifiers = [{"label": label, "value": value or ""}
                    for label, value in payroll_service._payslip_identity_rows(country, data)]
     net = data.get("netPay") or 0
+    earnings = [_coded_line(symbol, code, label, amount) for code, label, amount in earnings_items]
+    deductions = [_coded_line(symbol, code, label, amount) for code, label, amount in deduction_items]
+
+    # Monthly CTC = the employee's annual CTC / 12, read from the employee
+    # record (not stored on the payslip): shown for information only, never
+    # part of earnings, deductions or the tie-out.
+    from app.modules.payroll.models import PayrollEmployee
+    annual_ctc = db.query(PayrollEmployee.ctc).filter(
+        PayrollEmployee.id == item.employee_id, PayrollEmployee.organization_id == organization_id).scalar()
+    monthly_ctc = (Decimal(str(annual_ctc)) / Decimal(12)).quantize(Decimal("0.01")) if annual_ctc else None
+    employer_pf = data.get("employerPf")
+
+    from app.modules.payroll.bank_routing import payment_mode_label
 
     context = {
         "company": {
@@ -824,6 +1143,8 @@ def build_payslip_context(db: Session, organization_id: int, payslip_id: int, co
             "date_of_joining": _fmt_date(data.get("dateOfJoining")),
             "bank_name": data.get("bankName") or "",
             "bank_account": _mask_account(data.get("bankAccount")),
+            "ifsc": data.get("ifsc") or "",
+            "pan": data.get("pan") or "",
             "identifiers": identifiers,
         },
         "payroll": {
@@ -831,20 +1152,26 @@ def build_payslip_context(db: Session, organization_id: int, payslip_id: int, co
             "pay_date": _fmt_date(data.get("payDate")),
             "payslip_number": data.get("payslipNumber") or "",
             "total_days": data.get("totalWorkingDays"),
+            "month_days": data.get("totalWorkingDays"),
             "payable_days": data.get("payableDays"),
             "unpaid_days": data.get("unpaidLeaveDays"),
             "country": country,
         },
+        "payment": {"mode": payment_mode_label(country)},
         "currency": {"code": payroll_service._get_currency_code(country), "symbol": symbol},
-        "earnings": [_line(symbol, label, amount) for label, amount in earnings_items],
-        "deductions": [_line(symbol, label, amount) for label, amount in deduction_items],
+        "earnings": earnings,
+        "deductions": deductions,
+        **_line_views(symbol, earnings, deductions, cfg),
+        "employer": {"epf": _amount_pair(symbol, employer_pf) if employer_pf else None},
         "totals": {
             "gross_pay": float(gross), "gross_pay_formatted": _money(symbol, gross),
             "total_deductions": float(total_deductions), "total_deductions_formatted": _money(symbol, total_deductions),
             "net_pay": float(net), "net_pay_formatted": _money(symbol, net),
+            "net_paid": _money(symbol, net),
             "net_pay_in_words": amount_in_words(net, country),
+            "ctc": _amount_pair(symbol, monthly_ctc),
         },
-        "config": cfg,
+        "config": {**cfg, "fields": resolved_fields(cfg)},
         "disclaimer": cfg["disclaimerText"],
         "generated_on": _fmt_date(date.today()),
     }
@@ -857,28 +1184,42 @@ def sample_context(country: str = "IN", config: Optional[dict] = None) -> dict:
     country = payroll_service._normalize_country(country or "IN")
     symbol = payroll_service._get_currency_symbol(country)
     cfg = normalize_config(config)
-    earnings = [("Basic Salary", 50000), ("House Rent Allowance (HRA)", 20000), ("Special Allowance", 12000)]
-    deductions = [("Income Tax", 6200), ("Provident Fund (PF)", 6000), ("Professional Tax", 200)]
-    gross = sum(v for _l, v in earnings)
-    ded = sum(v for _l, v in deductions)
+    # Same totals as before (gross 82,000 / deductions 12,400 / net 69,600);
+    # Special Allowance is split so every common row has a sample value.
+    earnings = [("basic", "Basic Salary", 50000), ("hra", "House Rent Allowance (HRA)", 20000),
+                ("allowance_conveyance", "Conveyance Allowance", 1600), ("special", "Special Allowance", 8400),
+                ("additional_compensation", "Bonus", 2000)]
+    deductions = [("tds", "Income Tax", 6200), ("pf", "Provident Fund (PF)", 6000),
+                  ("professional_tax", "Professional Tax", 200)]
+    gross = sum(v for _c, _l, v in earnings)
+    ded = sum(v for _c, _l, v in deductions)
     net = gross - ded
+    earning_lines = [_coded_line(symbol, c, label, amount) for c, label, amount in earnings]
+    deduction_lines = [_coded_line(symbol, c, label, amount) for c, label, amount in deductions]
+    from app.modules.payroll.bank_routing import payment_mode_label
     return {
         "company": {"name": "Example Company Ltd", "address": "1 Example Street, Example City",
                     "tax_id": "TAX-0000000", "registration_no": "REG-0000", "logo_data_uri": None},
         "employee": {"name": "Sample Employee", "id": 1001, "department": "Engineering",
                      "designation": "Software Engineer", "date_of_joining": "01-Apr-2024",
                      "bank_name": "Example Bank", "bank_account": "XXXXXXXX1234",
+                     "ifsc": "EXMP0001234", "pan": "XXXXX1234X",
                      "identifiers": [{"label": "Tax ID", "value": "XXXXX1234X"}]},
         "payroll": {"period": "June 2026", "pay_date": "30-Jun-2026", "payslip_number": "PS-000001",
-                    "total_days": 30, "payable_days": 30, "unpaid_days": 0, "country": country},
+                    "total_days": 30, "month_days": 30, "payable_days": 30, "unpaid_days": 0, "country": country},
+        "payment": {"mode": payment_mode_label(country)},
         "currency": {"code": payroll_service._get_currency_code(country), "symbol": symbol},
-        "earnings": [_line(symbol, label, amount) for label, amount in earnings],
-        "deductions": [_line(symbol, label, amount) for label, amount in deductions],
+        "earnings": earning_lines,
+        "deductions": deduction_lines,
+        **_line_views(symbol, earning_lines, deduction_lines, cfg),
+        "employer": {"epf": _amount_pair(symbol, 1800)},
         "totals": {"gross_pay": gross, "gross_pay_formatted": _money(symbol, gross),
                    "total_deductions": ded, "total_deductions_formatted": _money(symbol, ded),
                    "net_pay": net, "net_pay_formatted": _money(symbol, net),
-                   "net_pay_in_words": amount_in_words(net, country)},
-        "config": cfg,
+                   "net_paid": _money(symbol, net),
+                   "net_pay_in_words": amount_in_words(net, country),
+                   "ctc": _amount_pair(symbol, gross + 1800)},
+        "config": {**cfg, "fields": resolved_fields(cfg)},
         "disclaimer": cfg["disclaimerText"],
         "generated_on": _fmt_date(date.today()),
     }
@@ -1013,6 +1354,7 @@ def list_templates(db: Session, organization_id: int) -> dict:
     codes = {c["code"] for c in countries}
     return {
         "starters": list_starters(),
+        "fieldCatalogue": field_catalogue(),
         "templates": [_template_dict(t, sorted(by_template.get(t.id, []))) for t in templates],
         # Only this organisation's own countries can be chosen; with one
         # country there is nothing to choose and the UI hides the picker.
@@ -1211,24 +1553,88 @@ def archive_template(db: Session, organization_id: int, template_id: int) -> dic
 
 # ── Preview / render ─────────────────────────────────────────────────────────
 
+# Diagnostic codes: why a payslip is shown in the standard format instead of
+# through a template (preview / Sample PDF with a real payslip, 409 details,
+# logs). Messages are for the operator; nothing here changes a payslip.
+DIAGNOSTIC_MESSAGES = {
+    "TIE_OUT_MISMATCH": "This payslip's lines don't add up to its stored gross pay / total deductions, so it "
+                        "would be shown in the standard format.",
+    "PAYSLIP_BLOCKED": "This payslip is blocked or partially calculated, so it is shown in the standard format.",
+    "BELGIUM": "Belgian payslips always use the Belgian payslip layout; templates never apply to them.",
+    "RENDER_ERROR": "The template could not be filled in with this payslip's data.",
+    "ENGINE_FAILURE": "The PDF engine could not turn this template into a PDF; the standard PDF would be used.",
+    "NOT_ASSIGNED": "No template is assigned for this payslip's country, so it uses the standard format.",
+}
+
+
+def _diagnostic(code: str, message: Optional[str] = None, detail: Optional[dict] = None) -> dict:
+    return {"code": code, "message": message or DIAGNOSTIC_MESSAGES.get(code, code), "detail": detail or {}}
+
+
+def _preview_context(db: Optional[Session], organization_id: Optional[int], payslip_id, country, config):
+    """(context, diagnostic) for a preview: sample data, or — with payslip_id —
+    that payslip of this organisation, rendered with the draft's settings.
+    A payslip the template can't show gives (None, diagnostic)."""
+    if payslip_id in (None, ""):
+        return sample_context(_sample_country(db, organization_id, country), config), None
+    try:
+        payslip_id = int(payslip_id)
+    except (TypeError, ValueError):
+        raise _bad_request("payslipId must be a payslip number.")
+    if db is None or organization_id is None:
+        raise _bad_request("A payslip can only be previewed inside an organisation.")
+    item = db.query(PayslipItem).filter(
+        PayslipItem.id == payslip_id, PayslipItem.organization_id == organization_id).first()
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Payslip {payslip_id} not found.")
+    if (item.country_code or "").strip().upper() == "BE":
+        return None, _diagnostic("BELGIUM")
+    try:
+        context, _item = build_payslip_context(db, organization_id, payslip_id, config)
+    except NotRepresentable as exc:
+        return None, _diagnostic(exc.reason, DIAGNOSTIC_MESSAGES.get(exc.reason, str(exc)), exc.detail)
+    return context, None
+
+
 def preview(html_content: str, css_content: Optional[str], config: Optional[dict], country: Optional[str],
-            db: Optional[Session] = None, organization_id: Optional[int] = None) -> dict:
+            db: Optional[Session] = None, organization_id: Optional[int] = None, payslip_id=None) -> dict:
+    """The draft rendered with sample data, or with a real payslip (payslip_id):
+    then 'diagnostics' says why that payslip would fall back to the standard
+    format, if it would (renderedHtml is then empty)."""
     fragment, css, warnings = validate_template(html_content, css_content)
-    context = sample_context(_sample_country(db, organization_id, country), config)
-    return {"renderedHtml": render_document(fragment, css, context), "warnings": warnings}
+    context, diagnostic = _preview_context(db, organization_id, payslip_id, country, config)
+    if diagnostic:
+        return {"renderedHtml": "", "warnings": warnings, "diagnostics": diagnostic}
+    if payslip_id in (None, ""):
+        return {"renderedHtml": render_document(fragment, css, context), "warnings": warnings, "diagnostics": None}
+    from app.modules.payroll import service as payroll_service
+    try:
+        html = render_document(fragment, css, context,
+                               watermark=payroll_service._is_evaluation_workspace(db, organization_id))
+    except HTTPException as exc:
+        return {"renderedHtml": "", "warnings": warnings,
+                "diagnostics": _diagnostic("RENDER_ERROR", f"{DIAGNOSTIC_MESSAGES['RENDER_ERROR']} {exc.detail}")}
+    return {"renderedHtml": html, "warnings": warnings, "diagnostics": None}
 
 
 def preview_pdf(html_content: str, css_content: Optional[str], config: Optional[dict],
                 country: Optional[str], db: Optional[Session] = None,
-                organization_id: Optional[int] = None) -> bytes:
-    """The template as a PDF with sample data — what a downloaded payslip will look like."""
+                organization_id: Optional[int] = None, payslip_id=None) -> bytes:
+    """The template as a PDF with sample data (or a real payslip) — what a
+    downloaded payslip will look like. 409 / 422 carry a diagnostic."""
     fragment, css, _warnings = validate_template(html_content, css_content)
-    context = sample_context(_sample_country(db, organization_id, country), config)
+    context, diagnostic = _preview_context(db, organization_id, payslip_id, country, config)
+    if diagnostic:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=diagnostic)
+    watermark = False
+    if payslip_id not in (None, ""):
+        from app.modules.payroll import service as payroll_service
+        watermark = payroll_service._is_evaluation_workspace(db, organization_id)
     try:
-        return html_to_pdf(_render_body(fragment, context), css, context["config"])
+        return html_to_pdf(_render_body(fragment, context), css, context["config"], watermark=watermark)
     except PdfRenderError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail=f"This template could not be turned into a PDF: {exc}")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=_diagnostic(
+            "ENGINE_FAILURE", f"This template could not be turned into a PDF: {exc}"))
 
 
 def _resolve_version(db: Session, organization_id: int, country: Optional[str]) -> Optional[PayslipTemplateVersion]:
@@ -1257,7 +1663,8 @@ def _payslip_template(db: Session, organization_id: int, payslip_id: int):
     if (item.country_code or "").strip().upper() == "BE":      # Belgium (Block H1): §11 layout only
         from app.modules.payroll.belgium_payslip_pdf import BE_TEMPLATE_REFUSAL
         raise HTTPException(status.HTTP_409_CONFLICT,
-                            detail={"code": "TEMPLATE_NOT_REPRESENTABLE", "message": BE_TEMPLATE_REFUSAL})
+                            detail={"code": "TEMPLATE_NOT_REPRESENTABLE", "message": BE_TEMPLATE_REFUSAL,
+                                    "reason": "BELGIUM", "detail": {}})
     version = None
     frozen = False
     if item.template_version_id:
@@ -1269,12 +1676,14 @@ def _payslip_template(db: Session, organization_id: int, payslip_id: int):
         version = _resolve_version(db, organization_id, item.country_code)
     if version is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND,
-                            detail={"code": "TEMPLATE_NOT_ASSIGNED", "message": "No payslip template is assigned."})
+                            detail={"code": "TEMPLATE_NOT_ASSIGNED", "message": "No payslip template is assigned.",
+                                    "reason": "NOT_ASSIGNED", "detail": {}})
     try:
         context, _item = build_payslip_context(db, organization_id, payslip_id, version.configuration_json)
     except NotRepresentable as exc:
         raise HTTPException(status.HTTP_409_CONFLICT,
-                            detail={"code": "TEMPLATE_NOT_REPRESENTABLE", "message": str(exc)})
+                            detail={"code": "TEMPLATE_NOT_REPRESENTABLE", "message": str(exc),
+                                    "reason": exc.reason, "detail": exc.detail})
     return item, version, frozen, context
 
 
@@ -1322,9 +1731,16 @@ def template_pdf_or_none(db: Session, payslip_id: int, organization_id: Optional
                 return None
             return render_payslip_pdf(db, row[0], payslip_id)
     except HTTPException as exc:
-        if exc.status_code not in (status.HTTP_404_NOT_FOUND, status.HTTP_409_CONFLICT):
+        reason = exc.detail.get("reason") if isinstance(exc.detail, dict) else None
+        if exc.status_code == status.HTTP_409_CONFLICT:
+            # Expected fallbacks (mismatch / blocked / Belgium): say which, no alarm.
+            logger.info("Payslip %s: standard PDF used (%s)", payslip_id, reason or "NOT_REPRESENTABLE")
+        elif exc.status_code != status.HTTP_404_NOT_FOUND:
             logger.warning("Payslip %s: template PDF unavailable (%s); using the standard PDF",
                            payslip_id, exc.detail)
+        return None
+    except PdfRenderError as exc:
+        logger.warning("Payslip %s: standard PDF used (ENGINE_FAILURE: %s)", payslip_id, exc)
         return None
     except Exception:  # noqa: BLE001
         logger.exception("Payslip %s: template PDF failed; using the standard PDF", payslip_id)

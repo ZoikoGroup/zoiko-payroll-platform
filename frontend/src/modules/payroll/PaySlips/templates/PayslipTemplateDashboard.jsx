@@ -21,7 +21,7 @@ const btnPrimary = `${btn} bg-primary text-white hover:bg-primary/90`;
 
 export default function PayslipTemplateDashboard() {
   const { addToast } = useToast();
-  const [data, setData] = useState({ starters: [], templates: [], assignments: [], countries: [], singleCountry: true });
+  const [data, setData] = useState({ starters: [], templates: [], assignments: [], countries: [], singleCountry: true, fieldCatalogue: [] });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -38,6 +38,7 @@ export default function PayslipTemplateDashboard() {
       assignments: res?.assignments || [],
       countries: res?.countries || [],
       singleCountry: res?.singleCountry ?? true,
+      fieldCatalogue: res?.fieldCatalogue || [],
     }))
     .catch((err) => addToast?.(err.message || "Could not load payslip templates.", "error"))
     .finally(() => setLoading(false)), [addToast]);
@@ -241,6 +242,7 @@ export default function PayslipTemplateDashboard() {
       <PayslipTemplateEditorModal
         key={editing ? `edit-${editing.id}` : "edit-none"}
         template={editing}
+        fieldCatalogue={data.fieldCatalogue}
         onClose={() => setEditing(null)}
         onSaved={load}
       />
@@ -253,6 +255,7 @@ export default function PayslipTemplateDashboard() {
       <PayslipTemplatePdfImportModal
         key={pdfImportKey || "pdf-closed"}
         isOpen={pdfImportKey !== 0}
+        fieldCatalogue={data.fieldCatalogue}
         onClose={() => setPdfImportKey(0)}
         onCreated={async (created) => { await load(); setEditing(created); }}
       />

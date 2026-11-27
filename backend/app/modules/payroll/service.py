@@ -35162,6 +35162,59 @@ def unicode_font_candidates():
     ]
 
 
+_FONT_STYLES = ("regular", "bold", "italic", "bolditalic")
+
+
+def pdf_font_faces():
+    """{'sans': {style: path}, 'serif': {style: path}} for payslip-template
+    PDFs that ask for full fonts (exact-layout templates): regular, bold,
+    italic and bold-italic of a Unicode sans and serif family (₹, Polish
+    letters). The first family whose regular face exists wins; a missing
+    style falls back to the nearest one that exists (bold-italic -> bold or
+    italic -> regular). A family with no files at all is omitted; when no
+    serif exists, serif text uses the sans faces. Read-only file checks."""
+    import os
+
+    win = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+    dejavu = "/usr/share/fonts/truetype/dejavu"
+    families = {
+        "sans": [
+            (f"{dejavu}/DejaVuSans.ttf", f"{dejavu}/DejaVuSans-Bold.ttf",
+             f"{dejavu}/DejaVuSans-Oblique.ttf", f"{dejavu}/DejaVuSans-BoldOblique.ttf"),
+            ("/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+             "/usr/share/fonts/TTF/DejaVuSans-Oblique.ttf", "/usr/share/fonts/TTF/DejaVuSans-BoldOblique.ttf"),
+            tuple(f"/usr/share/fonts/truetype/liberation/LiberationSans-{s}.ttf"
+                  for s in ("Regular", "Bold", "Italic", "BoldItalic")),
+            tuple(os.path.join(win, n) for n in ("arial.ttf", "arialbd.ttf", "ariali.ttf", "arialbi.ttf")),
+        ],
+        "serif": [
+            (f"{dejavu}/DejaVuSerif.ttf", f"{dejavu}/DejaVuSerif-Bold.ttf",
+             f"{dejavu}/DejaVuSerif-Italic.ttf", f"{dejavu}/DejaVuSerif-BoldItalic.ttf"),
+            ("/usr/share/fonts/TTF/DejaVuSerif.ttf", "/usr/share/fonts/TTF/DejaVuSerif-Bold.ttf",
+             "/usr/share/fonts/TTF/DejaVuSerif-Italic.ttf", "/usr/share/fonts/TTF/DejaVuSerif-BoldItalic.ttf"),
+            tuple(f"/usr/share/fonts/truetype/liberation/LiberationSerif-{s}.ttf"
+                  for s in ("Regular", "Bold", "Italic", "BoldItalic")),
+            tuple(os.path.join(win, n) for n in ("times.ttf", "timesbd.ttf", "timesi.ttf", "timesbi.ttf")),
+        ],
+    }
+    fallback = {"bold": ("regular",), "italic": ("regular",), "bolditalic": ("bold", "italic", "regular")}
+    out = {}
+    for family, candidates in families.items():
+        for paths in candidates:
+            paths = tuple(paths)
+            if not os.path.isfile(paths[0]):
+                continue
+            faces = {style: path for style, path in zip(_FONT_STYLES, paths) if os.path.isfile(path)}
+            for style in _FONT_STYLES[1:]:
+                if style not in faces:
+                    faces[style] = next(faces[s] for s in fallback[style] if s in faces)
+            out[family] = faces
+            break
+    if "sans" in out and "serif" not in out:
+        out["serif"] = dict(out["sans"])
+    return out
+
+
 def _register_rupee_font(c):
     """Attempt to register a Unicode-capable TTF font (regular + bold) so the
     rupee symbol renders correctly.  Falls back silently to Helvetica if no
@@ -35292,26 +35345,46 @@ def payslip_line_items(data: dict, country: str):
     PDF prints them: ([(label, amount)], [(label, amount)]). Shared by the PDF
     and the payslip-template renderer so both always show the same lines.
     May add the derived 'lohnsteuerOnly' key to ``data`` (Germany)."""
+    earnings, deductions = payslip_line_items_coded(data, country)
+    return [(label, amount) for _code, label, amount in earnings], \
+           [(label, amount) for _code, label, amount in deductions]
+
+
+def _allowance_code(key) -> str:
+    """Stable code of a named allowance line: 'allowance_<slug>'."""
+    slug = re.sub(r"[^a-z0-9]+", "_", str(key or "").strip().lower()).strip("_")
+    return f"allowance_{slug or 'other'}"
+
+
+def payslip_line_items_coded(data: dict, country: str):
+    """payslip_line_items with a stable code on every line:
+    ([(code, label, amount)], [(code, label, amount)]). The code names the
+    stored field a line comes from (basic, hra, allowance_<key>, special,
+    overtime, additional_compensation; lop, tds, pf, esi, professional_tax,
+    ...), so a payslip template can place a line by code. Same lines, labels,
+    amounts and order as payslip_line_items — nothing is computed here."""
     # ── Build earnings & deduction items (pre-computed for layout) ──
     earnings_items = [
-        ("Basic Salary", data["basicPay"]),
-        ("Housing Allowance" if country == "HK" else "House Rent Allowance (HRA)", data["hra"]),
+        ("basic", "Basic Salary", data["basicPay"]),
+        ("hra", "Housing Allowance" if country == "HK" else "House Rent Allowance (HRA)", data["hra"]),
     ]
     # Named allowance components (Transport/Medical/Other/...), if this org
     # has any configured — shown as their own line items, same as Overtime/
     # Additional Compensation below. Special Allowance stays the final
     # catch-all, listed after these named slices.
     for allowance in data.get("allowanceItems") or []:
-        earnings_items.append((allowance["label"], allowance["amount"]))
-    earnings_items.append(("Special Allowance", data["specialAllowance"]))
+        earnings_items.append((_allowance_code(allowance.get("key") or allowance.get("label")),
+                               allowance["label"], allowance["amount"]))
+    earnings_items.append(("special", "Special Allowance", data["specialAllowance"]))
     ov = float(data.get("overtime", 0) or 0)
     if ov > 0:
-        earnings_items.append(("Overtime", ov))
+        earnings_items.append(("overtime", "Overtime", ov))
     add_comp = float(data.get("additionalCompensation", 0) or 0)
     if add_comp > 0:
         # Singapore: this is exactly the CPF Additional Wages figure the
         # engine used (engine/countries/singapore.py — OW = gross − AW).
-        earnings_items.append(("Additional Wages (AW)" if country == "SG" else "Additional Compensation", add_comp))
+        earnings_items.append(("additional_compensation",
+                               "Additional Wages (AW)" if country == "SG" else "Additional Compensation", add_comp))
 
     deduction_items = []
     attendance_ded = float(data.get("attendanceDeduction", 0) or 0)
@@ -35320,7 +35393,7 @@ def payslip_line_items(data: dict, country: str):
         lbl = "No-pay Leave Deduction" if country == "HK" else "LOP Deduction"
         if unpaid_days:
             lbl += f" ({float(unpaid_days):g} day{'s' if float(unpaid_days) != 1 else ''})"
-        deduction_items.append((lbl, attendance_ded))
+        deduction_items.append(("lop", lbl, attendance_ded))
     # Every jurisdiction routes its income-tax withholding through the same
     # `tds` field (India-named historically) — label it with each
     # jurisdiction's own plain term (not a generic "Income Tax" gloss) so a
@@ -35393,7 +35466,7 @@ def payslip_line_items(data: dict, country: str):
     ]:
         v = float(data.get(key, 0) or 0)
         if v > 0:
-            deduction_items.append((lbl, v))
+            deduction_items.append((_LINE_CODES[key], lbl, v))
     # Germany: Kirchensteuer (church tax) is a statutory deduction from the
     # employee's pay when de_church_tax_liable is set — persisted in
     # PayslipItem.church_tax and populated by the engine. Only shown when
@@ -35405,7 +35478,7 @@ def payslip_line_items(data: dict, country: str):
         # never appeared on a German PDF.
         church_tax_val = float(data.get("churchTax", 0) or 0)
         if church_tax_val > 0:
-            deduction_items.append(("Kirchensteuer", church_tax_val))
+            deduction_items.append(("church_tax", "Kirchensteuer", church_tax_val))
     other_labels = {
         "CA": {"socialSecurity": "Canada Pension Plan (CPP)"},
         "AU": {"medicare": "Medicare Levy"},
@@ -35441,7 +35514,7 @@ def payslip_line_items(data: dict, country: str):
     ]:
         v = float(data.get(key, 0) or 0)
         if v > 0:
-            deduction_items.append((lbl, v))
+            deduction_items.append((_LINE_CODES[key], lbl, v))
     # US: State Disability Insurance / other state payroll-program employee
     # deductions (CA SDI, NY/NJ/RI TDI, CT/MA/WA/CO/OR/etc. paid-leave
     # employee share) — computed and persisted but never shown on the PDF
@@ -35453,12 +35526,12 @@ def payslip_line_items(data: dict, country: str):
         ]:
             v = float(data.get(key, 0) or 0)
             if v > 0:
-                deduction_items.append((lbl, v))
+                deduction_items.append((_LINE_CODES[key], lbl, v))
     # Poland / Malaysia: the employee social contributions travel in the
     # frozen calculation snapshot (pl_employee_total / my_employee_total), not
     # in the generic pf / esi / pension fields — itemise them from it, so the
     # lines add up to the stored total deductions (PCB / PIT is the tds line).
-    deduction_items.extend(_snapshot_deduction_lines(data, country))
+    deduction_items.extend(_snapshot_deduction_lines(data, country, with_codes=True))
     # Employer-side contributions (Employer PF/ESI/Social Security/Medicare/
     # Pension/NI) are deliberately NOT shown here — this is the employee's
     # own payslip, and none of these are amounts deducted from the
@@ -35470,14 +35543,27 @@ def payslip_line_items(data: dict, country: str):
     return earnings_items, deduction_items
 
 
+# Stored payslip field -> stable line code (payslip_line_items_coded).
+_LINE_CODES = {
+    "tds": "tds", "federalIncomeTax": "federal_income_tax", "stateIncomeTax": "state_income_tax",
+    "localTax": "local_tax", "lohnsteuerOnly": "lohnsteuer", "soli": "soli",
+    "pf": "pf", "esi": "esi", "professionalTax": "professional_tax",
+    "socialSecurity": "social_security", "medicare": "medicare", "niEmployee": "ni_employee",
+    "employeePension": "employee_pension", "studyLoanDeduction": "study_loan",
+    "postgradLoanDeduction": "postgrad_loan", "stateDisabilityInsurance": "state_disability_insurance",
+    "stateProgramDeductions": "state_program_deductions",
+}
+
+
 _PL_ZUS_EMPLOYEE_LABELS = {"EMERYTALNE": "ZUS Pension (emerytalne)", "RENTOWE": "ZUS Disability (rentowe)",
                            "CHOROBOWE": "ZUS Sickness (chorobowe)"}
 
 
-def _snapshot_deduction_lines(data: dict, country: str) -> list:
+def _snapshot_deduction_lines(data: dict, country: str, with_codes: bool = False) -> list:
     """[(label, amount)] of the employee contributions a Poland / Malaysia
     payslip keeps in its frozen snapshot (zero lines omitted). Read as stored —
-    never recomputed. Empty for every other country or without a snapshot."""
+    never recomputed. Empty for every other country or without a snapshot.
+    with_codes=True: [(code, label, amount)] (code = snapshot_<key>)."""
     def amount(value) -> float:
         try:
             return float(value or 0)
@@ -35489,14 +35575,18 @@ def _snapshot_deduction_lines(data: dict, country: str) -> list:
         snap = data.get("myCalculationSnapshot") or {}
         for label, key in (("EPF (Employee)", "my_epf"), ("SOCSO (Employee)", "my_socso"),
                            ("EIS (Employee)", "my_eis")):
-            lines.append((label, amount((snap.get(key) or {}).get("employee"))))
+            lines.append((f"snapshot_{key}", label, amount((snap.get(key) or {}).get("employee"))))
     elif country == "PL":
         snap = data.get("plCalculationSnapshot") or {}
         for key, value in sorted((snap.get("pl_zus_employee") or {}).items()):
-            lines.append((_PL_ZUS_EMPLOYEE_LABELS.get(str(key).upper(), f"ZUS ({key})"), amount(value)))
-        lines.append(("Health contribution (zdrowotna)", amount(snap.get("pl_health"))))
-        lines.append(("PPK (Employee)", sum(amount(v) for v in (snap.get("pl_ppk_employee") or {}).values())))
-    return [(label, value) for label, value in lines if value > 0]
+            lines.append((f"snapshot_pl_zus_{str(key).lower()}",
+                          _PL_ZUS_EMPLOYEE_LABELS.get(str(key).upper(), f"ZUS ({key})"), amount(value)))
+        lines.append(("snapshot_pl_health", "Health contribution (zdrowotna)", amount(snap.get("pl_health"))))
+        lines.append(("snapshot_pl_ppk_employee", "PPK (Employee)",
+                      sum(amount(v) for v in (snap.get("pl_ppk_employee") or {}).values())))
+    if with_codes:
+        return [(code, label, value) for code, label, value in lines if value > 0]
+    return [(label, value) for _code, label, value in lines if value > 0]
 
 
 def generate_payslip_pdf_bytes(db: Session, payslip_id: int, organization_id: int = None) -> bytes:

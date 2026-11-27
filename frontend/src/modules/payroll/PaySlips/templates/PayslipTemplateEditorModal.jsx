@@ -7,6 +7,8 @@ import {
   updatePayslipTemplate,
 } from "../../../../service/payrollService";
 import { useToast } from "../../ToastContext";
+import PayslipTemplateFieldsPanel from "./PayslipTemplateFieldsPanel";
+import PayslipTemplateDiagnostics from "./PayslipTemplateDiagnostics";
 
 // Must match payslip_template_service.build_payslip_context / sample_context.
 const PLACEHOLDERS = [
@@ -35,6 +37,17 @@ const PLACEHOLDERS = [
     ["{{ totals.net_pay_formatted }}", "Net pay"], ["{{ totals.net_pay_in_words }}", "Net pay in words"],
     ["{{ disclaimer }}", "Footer text"],
   ] },
+  { group: "By line code", items: [
+    ["{{ earnings_by_code.basic.amount_formatted }}", "Earning by code"],
+    ["{{ earnings_by_code.basic.entitled_formatted }}", "Entitled (full month)"],
+    ["{{ deductions_by_code.tds.amount_formatted }}", "Deduction by code"],
+    ["{{ other_earnings.amount_formatted }}", "Other earnings"],
+    ["{{ other_deductions.amount_formatted }}", "Other deductions"],
+    ["{{ employer.epf.paid_formatted }}", "Employer EPF"], ["{{ totals.ctc.paid_formatted }}", "Monthly CTC"],
+    ["{{ totals.net_paid }}", "Net paid"], ["{{ payment.mode }}", "Payment mode"],
+    ["{{ employee.pan }}", "PAN"], ["{{ employee.ifsc }}", "IFSC"], ["{{ payroll.month_days }}", "Month days"],
+    ["{% if config.fields.pan.include %}{{ config.fields.pan.label }}{% endif %}", "Field setting"],
+  ] },
 ];
 
 const TOGGLES = [
@@ -47,7 +60,7 @@ const tabCls = (on) =>
   `flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[12px] font-semibold transition-colors cursor-pointer ${
     on ? "bg-primary text-white" : "text-foreground-muted hover:text-foreground hover:bg-surface-muted"}`;
 
-export default function PayslipTemplateEditorModal({ template, onClose, onSaved }) {
+export default function PayslipTemplateEditorModal({ template, fieldCatalogue = [], onClose, onSaved }) {
   const { addToast } = useToast();
   // Remounted per template (key in the dashboard), so props seed the state.
   const initial = template?.latestVersion || {};
@@ -65,6 +78,9 @@ export default function PayslipTemplateEditorModal({ template, onClose, onSaved 
   const [problem, setProblem] = useState("");
   const [warnings, setWarnings] = useState([]);
   const [copied, setCopied] = useState(null);
+  // Optional: preview with a real payslip of this organisation instead of sample data.
+  const [testPayslipId, setTestPayslipId] = useState("");
+  const [diagnostics, setDiagnostics] = useState(null);
   const timer = useRef(null);
 
   useEffect(() => {
@@ -72,16 +88,19 @@ export default function PayslipTemplateEditorModal({ template, onClose, onSaved 
     clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
       try {
-        const res = await previewPayslipTemplate({ htmlContent: html, cssContent: css, configurationJson: config, country: template.country || "IN" });
+        const res = await previewPayslipTemplate({ htmlContent: html, cssContent: css, configurationJson: config,
+          country: template.country || "IN", ...(testPayslipId ? { payslipId: Number(testPayslipId) } : {}) });
         setDoc(res?.renderedHtml || "");
         setWarnings(res?.warnings || []);
+        setDiagnostics(res?.diagnostics || null);
         setProblem("");
       } catch (err) {
+        setDiagnostics(null);
         setProblem(err.message || "This template cannot be rendered.");
       }
     }, 450);
     return () => clearTimeout(timer.current);
-  }, [template, html, css, config]);
+  }, [template, html, css, config, testPayslipId]);
 
   if (!template) return null;
 
@@ -135,8 +154,9 @@ export default function PayslipTemplateEditorModal({ template, onClose, onSaved 
     setPdfBusy(true);
     try {
       await downloadPayslipTemplateSamplePdf({ htmlContent: html, cssContent: css, configurationJson: config,
-        country: template.country || "IN" });
+        country: template.country || "IN", ...(testPayslipId ? { payslipId: Number(testPayslipId) } : {}) });
     } catch (err) {
+      if (err.diagnostics) setDiagnostics(err.diagnostics);
       addToast?.(err.message || "Could not create the sample PDF.", "error");
     } finally {
       setPdfBusy(false);
@@ -200,6 +220,7 @@ export default function PayslipTemplateEditorModal({ template, onClose, onSaved 
             <span>{problem || warnings.join(" ")}</span>
           </div>
         )}
+        {!problem && <PayslipTemplateDiagnostics diagnostics={diagnostics} payslipId={testPayslipId} />}
 
         <div className="flex-1 flex overflow-hidden">
           <div className="w-1/2 border-r border-border flex flex-col">
@@ -234,6 +255,8 @@ export default function PayslipTemplateEditorModal({ template, onClose, onSaved 
                   <textarea rows={3} maxLength={500} value={config.disclaimerText || ""} onChange={(e) => setCfg("disclaimerText", e.target.value)}
                     className="w-full rounded-[10px] border border-border bg-surface p-3 text-[12px] text-foreground focus:outline-none focus:border-primary" />
                 </label>
+                <PayslipTemplateFieldsPanel catalogue={fieldCatalogue} config={config}
+                  onChange={(fields) => setCfg("fields", fields)} />
                 <p className="text-[11px] text-foreground-muted">
                   These settings apply to layouts that use them (both built-in layouts do). Amounts and line items always
                   come from the payslip.
@@ -272,7 +295,13 @@ export default function PayslipTemplateEditorModal({ template, onClose, onSaved 
           </div>
           <div className="w-1/2 flex flex-col bg-surface-muted/30">
             <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border text-[11px] text-foreground-muted">
-              <Eye size={12} /> Live preview with sample data
+              <Eye size={12} /> {testPayslipId ? `Live preview with payslip #${testPayslipId}` : "Live preview with sample data"}
+              <label className="ml-auto flex items-center gap-1.5">
+                Test with payslip #
+                <input value={testPayslipId} inputMode="numeric" placeholder="ID" aria-label="Payslip number to test with"
+                  onChange={(e) => setTestPayslipId(e.target.value.replace(/[^0-9]/g, "").slice(0, 10))}
+                  className="w-20 rounded-[6px] border border-border bg-surface px-1.5 py-0.5 text-[11px] text-foreground focus:outline-none focus:border-primary" />
+              </label>
             </div>
             <div className="flex-1 overflow-auto p-4">
               {doc && (

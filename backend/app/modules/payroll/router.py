@@ -2297,9 +2297,12 @@ def create_payslip_template(payload: dict = Body(...), db: Session = Depends(get
 def preview_payslip_template(payload: dict = Body(...), db: Session = Depends(get_db),
                              current_user=Depends(get_current_user)):
     from app.modules.payroll import payslip_template_service as tpl
+    # payslipId (optional): preview with that payslip of this organisation; the
+    # response's diagnostics say why it would fall back to the standard format.
     return tpl.preview(payload.get("htmlContent") or "", payload.get("cssContent"),
                        payload.get("configurationJson"), payload.get("country"),
-                       db=db, organization_id=current_user.organization_id)
+                       db=db, organization_id=current_user.organization_id,
+                       payslip_id=payload.get("payslipId"))
 
 
 @payroll_router.post(
@@ -2311,7 +2314,8 @@ def preview_payslip_template_pdf(payload: dict = Body(...), db: Session = Depend
     from app.modules.payroll import payslip_template_service as tpl
     pdf = tpl.preview_pdf(payload.get("htmlContent") or "", payload.get("cssContent"),
                           payload.get("configurationJson"), payload.get("country"),
-                          db=db, organization_id=current_user.organization_id)
+                          db=db, organization_id=current_user.organization_id,
+                          payslip_id=payload.get("payslipId"))
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": 'attachment; filename="sample-payslip.pdf"'})
 
@@ -2362,9 +2366,15 @@ async def import_payslip_template(
     summary="Read a PDF payslip and suggest a template (nothing is stored)",
     dependencies=[Depends(get_current_payroll_operator)],
 )
-async def analyze_payslip_pdf(file: UploadFile = File(...), current_user=Depends(get_current_user)):
+async def analyze_payslip_pdf(file: UploadFile = File(...), mode: str = Query("style", pattern="^(style|exact)$"),
+                              current_user=Depends(get_current_user)):
+    # mode=exact: rebuild the PDF's ruled grid cell for cell (payslip_template_exact);
+    # mode=style: a flowing layout in the PDF's colours and wording.
     from app.modules.payroll import payslip_template_import as importer
     raw = await file.read(importer.MAX_PDF_BYTES + 1)
+    if mode == "exact":
+        from app.modules.payroll import payslip_template_exact as exact
+        return exact.analyze_exact(raw)
     return importer.analyze_pdf(raw)
 
 
@@ -2377,7 +2387,11 @@ def create_payslip_template_from_pdf(payload: dict = Body(...), db: Session = De
                                      current_user=Depends(get_current_user)):
     from app.modules.payroll import payslip_template_import as importer
     from app.modules.payroll import payslip_template_service as tpl
-    built = importer.build_from_analysis(payload.get("analysis") or {})
+    if payload.get("mode") == "exact":
+        from app.modules.payroll import payslip_template_exact as exact
+        built = exact.build_exact(payload.get("analysis") or {})
+    else:
+        built = importer.build_from_analysis(payload.get("analysis") or {})
     return tpl.create_template(db, current_user.organization_id, current_user.id, {
         "name": payload.get("name") or "Imported from PDF",
         "description": payload.get("description") or "Built from an uploaded PDF payslip design.",
