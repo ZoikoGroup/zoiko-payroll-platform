@@ -1,5 +1,4 @@
-import { ChevronDown } from "lucide-react";
-
+import CountrySelect from "../jurisdiction/CountrySelect";
 import { authInputClass } from "./authUi";
 
 // Country calling code + number for the registration countries. Codes are the
@@ -31,26 +30,28 @@ export function dialCodeForCountry(country) {
   return DIAL_CODES[phoneCountryOrDefault(country)][1];
 }
 
-const SELECT_CLASS = `${authInputClass({ withTrailing: true }).replace("pl-4", "pl-3")} h-11 appearance-none`;
+// Calling-code options: the country's flag and name in the list, its code
+// alongside; the closed selector shows the flag and the code.
+const PHONE_OPTIONS = Object.entries(DIAL_CODES).map(([name, [iso, dial]]) => ({
+  value: name, label: name, code: iso, hint: dial,
+}));
 const INVALID = "border-red-400! focus:border-red-500! focus:ring-red-500/15!";
 
 export default function PhoneInput({ id, country, onCountryChange, number, onNumberChange, invalid = false, describedBy }) {
   const selected = phoneCountryOrDefault(country);
   return (
     <div className="flex gap-2">
-      <div className="relative w-[6.5rem] shrink-0">
-        <select
-          aria-label="Country calling code"
-          value={selected}
-          onChange={(e) => onCountryChange(e.target.value)}
-          className={SELECT_CLASS}
-        >
-          {Object.entries(DIAL_CODES).map(([name, [iso, code]]) => (
-            <option key={name} value={name}>{`${iso} ${code}`}</option>
-          ))}
-        </select>
-        <ChevronDown size={16} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-      </div>
+      <CountrySelect
+        variant="auth"
+        compact
+        className="w-[6.75rem] shrink-0"
+        value={selected}
+        onChange={onCountryChange}
+        options={PHONE_OPTIONS}
+        selectedLabel={DIAL_CODES[selected][1]}
+        ariaLabel="Country calling code"
+        panelMinWidth={280}
+      />
       <div className="min-w-0 flex-1">
         <input
           id={id} type="tel" autoComplete="tel-national" inputMode="tel"

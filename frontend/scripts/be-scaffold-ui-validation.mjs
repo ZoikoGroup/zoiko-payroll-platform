@@ -18,6 +18,7 @@ import { getCurrencyForJurisdiction } from "../src/utils/currency.js";
 import { getPayrollLabels } from "../src/utils/jurisdictionLabels.js";
 import { getCountryNameFromJurisdictionCode, getJurisdictionCode, getJurisdictionTaxFields }
   from "../src/utils/jurisdictionTax.js";
+import { hasBundledFlag } from "./country-flag-check.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, "..", "src");
@@ -77,8 +78,7 @@ check("every Belgium alias resolves to BE; the bare 'be' is not an alias", () =>
 });
 
 check("Belgium flag is registered", () => {
-  const flag = read("components/jurisdiction/CountryFlag.jsx");
-  assert(/function Belgium\(\)/.test(flag) && /BE: Belgium/.test(flag), "flag component + FLAGS entry");
+  assert(hasBundledFlag("BE"), "bundled flag-icons flag");
 });
 
 check("Belgian employee fields are IBAN only (NISS is vault-only)", () => {

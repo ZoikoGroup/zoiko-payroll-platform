@@ -17,6 +17,7 @@ import { COUNTRIES, COUNTRY_FIELD_SPECS, DUPLICATE_ID_FIELDS, normalizeComplianc
 import { getCurrencyForJurisdiction } from "../src/utils/currency.js";
 import { getCountryNameFromJurisdictionCode, getJurisdictionCode, getJurisdictionTaxFields }
   from "../src/utils/jurisdictionTax.js";
+import { hasBundledFlag } from "./country-flag-check.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, "..", "src");
@@ -80,8 +81,7 @@ check("every Spain alias resolves to ES; the bare 'es' is not an alias", () => {
 });
 
 check("Spain flag is registered", () => {
-  const flag = read("components/jurisdiction/CountryFlag.jsx");
-  assert(/function Spain\(\)/.test(flag) && /ES: Spain/.test(flag), "flag component + FLAGS entry");
+  assert(hasBundledFlag("ES"), "bundled flag-icons flag");
 });
 
 check("registration offers Spain with its regions", () => {

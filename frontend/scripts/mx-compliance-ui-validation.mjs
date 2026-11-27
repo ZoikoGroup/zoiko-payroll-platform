@@ -11,6 +11,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hasBundledFlag } from "./country-flag-check.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, "..", "src");
@@ -32,7 +33,6 @@ const config = read("config/jurisdictions/mexicoComplianceConfig.jsx");
 const page = read("pages/JurisdictionCompliance/MXCompliancePage.jsx");
 const app = read("App.jsx");
 const index = read("pages/JurisdictionCompliance/index.js");
-const flag = read("components/jurisdiction/CountryFlag.jsx");
 const certification = read("pages/TestCertificationPage.jsx");
 const superAdminSvc = read("service/superAdminService.js");
 const payrollService = read("service/payrollService.js");
@@ -67,7 +67,7 @@ check("Mexico page is exported and mapped from the compliance index", () =>
   index.includes('MX: "mexico"'));
 
 check("Mexico has a flag and a certification entry", () =>
-  flag.includes("function Mexico()") && /\bMX:\s*Mexico\b/.test(flag) &&
+  hasBundledFlag("MX") &&
   certification.includes('value: "MX"'));
 
 check("Super Admin and organisation services target the Mexico routes", () =>

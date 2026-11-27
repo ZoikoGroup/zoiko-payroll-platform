@@ -10,6 +10,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hasBundledFlag } from "./country-flag-check.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, "..", "src");
@@ -138,7 +139,7 @@ check("Super Admin route, export, slug and flag exist", () => {
   const index = read("pages/JurisdictionCompliance/index.js");
   return app.includes('path="/super-admin/compliance/japan"') && app.includes("<JPCompliancePage />")
     && index.includes('export { default as JPCompliancePage }') && /JP: "japan"/.test(index)
-    && /JP: Japan/.test(read("components/jurisdiction/CountryFlag.jsx"));
+    && hasBundledFlag("JP");
 });
 check("The Compliance Centre tab is mounted for Japan organisations", () =>
   /currentTab === JP_TAB && <JPComplianceCentreTab \/>/.test(read("modules/payroll/Compliances/CompliancePage.jsx")));

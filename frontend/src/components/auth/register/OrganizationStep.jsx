@@ -1,8 +1,13 @@
-import { Building, Factory, FileText, Globe2, Landmark, MapPin } from "lucide-react";
+import { Building, Factory, FileText, Landmark, MapPin } from "lucide-react";
 
 import { REGISTRATION_COUNTRIES, getStatesForCountryName } from "../../../utils/registrationRegions";
 import { getJurisdictionTaxFields, getJurisdictionTaxSchema } from "../../../utils/jurisdictionTax";
-import { Field, IconInput, IconSelect, StepHeading } from "./fields";
+import CountrySelect from "../../jurisdiction/CountrySelect";
+import { DIAL_CODES } from "../PhoneInput";
+import { Field, IconInput, IconSelect, StepHeading, errorId } from "./fields";
+
+// Each registration country with its ISO code, so the picker can show its flag.
+const COUNTRY_OPTIONS = REGISTRATION_COUNTRIES.map((name) => ({ value: name, label: name, code: DIAL_CODES[name]?.[0] }));
 
 export const COMPANY_TYPES = [
   "Private Limited", "Public Limited", "Limited Liability Company (LLC)", "Sole Proprietorship",
@@ -48,11 +53,9 @@ export default function OrganizationStep({ form, errors, onChange, onCountryChan
         </Field>
 
         <Field id="country" label="Country" required error={errors.country}>
-          <IconSelect icon={Globe2} id="country" required error={errors.country} value={form.country}
-            onChange={(e) => onCountryChange(e.target.value)}>
-            <option value="">Select country</option>
-            {REGISTRATION_COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </IconSelect>
+          <CountrySelect id="country" variant="auth" required value={form.country} onChange={onCountryChange}
+            options={COUNTRY_OPTIONS} placeholder="Select country" invalid={Boolean(errors.country)}
+            describedBy={errors.country ? errorId("country") : undefined} />
         </Field>
         <Field id="state" label="State / Province" error={errors.state}>
           <IconSelect icon={MapPin} id="state" value={form.state} disabled={states.length === 0}

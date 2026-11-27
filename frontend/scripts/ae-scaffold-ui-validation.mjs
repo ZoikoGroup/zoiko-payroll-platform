@@ -17,6 +17,7 @@ import { COUNTRIES, COUNTRY_FIELD_SPECS, normalizeComplianceFields, validateComp
 import { getCurrencyForJurisdiction } from "../src/utils/currency.js";
 import { getCountryNameFromJurisdictionCode, getJurisdictionCode, getJurisdictionTaxFields }
   from "../src/utils/jurisdictionTax.js";
+import { hasBundledFlag } from "./country-flag-check.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, "..", "src");
@@ -78,9 +79,7 @@ check("every UAE alias resolves to AE; the bare 'ae' is not an alias", () => {
 });
 
 check("UAE flag is registered", () => {
-  const flag = read("components/jurisdiction/CountryFlag.jsx");
-  assert(/function UnitedArabEmirates\(\)/.test(flag) && /AE: UnitedArabEmirates/.test(flag),
-    "flag component + FLAGS entry");
+  assert(hasBundledFlag("AE"), "bundled flag-icons flag");
 });
 
 check("registration offers the UAE and the DIFC / ADGM regions", () => {

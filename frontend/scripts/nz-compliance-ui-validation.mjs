@@ -13,6 +13,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hasBundledFlag } from "./country-flag-check.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, "..", "src");
@@ -343,7 +344,7 @@ check("The NZ page is exported and slugged new-zealand", () => {
   return index.includes('NZCompliancePage } from "./NZCompliancePage"') && /NZ: "new-zealand"/.test(index);
 });
 check("NZ has a flag and labels", () =>
-  /NZ: NewZealand/.test(read("components/jurisdiction/CountryFlag.jsx"))
+  hasBundledFlag("NZ")
   && (read("utils/jurisdictionLabels.js").match(/\bNZ: "/g) || []).length >= 2);
 check("Every NZ source file is reachable from an import", () => {
   const all = walk(SRC).filter((p) => /\.(jsx?|mjs)$/.test(p)).map((p) => readFileSync(p, "utf-8")).join("\n");

@@ -10,6 +10,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hasBundledFlag } from "./country-flag-check.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, "..", "src");
@@ -33,7 +34,6 @@ const config = read("config/jurisdictions/southAfricaComplianceConfig.jsx");
 const page = read("pages/JurisdictionCompliance/ZACompliancePage.jsx");
 const app = read("App.jsx");
 const index = read("pages/JurisdictionCompliance/index.js");
-const flag = read("components/jurisdiction/CountryFlag.jsx");
 const certification = read("pages/TestCertificationPage.jsx");
 const service = read("service/superAdminService.js");
 const overview = read("components/jurisdiction/southAfrica/ZAOverviewDashboard.jsx");
@@ -82,8 +82,7 @@ check("ZA page is exported and mapped from the compliance index", () =>
   index.includes('ZA: "south-africa"'));
 
 check("South Africa has a flag and a certification entry", () =>
-  flag.includes("function SouthAfrica()") &&
-  /\bZA:\s*SouthAfrica\b/.test(flag) &&
+  hasBundledFlag("ZA") &&
   certification.includes("South Africa (SARS)"));
 
 check("ZA summary service calls the single supported summary endpoint", () =>

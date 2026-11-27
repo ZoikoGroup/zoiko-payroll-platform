@@ -6,6 +6,8 @@ import { ROLES } from "../../../config/roles";
 import { useToast } from "../ToastContext";
 import ConfirmDialog from "../../../components/ConfirmDialog";
 import Modal from "../../../components/Modal";
+import CountryFlag from "../../../components/jurisdiction/CountryFlag";
+import CountrySelect from "../../../components/jurisdiction/CountrySelect";
 import PlanLimitMessage, { isPlanLimitError, PLAN_SELECTION_ROUTE } from "../../../components/PlanLimitMessage";
 import { useEntitledCountries } from "../EntitledCountriesContext";
 import { usePayrollSetup } from "../PayrollSetupContext";
@@ -17,13 +19,6 @@ import {
 } from "../../../service/jurisdictionService";
 
 const PLAN_LABEL = { CORE: "Core", PROFESSIONAL: "Professional", BUSINESS: "Business", ENTERPRISE: "Enterprise" };
-
-// "DE" -> 🇩🇪 via regional-indicator symbols ("UK" is spelled GB in Unicode).
-function flagFor(code) {
-  const iso = String(code || "").toUpperCase() === "UK" ? "GB" : String(code || "").toUpperCase();
-  if (!/^[A-Z]{2}$/.test(iso)) return "";
-  return String.fromCodePoint(...[...iso].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65));
-}
 
 function formatDate(iso) {
   if (!iso) return "—";
@@ -239,12 +234,8 @@ export default function CountriesTab() {
               className={`bg-surface border rounded-[18px] p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] flex flex-col gap-4 ${overLimit ? "border-warning/40" : "border-border"}`}
             >
               <div className="flex items-center gap-3">
-                <span
-                  className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-surface-muted text-[20px] leading-none text-foreground"
-                  title={c.code}
-                >
-                  {flagFor(c.code) || <Globe size={16} />}
-                </span>
+                {/* Flag image, not emoji: Windows shows emoji flags as the letters ("IN"). */}
+                <CountryFlag code={c.code} name={c.name} size="xl" decorative />
                 <p className="text-[15px] font-bold text-foreground flex-1 min-w-0 truncate">{c.name}</p>
                 {c.isPrimary && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-1 text-[11px] font-bold text-info">
@@ -314,19 +305,18 @@ export default function CountriesTab() {
             {pickerCountries.length === 0 ? (
               <p className="text-[13px] text-foreground-muted">Your organization already has every country Zoiko supports.</p>
             ) : (
-              <label className="block">
-                <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Country</span>
-                <select
+              <div>
+                <label htmlFor="add-country-picker" className="mb-1.5 block text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Country</label>
+                <CountrySelect
+                  id="add-country-picker"
                   value={pickedCode}
-                  onChange={(e) => setPickedCode(e.target.value)}
-                  className="w-full rounded-[12px] border border-border bg-background px-3.5 py-2.5 text-[13px] text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                >
-                  {pickerCountries.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.name}{c.setupPending ? " — set-up pending" : ""}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setPickedCode}
+                  options={pickerCountries.map((c) => ({
+                    value: c.code, code: c.code, label: c.name, hint: c.setupPending ? "Set-up pending" : undefined,
+                  }))}
+                  buttonClassName="rounded-[12px] text-[13px]"
+                  testId="add-country-picker"
+                />
                 {pickedCountry?.setupPending && (
                   <span className="mt-1.5 block text-[11px] text-warning">
                     Zoiko is still completing {pickedCountry.name}&apos;s statutory set-up. You can add it and its
@@ -339,7 +329,7 @@ export default function CountriesTab() {
                     Zoiko completes their statutory set-up.
                   </span>
                 )}
-              </label>
+              </div>
             )}
             <div className="flex justify-end gap-3">
               <button

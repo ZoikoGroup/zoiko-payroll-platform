@@ -115,7 +115,7 @@ export default function EngineFallbackDefaultsPage() {
             }`}
           >
             <span className="flex h-4 w-4 items-center justify-center overflow-hidden rounded-sm">
-              <CountryFlag code={c.code} className="h-full w-full" fallback={<Globe2 size={12} />} />
+              <CountryFlag code={c.code} name={c.name} size="xs" fallback={<Globe2 size={12} />} />
             </span>
             {c.name}
           </button>
