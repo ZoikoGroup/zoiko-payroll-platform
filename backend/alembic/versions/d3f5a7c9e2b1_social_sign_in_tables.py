@@ -22,8 +22,22 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _offline() -> bool:
+    return bool(op.get_context().as_sql)
+
+
+def _existing_tables() -> set:
+    """Tables already in the database, so a re-run is a no-op. Offline
+    (`alembic upgrade --sql`) there is no database to inspect: render every
+    statement, which is exactly what an online run does on a database that
+    doesn't have these tables yet."""
+    if _offline():
+        return set()
+    return set(sa.inspect(op.get_bind()).get_table_names())
+
+
 def upgrade() -> None:
-    tables = sa.inspect(op.get_bind()).get_table_names()
+    tables = _existing_tables()
 
     if "user_oauth_identities" not in tables:
         op.create_table(
@@ -77,7 +91,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    tables = sa.inspect(op.get_bind()).get_table_names()
+    tables = _existing_tables() if not _offline() else {
+        "organization_sso_domains", "oauth_pending", "user_oauth_identities"}
     for table in ("organization_sso_domains", "oauth_pending", "user_oauth_identities"):
         if table in tables:
             op.drop_table(table)
