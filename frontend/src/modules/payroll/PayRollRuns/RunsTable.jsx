@@ -90,6 +90,9 @@ export default function RunsTable({
   // eye icon still opens View). Falls back to onSelect when not provided.
   onRowClick,
   selectedRunId = null,
+  // Lights up this run's Advance (✓) button: the panel's current step / Next
+  // action is hovered, or the run was just created.
+  highlightRunId = null,
   // The shared advance action (useRunAdvance) - same dialogs/permissions as
   // the progress panel and the run detail view.
   onAdvance,
@@ -294,7 +297,9 @@ export default function RunsTable({
                 key={run.id}
                 aria-selected={selectedRunId === run.id}
                 className={`cursor-pointer transition-colors ${
-                  selectedRunId === run.id
+                  highlightRunId === run.id
+                    ? "bg-primary/10 shadow-[inset_3px_0_0_var(--color-primary)]"
+                    : selectedRunId === run.id
                     ? "bg-primary/5 shadow-[inset_3px_0_0_var(--color-primary)] dark:bg-primary/10"
                     : "hover:bg-background dark:hover:bg-surface-muted"}`}
                 onClick={() => (onRowClick ? onRowClick(run) : onSelect?.(run))}
@@ -327,7 +332,11 @@ export default function RunsTable({
                       onClick={(e) => handleApproveClick(e, run)}
                       title={nextStatusLabel(run.status) ? `Advance to ${nextStatusLabel(run.status)}` : "Already at final status"}
                       disabled={!onAdvance || advancingId === run.id || !nextStatusLabel(run.status)}
-                      className="rounded-[8px] p-1.5 text-foreground-muted hover:text-primary hover:bg-primary/10 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                      data-highlighted={highlightRunId === run.id ? "true" : undefined}
+                      className={`rounded-[8px] p-1.5 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed ${
+                        highlightRunId === run.id && nextStatusLabel(run.status)
+                          ? "animate-pulse bg-primary/15 text-primary ring-2 ring-primary shadow-[0_0_0_4px_rgba(25,197,138,0.18)]"
+                          : "text-foreground-muted hover:text-primary hover:bg-primary/10"}`}
                     >
                       {advancingId === run.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
                     </button>

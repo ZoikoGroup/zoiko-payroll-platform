@@ -59,6 +59,7 @@ export default function RunTrackerPanel({
   advancingId,
   onCreateRun,
   creating,
+  onHighlight,
 }) {
   const [collapsed, setCollapsed] = useState(startsCollapsed);
   const today = useMemo(() => new Date(), []);
@@ -67,6 +68,20 @@ export default function RunTrackerPanel({
   const clicked = trackedRunId != null ? (runs || []).find((r) => r.id === trackedRunId) : null;
   const run = clicked || thisMonth[0] || latestUnfinished || null;
   const noRunThisMonth = thisMonth.length === 0;
+  // Every run for the period dropdown: this month's first, then all earlier
+  // ones, newest first (pickDefaultRuns already sorts thisMonth that way).
+  const previousRuns = useMemo(() => {
+    const thisMonthIds = new Set(thisMonth.map((r) => r.id));
+    return [...(runs || [])]
+      .filter((r) => !thisMonthIds.has(r.id))
+      .sort((a, b) => String(b.periodStart || "").localeCompare(String(a.periodStart || "")) || (b.id ?? 0) - (a.id ?? 0));
+  }, [runs, thisMonth]);
+  const defaultLabel = !noRunThisMonth
+    ? `Default: this month (${thisMonth[0].period})`
+    : latestUnfinished
+      ? `Default: latest unfinished (${latestUnfinished.period})`
+      : "Default: no unfinished run";
+  const optionLabel = (r) => `${r.period} · ${r.status}${r.runCode ? ` · ${r.runCode}` : ""}`;
 
   // Countries a run pays: an org's run covers every one of its active
   // countries (each employee under their own country's rules).
@@ -120,37 +135,30 @@ export default function RunTrackerPanel({
                 <CalendarPlus size={13} aria-hidden="true" /> {creating ? "Loading…" : "Create run"}
               </button>
             )}
-            {run && !clicked && (
-              <p className="mt-2 text-[11px] text-foreground-muted">Showing the most recent unfinished run:</p>
-            )}
           </div>
         )}
 
-        {!noRunThisMonth && thisMonth.length > 1 && !clicked && (
+        {(runs || []).length > 0 && (
           <label className="mb-3 block">
-            <span className="mb-1 block text-[11px] font-semibold text-foreground-muted">
-              {thisMonth.length} runs this month
-            </span>
+            <span className="mb-1 block text-[11px] font-semibold text-foreground-muted">Show run</span>
             <select
-              value={run?.id ?? ""}
-              onChange={(e) => onTrack(Number(e.target.value))}
+              value={clicked ? String(clicked.id) : ""}
+              onChange={(e) => onTrack(e.target.value ? Number(e.target.value) : null)}
               className="w-full rounded-[10px] border border-border bg-background px-2.5 py-1.5 text-[12px] text-foreground focus:border-primary focus:outline-none"
             >
-              {thisMonth.map((r) => (
-                <option key={r.id} value={r.id}>{r.period} · {r.status}{r.runCode ? ` · ${r.runCode}` : ""}</option>
-              ))}
+              <option value="">{defaultLabel}</option>
+              {thisMonth.length > 0 && (
+                <optgroup label={`${monthLabel(today)} (this month)`}>
+                  {thisMonth.map((r) => <option key={r.id} value={r.id}>{optionLabel(r)}</option>)}
+                </optgroup>
+              )}
+              {previousRuns.length > 0 && (
+                <optgroup label="Previous months">
+                  {previousRuns.map((r) => <option key={r.id} value={r.id}>{optionLabel(r)}</option>)}
+                </optgroup>
+              )}
             </select>
           </label>
-        )}
-
-        {clicked && (
-          <button
-            type="button"
-            onClick={() => onTrack(null)}
-            className="mb-2 text-[11px] font-semibold text-primary hover:underline"
-          >
-            ← Back to {noRunThisMonth ? "the default run" : "this month's run"}
-          </button>
         )}
 
         {run ? (
@@ -162,9 +170,11 @@ export default function RunTrackerPanel({
               canOperate={canOperate}
               onAdvance={onAdvance}
               busy={advancingId === run.id}
+              onHighlight={onHighlight}
             />
             <p className="mt-3 text-[11px] text-foreground-muted">
-              Hover or tap a step to see what happens there. Click a row in the table to follow another run.
+              Hover or tap a step to see what happens there. Pick a period above, or click a row in the table, to
+              follow another run.
             </p>
           </>
         ) : (

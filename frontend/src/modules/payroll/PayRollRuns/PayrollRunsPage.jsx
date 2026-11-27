@@ -18,7 +18,8 @@ import { useEntitledCountries } from "../EntitledCountriesContext";
 import { ATTENDANCE_OVERRIDE_MIN_REASON } from "./AttendanceReadinessPanel";
 import RunTrackerPanel from "./RunTrackerPanel";
 import useRunAdvance from "./useRunAdvance";
-import { canOperatePayroll } from "./runWorkflow";
+import { WIZARD_GUIDE, canOperatePayroll } from "./runWorkflow";
+import { GuideTooltip } from "./RunWorkflowTracker";
 import { useAuth } from "../../../context/AuthContext";
 
 // Steps of the "Create New Run" wizard only (shown in the left panel while
@@ -70,6 +71,19 @@ export default function PayrollRunsPage() {
   const [trackedRunId, setTrackedRunId] = useState(null);
   const { role } = useAuth();
   const canOperate = canOperatePayroll(role);
+  // Lights up a run's Advance (✓) button in the table: while its current
+  // step / Next action is hovered in the panel, and briefly after the wizard
+  // creates a run.
+  const [hoverHighlightId, setHoverHighlightId] = useState(null);
+  const [flashRunId, setFlashRunId] = useState(null);
+  const highlightRunId = hoverHighlightId ?? flashRunId;
+  useEffect(() => {
+    if (flashRunId == null) return undefined;
+    const t = setTimeout(() => setFlashRunId(null), 6000);
+    return () => clearTimeout(t);
+  }, [flashRunId]);
+  // Guide tooltip for the Create New Run wizard steps: { id, anchor, pinned }.
+  const [wizardTip, setWizardTip] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   // Attendance gate (see AttendanceReadinessPanel / backend
   // check_attendance_readiness): checked when the Calculate step opens and
@@ -256,6 +270,11 @@ export default function PayrollRunsPage() {
     if (wizardStep < 4) setWizardStep((s) => s + 1);
     if (wizardStep === 3) {
       addToast?.("Payroll run submitted successfully.", "success");
+      // Follow the new run in Run progress and light up its next action.
+      if (createdRunId) {
+        setTrackedRunId(createdRunId);
+        setFlashRunId(createdRunId);
+      }
       setView("list");
       setWizardStep(0);
       setEmployees([]);
@@ -323,6 +342,7 @@ export default function PayrollRunsPage() {
             advancingId={advancingId}
             onCreateRun={startWizard}
             creating={loadingEmployees}
+            onHighlight={setHoverHighlightId}
           />
         )}
         {isWizard && (
@@ -336,7 +356,19 @@ export default function PayrollRunsPage() {
             const active = isWizard && wizardStep === step.id;
             const StepIcon = step.icon;
             return (
-              <div key={step.id} className="flex items-start gap-2.5">
+              <button
+                key={step.id}
+                type="button"
+                onMouseEnter={(e) => { const anchor = e.currentTarget; setWizardTip((t) => (t?.pinned ? t : { id: step.id, anchor })); }}
+                onMouseLeave={() => setWizardTip((t) => (t?.pinned ? t : null))}
+                onFocus={(e) => { const anchor = e.currentTarget; setWizardTip((t) => (t?.pinned ? t : { id: step.id, anchor })); }}
+                onBlur={() => setWizardTip(null)}
+                onClick={(e) => { const anchor = e.currentTarget; setWizardTip((t) => (t?.id === step.id && t.pinned ? null : { id: step.id, anchor, pinned: true })); }}
+                onKeyDown={(e) => { if (e.key === "Escape") setWizardTip(null); }}
+                aria-describedby={wizardTip?.id === step.id ? `wizard-step-tip-${step.id}` : undefined}
+                aria-current={active ? "step" : undefined}
+                className="flex w-full items-start gap-2.5 rounded-[10px] text-left transition-colors hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-primary"
+              >
                 <div className="flex flex-col items-center">
                     <div
                     className={`flex h-9 w-9 items-center justify-center rounded-full border-2 text-xs font-bold transition-all ${
@@ -358,10 +390,27 @@ export default function PayrollRunsPage() {
                     {step.label}
                   </p>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
+        {wizardTip?.anchor && WIZARD_GUIDE[wizardTip.id] && (() => {
+          const guide = WIZARD_GUIDE[wizardTip.id];
+          const tone = wizardStep > wizardTip.id ? "done" : wizardStep === wizardTip.id ? "current" : "upcoming";
+          return (
+            <GuideTooltip
+              id={`wizard-step-tip-${wizardTip.id}`}
+              anchor={wizardTip.anchor}
+              title={guide.title}
+              badge={{ done: "Done", current: "Current step", upcoming: "Upcoming" }[tone]}
+              badgeTone={tone}
+            >
+              <p className="text-[12px] leading-snug text-foreground-secondary">{guide.meaning}</p>
+              {guide.howTo && <p className="mt-1.5 text-[12px] leading-snug text-foreground">{guide.howTo}</p>}
+            </GuideTooltip>
+          );
+        })()}
+        <p className="mt-2 text-[11px] text-foreground-muted">Hover or tap a step to see what to do there.</p>
         </>
         )}
         {jurisdictionCountry && (
@@ -446,6 +495,7 @@ export default function PayrollRunsPage() {
                     onSelect={setSelectedRun}
                     onRowClick={(run) => setTrackedRunId(run.id)}
                     selectedRunId={trackedRunId}
+                    highlightRunId={highlightRunId}
                     onAdvance={requestAdvance}
                     advancingId={advancingId}
                     onDelete={handleRunChanged}

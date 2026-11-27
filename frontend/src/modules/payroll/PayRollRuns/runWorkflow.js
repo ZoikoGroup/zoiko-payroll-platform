@@ -139,3 +139,38 @@ export function pickDefaultRuns(runs, today = new Date()) {
   const latestUnfinished = byRecency.find((r) => r.status !== "Closed") || null;
   return { thisMonth, latestUnfinished };
 }
+
+/**
+ * The "Create New Run" wizard (PayrollRunsPage + RunDetailPage), step by step.
+ * Note what step 3 really does: "Submit Payroll Run" moves the newly created
+ * Draft run to Review - it does not approve or pay anything.
+ */
+export const WIZARD_GUIDE = {
+  1: {
+    title: "Configure",
+    meaning: "Set the pay period start and end, the pay date and the pay schedule (Monthly, Bi-Weekly or "
+      + "Weekly), and choose which active employees to include.",
+    howTo: "When the dates and employees are right, click Calculate Payroll.",
+  },
+  2: {
+    title: "Calculate",
+    meaning: "Payroll is calculated for the selected employees. This is a preview: nothing is saved yet. "
+      + "Check the totals and each employee's pay. Attendance for the period is checked automatically; "
+      + "missing attendance blocks the run unless an admin turns on the override and records a reason.",
+    howTo: "Use Recalculate after any change. Then click Approve & Continue and, in \"Confirm Payroll Run\", "
+      + "click Confirm & Create. This creates the run as Draft.",
+  },
+  3: {
+    title: "Approve",
+    meaning: "Check the final summary: pay period, pay date, calculation mode and totals. The run already "
+      + "exists as Draft at this point.",
+    howTo: "Tick \"I confirm all payroll calculations are accurate and authorize this disbursement\", then click "
+      + "Submit Payroll Run. This sends the run to Review; it does not approve or pay anyone yet.",
+  },
+  4: {
+    title: "Process",
+    meaning: "The run is created and sent for review. Approving, authorizing, paying and closing happen "
+      + "afterwards from the Payroll Runs list (follow it in Run progress).",
+    howTo: null,
+  },
+};

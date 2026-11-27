@@ -24,11 +24,18 @@ function stepState(idx, currentIdx) {
 
 const STATE_LABEL = { done: "Done", current: "Current step", upcoming: "Upcoming" };
 
-function StepTooltip({ id, anchor, step, state, run, canOperate }) {
+const STATE_BADGE = {
+  current: "bg-info/10 text-info",
+  done: "bg-primary/10 text-primary",
+  upcoming: "bg-surface-muted text-foreground-muted",
+};
+
+/** The guide tooltip shell: portal + fixed position next to `anchor`, so a
+ * scrolling panel or a modal never clips it. Shared with the Create Run
+ * wizard steps. */
+export function GuideTooltip({ id, anchor, title, badge, badgeTone = "upcoming", children }) {
   const ref = useRef(null);
   const [pos, setPos] = useState(null);
-  const guide = STEP_GUIDE[step];
-  const done = state === "done" ? stepCompletion(step, run) : null;
 
   useLayoutEffect(() => {
     function place() {
@@ -60,13 +67,24 @@ function StepTooltip({ id, anchor, step, state, run, canOperate }) {
       className="pointer-events-none w-72 max-w-[calc(100vw-16px)] rounded-[12px] border border-border bg-surface p-3 text-left shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
     >
       <div className="mb-1 flex items-center justify-between gap-2">
-        <p className="text-[13px] font-bold text-foreground">{step}</p>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-          state === "current" ? "bg-info/10 text-info" : state === "done" ? "bg-primary/10 text-primary" : "bg-surface-muted text-foreground-muted"}`}
-        >
-          {STATE_LABEL[state]}
-        </span>
+        <p className="text-[13px] font-bold text-foreground">{title}</p>
+        {badge && (
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATE_BADGE[badgeTone] || STATE_BADGE.upcoming}`}>
+            {badge}
+          </span>
+        )}
       </div>
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+function StepTooltip({ id, anchor, step, state, run, canOperate }) {
+  const guide = STEP_GUIDE[step];
+  const done = state === "done" ? stepCompletion(step, run) : null;
+  return (
+    <GuideTooltip id={id} anchor={anchor} title={step} badge={STATE_LABEL[state]} badgeTone={state}>
       <p className="text-[12px] leading-snug text-foreground-secondary">{guide.meaning}</p>
       {done?.by && (
         <p className="mt-1.5 text-[11px] text-foreground-muted">
@@ -83,8 +101,7 @@ function StepTooltip({ id, anchor, step, state, run, canOperate }) {
           Waiting for {PAYROLL_OPERATOR_LABEL}. Your role can view this run but can&apos;t move it forward.
         </p>
       )}
-    </div>,
-    document.body,
+    </GuideTooltip>
   );
 }
 
@@ -106,7 +123,7 @@ function StepMarker({ state, index }) {
 }
 
 /** The "Next action" line on its own (the detail view shows it beside the tracker). */
-export function RunNextAction({ run, canOperate, onAdvance, busy, compact = true }) {
+export function RunNextAction({ run, canOperate, onAdvance, busy, compact = true, onHighlight }) {
   const guide = STEP_GUIDE[run.status];
   if (!guide) return null;
   if (!guide.action) {
@@ -117,7 +134,13 @@ export function RunNextAction({ run, canOperate, onAdvance, busy, compact = true
     );
   }
   return (
-    <div className={`rounded-[12px] border border-info/30 bg-info/5 px-3 py-2.5 ${compact ? "" : "mt-4"}`}>
+    <div
+      className={`rounded-[12px] border border-info/30 bg-info/5 px-3 py-2.5 ${compact ? "" : "mt-4"}`}
+      onMouseEnter={() => onHighlight?.(run.id)}
+      onMouseLeave={() => onHighlight?.(null)}
+      onFocus={() => onHighlight?.(run.id)}
+      onBlur={() => onHighlight?.(null)}
+    >
       <p className="text-[11px] font-bold uppercase tracking-widest text-info">Next action</p>
       <p className="mt-0.5 text-[13px] font-semibold text-foreground">{guide.action}</p>
       {canOperate ? (
@@ -149,6 +172,9 @@ export default function RunWorkflowTracker({
   onAdvance,
   busy = false,
   showNextAction = true,
+  // (runId | null) => void: called while the current step or the Next action
+  // is hovered / focused, so the page can light up that run's Advance button.
+  onHighlight,
 }) {
   const baseId = useId();
   const [open, setOpen] = useState(null); // { step, pinned, anchor }
@@ -166,14 +192,17 @@ export default function RunWorkflowTracker({
 
   if (!run?.status) return null;
   const currentIdx = PAYROLL_STATUS_ORDER.indexOf(run.status);
+  const currentStep = PAYROLL_STATUS_ORDER[currentIdx];
+  const lightUp = (step) => { if (step === currentStep && STEP_GUIDE[step]?.action) onHighlight?.(run.id); };
+  const lightOff = () => onHighlight?.(null);
   const vertical = orientation === "vertical";
 
   const stepButtonProps = (step) => ({
     type: "button",
-    onMouseEnter: (e) => { const anchor = e.currentTarget; setOpen((o) => (o?.pinned ? o : { step, pinned: false, anchor })); },
-    onMouseLeave: () => setOpen((o) => (o?.pinned ? o : null)),
-    onFocus: (e) => { const anchor = e.currentTarget; setOpen((o) => (o?.pinned ? o : { step, pinned: false, anchor })); },
-    onBlur: () => setOpen((o) => (o?.pinned ? o : null)),
+    onMouseEnter: (e) => { const anchor = e.currentTarget; lightUp(step); setOpen((o) => (o?.pinned ? o : { step, pinned: false, anchor })); },
+    onMouseLeave: () => { lightOff(); setOpen((o) => (o?.pinned ? o : null)); },
+    onFocus: (e) => { const anchor = e.currentTarget; lightUp(step); setOpen((o) => (o?.pinned ? o : { step, pinned: false, anchor })); },
+    onBlur: () => { lightOff(); setOpen((o) => (o?.pinned ? o : null)); },
     onClick: (e) => {
       const anchor = e.currentTarget;
       setOpen((o) => (o?.step === step && o.pinned ? null : { step, pinned: true, anchor }));
@@ -254,7 +283,7 @@ export default function RunWorkflowTracker({
       )}
 
       {showNextAction && (
-        <RunNextAction run={run} canOperate={canOperate} onAdvance={onAdvance} busy={busy} compact={!vertical} />
+        <RunNextAction run={run} canOperate={canOperate} onAdvance={onAdvance} busy={busy} compact={!vertical} onHighlight={onHighlight} />
       )}
     </div>
   );
