@@ -198,6 +198,32 @@ class Settings(BaseSettings):
     GOOGLE_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
     GOOGLE_USERINFO_URL: str = "https://www.googleapis.com/oauth2/v2/userinfo"
 
+    # ── Microsoft sign-in (Microsoft identity platform, OIDC code flow) ─
+    # App registration in Microsoft Entra ID → "Accounts in any organizational
+    # directory and personal Microsoft accounts" for MICROSOFT_TENANT=common
+    # (or a tenant id / "organizations" / "consumers" to narrow it). Web
+    # redirect URI: the API's /api/auth/microsoft/callback. Sign-in stays off
+    # (button shown as unavailable) until both the id and secret are set.
+    MICROSOFT_CLIENT_ID: str = ""
+    MICROSOFT_CLIENT_SECRET: str = ""
+    MICROSOFT_TENANT: str = "common"
+    MICROSOFT_REDIRECT_URI: str = "http://localhost:8000/api/auth/microsoft/callback"
+
+    # ── Sign in with Apple ─────────────────────────────────────────────
+    # APPLE_CLIENT_ID is the Services ID (not the App ID). The client secret is
+    # a short-lived ES256 JWT this server signs with the .p8 key below
+    # (APPLE_PRIVATE_KEY: the PEM text; "\n" escapes are accepted). Return URL:
+    # the API's /api/auth/apple/callback — Apple requires https and a real
+    # domain (no localhost). For the welcome / receipt / invoice emails to
+    # reach "Hide My Email" (privaterelay.appleid.com) addresses, register the
+    # sending domain and From address under Apple's Private Email Relay
+    # Service; the registration page also asks those users for a work email.
+    APPLE_CLIENT_ID: str = ""
+    APPLE_TEAM_ID: str = ""
+    APPLE_KEY_ID: str = ""
+    APPLE_PRIVATE_KEY: str = ""
+    APPLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/apple/callback"
+
     # ── Email / SMTP ──────────────────────────────────────────────────
     SMTP_HOST: str = ""
     SMTP_PORT: str = "587"

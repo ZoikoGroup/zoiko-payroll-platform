@@ -9,6 +9,7 @@ import MfaLoginStep from "../components/MfaLoginStep";
 import AuthLayout from "../components/auth/AuthLayout";
 import SocialSignInButtons from "../components/auth/SocialSignInButtons";
 import { AUTH_LABEL, AuthAlert, AuthPrimaryButton, authInputClass } from "../components/auth/authUi";
+import { readSignInError } from "../components/auth/signInErrors";
 
 // "Remember this device" keeps only the work email on this browser — never a
 // password or token, and it never skips the second factor (ZP-PRIV B08).
@@ -37,35 +38,14 @@ function storeRememberedEmail(email, remember) {
   }
 }
 
-// Google Sign-In returns here in two cases: a registered account that owes its
+// Google / Microsoft / Apple sign-in return here in two cases: a registered account that owes its
 // second factor (#mfa_token=&mfa_mode= — a URL fragment, never sent to a
-// server), or a failure (?error=&message=).
+// server), or a failure (?error=&reason=, see signInErrors.js).
 function readGoogleMfaStep() {
   const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const mfaToken = fragment.get("mfa_token");
   if (!mfaToken) return null;
   return { mode: fragment.get("mfa_mode") === "enroll" ? "enroll" : "challenge", mfaToken };
-}
-
-const GOOGLE_ERROR_MESSAGES = {
-  google_cancelled: "Google sign-in was cancelled.",
-  google_state_invalid: "Your Google sign-in expired or was started in another tab. Please try again.",
-  google_sign_in_failed: "Google sign-in failed. Please try again.",
-};
-
-// Fixed reason codes from the API's Google callback — the URL never carries
-// free text, so a crafted link can't put its own wording on this page.
-const GOOGLE_FAILURE_REASONS = {
-  email_unverified: "Your Google account's email isn't verified. Please sign in with email and password.",
-  account_deactivated: "Your account has been deactivated.",
-  organization_suspended: "Your organization has been suspended. Please contact support.",
-  access_ended: "This temporary support access has ended.",
-};
-
-function readGoogleError(search) {
-  const params = new URLSearchParams(search);
-  const fallback = GOOGLE_ERROR_MESSAGES[params.get("error")];
-  return fallback ? GOOGLE_FAILURE_REASONS[params.get("reason")] || fallback : null;
 }
 
 export default function LoginPage() {
@@ -78,7 +58,7 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [localError, setLocalError] = useState(() => readGoogleError(location.search));
+  const [localError, setLocalError] = useState(() => readSignInError(location.search));
   // ZP-PRIV B08: {mode: "challenge" | "enroll", mfaToken} after a password step
   // — or straight after Google Sign-In for a registered account that owes its
   // second factor (see readGoogleMfaStep).

@@ -198,7 +198,10 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
         # Country entitlement ledger (b4d6f8a0c2e3, joined at d4c8f1a7b2e9 / c2e7a4f9b1d8):
         # pending on top of every production revision below.
         country = {"organization_jurisdictions"}
-        google_tables = {"google_pending"}
+        # Microsoft / Apple sign-in and Company SSO domains (d3f5a7c9e2b1): pending
+        # on top of every revision below, the same way google_pending is.
+        social_tables = {"user_oauth_identities", "oauth_pending", "organization_sso_domains"}
+        google_tables = {"google_pending"} | social_tables
         google_columns = {"users": {"auth_provider", "google_id", "avatar_url"}}
 
         def assert_google_pending(tables, columns):
@@ -314,33 +317,33 @@ def test_pending_objects_are_read_from_the_real_migration_chain():
                      "payroll_runs": {"be_approval_fingerprint"}}
         tables, columns = pending_objects("e7ec6c1933b4")
         assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
-        assert tables == payslip_template_tables | my_tables | be_p2_tables | be_block_b_tables
+        assert tables == payslip_template_tables | my_tables | be_p2_tables | be_block_b_tables | social_tables
         assert columns == {**mx_m21, "payroll_runs": {"my_approval_fingerprint", "be_approval_fingerprint"},
                            "payslip_items": {"template_version_id", "my_calculation_snapshot", "be_calculation_snapshot", "ae_calculation_snapshot", "es_calculation_snapshot"}}
         # A database at Mexico m21 (efc56f3235e2, production's head after PR #157): the payslip
         # templates, Malaysia and Belgium are pending.
         tables, columns = pending_objects("efc56f3235e2")
         assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
-        assert tables == payslip_template_tables | my_tables | be_p2_tables | be_block_b_tables
+        assert tables == payslip_template_tables | my_tables | be_p2_tables | be_block_b_tables | social_tables
         assert columns == {"payroll_runs": {"my_approval_fingerprint", "be_approval_fingerprint"},
                            "payslip_items": {"template_version_id", "my_calculation_snapshot", "be_calculation_snapshot", "ae_calculation_snapshot", "es_calculation_snapshot"}}
         # A database at the payslip templates (f3a9c1d7e2b4): Malaysia and Belgium are pending.
         tables, columns = pending_objects("f3a9c1d7e2b4")
         assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
-        assert tables == my_tables | be_p2_tables | be_block_b_tables
+        assert tables == my_tables | be_p2_tables | be_block_b_tables | social_tables
         assert columns == {"payroll_runs": {"my_approval_fingerprint", "be_approval_fingerprint"}, "payslip_items": {"my_calculation_snapshot", "be_calculation_snapshot", "ae_calculation_snapshot", "es_calculation_snapshot"}}
         # cf348b09db2b joins the two chains: a database at either chain's head has only the
         # other chain pending.
         tables, columns = pending_objects("8a1f5ef9fa5d")     # Belgium head (main, PR #161)
         be_block_k_tables = {"payroll_be_gate_evidence", "payroll_be_decisions", "payroll_be_onss_rate_files", "payroll_be_onss_rates", "payroll_be_onss_code_combinations", "payroll_be_onss_type_rules"}  # + Belgium Block K (b7e4c2a9d5f1)
-        assert tables == my_tables | be_block_k_tables
+        assert tables == my_tables | be_block_k_tables | social_tables
         be_m_ecwc_columns = {"payroll_be_employer_registrations": {  # + Belgium Block M-ECWC (e9c4b7a2d6f3)
             "closure_fund_sector", "closure_fund_sector_evidence_ref", "workforce_class", "workforce_class_evidence_ref",
             "wage_moderation_status", "wage_moderation_evidence_ref"}}
         assert columns == {**my_runs, "payslip_items": {"my_calculation_snapshot", "ae_calculation_snapshot", "es_calculation_snapshot"}, **be_m_ecwc_columns}
         tables, columns = pending_objects("f793f6074257")     # Malaysia head (venu)
         assert {t: columns.pop(t, None) for t in BE_BLOCK_B_COLUMNS} == BE_BLOCK_B_COLUMNS  # + Belgium Block B (2943a0490b5b)
-        assert tables == be_p2_tables | be_block_b_tables
+        assert tables == be_p2_tables | be_block_b_tables | social_tables
         assert columns == {"payroll_runs": {"be_approval_fingerprint"}, "payslip_items": {"be_calculation_snapshot", "ae_calculation_snapshot", "es_calculation_snapshot"}}
         # Both branches out of f5c1a8d3e9b2 (Mexico M8 and ZP-PRIV) are pending from it.
         tables, columns = pending_objects("f5c1a8d3e9b2")

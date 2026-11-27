@@ -11,6 +11,7 @@ import { dialCodeForCountry, phoneCountryOrDefault } from "../components/auth/Ph
 import { AuthAlert, AuthPrimaryButton } from "../components/auth/authUi";
 import MfaLoginStep from "../components/MfaLoginStep";
 import SocialSignInButtons from "../components/auth/SocialSignInButtons";
+import { readSignInError } from "../components/auth/signInErrors";
 import OrganizationStep from "../components/auth/register/OrganizationStep";
 import AdministratorStep from "../components/auth/register/AdministratorStep";
 import ReviewStep from "../components/auth/register/ReviewStep";
@@ -33,20 +34,36 @@ import { STEP_FIELDS, firstIncompleteStep, validateStep } from "../components/au
 const STEPS = ["Organization", "Administrator", "Review", "Plan"];
 const LAST_STEP = STEPS.length;
 
-const PROVIDER_LABELS = { google: "Google" };
+const PROVIDER_LABELS = { google: "Google", microsoft: "Microsoft", apple: "Apple" };
 
 function parseStep(value) {
   const n = Number.parseInt(value, 10);
   return Number.isInteger(n) && n >= 1 && n <= LAST_STEP ? n : 1;
 }
 
-/** Presentation details for a social sign-up held in the draft. */
+/** Where the provider's held profile is read from (pre-fills step 2). */
+function pendingProfileUrl(provider, token) {
+  const path = provider === "google" ? "google/pending" : "oauth/pending";
+  return `${API_BASE}/api/auth/${path}/${encodeURIComponent(token)}`;
+}
+
+/** Presentation details for a social sign-up held in the draft.
+ *
+ * The email is the provider's verified address and read-only — except for
+ * an Apple "Hide My Email" relay address, which the admin may replace with a
+ * work email so the welcome, receipt and invoice emails go somewhere they
+ * read (the API accepts that only for a relay sign-up). */
 function describeSocial(social) {
   if (!social?.pendingToken) return null;
+  const relay = Boolean(social.isPrivateRelay);
   return {
     ...social,
     label: PROVIDER_LABELS[social.provider] || social.provider,
-    emailEditable: false,
+    emailEditable: relay,
+    emailHint: relay
+      ? "Apple is hiding your email. Add your work email so receipts and invoices reach you directly; "
+        + "you'll still sign in with Apple."
+      : undefined,
   };
 }
 
@@ -66,7 +83,9 @@ export default function RegisterPage() {
   const [socialDraft, setSocialDraft] = useState(() => initialDraft?.social || null);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
-  const [localError, setLocalError] = useState(null);
+  // A provider sign-up that failed or was cancelled returns here with a
+  // fixed error code (the URL is then reduced to ?step=).
+  const [localError, setLocalError] = useState(() => readSignInError(window.location.search));
   // ZP-PRIV B08: a new organization admin sets up MFA before the first session.
   const [mfaStep, setMfaStep] = useState(null);
   const finishedRef = useRef(false);
@@ -109,11 +128,11 @@ export default function RegisterPage() {
     if (!pendingTokenInUrl || handledPendingRef.current === pendingTokenInUrl) return undefined;
     handledPendingRef.current = pendingTokenInUrl;
     let cancelled = false;
-    const provider = "google";
+    const requested = searchParams.get("provider") || "google";
+    const provider = requested in PROVIDER_LABELS ? requested : "google";
     const emailFromUrl = searchParams.get("email") || "";
-    const nextSocial = { provider, pendingToken: pendingTokenInUrl, email: emailFromUrl };
 
-    fetch(`${API_BASE}/api/auth/google/pending/${encodeURIComponent(pendingTokenInUrl)}`, { credentials: "include" })
+    fetch(pendingProfileUrl(provider, pendingTokenInUrl), { credentials: "include" })
       .then(async (res) => (res.ok ? res.json() : {}))
       .catch(() => ({}))
       .then((profile) => {
@@ -121,6 +140,8 @@ export default function RegisterPage() {
         // Expired/used token: keep the email from the redirect; the server
         // explains on submit that the sign-up must be restarted.
         const email = profile.email || emailFromUrl;
+        const isPrivateRelay = Boolean(profile.is_private_relay)
+          || /@privaterelay\.appleid\.com$/i.test(email);
         const merged = {
           ...form,
           firstName: profile.given_name || form.firstName,
@@ -129,9 +150,11 @@ export default function RegisterPage() {
           password: "",
         };
         setForm(merged);
-        setSocialDraft({ ...nextSocial, email });
-        const firstOpen = firstIncompleteStep(merged, { passwordless: true, emailEditable: false }) ?? 3;
-        setSearchParams({ step: String(firstOpen) }, { replace: true });
+        setSocialDraft({ provider, pendingToken: pendingTokenInUrl, email, isPrivateRelay });
+        const firstOpen = firstIncompleteStep(merged, { passwordless: true, emailEditable: isPrivateRelay }) ?? 3;
+        // A relay address is valid, so step 2 would be skipped: open it
+        // anyway so the admin sees the option to add a work email.
+        setSearchParams({ step: String(isPrivateRelay ? Math.min(firstOpen, 2) : firstOpen) }, { replace: true });
       });
     return () => { cancelled = true; };
     // `form` is read once, at the moment the provider returns.
@@ -280,12 +303,14 @@ export default function RegisterPage() {
         tax_identifiers: hasTaxIdentifiers ? form.taxIdentifiers : undefined,
         plan_code: selectedPlanCode,
       };
-      // Google Sign-Up: no password (Google is the IdP). The server takes the
-      // Google identity and verified email from the pending token — never
-      // from this request — and consumes the token once the account exists.
+      // Provider sign-up: no password (Google / Microsoft / Apple is the
+      // IdP). The server takes the identity and verified email from the
+      // pending token — never from this request — and consumes the token
+      // once the account exists.
       if (social) {
         body.auth_provider = social.provider;
-        body.google_pending_token = social.pendingToken;
+        if (social.provider === "google") body.google_pending_token = social.pendingToken;
+        else body.oauth_pending_token = social.pendingToken;
       } else {
         body.password = form.password;
       }
@@ -384,7 +409,7 @@ export default function RegisterPage() {
       {/* Sign-up method: provider buttons first, then the email divider. */}
       {step === 1 && !social && (
         <>
-          <SocialSignInButtons mode="register" />
+          <SocialSignInButtons mode="register" compact />
           <div className="my-3 flex items-center gap-3 text-[13px] text-blue-700">
             <span className="h-px flex-1 bg-slate-200" />
             <span>or sign up with email</span>

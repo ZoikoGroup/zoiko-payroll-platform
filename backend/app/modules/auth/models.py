@@ -27,6 +27,9 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
+    false,
+    true,
 )
 from sqlalchemy.orm import relationship
 
@@ -327,6 +330,63 @@ class GooglePending(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     consumed_at = Column(DateTime, nullable=True)
+
+
+class OAuthIdentity(Base):
+    """A Microsoft or Apple identity linked to a user (Google keeps its own
+    users.google_id column). One row per (provider, subject); a user may have
+    several. ``provider_email`` is the address the provider reported, kept so
+    an Apple "Hide My Email" relay address stays known even when the user
+    registered with a separate work email."""
+
+    __tablename__ = "user_oauth_identities"
+    __table_args__ = (UniqueConstraint("provider", "subject", name="uq_user_oauth_identity_provider_subject"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(20), nullable=False)  # "microsoft" | "apple"
+    subject = Column(String(255), nullable=False)
+    provider_email = Column(String(200), nullable=True)
+    is_private_relay = Column(Boolean, nullable=False, default=False, server_default=false())
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OAuthPending(Base):
+    """Short-lived hold for a Microsoft / Apple profile between the provider's
+    callback and the registration page — the same role GooglePending plays for
+    Google. Single-use, 10 minutes."""
+
+    __tablename__ = "oauth_pending"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String(64), unique=True, index=True, nullable=False)
+    provider = Column(String(20), nullable=False)
+    subject = Column(String(255), nullable=False)
+    email = Column(String(200), nullable=False, index=True)
+    given_name = Column(String(120), nullable=True)
+    family_name = Column(String(120), nullable=True)
+    is_private_relay = Column(Boolean, nullable=False, default=False, server_default=false())
+    mode = Column(String(20), nullable=False, default="register", server_default="register")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    consumed_at = Column(DateTime, nullable=True)
+
+
+class OrganizationSsoDomain(Base):
+    """An email domain whose users sign in through their organization's own
+    identity provider. ``login_url`` is the IdP-initiated sign-in address the
+    "Continue with Company SSO" button sends them to. Rows are created when an
+    organization's SSO is set up (after its account exists); a domain belongs
+    to at most one organization."""
+
+    __tablename__ = "organization_sso_domains"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    domain = Column(String(253), nullable=False, unique=True, index=True)
+    login_url = Column(String(500), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True, server_default=true())
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 from app.core import audit_immutability as _audit_immutability  # noqa: E402

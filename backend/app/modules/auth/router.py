@@ -18,7 +18,7 @@ from typing import Annotated, Optional
 from urllib.parse import urlencode, urlsplit
 
 from pydantic import BaseModel
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -275,6 +275,168 @@ def google_pending(token: str, db: Session = Depends(get_db)):
     if profile is None:
         raise NotFoundException("Google pending registration", "token")
     return profile
+
+
+# ── Microsoft / Apple sign-in and Company SSO discovery ──────────────────
+#
+# Same shape as Google above, with the provider's own state cookie. The
+# callbacks are API routes (MICROSOFT_REDIRECT_URI / APPLE_REDIRECT_URI point
+# here directly). Outcomes go back to the frontend exactly like Google's:
+# session tokens in a URL fragment on /auth/social/callback, a second factor
+# on /login#mfa_token=, a new identity on /register?pending=&provider=, and
+# failures as fixed codes (?error=&provider=&reason=), never free text.
+
+SOCIAL_STATE_TTL_SECONDS = 600
+
+
+def _social_state_cookie(provider: str) -> str:
+    return f"zoiko_{provider}_oauth_state"
+
+
+def _social_start_response(provider: str, mode: str) -> RedirectResponse:
+    from app.modules.auth import social
+
+    state = secrets.token_urlsafe(32)
+    response = RedirectResponse(social.authorization_url(provider, state), status_code=302)
+    # Apple returns with a cross-site form POST, which only carries a
+    # SameSite=None (hence Secure) cookie. Microsoft returns with a top-level
+    # GET, for which Lax is enough.
+    is_apple = provider == "apple"
+    redirect_uri = settings.APPLE_REDIRECT_URI if is_apple else settings.MICROSOFT_REDIRECT_URI
+    response.set_cookie(
+        _social_state_cookie(provider),
+        f"{mode}:{state}",
+        max_age=SOCIAL_STATE_TTL_SECONDS,
+        httponly=True,
+        secure=is_apple or urlsplit(redirect_uri).scheme.lower() == "https",
+        samesite="none" if is_apple else "lax",
+        path="/",
+    )
+    return response
+
+
+def _social_redirect(provider: str, url: str, status_code: int) -> RedirectResponse:
+    response = RedirectResponse(url, status_code=status_code)
+    response.delete_cookie(_social_state_cookie(provider), path="/")
+    return response
+
+
+def _social_failure_reason(message: str) -> str:
+    if "email address" in (message or "").lower():
+        return "email_missing"
+    return _google_failure_reason(message)
+
+
+def _social_callback(request: Request, provider: str, db: Session, *, code, state, error,
+                     apple_user: Optional[dict] = None, status_code: int = 302) -> RedirectResponse:
+    from app.modules.auth import social
+
+    frontend = settings.FRONTEND_URL.rstrip("/")
+    state_cookie = request.cookies.get(_social_state_cookie(provider), "")
+    cookie_mode, separator, expected_state = state_cookie.partition(":")
+    # Failures go back to where the flow started (sign-in or registration).
+    origin = "/register" if cookie_mode == "register" else "/login"
+
+    if error or not code:
+        return _social_redirect(provider, frontend + origin + "?" + urlencode(
+            {"error": "oauth_cancelled", "provider": provider}), status_code)
+    if (not separator or cookie_mode not in {"login", "register"}
+            or not compare_digest(state or "", expected_state)):
+        return _social_redirect(provider, frontend + "/login?" + urlencode(
+            {"error": "oauth_state_invalid", "provider": provider}), status_code)
+    try:
+        result = social.sign_in(db, provider, code, request=request, mode=cookie_mode, apple_user=apple_user)
+    except (UnauthorizedException, BadRequestException) as exc:
+        return _social_redirect(provider, frontend + origin + "?" + urlencode(
+            {"error": "oauth_failed", "provider": provider,
+             "reason": _social_failure_reason(str(exc.detail))}), status_code)
+
+    if result["action"] == "session":
+        session = result["session"]
+        return _social_redirect(provider, frontend + "/auth/social/callback#" + urlencode(
+            {"access_token": session["access_token"], "refresh_token": session["refresh_token"]}), status_code)
+    if result["action"] == "mfa":
+        return _social_redirect(provider, frontend + "/login#" + urlencode(
+            {"mfa_token": result["mfa_token"], "mfa_mode": result["mfa_mode"]}), status_code)
+    return _social_redirect(provider, frontend + "/register?" + urlencode(
+        {"pending": result["token"], "provider": provider, "email": result["email"]}), status_code)
+
+
+@router.get("/providers", summary="Which sign-in providers are configured on this server")
+def sign_in_providers():
+    from app.modules.auth import social
+
+    return social.provider_status()
+
+
+@router.get("/microsoft/login", summary="Start Microsoft sign-in (existing account → session)")
+def microsoft_login(request: Request):
+    return _social_start_response("microsoft", "login")
+
+
+@router.get("/microsoft/register", summary="Start Microsoft sign-in (no account yet → registration page)")
+def microsoft_register(request: Request):
+    return _social_start_response("microsoft", "register")
+
+
+@router.get("/microsoft/callback", summary="Microsoft OAuth callback (session or pending registration)")
+def microsoft_callback(request: Request, code: Annotated[Optional[str], Query()] = None,
+                       state: Annotated[Optional[str], Query()] = None,
+                       error: Annotated[Optional[str], Query()] = None,
+                       db: Session = Depends(get_db)):
+    return _social_callback(request, "microsoft", db, code=code, state=state, error=error)
+
+
+@router.get("/apple/login", summary="Start Sign in with Apple (existing account → session)")
+def apple_login(request: Request):
+    return _social_start_response("apple", "login")
+
+
+@router.get("/apple/register", summary="Start Sign in with Apple (no account yet → registration page)")
+def apple_register(request: Request):
+    return _social_start_response("apple", "register")
+
+
+@router.post("/apple/callback", summary="Sign in with Apple callback (form_post)")
+def apple_callback(request: Request, code: Annotated[Optional[str], Form()] = None,
+                   state: Annotated[Optional[str], Form()] = None,
+                   error: Annotated[Optional[str], Form()] = None,
+                   user: Annotated[Optional[str], Form()] = None,
+                   db: Session = Depends(get_db)):
+    """Apple posts the code here. `user` (first authorization only) carries the
+    name as JSON; it is the only time Apple shares it. 303 turns the browser's
+    POST into a GET on the frontend."""
+    apple_user = None
+    if user:
+        try:
+            parsed = json.loads(user)
+            apple_user = parsed if isinstance(parsed, dict) else None
+        except ValueError:
+            apple_user = None
+    return _social_callback(request, "apple", db, code=code, state=state, error=error,
+                            apple_user=apple_user, status_code=303)
+
+
+@router.get("/oauth/pending/{token}", summary="Get a pending Microsoft / Apple profile (pre-fill registration)")
+def oauth_pending(token: str, db: Session = Depends(get_db)):
+    from app.modules.auth import social
+
+    profile = social.public_pending(db, token)
+    if profile is None:
+        raise NotFoundException("Pending registration", "token")
+    return profile
+
+
+class SsoDiscoverRequest(BaseModel):
+    email: str
+
+
+@router.post("/sso/discover", summary="Find the Company SSO sign-in for a work email's domain")
+@limiter.limit("10/minute")
+def sso_discover(request: Request, data: SsoDiscoverRequest, db: Session = Depends(get_db)):
+    from app.modules.auth import social
+
+    return social.discover_sso(db, data.email)
 
 
 @router.post("/register", response_model=LoginResponse, summary="Register a new organization")
