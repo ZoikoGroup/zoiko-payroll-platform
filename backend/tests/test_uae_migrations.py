@@ -122,7 +122,7 @@ def test_deploy_drift_filter_explains_the_column():
         os.chdir(here)
     from tests._mx_lifecycle_pending import CERT_RUN_PACK_COLUMNS
 
-    assert tables == set()
+    assert tables == {"user_oauth_identities", "oauth_pending", "organization_sso_domains"}   # + social sign-in tables d3f5a7c9e2b1
     assert {t: columns.pop(t, None) for t in CERT_RUN_PACK_COLUMNS} == CERT_RUN_PACK_COLUMNS  # + e4b7c2a9d1f3
     assert columns == {"payslip_items": {COLUMN, "es_calculation_snapshot"}}   # + Spain 86f1ec062709 after the merge
 
@@ -141,7 +141,7 @@ def test_single_head():
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert list(script.get_heads()) == ["c8d2f6a4e1b9"]   # merge of Spain 86f1ec062709 + e4b7c2a9d1f3, on b5f3e8a1c6d9
+    assert list(script.get_heads()) == ["d3f5a7c9e2b1"]   # social sign-in tables on merge c8d2f6a4e1b9
     assert set(script.get_revision("b5f3e8a1c6d9").down_revision) == {REVISION, "d7a3f1c9e5b2"}
 
 

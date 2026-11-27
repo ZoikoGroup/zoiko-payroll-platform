@@ -47,7 +47,7 @@ export default function ReportTemplatesPage() {
               >
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                    <CountryFlag code={j.code} className="h-full w-full" fallback={<Globe2 size={18} className="text-primary" />} />
+                    <CountryFlag code={j.code} name={j.name} size="lg" fallback={<Globe2 size={18} className="text-primary" />} />
                   </div>
                   <div>
                     <p className="text-sm font-bold text-foreground">{j.name}</p>

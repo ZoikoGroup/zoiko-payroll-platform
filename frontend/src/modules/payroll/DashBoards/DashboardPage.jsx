@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Plus, ChevronLeft, ChevronRight, Globe2 } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import StatCards from "./StatCards";
 import CostTrendChart from "./CostTrendChart";
 import BreakdownsChart from "./BreakdownsChart";
@@ -10,6 +10,7 @@ import { CALCULATION_MODE_LABELS } from "../../../service/payrollService";
 import { usePayrollSetup } from "../PayrollSetupContext";
 import { useEntitledCountries } from "../EntitledCountriesContext";
 import { getCountryNameFromCode, getCurrencyForJurisdiction } from "../../../utils/currency";
+import CountrySelect from "../../../components/jurisdiction/CountrySelect";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -149,23 +150,20 @@ export default function DashboardPage({ onNewPayrollRun }) {
 
             {/* Country filter — each country's totals in its own currency */}
             {activeCountries.length > 0 && (
-              <label className="inline-flex items-center gap-2 rounded-[12px] border border-border bg-surface px-3 py-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-                <Globe2 size={14} className="text-foreground-muted" />
-                <span className="sr-only">Country</span>
-                <select
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  data-testid="dashboard-country-filter"
-                  className="bg-transparent text-[13px] font-semibold text-foreground focus:outline-none"
-                >
-                  <option value="ALL">All countries</option>
-                  {activeCountries.map((code) => (
-                    <option key={code} value={code}>
-                      {getCountryNameFromCode(code) || code}{currencyFor(code) ? ` (${currencyFor(code)})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <CountrySelect
+                value={country}
+                onChange={setCountry}
+                ariaLabel="Country"
+                testId="dashboard-country-filter"
+                className="w-56"
+                buttonClassName="h-9! rounded-[12px] bg-surface text-[13px] font-semibold shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+                options={[
+                  { value: "ALL", label: "All countries" },
+                  ...activeCountries.map((code) => ({
+                    value: code, code, label: getCountryNameFromCode(code) || code, hint: currencyFor(code) || undefined,
+                  })),
+                ]}
+              />
             )}
 
             <button

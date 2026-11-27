@@ -153,7 +153,8 @@ def test_drift_filter_explains():
     finally:
         os.chdir(here)
     # P6 (c6ea8c6c35ce) and P8 (dd8a60634320) are pending on the same chain; so is Poland P2 (1ee3bbde33bb).
-    assert tables - MX_LIFECYCLE_TABLES == set(NEW_TABLES) | {"payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
+    # Microsoft / Apple sign-in and Company SSO domains (d3f5a7c9e2b1) are pending from here too.
+    assert tables - MX_LIFECYCLE_TABLES - {"user_oauth_identities", "oauth_pending", "organization_sso_domains"} == set(NEW_TABLES) | {"payroll_nz_final_pay_cases", "payroll_nz_leave_pay_calculations",
                                         "payroll_nz_cash_up_requests", "payroll_nz_corrections",
                                         "google_pending", "payroll_nz_filings", "payroll_nz_remittances",
                                         "payroll_nz_remittance_lines", "payroll_nz_settlements",

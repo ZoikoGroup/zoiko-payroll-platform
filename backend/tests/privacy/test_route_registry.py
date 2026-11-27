@@ -38,6 +38,17 @@ KNOWN_PUBLIC = {
     ("GET", "/api/auth/google/register"),
     ("GET", "/api/auth/google/callback"),
     ("GET", "/api/auth/google/pending/{token}"),
+    # Microsoft / Apple sign-in and Company SSO discovery (auth/social.py):
+    # the same pre-login shape as Google above.
+    ("GET", "/api/auth/providers"),
+    ("GET", "/api/auth/microsoft/login"),
+    ("GET", "/api/auth/microsoft/register"),
+    ("GET", "/api/auth/microsoft/callback"),
+    ("GET", "/api/auth/apple/login"),
+    ("GET", "/api/auth/apple/register"),
+    ("POST", "/api/auth/apple/callback"),
+    ("GET", "/api/auth/oauth/pending/{token}"),
+    ("POST", "/api/auth/sso/discover"),
     ("POST", "/api/auth/refresh"),
     ("GET", "/api/auth/accept-invite"),
     ("POST", "/api/auth/forgot-password"),

@@ -1,426 +1,83 @@
-// Real inline SVG flags — not Unicode flag emoji. Windows' default font
-// (Segoe UI Emoji) has never shipped color flag glyphs, so emoji flags
-// silently fall back to a two-letter code in a box on Windows, regardless
-// of browser/refresh. Inline SVG renders identically on every platform.
-// Simplified at this size (a 40px card icon) but recognizable — not
-// aiming for vexillographic precision.
+import { getFlagUrl } from "../../utils/countryFlags";
 
-function India() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#fff" />
-      <rect width="24" height="5.33" fill="#FF9933" />
-      <rect y="10.67" width="24" height="5.33" fill="#138808" />
-      <circle cx="12" cy="8" r="2" fill="none" stroke="#000080" strokeWidth="0.3" />
-      <circle cx="12" cy="8" r="0.4" fill="#000080" />
-    </svg>
-  );
-}
+// The one country flag component — use it wherever a country is shown
+// (country cards, pickers, the phone code selector, the header).
+//
+// Renders the bundled flag-icons SVG (see utils/countryFlags.js), never a
+// flag emoji: Windows can't draw flag emoji and shows the letters instead.
+//
+//   <CountryFlag code="IN" name="India" size="md" />
+//
+// * `size` — "xs" 16x12, "sm" 20x15, "md" 24x18, "lg" 32x24, "xl" 40x30
+//   (all 4:3). Leave it out and pass sizing classes instead, e.g.
+//   className="h-full w-full" to fill a box (the flag is then cropped to the
+//   box like a cover image).
+// * `name` — the country's name: the image's alt text and tooltip.
+// * `fallback` — what to show when there is no flag for the code; by
+//   default the code itself in a small neutral badge of the same size.
+// * `decorative` — the country is already named next to the flag: the
+//   image is hidden from screen readers (alt="").
+//
+// A thin inner ring keeps white flags (Japan, Poland …) defined on white
+// cards and light flags visible on dark surfaces in dark mode.
 
-function UnitedStates() {
-  const stripeH = 16 / 7;
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#fff" />
-      {[0, 2, 4, 6].map((i) => <rect key={i} y={i * stripeH} width="24" height={stripeH} fill="#B22234" />)}
-      <rect width="10" height={stripeH * 4} fill="#3C3B6E" />
-    </svg>
-  );
-}
-
-function UnitedKingdom() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#00247D" />
-      <path d="M0,0 L24,16 M24,0 L0,16" stroke="#fff" strokeWidth="3.2" />
-      <path d="M0,0 L24,16 M24,0 L0,16" stroke="#CF142B" strokeWidth="1.2" />
-      <path d="M12,0 V16 M0,8 H24" stroke="#fff" strokeWidth="5.2" />
-      <path d="M12,0 V16 M0,8 H24" stroke="#CF142B" strokeWidth="3" />
-    </svg>
-  );
-}
-
-function Australia() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#00247D" />
-      <g transform="translate(0,0) scale(0.5)">
-        <rect width="24" height="16" fill="#00247D" />
-        <path d="M0,0 L24,16 M24,0 L0,16" stroke="#fff" strokeWidth="3.2" />
-        <path d="M0,0 L24,16 M24,0 L0,16" stroke="#CF142B" strokeWidth="1.2" />
-        <path d="M12,0 V16 M0,8 H24" stroke="#fff" strokeWidth="5.2" />
-        <path d="M12,0 V16 M0,8 H24" stroke="#CF142B" strokeWidth="3" />
-      </g>
-      {[[17, 3], [20, 6], [17, 9], [14, 6.5], [19, 12]].map(([x, y], i) => (
-        <circle key={i} cx={x} cy={y} r={i === 4 ? 0.9 : 0.6} fill="#fff" />
-      ))}
-    </svg>
-  );
-}
-
-function Canada() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#fff" />
-      <rect width="6" height="16" fill="#D80621" />
-      <rect x="18" width="6" height="16" fill="#D80621" />
-      <path
-        d="M12 3 L12.7 5 L14.3 4.3 L13.6 6 L15.5 6.3 L13.9 7.5 L15 9 L13 8.6 L13.2 10.5 L12 9.2 L10.8 10.5 L11 8.6 L9 9 L10.1 7.5 L8.5 6.3 L10.4 6 L9.7 4.3 L11.3 5 Z"
-        fill="#D80621"
-      />
-    </svg>
-  );
-}
-
-function Germany() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="5.33" fill="#000" />
-      <rect y="5.33" width="24" height="5.33" fill="#DD0000" />
-      <rect y="10.67" width="24" height="5.33" fill="#FFCE00" />
-    </svg>
-  );
-}
-
-// ── Caribbean production jurisdictions (2026-09-21) — simplified, same
-// "recognizable, not vexillographically precise" convention as every
-// flag above.
-
-function Barbados() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="8" height="16" fill="#00267F" />
-      <rect x="8" width="8" height="16" fill="#FFC726" />
-      <rect x="16" width="8" height="16" fill="#00267F" />
-      <path d="M11 3 L13 3 L13 10 L11.7 13 L11 10 Z" fill="#000" />
-    </svg>
-  );
-}
-
-function CaymanIslands() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#A5C8ED" />
-      <rect width="12" height="8" fill="#00247D" />
-      <path d="M0,0 L12,8 M12,0 L0,8" stroke="#fff" strokeWidth="1.6" />
-      <path d="M0,0 L12,8 M12,0 L0,8" stroke="#CF142B" strokeWidth="0.6" />
-      <path d="M6,0 V8 M0,4 H12" stroke="#fff" strokeWidth="2.6" />
-      <path d="M6,0 V8 M0,4 H12" stroke="#CF142B" strokeWidth="1.5" />
-      <circle cx="17" cy="8" r="3.4" fill="#fff" stroke="#00267F" strokeWidth="0.4" />
-    </svg>
-  );
-}
-
-function DominicanRepublic() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#002D62" />
-      <rect x="10" width="4" height="16" fill="#fff" />
-      <rect y="6" width="24" height="4" fill="#fff" />
-      <rect width="10" height="6" fill="#CE1126" />
-      <rect x="14" width="10" height="6" fill="#002D62" />
-      <rect width="10" height="6" y="10" fill="#002D62" />
-      <rect x="14" width="10" height="6" y="10" fill="#CE1126" />
-    </svg>
-  );
-}
-
-function Guyana() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#009E49" />
-      <polygon points="0,0 16,8 0,16" fill="#FCD116" />
-      <polygon points="0,0 10,8 0,16" fill="#CE1126" />
-      <polygon points="0,3 5,8 0,13" fill="#000" />
-    </svg>
-  );
-}
-
-function Jamaica() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#000" />
-      <polygon points="0,0 24,16 24,0" fill="#009B3A" />
-      <polygon points="0,0 0,16 24,16" fill="#009B3A" />
-      <path d="M0,0 L24,16 M24,0 L0,16" stroke="#FED100" strokeWidth="2.6" />
-    </svg>
-  );
-}
-
-function Bahamas() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="5.33" fill="#00778B" />
-      <rect y="5.33" width="24" height="5.33" fill="#FFC72C" />
-      <rect y="10.67" width="24" height="5.33" fill="#00778B" />
-      <polygon points="0,0 9,8 0,16" fill="#000" />
-    </svg>
-  );
-}
-
-function TrinidadAndTobago() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#CE1126" />
-      <path d="M-2,18 L18,-2" stroke="#fff" strokeWidth="4.6" />
-      <path d="M-2,18 L18,-2" stroke="#000" strokeWidth="2.8" />
-    </svg>
-  );
-}
-
-function PuertoRico() {
-  const stripeH = 16 / 5;
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      {[0, 1, 2, 3, 4].map((i) => (
-        <rect key={i} y={i * stripeH} width="24" height={stripeH} fill={i % 2 === 0 ? "#ED1B34" : "#fff"} />
-      ))}
-      <path d="M0,0 L10,8 L0,16 Z" fill="#0050A4" />
-      <path
-        d="M3.6,8 l1.2,-0.9 l1.2,0.9 l-0.46,-1.4 l1.2,-0.9 h-1.48 l-0.46,-1.4 l-0.46,1.4 h-1.48 l1.2,0.9 z"
-        fill="#fff"
-      />
-    </svg>
-  );
-}
-
-function France() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="8" height="16" fill="#002395" />
-      <rect x="8" width="8" height="16" fill="#fff" />
-      <rect x="16" width="8" height="16" fill="#ED2939" />
-    </svg>
-  );
-}
-
-function Spain() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#AA151B" />
-      <rect y="4" width="24" height="8" fill="#F1BF00" />
-    </svg>
-  );
-}
-
-function Ireland() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="8" height="16" fill="#169B62" />
-      <rect x="8" width="8" height="16" fill="#fff" />
-      <rect x="16" width="8" height="16" fill="#FF883E" />
-    </svg>
-  );
-}
-
-function Singapore() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="8" fill="#EF3340" />
-      <rect y="8" width="24" height="8" fill="#fff" />
-      <circle cx="5.2" cy="4" r="2.6" fill="#fff" />
-      <circle cx="6.2" cy="4" r="2.4" fill="#EF3340" />
-    </svg>
-  );
-}
-
-function Italy() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="8" height="16" fill="#009246" />
-      <rect x="8" width="8" height="16" fill="#FFFFFF" />
-      <rect x="16" width="8" height="16" fill="#CE2B37" />
-    </svg>
-  );
-}
-
-// Hong Kong SAR — red field, simplified five-petal white bauhinia.
-function HongKong() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#DE2910" />
-      {[0, 72, 144, 216, 288].map((a) => (
-        <ellipse key={a} cx="12" cy="5.6" rx="1.5" ry="2.6" fill="#fff" transform={`rotate(${a} 12 8)`} />
-      ))}
-    </svg>
-  );
-}
-
-function Sweden() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#006AA7" />
-      <rect x="7" width="3" height="16" fill="#FECC00" />
-      <rect y="6.5" width="24" height="3" fill="#FECC00" />
-    </svg>
-  );
-}
-
-// Switzerland — square (1:1) red field with an upright white cross, centered
-// in this landscape viewBox the same "recognizable, not vexillographic"
-// convention as every flag above.
-function Switzerland() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect x="4" width="16" height="16" fill="#D52B1E" />
-      <rect x="9.5" y="3" width="5" height="10" fill="#fff" />
-      <rect x="7" y="5.5" width="10" height="5" fill="#fff" />
-    </svg>
-  );
-}
-
-// Netherlands — horizontal tricolour, red / white / blue.
-function Netherlands() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="5.34" fill="#AE1C28" />
-      <rect y="5.33" width="24" height="5.34" fill="#fff" />
-      <rect y="10.67" width="24" height="5.33" fill="#21468B" />
-    </svg>
-  );
-}
-
-// Mexico — vertical tricolour, green / white / red, with a simplified emblem
-// (brown disc) in the centre band — recognizable, not vexillographic.
-function Mexico() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="8" height="16" fill="#006847" />
-      <rect x="8" width="8" height="16" fill="#fff" />
-      <rect x="16" width="8" height="16" fill="#CE1126" />
-      <circle cx="12" cy="8" r="2" fill="#8C5A2B" />
-    </svg>
-  );
-}
-
-// Brazil — green field, yellow rhombus, blue disc — recognizable, not
-// vexillographic (no stars or motto band).
-function Brazil() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#009C3B" />
-      <polygon points="12,2 22,8 12,14 2,8" fill="#FFDF00" />
-      <circle cx="12" cy="8" r="3.4" fill="#002776" />
-    </svg>
-  );
-}
-
-function SouthAfrica() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="8" fill="#DE3831" />
-      <rect y="8" width="24" height="8" fill="#002395" />
-      <path d="M4,4 L12,8 L4,12" fill="none" stroke="#fff" strokeWidth="3.6" />
-      <path d="M4,4 L12,8 L4,12" fill="none" stroke="#007A4D" strokeWidth="2" />
-      <path d="M10,8 H24" fill="none" stroke="#fff" strokeWidth="4.4" />
-      <path d="M10,8 H24" fill="none" stroke="#007A4D" strokeWidth="2.4" />
-      <path d="M0,1.5 L10,8 L0,14.5 Z" fill="#000" stroke="#FFB612" strokeWidth="1.2" />
-    </svg>
-  );
-}
-
-function Japan() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#fff" />
-      <circle cx="12" cy="8" r="4.8" fill="#BC002D" />
-    </svg>
-  );
-}
-
-function Malaysia() {
-  // Simplified: red / white stripes with the blue canton and a yellow crescent and star.
-  const stripes = Array.from({ length: 14 }, (_, i) => (
-    <rect key={i} y={(16 / 14) * i} width="24" height={16 / 14} fill={i % 2 === 0 ? "#CC0001" : "#fff"} />
-  ));
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      {stripes}
-      <rect width="12" height={(16 / 14) * 8} fill="#010066" />
-      <circle cx="4.6" cy="4.6" r="3" fill="#FC0" />
-      <circle cx="5.5" cy="4.6" r="2.5" fill="#010066" />
-      <circle cx="8.6" cy="4.6" r="1.3" fill="#FC0" />
-    </svg>
-  );
-}
-
-function Poland() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="8" fill="#fff" />
-      <rect y="8" width="24" height="8" fill="#DC143C" />
-    </svg>
-  );
-}
-
-function Belgium() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="8" height="16" fill="#000" />
-      <rect x="8" width="8" height="16" fill="#FDDA24" />
-      <rect x="16" width="8" height="16" fill="#EF3340" />
-    </svg>
-  );
-}
-
-function UnitedArabEmirates() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="5.33" fill="#00843D" />
-      <rect y="5.33" width="24" height="5.34" fill="#FFF" />
-      <rect y="10.67" width="24" height="5.33" fill="#000" />
-      <rect width="6" height="16" fill="#EF3340" />
-    </svg>
-  );
-}
-
-function SaudiArabia() {
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#006C35" />
-      <path d="M5 5.2 H19" stroke="#fff" strokeWidth="1.1" strokeLinecap="round" />
-      <path d="M6 8 H18" stroke="#fff" strokeWidth="0.9" strokeLinecap="round" />
-      <path d="M5 11.5 H15" stroke="#fff" strokeWidth="1" strokeLinecap="round" />
-      <path d="M16.5 11.8 L18.8 11.2" stroke="#fff" strokeWidth="0.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function NewZealand() {
-  const star = (cx, cy, r) => {
-    const points = Array.from({ length: 10 }, (_, i) => {
-      const radius = i % 2 === 0 ? r : r * 0.42;
-      const angle = (Math.PI / 5) * i - Math.PI / 2;
-      return `${(cx + radius * Math.cos(angle)).toFixed(2)},${(cy + radius * Math.sin(angle)).toFixed(2)}`;
-    }).join(" ");
-    return <polygon points={points} fill="#C8102E" stroke="#fff" strokeWidth="0.35" />;
-  };
-  return (
-    <svg viewBox="0 0 24 16" className="h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect width="24" height="16" fill="#012169" />
-      <path d="M0,0 L12,8 M12,0 L0,8" stroke="#fff" strokeWidth="1.6" />
-      <path d="M0,0 L12,8 M12,0 L0,8" stroke="#C8102E" strokeWidth="0.6" />
-      <path d="M6,0 V8 M0,4 H12" stroke="#fff" strokeWidth="2.4" />
-      <path d="M6,0 V8 M0,4 H12" stroke="#C8102E" strokeWidth="1.4" />
-      {star(18, 12.5, 1.3)}{star(16.2, 7, 1.1)}{star(20.2, 6, 1.1)}{star(18, 2.8, 1.0)}
-    </svg>
-  );
-}
-
-const FLAGS = {
-  IN: India, US: UnitedStates, UK: UnitedKingdom, GB: UnitedKingdom, AU: Australia, CA: Canada, DE: Germany,
-  BB: Barbados, KY: CaymanIslands, DO: DominicanRepublic, GY: Guyana, JM: Jamaica, BS: Bahamas, TT: TrinidadAndTobago,
-PR: PuertoRico, FR: France, IE: Ireland, SG: Singapore, SE: Sweden, IT: Italy, HK: HongKong, CH: Switzerland,
-  NL: Netherlands, MX: Mexico, BR: Brazil, ZA: SouthAfrica, JP: Japan, NZ: NewZealand, PL: Poland, MY: Malaysia, SA: SaudiArabia,
-  BE: Belgium, AE: UnitedArabEmirates, ES: Spain,
+const SIZES = {
+  xs: "h-3 w-4",
+  sm: "h-[15px] w-5",
+  md: "h-[18px] w-6",
+  lg: "h-6 w-8",
+  xl: "h-[30px] w-10",
 };
 
-export default function CountryFlag({ code, className = "", fallback = null }) {
-  const Flag = FLAGS[code];
-  if (!Flag) return fallback;
+const TEXT_SIZES = { xs: "text-[7px]", sm: "text-[8px]", md: "text-[9px]", lg: "text-[11px]", xl: "text-[13px]" };
+
+export default function CountryFlag({
+  code,
+  name,
+  size,
+  className = "",
+  fallback,
+  decorative = false,
+  title,
+}) {
+  const url = getFlagUrl(code);
+  const sizeClass = size ? SIZES[size] || SIZES.md : "";
+  const label = name || String(code || "").toUpperCase();
+  const tooltip = title === undefined ? name || undefined : title || undefined;
+
+  if (!url) {
+    if (fallback !== undefined) return fallback;
+    if (!code) return null;
+    return (
+      <span
+        role={decorative ? undefined : "img"}
+        aria-label={decorative ? undefined : label}
+        aria-hidden={decorative ? "true" : undefined}
+        title={tooltip}
+        className={`inline-flex shrink-0 items-center justify-center rounded-[3px] bg-slate-200 font-bold uppercase leading-none text-slate-600 dark:bg-slate-700 dark:text-slate-200 ${
+          sizeClass} ${size ? TEXT_SIZES[size] || TEXT_SIZES.md : "text-[10px]"} ${className}`}
+      >
+        {String(code).toUpperCase().slice(0, 3)}
+      </span>
+    );
+  }
+
   return (
-    <span className={`inline-flex overflow-hidden rounded ${className}`}>
-      <Flag />
+    <span
+      title={tooltip}
+      className={`relative inline-flex shrink-0 overflow-hidden rounded-[3px] bg-slate-100 align-middle dark:bg-slate-800 ${sizeClass} ${className}`}
+    >
+      <img
+        src={url}
+        alt={decorative ? "" : `${label} flag`}
+        width={32}
+        height={24}
+        loading="lazy"
+        decoding="async"
+        draggable="false"
+        className="h-full w-full object-cover"
+      />
+      <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] ring-1 ring-inset ring-black/10 dark:ring-white/20" />
     </span>
   );
 }

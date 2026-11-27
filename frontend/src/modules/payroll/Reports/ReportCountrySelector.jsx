@@ -1,4 +1,5 @@
 import { Banknote, BarChart3, Check, FileText, Globe2 } from "lucide-react";
+import CountryFlag from "../../../components/jurisdiction/CountryFlag";
 
 // Interactive country cards for /payroll/reports. Click selects a country
 // (aria-pressed, highlighted card); hover or keyboard focus shows a preview of
@@ -34,8 +35,9 @@ export default function ReportCountrySelector({
                     : "border-border bg-background hover:border-primary/50 hover:bg-surface-muted"
                 }`}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="truncate text-[15px] font-bold text-foreground">{c.name}</p>
+                <div className="flex items-center gap-2">
+                  <CountryFlag code={c.code} name={c.name} size="md" decorative />
+                  <p className="min-w-0 flex-1 truncate text-[15px] font-bold text-foreground" title={c.name}>{c.name}</p>
                   <div className="flex shrink-0 items-center gap-1">
                     {c.isPrimary && (
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">Primary</span>

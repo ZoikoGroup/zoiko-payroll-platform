@@ -17,6 +17,10 @@ import { ROLE_DEFAULT_REDIRECT } from "../config/roles";
  *  2. From the API with #access_token=&refresh_token= (URL fragment: never
  *     sent to a server). Stores the session, loads the profile, opens the
  *     role's dashboard and clears the tokens from the address bar.
+ *
+ * Microsoft and Apple sign-in reuse step 2 only, at /auth/social/callback:
+ * their provider redirects go straight to the API, which then sends the
+ * session here in the fragment.
  */
 export default function GoogleCallbackPage() {
   const [searchParams] = useSearchParams();
@@ -57,7 +61,8 @@ export default function GoogleCallbackPage() {
       const { accessToken, refreshToken } = tokensRef.current;
 
       if (!accessToken) {
-        navigate("/login?error=google_sign_in_failed", { replace: true });
+        const isGoogle = window.location.pathname.startsWith("/auth/google/");
+        navigate(isGoogle ? "/login?error=google_sign_in_failed" : "/login", { replace: true });
         return;
       }
 
@@ -86,7 +91,7 @@ export default function GoogleCallbackPage() {
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <p style={{ color: "#64748B", fontSize: 15 }}>Signing you in with Google…</p>
+      <p role="status" style={{ color: "#64748B", fontSize: 15 }}>Signing you in…</p>
     </div>
   );
 }

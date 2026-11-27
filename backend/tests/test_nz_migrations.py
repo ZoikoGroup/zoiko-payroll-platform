@@ -200,7 +200,8 @@ def test_deploy_drift_filter_explains_every_nz_object():
     finally:
         os.chdir(here)
     # P5 (ac08988ecd3a) and P6 (c6ea8c6c35ce) are pending on the same chain.
-    assert tables - set(NEW_TABLES) - MX_LIFECYCLE_TABLES == {"payroll_nz_employments", "payroll_nz_public_holiday_decisions",
+    # Microsoft / Apple sign-in and Company SSO domains (d3f5a7c9e2b1) are pending from here too.
+    assert tables - set(NEW_TABLES) - MX_LIFECYCLE_TABLES - {"user_oauth_identities", "oauth_pending", "organization_sso_domains"} == {"payroll_nz_employments", "payroll_nz_public_holiday_decisions",
                                         "payroll_nz_leave_entitlements", "payroll_nz_gross_earnings_ledger",
                                         "payroll_nz_leave_events", "payroll_nz_final_pay_cases",
                                         "payroll_nz_leave_pay_calculations", "payroll_nz_cash_up_requests",

@@ -159,13 +159,20 @@ def test_only_the_guarded_chokepoint_opens_an_smtp_connection_and_no_sms_or_webh
                     clients.append(f"{rel}: {n}")
     assert smtp_openers == ["services/email_service.py"]
     # A new SMS / webhook / HTTP sender must route through app/core/outbound.py first; update this test with it.
-    assert clients == ["core/google_oauth.py: httpx"]
+    assert sorted(clients) == ["core/google_oauth.py: httpx", "core/social_oauth.py: httpx"]
     oauth_boundary = (APP / "core" / "google_oauth.py").read_text(encoding="utf-8")
     assert "https://oauth2.googleapis.com/token" in oauth_boundary
     assert "https://www.googleapis.com/oauth2/v2/userinfo" in oauth_boundary
     assert "follow_redirects=False" in oauth_boundary
     assert "trust_env=False" in oauth_boundary
     assert "httpx.Timeout(20.0)" in oauth_boundary
+    # Microsoft / Apple sign-in: the same boundary rules, fixed provider hosts.
+    social_boundary = (APP / "core" / "social_oauth.py").read_text(encoding="utf-8")
+    assert 'MICROSOFT_LOGIN_HOST = "https://login.microsoftonline.com"' in social_boundary
+    assert 'APPLE_TOKEN_ENDPOINT = "https://appleid.apple.com/auth/token"' in social_boundary
+    assert "follow_redirects=False" in social_boundary
+    assert "trust_env=False" in social_boundary
+    assert "httpx.Timeout(20.0)" in social_boundary
 
 
 def test_google_oauth_outbound_boundary_rejects_non_google_endpoints(monkeypatch):

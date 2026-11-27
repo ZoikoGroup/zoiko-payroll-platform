@@ -21,6 +21,7 @@ import { COUNTRIES, COUNTRY_FIELD_SPECS, DUPLICATE_ID_FIELDS, myNricIsValid }
   from "../src/modules/payroll/Payroll_Employees/countryFieldSpecs.js";
 import { getCountryNameFromJurisdictionCode, getJurisdictionCode, getJurisdictionTaxFields }
   from "../src/utils/jurisdictionTax.js";
+import { hasBundledFlag } from "./country-flag-check.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, "..", "src");
@@ -110,7 +111,7 @@ check("the Malaysia page hides the generic editors and is routed", () => {
   const app = read("App.jsx");
   assert(app.includes('path="/super-admin/compliance/malaysia"') && app.includes("<MYCompliancePage />"), "route");
   assert(/MY: "malaysia"/.test(read("pages/JurisdictionCompliance/index.js")), "slug");
-  assert(/MY: Malaysia/.test(read("components/jurisdiction/CountryFlag.jsx")), "flag");
+  assert(hasBundledFlag("MY"), "flag");
   assert(/jurisdiction_country == "MY"/.test(readFileSync(resolve(BACKEND_ROOT, "payroll", "service.py"), "utf-8")),
     "backend refuses the generic editor for MY");
 });

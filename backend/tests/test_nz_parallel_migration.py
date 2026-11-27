@@ -145,7 +145,8 @@ def test_drift_filter_explains():
     finally:
         os.chdir(here)
     # Poland P2 (1ee3bbde33bb) is pending on the same chain.
-    assert tables - MX_LIFECYCLE_TABLES == set(NEW_TABLES) | {"payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
+    # Microsoft / Apple sign-in and Company SSO domains (d3f5a7c9e2b1) are pending from here too.
+    assert tables - MX_LIFECYCLE_TABLES - {"user_oauth_identities", "oauth_pending", "organization_sso_domains"} == set(NEW_TABLES) | {"payroll_pl_identifier_vault", "payroll_pl_identifier_access_events",
                                         "payroll_pl_employer_registrations", "payroll_pl_worker_profiles",
                                         "payroll_pl_declarations", "payroll_pl_ppk_participations",
                                         "payroll_pl_accumulator_entries",

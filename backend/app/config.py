@@ -198,6 +198,40 @@ class Settings(BaseSettings):
     GOOGLE_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
     GOOGLE_USERINFO_URL: str = "https://www.googleapis.com/oauth2/v2/userinfo"
 
+    # ── Microsoft sign-in (Microsoft identity platform, OIDC code flow) ─
+    # App registration in Microsoft Entra ID → "Accounts in any organizational
+    # directory and personal Microsoft accounts" for MICROSOFT_TENANT=common
+    # (or a tenant id / "organizations" / "consumers" to narrow it). Web
+    # redirect URI: the API's /api/auth/microsoft/callback. Sign-in stays off
+    # (button shown as unavailable) until both the id and secret are set.
+    MICROSOFT_CLIENT_ID: str = ""
+    MICROSOFT_CLIENT_SECRET: str = ""
+    MICROSOFT_TENANT: str = "common"
+    MICROSOFT_REDIRECT_URI: str = "http://localhost:8000/api/auth/microsoft/callback"
+
+    # ── Sign in with Apple ─────────────────────────────────────────────
+    # APPLE_CLIENT_ID is the Services ID (not the App ID). The client secret is
+    # a short-lived ES256 JWT this server signs with the .p8 key below
+    # (APPLE_PRIVATE_KEY: the PEM text; "\n" escapes are accepted). Return URL:
+    # the API's /api/auth/apple/callback — Apple requires https and a real
+    # domain (no localhost). For the welcome / receipt / invoice emails to
+    # reach "Hide My Email" (privaterelay.appleid.com) addresses, register the
+    # sending domain and From address under Apple's Private Email Relay
+    # Service; the registration page also asks those users for a work email.
+    APPLE_CLIENT_ID: str = ""
+    APPLE_TEAM_ID: str = ""
+    APPLE_KEY_ID: str = ""
+    APPLE_PRIVATE_KEY: str = ""
+    APPLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/apple/callback"
+
+    # ── Company SSO ────────────────────────────────────────────────────
+    # Off until organization SSO is fully built (an SSO sign-in endpoint that
+    # receives users back from their identity provider, and an admin screen
+    # to configure it). While off, the "Continue with Company SSO" button is
+    # hidden on the sign-in and registration pages and POST /auth/sso/discover
+    # answers 404.
+    COMPANY_SSO_ENABLED: bool = False
+
     # ── Email / SMTP ──────────────────────────────────────────────────
     SMTP_HOST: str = ""
     SMTP_PORT: str = "587"
@@ -364,6 +398,11 @@ class Settings(BaseSettings):
     # data to synthetic values, and sandbox outbound billing email. See
     # the startup guard below and modules/billing/staging.py.
     STAGING_MODE: bool = False
+
+    # Database hosts that are production. A development process (DEBUG=true or
+    # ENVIRONMENT=development) refuses to start against any of them — see the
+    # startup guard below. Comma-separated host names / IPs.
+    PRODUCTION_DATABASE_HOSTS: str = "34.88.166.225"
     STAGING_SANDBOX_EMAIL: str = ""   # every outbound billing email is redirected here in staging
 
 settings = Settings()
@@ -388,6 +427,31 @@ if settings.PAYROLL_SECRET_KEY == "change-me-payroll-platform-secret" and not _i
     raise RuntimeError(
         "PAYROLL_SECRET_KEY is still the placeholder default. Refusing to start outside a "
         "development environment — set a real PAYROLL_SECRET_KEY in your .env file."
+    )
+
+
+def _database_host(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    try:
+        return (urlsplit(url).hostname or "").strip().lower()
+    except ValueError:
+        return ""
+
+
+def _production_database_hosts() -> set:
+    return {h.strip().lower() for h in settings.PRODUCTION_DATABASE_HOSTS.split(",") if h.strip()}
+
+
+if _is_development_environment() and _database_host(settings.PAYROLL_DATABASE_URL) in _production_database_hosts():
+    # A development process (local server, alembic, a script) must never run
+    # against the production database: startup jobs (trial / dunning sweeps,
+    # usage aggregation, token cleanup) and every click would write real rows.
+    # Point PAYROLL_DATABASE_URL at a local or staging database instead.
+    raise RuntimeError(
+        "Refusing to start: this is a development environment (DEBUG=true or "
+        "ENVIRONMENT=development) but PAYROLL_DATABASE_URL points at the PRODUCTION database host "
+        f"({_database_host(settings.PAYROLL_DATABASE_URL)}). Use a local or staging database."
     )
 
 

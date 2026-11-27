@@ -16,6 +16,7 @@ import { COUNTRIES, COUNTRY_FIELD_SPECS, DUPLICATE_ID_FIELDS, plNipIsValid, plPe
   from "../src/modules/payroll/Payroll_Employees/countryFieldSpecs.js";
 import { getCountryNameFromJurisdictionCode, getJurisdictionCode, getJurisdictionTaxFields }
   from "../src/utils/jurisdictionTax.js";
+import { hasBundledFlag } from "./country-flag-check.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, "..", "src");
@@ -133,7 +134,7 @@ check("the page hides the generic editors and is routed", () => {
   const app = read("App.jsx");
   assert(app.includes('path="/super-admin/compliance/poland"') && app.includes("<PLCompliancePage />"), "route");
   assert(/PL: "poland"/.test(read("pages/JurisdictionCompliance/index.js")), "slug");
-  assert(/PL: Poland/.test(read("components/jurisdiction/CountryFlag.jsx")), "flag");
+  assert(hasBundledFlag("PL"), "flag");
   const service = read("service/superAdminService.js");
   assert(service.includes('"/api/super-admin/compliance/poland"') && /export const updatePlRow/.test(service), "service");
   assert(read("components/jurisdiction/poland/PLRowEditor.jsx").includes("updatePlRow("), "editor uses the governed API");

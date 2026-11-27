@@ -209,7 +209,8 @@ def test_deploy_drift_filter_explains_every_pl_object():
     finally:
         os.chdir(here)
     # Poland P6 (e11c2c36df17) is pending on the same chain.
-    assert tables - MX_LIFECYCLE_TABLES == set(NEW_TABLES) | {"payroll_pl_incapacity_episodes", "payroll_pl_filings",  # P6, P8
+    # Microsoft / Apple sign-in and Company SSO domains (d3f5a7c9e2b1) are pending from here too.
+    assert tables - MX_LIFECYCLE_TABLES - {"user_oauth_identities", "oauth_pending", "organization_sso_domains"} == set(NEW_TABLES) | {"payroll_pl_incapacity_episodes", "payroll_pl_filings",  # P6, P8
                                         "payroll_pl_settlements", "payroll_pl_reconciliation_variances",
                                         "payroll_pl_parallel_imports", "payroll_pl_parallel_differences",  # P9
                                         "payroll_my_identifier_vault", "payroll_my_identifier_access_events",

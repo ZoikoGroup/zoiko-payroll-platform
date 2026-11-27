@@ -968,6 +968,48 @@ def _profile_display(profile: dict) -> tuple[str, str]:
     return first_name, last_name
 
 
+def refuse_inactive_federated_user(db: Session, user, request=None) -> None:
+    """The account checks every provider sign-in (Google, Microsoft, Apple)
+    makes before a session or second factor: deactivated user, ended
+    temporary access, suspended organization. Raises UnauthorizedException."""
+    from app.modules.auth import audit as auth_audit
+
+    if not user.is_active:
+        auth_audit.record(db, auth_audit.ACCOUNT_INACTIVE, user=user, request=request, reason="ACCOUNT_DEACTIVATED")
+        raise UnauthorizedException("Your account has been deactivated.")
+    if temporary_access_ended(user):
+        auth_audit.record(db, auth_audit.TEMPORARY_ACCESS_ENDED, user=user, request=request, reason="LOGIN")
+        raise UnauthorizedException(TEMPORARY_ACCESS_ENDED_MESSAGE)
+    if user.organization_id:
+        org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+        if org is not None and not org.is_active:
+            auth_audit.record(db, auth_audit.LOGIN_FAILED, user=user, request=request,
+                              reason="ORGANIZATION_SUSPENDED")
+            raise UnauthorizedException("Your organization has been suspended. Please contact support.")
+
+
+def federated_session_or_mfa(db: Session, user, request=None, via: str = "Google") -> dict:
+    """A provider is the first factor only (ZP-PRIV B08): the same second
+    factor rule as password sign-in (login_user) applies. Returns the
+    {"action": "mfa", ...} or {"action": "session", ...} result."""
+    from app.core.security import MFA_CHALLENGE_TOKEN_TYPE, MFA_ENROLL_TOKEN_TYPE, create_mfa_token
+    from app.modules.auth import audit as auth_audit
+    from app.modules.auth import mfa
+
+    if mfa.enforcement_on() and mfa.is_enrolled(db, user):
+        auth_audit.record(db, auth_audit.MFA_CHALLENGE_ISSUED, user=user, request=request)
+        return {"action": "mfa", "mfa_mode": "challenge",
+                "mfa_token": create_mfa_token(user.id, MFA_CHALLENGE_TOKEN_TYPE)}
+    if mfa.mfa_required_for(user):
+        auth_audit.record(db, auth_audit.MFA_CHALLENGE_ISSUED, user=user, request=request, reason="ENROLL")
+        return {"action": "mfa", "mfa_mode": "enroll",
+                "mfa_token": create_mfa_token(user.id, MFA_ENROLL_TOKEN_TYPE)}
+
+    auth_audit.record(db, auth_audit.LOGIN_SUCCESS, user=user, request=request, required=True)
+    logger.info("User %s (%s) signed in via %s", user.email, user.role.value, via)
+    return {"action": "session", "session": issue_session(db, user, request)}
+
+
 def google_sign_in(db: Session, code: str, request=None, mode: str = "login") -> dict:
     """Full Google OAuth sign-in.
 
@@ -981,10 +1023,6 @@ def google_sign_in(db: Session, code: str, request=None, mode: str = "login") ->
                                                   due (same policy as password)
       {"action": "pending", "token": str, ...}  — no account, needs signup
     """
-    from app.core.security import MFA_CHALLENGE_TOKEN_TYPE, MFA_ENROLL_TOKEN_TYPE, create_mfa_token
-    from app.modules.auth import audit as auth_audit
-    from app.modules.auth import mfa
-
     tokens = _google_tokens(code)
     profile = _google_userinfo(tokens["access_token"])
     email = profile.get("email")
@@ -993,18 +1031,7 @@ def google_sign_in(db: Session, code: str, request=None, mode: str = "login") ->
 
     user = _find_google_user(db, profile)
     if user is not None:
-        if not user.is_active:
-            auth_audit.record(db, auth_audit.ACCOUNT_INACTIVE, user=user, request=request, reason="ACCOUNT_DEACTIVATED")
-            raise UnauthorizedException("Your account has been deactivated.")
-        if temporary_access_ended(user):
-            auth_audit.record(db, auth_audit.TEMPORARY_ACCESS_ENDED, user=user, request=request, reason="LOGIN")
-            raise UnauthorizedException(TEMPORARY_ACCESS_ENDED_MESSAGE)
-        if user.organization_id:
-            org = db.query(Organization).filter(Organization.id == user.organization_id).first()
-            if org is not None and not org.is_active:
-                auth_audit.record(db, auth_audit.LOGIN_FAILED, user=user, request=request,
-                                  reason="ORGANIZATION_SUSPENDED")
-                raise UnauthorizedException("Your organization has been suspended. Please contact support.")
+        refuse_inactive_federated_user(db, user, request)
 
         # Refresh Google-sourced names/avatar in case they changed.
         first_name, last_name = _profile_display(profile)
@@ -1015,20 +1042,7 @@ def google_sign_in(db: Session, code: str, request=None, mode: str = "login") ->
         user.avatar_url = profile.get("picture")
         db.commit()
 
-        # ZP-PRIV B08: Google is the first factor only — the same second
-        # factor rule as password sign-in applies (login_user).
-        if mfa.enforcement_on() and mfa.is_enrolled(db, user):
-            auth_audit.record(db, auth_audit.MFA_CHALLENGE_ISSUED, user=user, request=request)
-            return {"action": "mfa", "mfa_mode": "challenge",
-                    "mfa_token": create_mfa_token(user.id, MFA_CHALLENGE_TOKEN_TYPE)}
-        if mfa.mfa_required_for(user):
-            auth_audit.record(db, auth_audit.MFA_CHALLENGE_ISSUED, user=user, request=request, reason="ENROLL")
-            return {"action": "mfa", "mfa_mode": "enroll",
-                    "mfa_token": create_mfa_token(user.id, MFA_ENROLL_TOKEN_TYPE)}
-
-        auth_audit.record(db, auth_audit.LOGIN_SUCCESS, user=user, request=request, required=True)
-        logger.info("User %s (%s) signed in via Google", user.email, user.role.value)
-        return {"action": "session", "session": issue_session(db, user, request)}
+        return federated_session_or_mfa(db, user, request, via="Google")
 
     # No Zoiko account for this Google identity → hold the profile and send
     # the user to the registration page to finish org signup.
@@ -1220,8 +1234,30 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
     # never from the request body. Without this, anyone could create a
     # "verified", passwordless account for any email address and attach
     # their own Google identity to it.
-    is_google = (data.auth_provider or "email") == "google"
+    provider = data.auth_provider or "email"
+    is_google = provider == "google"
     google_profile = None
+    # Microsoft / Apple: same rule as Google — the identity comes from the
+    # pending row their callback created, never from this request.
+    social_profile = None
+    if provider in ("microsoft", "apple"):
+        from app.modules.auth import social
+
+        label = social.PROVIDER_LABELS[provider]
+        social_profile = social.get_pending(db, data.oauth_pending_token or "", provider)
+        if social_profile is None:
+            raise BadRequestException(
+                f"Your {label} sign-up has expired. Please choose \"Continue with {label}\" again.")
+        # An Apple "Hide My Email" user may register with a work email
+        # instead (welcome, receipt and invoice emails then go there); the
+        # relay address stays on the linked identity. Anyone else must use
+        # the provider's own address.
+        if not social_profile["is_private_relay"] and \
+                social_profile["email"].strip().lower() != str(data.email).strip().lower():
+            raise BadRequestException(
+                f"The admin email must be the {label} account's email address ({social_profile['email']}).")
+        if social.find_identity_user(db, provider, social_profile["subject"]) is not None:
+            raise AlreadyExistsException("User", f"{label} account")
     if is_google:
         google_profile = get_google_pending(db, data.google_pending_token or "")
         if google_profile is None:
@@ -1233,7 +1269,7 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
                 f"{google_profile.get('email')}).")
         if db.query(User.id).filter(User.google_id == google_profile["google_id"]).first():
             raise AlreadyExistsException("User", "Google account")
-    elif not data.password:
+    elif social_profile is None and not data.password:
         raise BadRequestException("A password is required.")
 
     # Reject registration outright for a jurisdiction with no valid Active
@@ -1292,10 +1328,12 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
     first_name = name_parts[0]
     last_name = name_parts[1] if len(name_parts) > 1 else "Admin"
 
+    passwordless = is_google or social_profile is not None
     admin = User(
         email=data.email,
-        # Google-signed-up accounts have no usable password — Google is the IdP.
-        hashed_password="" if is_google else hash_password(data.password),
+        # Provider-signed-up accounts have no usable password — the provider
+        # (Google / Microsoft / Apple) is the IdP.
+        hashed_password="" if passwordless else hash_password(data.password),
         role=UserRole.ORG_ADMIN,
         organization_id=org.id,
         first_name=first_name,
@@ -1303,19 +1341,34 @@ def register_enterprise(db: Session, data: RegisterRequest, background_tasks: Op
         phone=data.phone or "",
         is_active=True,
         is_verified=True,
-        auth_provider="google" if is_google else "email",
+        auth_provider=provider if passwordless else "email",
         google_id=google_profile["google_id"] if is_google else None,
         avatar_url=google_profile.get("picture") if is_google else None,
     )
     db.add(admin)
+    if social_profile is not None:
+        # Same transaction as the user: an account never exists without the
+        # identity it was created to sign in with.
+        db.flush()
+        from app.modules.auth.models import OAuthIdentity
+
+        db.add(OAuthIdentity(
+            user_id=admin.id,
+            provider=provider,
+            subject=social_profile["subject"],
+            provider_email=social_profile["email"],
+            is_private_relay=social_profile["is_private_relay"],
+        ))
     db.commit()
     db.refresh(admin)
     db.refresh(org)
 
-    # Consume the Google pending token now that the account exists, so the
+    # Consume the pending token now that the account exists, so the
     # one-time registration hold can't be reused.
     if is_google:
         _consume_google_pending(db, data.google_pending_token)
+    elif social_profile is not None:
+        social.consume_pending(db, data.oauth_pending_token)
 
     logger.info("New organization %s registered by %s (auth_provider=%s)",
                 org.organization_code, data.email, admin.auth_provider)

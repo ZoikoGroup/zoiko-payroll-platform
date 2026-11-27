@@ -32,7 +32,7 @@ import AssistLauncher from "../modules/assist/AssistLauncher";
 import TrialBanner from "./TrialBanner";
 import DunningBanner from "./DunningBanner";
 import CountryFlag from "./jurisdiction/CountryFlag";
-import { normalizeCountryCode } from "../utils/currency";
+import { getCountryNameFromCode, normalizeCountryCode } from "../utils/currency";
 
 // Tenant payroll operators only (ZP-PRIV A05: no platform role here).
 const OPERATOR_ROLES = new Set([ROLES.ORG_ADMIN, ROLES.PAYROLL_ADMIN]);
@@ -355,7 +355,8 @@ function Header({ onOpenMobileSidebar, onToggleCollapse, collapsed, menuButtonRe
           <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-muted text-foreground-muted">
             <CountryFlag
               code={countryCode}
-              className="h-full w-full"
+              name={getCountryNameFromCode(countryCode) || organization?.country || undefined}
+              size="md"
               fallback={<Building2 size={16} />}
             />
           </span>
