@@ -9,8 +9,10 @@ import { API_BASE } from "../../api/client";
 // new identity to /register to finish org signup instead of signing in.
 // Microsoft and Apple run only once the server has their credentials (GET
 // /api/auth/providers); until then the button explains it isn't available.
-// Company SSO asks for the work email and looks up its domain: a domain whose
-// organization has SSO set up goes straight to that organization's sign-in.
+// Company SSO is shown only when the server enables it (COMPANY_SSO_ENABLED,
+// off by default until organization SSO is fully built). It asks for the work
+// email and looks up its domain: a domain whose organization has SSO set up
+// goes straight to that organization's sign-in.
 // `compact` lays the buttons out two per row (create-account wizard).
 
 const MicrosoftIcon = () => (
@@ -48,7 +50,7 @@ export const SOCIAL_PROVIDERS = [
 
 // Before the server answers, Google keeps its long-standing behaviour
 // (always offered); Microsoft / Apple wait for confirmation.
-const DEFAULT_STATUS = { google: true, microsoft: false, apple: false, sso: true };
+const DEFAULT_STATUS = { google: true, microsoft: false, apple: false, sso: false };
 let statusPromise = null;
 
 function loadProviderStatus() {
@@ -168,12 +170,14 @@ export default function SocialSignInButtons({ mode = "login", compact = false })
     window.location.assign(`${API_BASE}/api/auth/${provider.key}/${mode === "register" ? "register" : "login"}`);
   }
 
+  const shown = SOCIAL_PROVIDERS.filter((provider) => provider.key !== "sso" || status.sso);
+
   return (
     <div>
-      <div className={compact ? "grid gap-2 sm:grid-cols-2" : "grid gap-2"}>
-        {SOCIAL_PROVIDERS.map((provider) => {
+      <div className={compact ? `grid gap-2 sm:grid-cols-2 ${shown.length === 3 ? "xl:grid-cols-3" : ""}` : "grid gap-2"}>
+        {shown.map((provider) => {
           const Icon = provider.icon;
-          const available = provider.key === "sso" || status[provider.key];
+          const available = Boolean(status[provider.key]);
           return (
             <button
               key={provider.key}
@@ -192,7 +196,7 @@ export default function SocialSignInButtons({ mode = "login", compact = false })
           );
         })}
       </div>
-      {ssoOpen && <CompanySsoPanel mode={mode} onClose={() => setSsoOpen(false)} />}
+      {ssoOpen && status.sso && <CompanySsoPanel mode={mode} onClose={() => setSsoOpen(false)} />}
       {notice && (
         <p role="status" className="mt-2 rounded-lg bg-blue-50 px-3 py-2 text-[13px] text-blue-800">{notice}</p>
       )}

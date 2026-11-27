@@ -224,6 +224,14 @@ class Settings(BaseSettings):
     APPLE_PRIVATE_KEY: str = ""
     APPLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/apple/callback"
 
+    # ── Company SSO ────────────────────────────────────────────────────
+    # Off until organization SSO is fully built (an SSO sign-in endpoint that
+    # receives users back from their identity provider, and an admin screen
+    # to configure it). While off, the "Continue with Company SSO" button is
+    # hidden on the sign-in and registration pages and POST /auth/sso/discover
+    # answers 404.
+    COMPANY_SSO_ENABLED: bool = False
+
     # ── Email / SMTP ──────────────────────────────────────────────────
     SMTP_HOST: str = ""
     SMTP_PORT: str = "587"

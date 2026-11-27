@@ -63,13 +63,13 @@ def provider_configured(provider: str) -> bool:
 
 
 def provider_status() -> dict:
-    """Which sign-in buttons work on this server. Company SSO discovery is
-    always available (it only looks up configured domains)."""
+    """Which sign-in buttons work on this server. Company SSO is behind the
+    COMPANY_SSO_ENABLED flag (off by default) until organization SSO is built."""
     return {
         "google": provider_configured("google"),
         "microsoft": provider_configured("microsoft"),
         "apple": provider_configured("apple"),
-        "sso": True,
+        "sso": bool(settings.COMPANY_SSO_ENABLED),
     }
 
 
@@ -296,7 +296,11 @@ def discover_sso(db: Session, email: str) -> dict:
 
     {"sso": True, "login_url": ...} when the address's domain belongs to an
     organization with SSO set up; otherwise {"sso": False}. Nothing about
-    the organization itself is returned."""
+    the organization itself is returned. 404 while COMPANY_SSO_ENABLED is off."""
+    if not settings.COMPANY_SSO_ENABLED:
+        from app.core.exceptions import NotFoundException
+
+        raise NotFoundException("Company SSO")
     domain = email_domain(email)
     if not domain:
         raise BadRequestException("Enter a valid work email address.")

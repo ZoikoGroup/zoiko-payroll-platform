@@ -381,9 +381,21 @@ def test_password_is_still_required_for_email_sign_up_and_unknown_providers_are_
 
 # ── Company SSO discovery ─────────────────────────────────────────────────
 
-def test_sso_discovery_finds_only_configured_https_domains(db):
+def test_company_sso_is_off_by_default(db, monkeypatch):
+    from app.core.exceptions import NotFoundException
+
+    monkeypatch.setattr(social.settings, "COMPANY_SSO_ENABLED", False)
+    assert social.provider_status()["sso"] is False
+    with pytest.raises(NotFoundException):
+        social.discover_sso(db, "it@acme.example")
+
+
+def test_sso_discovery_finds_only_configured_https_domains(db, monkeypatch):
     from app.core.exceptions import BadRequestException
     from app.modules.auth.models import OrganizationSsoDomain
+
+    monkeypatch.setattr(social.settings, "COMPANY_SSO_ENABLED", True)
+    assert social.provider_status()["sso"] is True
 
     org_user = _user(db, "it@acme.example")
     db.add(OrganizationSsoDomain(organization_id=org_user.organization_id, domain="acme.example",
