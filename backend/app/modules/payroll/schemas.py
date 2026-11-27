@@ -1323,6 +1323,10 @@ class PayrollRunResponse(BaseModel):
     id:                    int
     runCode:               Optional[str] = Field(None, validation_alias="run_code", serialization_alias="runCode")
     period:                str     = Field(validation_alias="period_label", serialization_alias="period")
+    # The pay period itself (read-only, display): lets the Payroll Runs page
+    # find "this month's run" without parsing the human-readable label.
+    periodStart:           Optional[date] = Field(None, validation_alias="period_start", serialization_alias="periodStart")
+    periodEnd:             Optional[date] = Field(None, validation_alias="period_end", serialization_alias="periodEnd")
     payDate:               date    = Field(validation_alias="pay_date", serialization_alias="payDate")
     status:                PayrollStatus
     employees:             int     = Field(validation_alias="employee_count", serialization_alias="employees")
