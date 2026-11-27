@@ -89,6 +89,8 @@ def load_rows(path=DEFAULT_CSV) -> list[dict]:
         if field in DATE_FIELDS:
             try:
                 row["value"] = dt.date.fromisoformat(value)
+                if row.get("expected_old"):              # a date correction compares dates, not text
+                    row["expected_old"] = dt.date.fromisoformat(row["expected_old"])
             except ValueError:
                 problems.append(f"{where}: not an ISO date")
         else:

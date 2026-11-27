@@ -10,11 +10,12 @@ The service (belgium_onss_rates.be_onss_rate_table_input) hands the engine ONE q
                        "outcome", "effectiveFrom", "effectiveTo", "status"}]}
 
 Rules (fail closed, nothing defaulted):
-  * a row is used only when the file is ATTESTED authentic AND the row itself is SIGNED (four-eyes each);
-  * the ContributionType of every code (DmfA zone 00083) comes from a SIGNED type rule matching the facts: the
-    worker's ONSS pay basis (PAY_100 / PAY_108) and the employer's closure-fund sector, workforce class and
-    wage-moderation status, each recorded with its evidence; no match, an ambiguous match or a pending rule blocks;
-  * the base row is (employer category, worker code, type); every combined contribution code in use (a signed
+  * a row is used only when the file is ATTESTED authentic; a live row (PENDING or SIGNED) is used as it stands -
+    row signing is optional since the gate removal (owner decision 2026-11-26, C2): only a missing row blocks;
+  * the ContributionType of every code (DmfA zone 00083) comes from a live type rule (PENDING or SIGNED) matching
+    the facts: the worker's ONSS pay basis (PAY_100 / PAY_108) and the employer's closure-fund sector, workforce
+    class and wage-moderation status, each recorded with its evidence; no match or an ambiguous match blocks;
+  * the base row is (employer category, worker code, type); every combined contribution code in use (a live
     combination) adds its employer share and its wage moderation; a rule outcome NOT_DUE skips the code;
   * flat amounts, quarterly minimums and a personal share on a combined code are not calculated yet: they block.
 """
@@ -28,7 +29,6 @@ from app.modules.payroll.engine.jurisdictions.belgium import errors as E
 from app.modules.payroll.engine.jurisdictions.belgium.pack import ZERO, BePack, as_date, dec, field, in_window, upper
 
 _PERCENT = Decimal("100")                    # a rate is a percentage (structural unit)
-SIGNED = "SIGNED"
 _BASE_KIND = "CONTRIBUTION"                  # the rate file lists ordinary worker codes as ContributionWorkerCode
 _FACTS = (("closureFundSector", "closureFundSectorEvidence", "closure-fund sector"),
           ("workforceClass", "workforceClassEvidence", "workforce class"),
@@ -70,7 +70,7 @@ def _allows(condition, value: str) -> bool:
 
 
 def be_onss_resolve_type(pack: BePack, table: dict, code: str, facts: dict) -> Optional[str]:
-    """The ContributionType of `code` for these facts, or None when the signed rule says NOT_DUE."""
+    """The ContributionType of `code` for these facts, or None when the matching rule says NOT_DUE."""
     matching = [r for r in table.get("typeRules") or ()
                 if str(r.get("code")) == code
                 and in_window(as_date(r.get("effectiveFrom")), as_date(r.get("effectiveTo")), pack.as_of)
@@ -78,16 +78,13 @@ def be_onss_resolve_type(pack: BePack, table: dict, code: str, facts: dict) -> O
                 and _allows(r.get("closureFundSector"), facts["closureFundSector"])
                 and _allows(r.get("workforceClass"), facts["workforceClass"])
                 and _allows(r.get("wageModeration"), facts["wageModerationStatus"])]
-    if any(upper(r.get("status")) != SIGNED for r in matching):
-        pack.block(E.ONSS_RATE_UNSIGNED, f"type_rule:{code}", "a type rule matching these facts is not signed "
-                                                              "(four-eyes)")
     outcomes = {upper(r.get("outcome")) for r in matching}
     if not outcomes:
-        pack.block(E.ONSS_TYPE_UNRESOLVED, code, "no signed type rule matches the worker's pay basis and the "
+        pack.block(E.ONSS_TYPE_UNRESOLVED, code, "no type rule matches the worker's pay basis and the "
                                                  "employer's facts — no ContributionType is ever assumed")
     outcome = outcomes.pop()
     if outcomes:                                                 # another distinct outcome remains
-        pack.block(E.ONSS_TYPE_AMBIGUOUS, code, f"signed type rules disagree: {sorted(outcomes | {outcome})}")
+        pack.block(E.ONSS_TYPE_AMBIGUOUS, code, f"type rules disagree: {sorted(outcomes | {outcome})}")
     if outcome == content.TYPE_RULE_NOT_DUE:
         return None
     if not content.CONTRIBUTION_TYPE_PATTERN.fullmatch(outcome):
@@ -96,7 +93,7 @@ def be_onss_resolve_type(pack: BePack, table: dict, code: str, facts: dict) -> O
 
 
 def be_onss_rate_row(pack: BePack, table: dict, employer_class: str, code: str, contribution_type: str) -> dict:
-    """The live rate row (category, code, type): its file attested AND the row signed, or a block."""
+    """The live rate row (category, code, type) of an attested file, or a block. The row need not be signed."""
     ident = f"{employer_class}:{code}:{contribution_type}"
     if table.get("fileAttested") is not True:
         pack.block(E.ONSS_RATE_FILE_UNATTESTED, ident, f"rate file {table.get('quarter')} is not attested as the "
@@ -108,9 +105,6 @@ def be_onss_rate_row(pack: BePack, table: dict, employer_class: str, code: str, 
         pack.block(E.ONSS_RATE_ROW_MISSING, ident, "no live rate row for this employer category, code and "
                                                    "ContributionType in the quarter's file")
     row = next(iter(rows))                       # (file, category, kind, code, type) is unique in the database
-    if upper(row.get("status")) != SIGNED:
-        pack.block(E.ONSS_RATE_UNSIGNED, ident, "the rate row is not signed (four-eyes) — a signed file does "
-                                                "not sign its rows")
     if row.get("isFlat") is True or row.get("minimumFlat") not in (None, ""):
         pack.block(E.ONSS_RATE_FLAT_UNSUPPORTED, ident, "flat amounts and quarterly minimums are not calculated yet")
     return row
@@ -146,9 +140,6 @@ def be_onss_table_compute(pack: BePack, table: Optional[dict], decision: dict, e
         if str(combo.get("employerClass")) != employer_class or str(combo.get("workerCode")) != worker_code:
             continue
         code = str(combo.get("contributionCode"))
-        if upper(combo.get("status")) != SIGNED:
-            pack.block(E.ONSS_RATE_UNSIGNED, f"combination:{employer_class}:{worker_code}:{code}",
-                       "a combination in use is not signed (four-eyes)")
         ctype = be_onss_resolve_type(pack, table, code, facts)
         types[code] = ctype
         if ctype is None:
