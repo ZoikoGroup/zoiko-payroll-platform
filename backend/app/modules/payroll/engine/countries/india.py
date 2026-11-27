@@ -419,11 +419,15 @@ def _calculate_annual_tax_in(
     }
 
 
-def calculate(ctx: PayrollContext) -> dict:
-    """India: PF, ESI, Professional Tax, TDS."""
+def employer_statutory_contributions(ctx) -> dict:
+    """EPF (employee + employer, with the EPS/residual split), EDLI and ESI
+    for one month — the single source of these formulas: calculate() below
+    uses it, and so does the "CTC includes employer contributions" solver
+    (service._india_ctc_monthly_gross), so the gross it solves for is priced
+    with exactly the figures the payslip will show. Reads only ctx.rate_map,
+    the salary components (basic/hra/special_allowance/overtime/
+    additional_compensation/gross) and the org's wage-base rules."""
     rate_map = ctx.rate_map
-    gross = ctx.gross
-    basic = ctx.basic
 
     pf_rate = rate_map.get("pf")
     # ZP-TAX-IN-2026-27-001 §8: the Labour Code's canonical Code-wages
@@ -487,6 +491,40 @@ def calculate(ctx: PayrollContext) -> dict:
             edli_wage_base = min(pf_wage_base, edli_ceiling_row.flat_amount)
         employer_edli = _round2(edli_wage_base * (edli_rate_row.employer_rate_pct / 100))
 
+    esi_rate = rate_map.get("esi")
+    esi_ceiling = resolve_jurisdiction_parameter(rate_map, "esi_wage_ceiling", ESI_MONTHLY_WAGE_CEILING, country="IN")
+    # ESI wage-base classification (gap-closure Phase G) — with no
+    # ctx.esi_base_rules configured (every org today), every component
+    # defaults to included, so this sum always equals ctx.gross exactly
+    # (named_allowances is the residual, by construction) — reproducing
+    # the engine's original gross-based ESI ceiling test/contribution
+    # calculation byte-for-byte.
+    esi_wage_base = _classify_wage_base(ctx, ctx.esi_base_rules, default_included=None)
+    esi_applicable = esi_wage_base <= esi_ceiling
+    employee_esi = _round2(esi_wage_base * (esi_rate.employee_rate_pct / 100)) if esi_rate and esi_rate.employee_rate_pct and esi_applicable else Decimal("0")
+    employer_esi = _round2(esi_wage_base * (esi_rate.employer_rate_pct / 100)) if esi_rate and esi_rate.employer_rate_pct and esi_applicable else Decimal("0")
+    return {
+        "employee_pf": employee_pf, "employer_pf": employer_pf, "employer_eps": employer_eps,
+        "employer_pf_residual": employer_pf_residual, "employer_edli": employer_edli,
+        "employee_esi": employee_esi, "employer_esi": employer_esi,
+    }
+
+
+def calculate(ctx: PayrollContext) -> dict:
+    """India: PF, ESI, Professional Tax, TDS."""
+    rate_map = ctx.rate_map
+    gross = ctx.gross
+    basic = ctx.basic
+
+    contributions = employer_statutory_contributions(ctx)
+    employee_pf = contributions["employee_pf"]
+    employer_pf = contributions["employer_pf"]
+    employer_eps = contributions["employer_eps"]
+    employer_pf_residual = contributions["employer_pf_residual"]
+    employer_edli = contributions["employer_edli"]
+    employee_esi = contributions["employee_esi"]
+    employer_esi = contributions["employer_esi"]
+
     # Employer NPS contribution (§3.2: "Up to statutory percentage under
     # applicable section; 14% path available under new regime for
     # qualifying employer contribution") — a genuinely SEPARATE employer-
@@ -502,19 +540,6 @@ def calculate(ctx: PayrollContext) -> dict:
     employer_nps = Decimal("0")
     if nps_rate_row and nps_rate_row.employer_rate_pct:
         employer_nps = _round2(basic * (nps_rate_row.employer_rate_pct / 100))
-
-    esi_rate = rate_map.get("esi")
-    esi_ceiling = resolve_jurisdiction_parameter(rate_map, "esi_wage_ceiling", ESI_MONTHLY_WAGE_CEILING, country="IN")
-    # ESI wage-base classification (gap-closure Phase G) — with no
-    # ctx.esi_base_rules configured (every org today), every component
-    # defaults to included, so this sum always equals ctx.gross exactly
-    # (named_allowances is the residual, by construction) — reproducing
-    # the engine's original gross-based ESI ceiling test/contribution
-    # calculation byte-for-byte.
-    esi_wage_base = _classify_wage_base(ctx, ctx.esi_base_rules, default_included=None)
-    esi_applicable = esi_wage_base <= esi_ceiling
-    employee_esi = _round2(esi_wage_base * (esi_rate.employee_rate_pct / 100)) if esi_rate and esi_rate.employee_rate_pct and esi_applicable else Decimal("0")
-    employer_esi = _round2(esi_wage_base * (esi_rate.employer_rate_pct / 100)) if esi_rate and esi_rate.employer_rate_pct and esi_applicable else Decimal("0")
 
     # Professional Tax is genuinely state-specific in India, and in several
     # states genuinely bracketed by the employee's own gross salary (not a

@@ -114,6 +114,8 @@ class PayrollPolicyResponse(BaseModel):
     attendance_required: bool = Field(True, alias="attendanceRequired")
     attendance_required_employment_types: Optional[List[str]] = Field(None, alias="attendanceRequiredEmploymentTypes")
     attendance_weekly_off_days: Optional[List[int]] = Field(None, alias="attendanceWeeklyOffDays")
+    # India: does CTC include employer PF + ESI + EDLI? (default false)
+    ctc_includes_employer_contributions: bool = Field(False, alias="ctcIncludesEmployerContributions")
     enterprise_status: str = Field("not_configured", alias="enterpriseStatus")
     enterprise_activated_at: Optional[datetime] = Field(None, alias="enterpriseActivatedAt")
     configured_at: Optional[datetime] = Field(None, alias="configuredAt")
@@ -166,6 +168,9 @@ class PayrollPolicyUpdate(BaseModel):
     attendance_required: Optional[bool] = Field(None, alias="attendanceRequired")
     attendance_required_employment_types: Optional[List[str]] = Field(None, alias="attendanceRequiredEmploymentTypes")
     attendance_weekly_off_days: Optional[List[int]] = Field(None, alias="attendanceWeeklyOffDays")
+    # India CTC convention: true = monthly gross is solved so gross + employer
+    # PF + ESI + EDLI = CTC / 12; false (default) = gross = CTC / 12.
+    ctc_includes_employer_contributions: Optional[bool] = Field(None, alias="ctcIncludesEmployerContributions")
     employee_categories: Optional[List[EmployeeCategoryBase]] = Field(None, alias="employeeCategories")
     overtime_rule: Optional[OvertimeRuleUpdate] = Field(None, alias="overtimeRule")
     allowance_components: Optional[List[AllowanceComponentBase]] = Field(None, alias="allowanceComponents")
@@ -175,6 +180,9 @@ class PayrollPolicyUpdate(BaseModel):
         from app.modules.payroll.models import EmploymentType
         if "attendance_required" in self.model_fields_set and self.attendance_required is None:
             raise ValueError("attendanceRequired must be true or false.")
+        if ("ctc_includes_employer_contributions" in self.model_fields_set
+                and self.ctc_includes_employer_contributions is None):
+            raise ValueError("ctcIncludesEmployerContributions must be true or false.")
         if self.attendance_weekly_off_days is not None:
             days = self.attendance_weekly_off_days
             if any(d < 0 or d > 6 for d in days) or len(set(days)) != len(days):

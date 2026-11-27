@@ -566,6 +566,7 @@ def set_integration_enabled(
 _POLICY_CURATED_FIELDS = (
     "name", "description", "status", "effective_date", "calculation_mode",
     "basic_pct", "hra_pct", "bank_export_format", "attendance_required",
+    "ctc_includes_employer_contributions",
 )
 
 

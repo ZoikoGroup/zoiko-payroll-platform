@@ -472,6 +472,32 @@ export default function PayrollPolicyPage() {
             </div>
           </div>
 
+          {/* India CTC convention (policy ctc_includes_employer_contributions). */}
+          <div className="mt-5 rounded-[12px] border border-border p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-foreground">CTC includes employer contributions (India)</p>
+                <p className="text-[11px] text-foreground-muted mt-0.5">
+                  {policy.ctcIncludesEmployerContributions
+                    ? "On: employer PF, employer ESI and EDLI are paid out of each India employee's CTC. Monthly gross is reduced so gross + these contributions = CTC ÷ 12 (e.g. CTC ₹12,00,000 → gross ₹98,200 + employer PF ₹1,800)."
+                    : "Off: monthly gross = CTC ÷ 12, and employer PF, ESI and EDLI are paid on top of CTC (e.g. CTC ₹12,00,000 → gross ₹1,00,000 + employer PF ₹1,800)."}
+                  {" "}Applies to India employees from the next payroll run; approved payslips never change. Overtime and bonuses stay on top of CTC.
+                </p>
+              </div>
+              <Toggle
+                checked={!!policy.ctcIncludesEmployerContributions}
+                disabled={saving}
+                onChange={() => {
+                  const next = !policy.ctcIncludesEmployerContributions;
+                  const msg = next
+                    ? "Include employer PF, ESI and EDLI in CTC? Every India employee's gross and net pay will be lower from the next payroll run."
+                    : "Pay employer PF, ESI and EDLI on top of CTC again? Every India employee's gross and net pay will be higher from the next payroll run.";
+                  if (window.confirm(msg)) handleSaveGeneral({ ctcIncludesEmployerContributions: next });
+                }}
+              />
+            </div>
+          </div>
+
           <div className="mt-5">
             <span className="block text-[12px] font-semibold text-foreground-muted mb-2">
               Special Allowance

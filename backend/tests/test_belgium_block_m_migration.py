@@ -143,7 +143,7 @@ def test_literal_names_manifest_single_child_and_single_head():
     # (tax_slabs.tax_regime VARCHAR(40)) sits on it; UAE ad01fc67ce44 and the report-template content
     # editor d7a3f1c9e5b2 both grow from that; merge b5f3e8a1c6d9 joins them; Spain 86f1ec062709 and
     # e4b7c2a9d1f3 (certification runs tied to a pack) grow from it, joined by merge c8d2f6a4e1b9 (the head).
-    assert script.get_heads() == ["c8d2f6a4e1b9"]
+    assert script.get_heads() == ["9ffb5ff78e85"]
     assert script.get_revision("ad01fc67ce44").down_revision == "c3e8a1d5f7b2"
     assert script.get_revision("c3e8a1d5f7b2").down_revision == "a4c7e1f9b3d8"
     assert script.get_revision("a4c7e1f9b3d8").down_revision == REVISION

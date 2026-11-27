@@ -110,6 +110,14 @@ class PayrollPolicy(Base):
     attendance_required_employment_types = Column(JSON, nullable=True)
     attendance_weekly_off_days = Column(JSON, nullable=True)
 
+    # India CTC convention (migration 9ffb5ff78e85). False (default, every
+    # org unchanged): monthly gross = CTC / 12 and the employer's statutory
+    # contributions are on top of CTC. True: the fixed monthly gross is
+    # solved so gross + employer PF + employer ESI + EDLI = CTC / 12
+    # (service._india_ctc_monthly_gross). India employees only; overtime and
+    # attendance bonuses stay on top of CTC.
+    ctc_includes_employer_contributions = Column(Boolean, default=False, server_default="false", nullable=False)
+
     # Enterprise onboarding status — see app/modules/payroll/enterprise/.
     # Independent of `calculation_mode`: calculation_mode only flips to
     # "enterprise" once activation succeeds; enterprise_status tracks

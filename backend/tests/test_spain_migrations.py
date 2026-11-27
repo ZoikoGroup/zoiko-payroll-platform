@@ -140,7 +140,7 @@ def test_revision_is_the_single_child_of_the_previous_head_and_the_head():
     assert sorted(children) == sorted([FILENAME, "e4b7c2a9d1f3_tie_certification_runs_to_a_pack.py"])
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
     # e4b7c2a9d1f3 (certification runs tied to a pack) also grows from b5f3e8a1c6d9; merge c8d2f6a4e1b9 joins them.
-    assert list(script.get_heads()) == ["c8d2f6a4e1b9"]
+    assert list(script.get_heads()) == ["9ffb5ff78e85"]
     assert REVISION in script.get_revision("c8d2f6a4e1b9").down_revision
     assert set(script.get_revision(PARENT).down_revision) == {"ad01fc67ce44", "d7a3f1c9e5b2"}
 

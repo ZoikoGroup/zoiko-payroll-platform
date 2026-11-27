@@ -21348,9 +21348,23 @@ def preview_payroll_run(db: Session, organization_id: int, employee_ids: List[in
     # this mirrors it here.
     _country_rate_cache: dict = {country: (rate_map, slabs, _canonical_rates, _pack)}
 
+    # Policy switch read once for the batch (India CTC convention).
+    _ctc_includes_employer = _ctc_includes_employer_contributions(db, organization_id) if country != "MX" else False
     for emp in employees:
         ctc = Decimal(str(getattr(emp, "ctc", 0) or 0))
         monthly_gross = _round2(ctc / MONTHS_PER_YEAR) if ctc else Decimal("0")
+        if _ctc_includes_employer and ctc:
+            # Same gross a real run will use (see _compute_payslip_values):
+            # priced with THIS employee's own country's rates.
+            _ctc_country = _resolve_employee_country(db, organization_id, getattr(emp, "country_code", None)) or country
+            if _ctc_country == "IN":
+                if _ctc_country not in _country_rate_cache:
+                    _country_rate_cache[_ctc_country] = _resolve_effective_rate_inputs(
+                        db, organization_id, _ctc_country, period_end or date.today(), org_opted_in,
+                    )
+                monthly_gross = _monthly_gross_for(
+                    db, organization_id, emp, "IN", _country_rate_cache[_ctc_country][0], allowance_components,
+                    as_of=period_end or date.today(), calculation_mode=calculation_mode, includes_employer=True)
 
         # Fixed 30-Day: count unpaid leave days from attendance records
         unpaid_leave_days = (
@@ -24968,18 +24982,6 @@ def calculate_india_employee_gratuity(
     if not date_of_joining or not date_of_leaving:
         raise BadRequestException("Both date_of_joining and date_of_leaving are required to calculate gratuity.")
 
-    if last_drawn_monthly_wage_override is not None:
-        last_drawn_monthly_wage = last_drawn_monthly_wage_override
-    else:
-        stored_basic = getattr(employee, "basic", None)
-        if stored_basic is not None:
-            last_drawn_monthly_wage = _round2(Decimal(str(stored_basic)) / MONTHS_PER_YEAR)
-        else:
-            ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
-            monthly_gross = _round2(ctc / MONTHS_PER_YEAR) if ctc else Decimal("0")
-            basic_pct, _hra_pct = _resolve_salary_split_pct(db, organization_id)
-            last_drawn_monthly_wage = _round2(monthly_gross * basic_pct / 100)
-
     # org_opted_in fix, 2026-09-11: this call previously omitted it
     # entirely (always defaulting to False, the legacy org-scoped-copy
     # path) regardless of whether the org has actually opted into
@@ -24992,6 +24994,26 @@ def calculate_india_employee_gratuity(
     _country, rate_map, _slabs, _pack, _state, _state_rate_map, _state_slabs, _profiles, _recip, _loc, _poe, _res_state = (
         _resolve_employee_calc_inputs(db, organization_id, employee, payroll_date=date_of_leaving, org_opted_in=org_opted_in)
     )
+
+    if last_drawn_monthly_wage_override is not None:
+        last_drawn_monthly_wage = last_drawn_monthly_wage_override
+    else:
+        stored_basic = getattr(employee, "basic", None)
+        if stored_basic is not None:
+            last_drawn_monthly_wage = _round2(Decimal(str(stored_basic)) / MONTHS_PER_YEAR)
+        else:
+            # Same monthly gross the payslips use (CTC / 12, or the solved
+            # gross under "CTC includes employer contributions"). The policy
+            # lookups below only run when the switch is on, so an org
+            # without it is read exactly as before.
+            ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
+            monthly_gross = _round2(ctc / MONTHS_PER_YEAR) if ctc else Decimal("0")
+            if ctc and _ctc_includes_employer_contributions(db, organization_id):
+                monthly_gross = _india_ctc_monthly_gross(
+                    db, organization_id, employee, rate_map, _resolve_allowance_components(db, organization_id),
+                    as_of=date_of_leaving, calculation_mode=_resolve_calculation_mode(db, organization_id, None))
+            basic_pct, _hra_pct = _resolve_salary_split_pct(db, organization_id)
+            last_drawn_monthly_wage = _round2(monthly_gross * basic_pct / 100)
     return calculate_gratuity(
         date_of_joining, date_of_leaving, last_drawn_monthly_wage, rate_map,
         eligibility_event=eligibility_event, is_fixed_term=is_fixed_term,
@@ -26558,6 +26580,118 @@ def calculate_uk_class_1a_1b_charge(db: Session, organization_id: int, charge_ty
     return uk_country.calculate_class_1a_1b_charge(charge_type, amount, rate_map)
 
 
+# ── India: "CTC includes employer contributions" (policy, migration 9ffb5ff78e85) ──
+
+_CTC_SOLVE_MAX_ITERATIONS = 40
+
+
+def _ctc_includes_employer_contributions(db: Session, organization_id: int) -> bool:
+    """The organisation's policy switch (default False = gross is CTC / 12).
+    Read-only: looks at the org's default policy without get-or-create
+    (no policy yet = the default, False), so asking never writes."""
+    from app.modules.payroll.policy.models import PayrollPolicy
+    value = (db.query(PayrollPolicy.ctc_includes_employer_contributions)
+             .filter(PayrollPolicy.organization_id == organization_id,
+                     PayrollPolicy.is_default == True)  # noqa: E712
+             .scalar())
+    return bool(value)
+
+
+def _india_ctc_monthly_gross(db: Session, organization_id: int, employee, rate_map, allowance_components,
+                             as_of=None, calculation_mode: str = "standard") -> Decimal:
+    """Fixed monthly gross for an India employee whose CTC INCLUDES the
+    employer's statutory contributions: the largest gross g such that
+    g + employer PF + employer ESI + EDLI <= CTC / 12, priced with
+    engine.countries.india.employer_statutory_contributions — the same
+    formulas (wage-base rules, PF ceiling, ESI threshold) the payslip uses,
+    on the same Basic / HRA / allowances / Special split.
+
+    Overtime and attendance bonuses are not part of CTC: they (and any
+    contribution on them) stay on top. Simple Payroll computes no statutory
+    contributions, so there gross stays CTC / 12.
+
+    Solved by fixed-point iteration g = T - cost(g) (cost grows far slower
+    than g, so it converges in a few steps). ESI's eligibility threshold can
+    make the cost jump, so the answer is the largest gross seen that keeps
+    the total within CTC / 12 — never above the employee's CTC."""
+    from types import SimpleNamespace
+    from app.modules.payroll.engine.countries.india import employer_statutory_contributions
+
+    ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
+    target = _round2(ctc / MONTHS_PER_YEAR) if ctc else Decimal("0")
+    if target <= 0 or (calculation_mode or "standard") == "simple":
+        return target
+
+    as_of = as_of or date.today()
+    rules = {
+        "code_wages_rules": get_code_wages_classification(db, "IN", organization_id, as_of=as_of),
+        "epf_base_rules": get_epf_base_classification(db, "IN", organization_id, as_of=as_of),
+        "esi_base_rules": get_esi_base_classification(db, "IN", organization_id, as_of=as_of),
+    }
+    stored_basic = getattr(employee, "basic", None)
+    stored_hra = getattr(employee, "hra", None)
+    fixed_split = stored_basic is not None and stored_hra is not None
+    if fixed_split:
+        fixed_basic = _round2(Decimal(str(stored_basic)) / MONTHS_PER_YEAR)
+        fixed_hra = _round2(Decimal(str(stored_hra)) / MONTHS_PER_YEAR)
+    else:
+        basic_pct, hra_pct = _resolve_salary_split_pct(db, organization_id)
+
+    def cost(gross: Decimal) -> Decimal:
+        if fixed_split:
+            basic, hra = fixed_basic, fixed_hra
+        else:
+            basic = _round2(gross * basic_pct / 100)
+            hra = _round2(gross * hra_pct / 100)
+        _items, allowance_total = _compute_allowance_components(allowance_components or [], gross)
+        special = _round2(gross - basic - hra - allowance_total)
+        ctx = SimpleNamespace(
+            rate_map=rate_map, basic=basic, hra=hra, special_allowance=special, overtime=Decimal("0"),
+            additional_compensation=Decimal("0"), gross=basic + hra + special + allowance_total, **rules,
+        )
+        c = employer_statutory_contributions(ctx)
+        return c["employer_pf"] + c["employer_esi"] + c["employer_edli"]
+
+    best = None
+    gross = target
+    seen = set()
+    for _ in range(_CTC_SOLVE_MAX_ITERATIONS):
+        employer_cost = cost(gross)
+        total = gross + employer_cost
+        if total <= target and (best is None or gross > best):
+            best = gross
+        if abs(total - target) <= Decimal("0.01") or gross in seen:
+            break
+        seen.add(gross)
+        gross = max(Decimal("0"), _round2(target - employer_cost))
+    if best is None:
+        # Every candidate exceeded CTC (rounding at the ESI threshold): step
+        # down a paisa at a time from the last candidate until it fits.
+        best = gross
+        while best > 0 and best + cost(best) > target:
+            best = _round2(best - Decimal("0.01"))
+    return best
+
+
+def _monthly_gross_for(db: Session, organization_id: int, employee, country: str, rate_map,
+                       allowance_components, as_of=None, calculation_mode: str = "standard",
+                       includes_employer: Optional[bool] = None) -> Decimal:
+    """Monthly fixed gross from annual CTC: CTC / 12, or — for an India
+    employee of an organisation whose policy says CTC includes employer
+    contributions — the solved gross (_india_ctc_monthly_gross). Shared by
+    payslip generation, the run preview and gratuity, so all three agree."""
+    ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
+    plain = _round2(ctc / MONTHS_PER_YEAR) if ctc else Decimal("0")
+    if country != "IN" or not ctc:
+        return plain
+    if includes_employer is None:
+        includes_employer = _ctc_includes_employer_contributions(db, organization_id)
+    if not includes_employer:
+        return plain
+    return _india_ctc_monthly_gross(db, organization_id, employee, rate_map, allowance_components,
+                                    as_of=as_of, calculation_mode=calculation_mode)
+
+
 def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, slabs, country: str,
                              calculation_mode: str = "standard", attendance_records: List["PayrollAttendanceRecord"] = None,
                              allowance_components: list = None, resolved_pack=None,
@@ -26601,7 +26735,10 @@ def _compute_payslip_values(db: Session, run: PayrollRun, employee, rate_map, sl
     from app.core.exceptions import GermanyCalculationBlockedException
 
     ctc = Decimal(str(getattr(employee, "ctc", 0) or 0))
-    monthly_gross = _round2(ctc / MONTHS_PER_YEAR) if ctc else Decimal("0")
+    # CTC / 12 — or, for India under the "CTC includes employer
+    # contributions" policy, the gross that leaves room for them.
+    monthly_gross = _monthly_gross_for(db, run.organization_id, employee, country, rate_map, allowance_components,
+                                       as_of=run.pay_date, calculation_mode=calculation_mode)
 
     # Fixed 30-Day: count unpaid leave days only (no weekday/holiday logic)
     unpaid_leave_days = _count_unpaid_leave_days(

@@ -315,7 +315,7 @@ def test_alembic_heads_is_single_head():
     # Spain (ZP-ES-ENG-001) 86f1ec062709 (payslip_items.es_calculation_snapshot) and e4b7c2a9d1f3
     # (certification runs tied to a pack) both grow from merge b5f3e8a1c6d9; the no-op merge
     # c8d2f6a4e1b9 joins them and is the single head.
-    assert heads == ["c8d2f6a4e1b9"]   # merge of Spain 86f1ec062709 + certification runs e4b7c2a9d1f3
+    assert heads == ["9ffb5ff78e85"]   # merge of Spain 86f1ec062709 + certification runs e4b7c2a9d1f3
 
 
 def test_real_alembic_script_directory_loads_single_head():
@@ -327,7 +327,7 @@ def test_real_alembic_script_directory_loads_single_head():
     cfg = Config(str(_BACKEND_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_BACKEND_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
-    assert list(script.get_heads()) == ["c8d2f6a4e1b9"]   # merge of Spain + certification runs tied to a pack
+    assert list(script.get_heads()) == ["9ffb5ff78e85"]   # merge of Spain + certification runs tied to a pack
     assert script.get_revision("c8d2f6a4e1b9").down_revision == ("86f1ec062709", "e4b7c2a9d1f3")
     assert script.get_revision("e4b7c2a9d1f3").down_revision == "b5f3e8a1c6d9"
     assert script.get_revision("86f1ec062709").down_revision == "b5f3e8a1c6d9"
@@ -409,7 +409,7 @@ def test_alembic_branchpoints_are_only_the_known_existing_ones():
 def test_no_duplicate_revision_ids_in_versions_directory():
     revs = _parse_revisions()
     assert len(revs) == len(set(revs))
-    assert len(revs) == 283   # + certification runs e4b7c2a9d1f3 + merge c8d2f6a4e1b9
+    assert len(revs) == 284   # + certification runs e4b7c2a9d1f3 + merge c8d2f6a4e1b9 + CTC policy 9ffb5ff78e85
                               # + Spain es_foundation 86f1ec062709; rugvedh's 272 (Mexico lifecycle + Belgium + Malaysia + merges) + UAE ad01fc67ce44
                               # + Belgium Block K b7e4c2a9d5f1 + merge e3f9a7c1b5d2 + Belgium M-ECWC e9c4b7a2d6f3
                               # + report-field source_column widening a4c7e1f9b3d8
