@@ -68,6 +68,23 @@ function readGoogleError(search) {
   return fallback ? GOOGLE_FAILURE_REASONS[params.get("reason")] || fallback : null;
 }
 
+// Why the last session ended, in words (state set by AuthContext from
+// service/api.js): the server's own reason when it gave one, else the
+// client's. One generic line made every sign-out look the same.
+function sessionEndText(state) {
+  if (state?.sessionEndMessage) return state.sessionEndMessage;
+  switch (state?.sessionEndReason) {
+    case "idle_timeout":
+      return "For your security, you were signed out after a period without activity. Sign in again to continue.";
+    case "cross_tab_logout":
+      return "You signed out in another tab. Sign in again to continue.";
+    case "signed_out":
+      return "You have signed out.";
+    default:
+      return "Your session has expired. Sign in again to continue where you left off.";
+  }
+}
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -156,7 +173,7 @@ export default function LoginPage() {
             </div>
 
             {location.state?.sessionExpired && !localError && (
-              <AuthAlert tone="warning">Your session has expired. Sign in again to continue where you left off.</AuthAlert>
+              <AuthAlert tone="warning">{sessionEndText(location.state)}</AuthAlert>
             )}
 
             {localError && <AuthAlert>{localError}</AuthAlert>}

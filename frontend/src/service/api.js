@@ -264,11 +264,14 @@ if (typeof window !== "undefined") {
   });
 }
 
-function notifySessionInvalid(reason) {
+// reason: why the session ended (idle_timeout, refresh_rejected, ...);
+// message: the server's own explanation when it gave one. Both reach the
+// sign-in page so the user sees which rule ended the session.
+function notifySessionInvalid(reason, message) {
   if (sessionInvalidNotified) return;
   sessionInvalidNotified = true;
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(AUTH_INVALID_EVENT, { detail: { reason } }));
+    window.dispatchEvent(new CustomEvent(AUTH_INVALID_EVENT, { detail: { reason, message: message || null } }));
   }
 }
 
@@ -317,7 +320,7 @@ export async function apiRequest(path, { method = "GET", body, headers = {}, aut
     }
     if (refreshResult.invalidSession) {
       clearSession();
-      notifySessionInvalid(refreshResult.reason);
+      notifySessionInvalid(refreshResult.reason, refreshResult.message);
       throw createApiError("Your session has expired. Please sign in again.", 401, {
         authInvalid: true,
         refreshStatus: refreshResult.status,
@@ -392,10 +395,12 @@ export async function tryRefreshToken() {
     // After a failed attempt, another tab may have already refreshed and
     // broadcast new tokens via BroadcastChannel — re-read localStorage and
     // try again before giving up.
+    let last = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       const result = await refreshAccessToken();
       if (result.ok) return result;
       if (!result.invalidSession) return result; // transient failure, don't retry
+      last = result;
       // invalidSession: another tab may have refreshed. Re-read localStorage
       // (BroadcastChannel may have updated it) and retry once before quitting.
       const rt = getRefreshToken();
@@ -404,12 +409,12 @@ export async function tryRefreshToken() {
       // Small delay to let any in-flight broadcast from another tab settle.
       await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
     }
-    return { ok: false, invalidSession: true, reason: "refresh_exhausted_retries" };
+    return { ok: false, invalidSession: true, reason: "refresh_exhausted_retries", message: last?.message };
   })
     .then((result) => {
       if (!result.ok && result.invalidSession) {
         clearSession();
-        notifySessionInvalid(result.reason);
+        notifySessionInvalid(result.reason, result.message);
       }
       return result;
     })
@@ -433,11 +438,21 @@ async function refreshAccessToken() {
     });
 
     if (res.status === 401) {
+      // The server says why (idle limit, browser changed, MFA, token re-used, ...).
+      let message = null;
+      try {
+        const body = await res.json();
+        const m = body?.message || body?.detail;
+        message = typeof m === "string" ? m : null;
+      } catch {
+        // not JSON
+      }
       return {
         ok: false,
         invalidSession: true,
         status: res.status,
         reason: "refresh_rejected",
+        message,
       };
     }
 

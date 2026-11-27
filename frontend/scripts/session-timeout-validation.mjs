@@ -186,7 +186,33 @@ await check("endSession clears tokens and announces the sign-out", () => {
     && dispatched.some((e) => e.type === api.AUTH_INVALID_EVENT && e.detail?.reason === "idle_timeout");
 });
 
+await check("a rejected refresh carries the server's reason to the sign-out event", async () => {
+  freshPrivilegedSession("rt-r");
+  const msg = "For your security, admin sessions end after 30 minutes without activity. Please sign in again.";
+  nextRefreshResponse = { status: 401, ok: false, json: async () => ({ message: msg }) };
+  const result = await api.tryRefreshToken();
+  return result.ok === false && result.message === msg
+    && dispatched.some((e) => e.type === api.AUTH_INVALID_EVENT && e.detail?.message === msg && e.detail?.reason);
+});
+
+await check("a 401 without a JSON body still signs out (no message)", async () => {
+  freshPrivilegedSession("rt-s");
+  nextRefreshResponse = { status: 401, ok: false, json: async () => { throw new Error("not json"); } };
+  const result = await api.tryRefreshToken();
+  return result.ok === false && result.invalidSession === true
+    && dispatched.some((e) => e.type === api.AUTH_INVALID_EVENT && e.detail?.message === null);
+});
+
 // ── SOURCE ──────────────────────────────────────────────────────────────────
+await check("AuthContext passes the reason and message to the sign-in page", () => {
+  const src = read("context/AuthContext.jsx");
+  return src.includes("sessionEndReason: event?.detail?.reason") && src.includes("sessionEndMessage: event?.detail?.message");
+});
+await check("sign-in page shows why the session ended", () => {
+  const src = read("pages/LoginPage.jsx");
+  return src.includes("{sessionEndText(location.state)}") && src.includes('case "idle_timeout":')
+    && src.includes("if (state?.sessionEndMessage) return state.sessionEndMessage;");
+});
 await check("SessionTimeoutWarning is mounted in main.jsx", () =>
   /<SessionTimeoutWarning \/>/.test(read("main.jsx")));
 await check("warning offers Stay signed in and Sign out", () => {

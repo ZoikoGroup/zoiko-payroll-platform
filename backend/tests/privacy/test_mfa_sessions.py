@@ -108,6 +108,7 @@ def test_refresh_rotation_and_reuse_detection(client, world):
     assert second != first
     reused = client.post("/api/auth/refresh", json={"refresh_token": first})
     assert reused.status_code == 401
+    assert "older copy of it was used" in reused.json()["message"]       # says why
     # Reuse revoked the whole family, including the newest token.
     assert client.post("/api/auth/refresh", json={"refresh_token": second}).status_code == 401
 
@@ -143,6 +144,7 @@ def test_privileged_refresh_requires_reauth_when_idle(client, world, db):
     db.commit()
     resp = client.post("/api/auth/refresh", json={"refresh_token": enrolled["refresh_token"]})
     assert resp.status_code == 401 and "sign in again" in resp.json()["message"]
+    assert "minutes without activity" in resp.json()["message"]          # says why: idle
 
 
 def test_privileged_refresh_requires_reauth_on_a_new_device(client, world):
@@ -151,6 +153,7 @@ def test_privileged_refresh_requires_reauth_on_a_new_device(client, world):
     resp = client.post("/api/auth/refresh", json={"refresh_token": enrolled["refresh_token"]},
                        headers={"user-agent": "a-different-browser/1.0"})
     assert resp.status_code == 401
+    assert "browser looks different" in resp.json()["message"]           # says why: new device
 
 
 def test_mfa_off_is_password_only_and_never_asks_for_a_code(client, world, db, monkeypatch):

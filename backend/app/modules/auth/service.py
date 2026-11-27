@@ -1091,6 +1091,17 @@ def confirm_mfa_enrollment_at_login(db: Session, mfa_token: str, code: str, requ
     return session
 
 
+_REAUTH_MESSAGES = {
+    "IDLE": (f"For your security, admin sessions end after {settings.PRIVILEGED_REFRESH_IDLE_MINUTES} minutes "
+             "without activity. Please sign in again."),
+    "NEW_DEVICE": ("For your security, please sign in again: this browser looks different from the one you "
+                   "signed in with (for example after a browser update)."),
+    "MFA_MISSING": "For your security, please sign in again with two-factor authentication.",
+}
+REUSE_MESSAGE = ("Please sign in again: this session was ended because an older copy of it was used "
+                 "(for example a restored tab or a second browser window).")
+
+
 def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
     """Rotate a refresh token (ZP-PRIV B08).
 
@@ -1147,7 +1158,7 @@ def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
         _revoke_family(db, record.family_id, "REUSE_DETECTED")
         auth_audit.record(db, auth_audit.REFRESH_REUSE_DETECTED, request=request,
                           user=db.query(User).filter(User.id == record.user_id).first(), reason="REUSE")
-        raise UnauthorizedException("Please sign in again.")
+        raise UnauthorizedException(REUSE_MESSAGE)
 
     user = db.query(User).filter(User.id == payload.get("user_id")).first()
     if user is None or not user.is_active:
@@ -1188,7 +1199,9 @@ def refresh_user_token(db: Session, refresh_token: str, request=None) -> dict:
             reason = "IDLE" if not (new_device or missing_mfa) else ("NEW_DEVICE" if new_device else "MFA_MISSING")
             _revoke_family(db, record.family_id, f"REAUTH_{reason}")
             auth_audit.record(db, auth_audit.REAUTH_REQUIRED, user=user, request=request, reason=reason)
-            raise UnauthorizedException("For your security, please sign in again.")
+            # Say which rule ended the session: the client shows this on the
+            # sign-in page (one generic message made every case look alike).
+            raise UnauthorizedException(_REAUTH_MESSAGES[reason])
 
     record.used_at = datetime.utcnow()
     db.commit()

@@ -19,11 +19,16 @@ export function AuthProvider({ children }) {
   // were cleared but the page stayed put, every request failing with
   // "Your session has expired" until the user found the login page alone.
   useEffect(() => {
-    const onSessionInvalid = () => {
+    const onSessionInvalid = (event) => {
       clearSession();
       setUser(null);
       if (PUBLIC_PATHS.some((p) => location.pathname.startsWith(p))) return;
-      navigate("/login", { replace: true, state: { from: location, sessionExpired: true } });
+      // Why it ended travels to the sign-in page (shown there).
+      navigate("/login", { replace: true, state: {
+        from: location, sessionExpired: true,
+        sessionEndReason: event?.detail?.reason || null,
+        sessionEndMessage: event?.detail?.message || null,
+      } });
     };
     window.addEventListener(AUTH_INVALID_EVENT, onSessionInvalid);
     return () => window.removeEventListener(AUTH_INVALID_EVENT, onSessionInvalid);
