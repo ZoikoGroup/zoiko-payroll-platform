@@ -398,6 +398,11 @@ class Settings(BaseSettings):
     # data to synthetic values, and sandbox outbound billing email. See
     # the startup guard below and modules/billing/staging.py.
     STAGING_MODE: bool = False
+
+    # Database hosts that are production. A development process (DEBUG=true or
+    # ENVIRONMENT=development) refuses to start against any of them — see the
+    # startup guard below. Comma-separated host names / IPs.
+    PRODUCTION_DATABASE_HOSTS: str = "34.88.166.225"
     STAGING_SANDBOX_EMAIL: str = ""   # every outbound billing email is redirected here in staging
 
 settings = Settings()
@@ -422,6 +427,31 @@ if settings.PAYROLL_SECRET_KEY == "change-me-payroll-platform-secret" and not _i
     raise RuntimeError(
         "PAYROLL_SECRET_KEY is still the placeholder default. Refusing to start outside a "
         "development environment — set a real PAYROLL_SECRET_KEY in your .env file."
+    )
+
+
+def _database_host(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    try:
+        return (urlsplit(url).hostname or "").strip().lower()
+    except ValueError:
+        return ""
+
+
+def _production_database_hosts() -> set:
+    return {h.strip().lower() for h in settings.PRODUCTION_DATABASE_HOSTS.split(",") if h.strip()}
+
+
+if _is_development_environment() and _database_host(settings.PAYROLL_DATABASE_URL) in _production_database_hosts():
+    # A development process (local server, alembic, a script) must never run
+    # against the production database: startup jobs (trial / dunning sweeps,
+    # usage aggregation, token cleanup) and every click would write real rows.
+    # Point PAYROLL_DATABASE_URL at a local or staging database instead.
+    raise RuntimeError(
+        "Refusing to start: this is a development environment (DEBUG=true or "
+        "ENVIRONMENT=development) but PAYROLL_DATABASE_URL points at the PRODUCTION database host "
+        f"({_database_host(settings.PAYROLL_DATABASE_URL)}). Use a local or staging database."
     )
 
 
