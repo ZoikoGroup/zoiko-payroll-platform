@@ -20,6 +20,7 @@ import RunTrackerPanel from "./RunTrackerPanel";
 import useRunAdvance from "./useRunAdvance";
 import { WIZARD_GUIDE, canOperatePayroll } from "./runWorkflow";
 import { GuideTooltip } from "./RunWorkflowTracker";
+import Stepper from "./Stepper";
 import { useAuth } from "../../../context/AuthContext";
 
 // Steps of the "Create New Run" wizard only (shown in the left panel while
@@ -270,11 +271,9 @@ export default function PayrollRunsPage() {
     if (wizardStep < 4) setWizardStep((s) => s + 1);
     if (wizardStep === 3) {
       addToast?.("Payroll run submitted successfully.", "success");
-      // Follow the new run in Run progress and light up its next action.
-      if (createdRunId) {
-        setTrackedRunId(createdRunId);
-        setFlashRunId(createdRunId);
-      }
+      // Light up the new run's Advance button. Run progress is NOT switched to
+      // it: the panel only shows a run the user picks (dropdown or table row).
+      if (createdRunId) setFlashRunId(createdRunId);
       setView("list");
       setWizardStep(0);
       setEmployees([]);
@@ -350,49 +349,29 @@ export default function PayrollRunsPage() {
         <p className="text-[11px] font-bold uppercase tracking-widest text-foreground-muted mb-5">
           New run
         </p>
-        <div className="flex-1 space-y-1">
-          {WIZARD_STEPS.map((step, i) => {
-            const completed = isWizard && wizardStep > step.id;
-            const active = isWizard && wizardStep === step.id;
-            const StepIcon = step.icon;
-            return (
-              <button
-                key={step.id}
-                type="button"
-                onMouseEnter={(e) => { const anchor = e.currentTarget; setWizardTip((t) => (t?.pinned ? t : { id: step.id, anchor })); }}
-                onMouseLeave={() => setWizardTip((t) => (t?.pinned ? t : null))}
-                onFocus={(e) => { const anchor = e.currentTarget; setWizardTip((t) => (t?.pinned ? t : { id: step.id, anchor })); }}
-                onBlur={() => setWizardTip(null)}
-                onClick={(e) => { const anchor = e.currentTarget; setWizardTip((t) => (t?.id === step.id && t.pinned ? null : { id: step.id, anchor, pinned: true })); }}
-                onKeyDown={(e) => { if (e.key === "Escape") setWizardTip(null); }}
-                aria-describedby={wizardTip?.id === step.id ? `wizard-step-tip-${step.id}` : undefined}
-                aria-current={active ? "step" : undefined}
-                className="flex w-full items-start gap-2.5 rounded-[10px] text-left transition-colors hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-primary"
-              >
-                <div className="flex flex-col items-center">
-                    <div
-                    className={`flex h-9 w-9 items-center justify-center rounded-full border-2 text-xs font-bold transition-all ${
-                      completed
-                        ? "border-primary bg-primary text-white"
-                        : active
-                        ? "border-primary bg-primary/10 text-primary ring-4 ring-primary/20"
-                        : "border-border bg-surface text-foreground-muted"
-                    }`}
-                  >
-                    {completed ? <Check size={14} /> : <StepIcon size={14} />}
-                  </div>
-                  {i < WIZARD_STEPS.length - 1 && (
-                    <div className={`w-px h-5 my-0.5 ${completed || active ? "bg-primary" : "bg-border"}`} />
-                  )}
-                </div>
-                <div className="pt-1.5">
-                  <p className={`text-xs font-semibold ${completed || active ? "text-foreground" : "text-foreground-muted"}`}>
-                    {step.label}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
+        {/* Steps spread evenly down the panel on large screens (shared Stepper,
+            fill mode); compact spacing below lg so nothing overlaps. */}
+        <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+          <Stepper
+            label="New run steps"
+            fill
+            markerSize={36}
+            steps={WIZARD_STEPS.map((step) => ({
+              key: step.id,
+              label: step.label,
+              icon: step.icon,
+              state: wizardStep > step.id ? "done" : wizardStep === step.id ? "current" : "upcoming",
+            }))}
+            getStepProps={(step) => ({
+              onMouseEnter: (e) => { const anchor = e.currentTarget; setWizardTip((t) => (t?.pinned ? t : { id: step.key, anchor })); },
+              onMouseLeave: () => setWizardTip((t) => (t?.pinned ? t : null)),
+              onFocus: (e) => { const anchor = e.currentTarget; setWizardTip((t) => (t?.pinned ? t : { id: step.key, anchor })); },
+              onBlur: () => setWizardTip(null),
+              onClick: (e) => { const anchor = e.currentTarget; setWizardTip((t) => (t?.id === step.key && t.pinned ? null : { id: step.key, anchor, pinned: true })); },
+              onKeyDown: (e) => { if (e.key === "Escape") setWizardTip(null); },
+              "aria-describedby": wizardTip?.id === step.key ? `wizard-step-tip-${step.key}` : undefined,
+            })}
+          />
         </div>
         {wizardTip?.anchor && WIZARD_GUIDE[wizardTip.id] && (() => {
           const guide = WIZARD_GUIDE[wizardTip.id];

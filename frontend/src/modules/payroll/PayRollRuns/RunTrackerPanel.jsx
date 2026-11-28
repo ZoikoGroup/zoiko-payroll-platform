@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { CalendarPlus, ChevronDown, Users } from "lucide-react";
+import { CalendarPlus, ChevronDown, Users, X } from "lucide-react";
 
 import CountryFlag from "../../../components/jurisdiction/CountryFlag";
 import { getCurrencyForJurisdiction } from "../../../utils/currency";
 import RunWorkflowTracker from "./RunWorkflowTracker";
-import { STEP_GUIDE, monthLabel, pickDefaultRuns } from "./runWorkflow";
+import { STEP_GUIDE, monthLabel, periodRangeLabel, pickDefaultRuns, sortRunsNewestFirst } from "./runWorkflow";
 
 // Below the lg breakpoint the panel sits above the table: start collapsed
 // there (a one-line summary) so the table stays in view.
@@ -16,17 +16,28 @@ const startsCollapsed = () => {
   }
 };
 
-// Left panel of the Payroll Runs list: follows ONE real run through
-// Draft -> Closed. Which run:
-//   1. the run the user clicked in the table (trackedRunId), else
-//   2. this month's run (most recent if there are several - switchable), else
-//   3. "No payroll run for <month>" + Create run, and the most recent run
-//      that isn't Closed yet.
+// The run code is made by generate_business_code (backend
+// app/core/code_generation.py): organisation code + "PY" + the YEAR AND MONTH
+// THE RUN WAS CREATED (not its pay period) + a 3-digit sequence within that
+// month. VGPY202611001 = org VG, a payroll run, created Nov 2026, the first
+// one that month.
+const RUN_ID_HELP = "Run ID: organisation code + PY + the year and month the run was created "
+  + "(not its pay period) + its number within that month.";
+
+// Left panel of the Payroll Runs list. Nothing is tracked until the user picks
+// a run - in the "Show run" dropdown or by clicking a row in the table (both
+// set trackedRunId, so they stay in sync). Above it: "No payroll run for
+// <this month>" + Create run when this month has no run yet.
 
 function RunSummary({ run, countries }) {
   return (
     <div className="mb-3 rounded-[12px] border border-border bg-surface-muted p-3">
-      <p className="text-[14px] font-bold text-foreground">{run.period}</p>
+      <p className="text-[14px] font-bold text-foreground">{periodRangeLabel(run)}</p>
+      {run.runCode && (
+        <p className="mt-0.5 text-[11px] text-foreground-muted" title={RUN_ID_HELP}>
+          Run ID: <span className="font-mono">{run.runCode}</span>
+        </p>
+      )}
       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-foreground-muted">
         <span className="inline-flex items-center gap-1.5">
           {countries.map((c) => (
@@ -63,25 +74,13 @@ export default function RunTrackerPanel({
 }) {
   const [collapsed, setCollapsed] = useState(startsCollapsed);
   const today = useMemo(() => new Date(), []);
-  const { thisMonth, latestUnfinished } = useMemo(() => pickDefaultRuns(runs, today), [runs, today]);
+  const { thisMonth } = useMemo(() => pickDefaultRuns(runs, today), [runs, today]);
+  // Newest pay period first; the top one is marked "Latest".
+  const ordered = useMemo(() => sortRunsNewestFirst(runs), [runs]);
 
-  const clicked = trackedRunId != null ? (runs || []).find((r) => r.id === trackedRunId) : null;
-  const run = clicked || thisMonth[0] || latestUnfinished || null;
+  const run = trackedRunId != null ? ordered.find((r) => r.id === trackedRunId) || null : null;
   const noRunThisMonth = thisMonth.length === 0;
-  // Every run for the period dropdown: this month's first, then all earlier
-  // ones, newest first (pickDefaultRuns already sorts thisMonth that way).
-  const previousRuns = useMemo(() => {
-    const thisMonthIds = new Set(thisMonth.map((r) => r.id));
-    return [...(runs || [])]
-      .filter((r) => !thisMonthIds.has(r.id))
-      .sort((a, b) => String(b.periodStart || "").localeCompare(String(a.periodStart || "")) || (b.id ?? 0) - (a.id ?? 0));
-  }, [runs, thisMonth]);
-  const defaultLabel = !noRunThisMonth
-    ? `Default: this month (${thisMonth[0].period})`
-    : latestUnfinished
-      ? `Default: latest unfinished (${latestUnfinished.period})`
-      : "Default: no unfinished run";
-  const optionLabel = (r) => `${r.period} · ${r.status}${r.runCode ? ` · ${r.runCode}` : ""}`;
+  const optionLabel = (r, i) => `${periodRangeLabel(r)} · ${r.status}${i === 0 ? " · Latest" : ""}`;
 
   // Countries a run pays: an org's run covers every one of its active
   // countries (each employee under their own country's rules).
@@ -109,14 +108,16 @@ export default function RunTrackerPanel({
         >
           {run ? (
             <>
-              <span className="font-bold text-foreground">{run.period}</span>
+              <span className="font-bold text-foreground">{periodRangeLabel(run)}</span>
               <span className="text-foreground-muted"> · {run.status}</span>
               {STEP_GUIDE[run.status]?.action && (
                 <span className="block text-info">Next: {STEP_GUIDE[run.status].action}</span>
               )}
             </>
-          ) : (
+          ) : noRunThisMonth ? (
             <span className="text-foreground-muted">No payroll run for {monthLabel(today)}</span>
+          ) : (
+            <span className="text-foreground-muted">Select a payroll run</span>
           )}
         </button>
       )}
@@ -138,27 +139,32 @@ export default function RunTrackerPanel({
           </div>
         )}
 
-        {(runs || []).length > 0 && (
-          <label className="mb-3 block">
-            <span className="mb-1 block text-[11px] font-semibold text-foreground-muted">Show run</span>
+        {ordered.length > 0 && (
+          <div className="mb-3">
+            <div className="mb-1 flex items-center justify-between">
+              <label htmlFor="run-progress-select" className="text-[11px] font-semibold text-foreground-muted">
+                Show run
+              </label>
+              {run && (
+                <button
+                  type="button"
+                  onClick={() => onTrack(null)}
+                  className="inline-flex items-center gap-0.5 rounded-[6px] px-1 text-[11px] font-semibold text-foreground-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  <X size={11} aria-hidden="true" /> Clear
+                </button>
+              )}
+            </div>
             <select
-              value={clicked ? String(clicked.id) : ""}
+              id="run-progress-select"
+              value={run ? String(run.id) : ""}
               onChange={(e) => onTrack(e.target.value ? Number(e.target.value) : null)}
               className="w-full rounded-[10px] border border-border bg-background px-2.5 py-1.5 text-[12px] text-foreground focus:border-primary focus:outline-none"
             >
-              <option value="">{defaultLabel}</option>
-              {thisMonth.length > 0 && (
-                <optgroup label={`${monthLabel(today)} (this month)`}>
-                  {thisMonth.map((r) => <option key={r.id} value={r.id}>{optionLabel(r)}</option>)}
-                </optgroup>
-              )}
-              {previousRuns.length > 0 && (
-                <optgroup label="Previous months">
-                  {previousRuns.map((r) => <option key={r.id} value={r.id}>{optionLabel(r)}</option>)}
-                </optgroup>
-              )}
+              <option value="">Select a payroll run</option>
+              {ordered.map((r, i) => <option key={r.id} value={r.id}>{optionLabel(r, i)}</option>)}
             </select>
-          </label>
+          </div>
         )}
 
         {run ? (
@@ -173,13 +179,15 @@ export default function RunTrackerPanel({
               onHighlight={onHighlight}
             />
             <p className="mt-3 text-[11px] text-foreground-muted">
-              Hover or tap a step to see what happens there. Pick a period above, or click a row in the table, to
-              follow another run.
+              Hover or tap a step to see what happens there. Pick another run above, or click a row in the table,
+              to follow it.
             </p>
           </>
         ) : (
-          !noRunThisMonth ? null : (
-            <p className="text-[12px] text-foreground-muted">No unfinished runs.</p>
+          ordered.length > 0 && (
+            <p className="text-[12px] text-foreground-muted">
+              Select a run above, or click a row in the table, to see its progress.
+            </p>
           )
         )}
       </div>
