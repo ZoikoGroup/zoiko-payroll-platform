@@ -5,7 +5,7 @@ import { useToast } from "../ToastContext";
 import { getPayrollLabels, getIncomeTaxLines } from "../../../utils/jurisdictionLabels";
 import { formatCurrency, createCurrencyFormatterForCode, getCountryNameFromCode, getCurrencyForJurisdiction } from "../../../utils/currency";
 import CountryTotalsTable from "../../../components/payroll/CountryTotalsTable";
-import RunWorkflowTracker, { RunNextAction } from "./RunWorkflowTracker";
+import { RunHeaderAction } from "./RunWorkflowTracker";
 import useRunAdvance from "./useRunAdvance";
 import AssistInlinePanel from "../../assist/AssistInlinePanel";
 import SGRunPreflightPanel from "./SGRunPreflightPanel";
@@ -494,10 +494,10 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency, canOperate =
         className="flex h-full max-h-[96vh] w-full max-w-[96vw] xl:max-w-7xl 2xl:max-w-[1560px] flex-col rounded-2xl bg-surface border border-border shadow-[0_24px_60px_rgba(0,0,0,0.25)] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-surface">
-          <div className="flex items-center gap-3">
-            <div>
-              <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 sm:px-6 py-4 border-b border-border bg-surface">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-bold text-foreground">
                   Payroll Run &middot; {detail?.period || run.period}
                 </h2>
@@ -506,7 +506,17 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency, canOperate =
               <p className="text-xs text-foreground-muted mt-0.5">Run details and employee-level breakdown</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+            {/* The run's next step, with the same confirmation dialogs and
+                server-side permission checks as the list (useRunAdvance). */}
+            {!loading && (
+              <RunHeaderAction
+                run={detail || run}
+                canOperate={canOperate}
+                onAdvance={requestAdvance}
+                busy={advancingId === (detail || run).id}
+              />
+            )}
             <button
               type="button"
               onClick={() => setShowAssist((prev) => !prev)}
@@ -538,24 +548,6 @@ export default function RunDetailPanel({ run, onClose, fmtCurrency, canOperate =
             </div>
           ) : (
             <>
-              <div className="mb-5 rounded-[18px] bg-surface-muted p-5">
-                <h4 className="mb-4 text-[11px] font-bold uppercase tracking-widest text-foreground-muted">Run progress</h4>
-                <div className="grid gap-4 lg:grid-cols-[1fr_260px] lg:items-center">
-                  <RunWorkflowTracker
-                    run={detail || run}
-                    orientation="horizontal"
-                    canOperate={canOperate}
-                    showNextAction={false}
-                  />
-                  <RunNextAction
-                    run={detail || run}
-                    canOperate={canOperate}
-                    onAdvance={requestAdvance}
-                    busy={advancingId === (detail || run).id}
-                  />
-                </div>
-              </div>
-
               {detail?.attendanceOverrideReason && (
                 <div className="rounded-[14px] border border-warning/30 bg-warning/10 px-4 py-3 mb-5 text-[13px] text-foreground">
                   <strong>Run with incomplete attendance (admin override).</strong> Employees without attendance were paid as present for those days.

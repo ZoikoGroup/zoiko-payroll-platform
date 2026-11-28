@@ -471,7 +471,9 @@ export default function PayrollRunsPage() {
                 <div className="px-5 pb-5">
                   <RunsTable
                     runs={runs}
-                    onSelect={setSelectedRun}
+                    // View opens the detail view AND follows the run in Run
+                    // progress, so its tracker is there when the view closes.
+                    onSelect={(run) => { setSelectedRun(run); setTrackedRunId(run.id); }}
                     onRowClick={(run) => setTrackedRunId(run.id)}
                     selectedRunId={trackedRunId}
                     highlightRunId={highlightRunId}
