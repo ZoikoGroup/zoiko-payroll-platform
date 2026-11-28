@@ -172,7 +172,6 @@ export default function RunTrackerPanel({
             <RunSummary run={run} countries={countries} />
             <RunWorkflowTracker
               run={run}
-              orientation="vertical"
               canOperate={canOperate}
               onAdvance={onAdvance}
               busy={advancingId === run.id}

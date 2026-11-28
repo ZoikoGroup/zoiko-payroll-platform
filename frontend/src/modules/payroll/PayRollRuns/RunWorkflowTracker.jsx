@@ -11,8 +11,8 @@ import {
   stepCompletion,
 } from "./runWorkflow";
 
-// The payroll run tracker, shared by the Payroll Runs list panel (vertical)
-// and the run detail view (horizontal). Every step explains itself on hover,
+// The payroll run tracker in the Payroll Runs list's Run progress panel
+// (the run detail view shows only RunHeaderAction). Every step explains itself on hover,
 // keyboard focus or tap; the "Next action" line performs the current step
 // through the caller's onAdvance (which keeps the existing confirmation
 // dialogs and server-side permission checks) or says who has to do it.
@@ -106,20 +106,46 @@ function StepTooltip({ id, anchor, step, state, run, canOperate }) {
   );
 }
 
-/** The "Next action" line on its own (the detail view shows it beside the tracker). */
-export function RunNextAction({ run, canOperate, onAdvance, busy, compact = true, onHighlight }) {
+/** The run's next step as one button, for the run detail view's header. Same
+ * onAdvance (confirmation dialogs + server checks) as the tracker's Next
+ * action; without permission, a short grey note says who has to do it. */
+export function RunHeaderAction({ run, canOperate, onAdvance, busy }) {
+  const guide = STEP_GUIDE[run?.status];
+  if (!guide?.action) return null; // Closed (or unknown): nothing to do
+  if (!canOperate || !onAdvance) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-foreground-muted" title={`Waiting for ${PAYROLL_OPERATOR_LABEL}`}>
+        <Lock size={12} aria-hidden="true" /> Waiting for a payroll admin
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onAdvance(run)}
+      disabled={busy}
+      className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-bold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {busy ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <ArrowRight size={14} aria-hidden="true" />}
+      {busy ? "Working…" : guide.action}
+    </button>
+  );
+}
+
+/** The "Next action" box under the tracker. */
+function RunNextAction({ run, canOperate, onAdvance, busy, onHighlight }) {
   const guide = STEP_GUIDE[run.status];
   if (!guide) return null;
   if (!guide.action) {
     return (
-      <p className={`rounded-[12px] bg-primary/10 px-3 py-2 text-[12px] font-semibold text-primary ${compact ? "" : "mt-4"}`}>
+      <p className="mt-4 rounded-[12px] bg-primary/10 px-3 py-2 text-[12px] font-semibold text-primary">
         This run is complete. Nothing else to do.
       </p>
     );
   }
   return (
     <div
-      className={`rounded-[12px] border border-info/30 bg-info/5 px-3 py-2.5 ${compact ? "" : "mt-4"}`}
+      className="mt-4 rounded-[12px] border border-info/30 bg-info/5 px-3 py-2.5"
       onMouseEnter={() => onHighlight?.(run.id)}
       onMouseLeave={() => onHighlight?.(null)}
       onFocus={() => onHighlight?.(run.id)}
@@ -151,11 +177,9 @@ export function RunNextAction({ run, canOperate, onAdvance, busy, compact = true
 
 export default function RunWorkflowTracker({
   run,
-  orientation = "vertical",
   canOperate = false,
   onAdvance,
   busy = false,
-  showNextAction = true,
   // (runId | null) => void: called while the current step or the Next action
   // is hovered / focused, so the page can light up that run's Advance button.
   onHighlight,
@@ -179,7 +203,6 @@ export default function RunWorkflowTracker({
   const currentStep = PAYROLL_STATUS_ORDER[currentIdx];
   const lightUp = (step) => { if (step === currentStep && STEP_GUIDE[step]?.action) onHighlight?.(run.id); };
   const lightOff = () => onHighlight?.(null);
-  const vertical = orientation === "vertical";
 
   const stepButtonProps = (step) => ({
     onMouseEnter: (e) => { const anchor = e.currentTarget; lightUp(step); setOpen((o) => (o?.pinned ? o : { step, pinned: false, anchor })); },
@@ -198,7 +221,6 @@ export default function RunWorkflowTracker({
     <div ref={containerRef}>
       <Stepper
         label="Payroll run progress"
-        orientation={vertical ? "vertical" : "horizontal"}
         steps={PAYROLL_STATUS_ORDER.map((step, idx) => {
           const state = stepState(idx, currentIdx);
           const done = state === "done" ? stepCompletion(step, run) : null;
@@ -221,9 +243,7 @@ export default function RunWorkflowTracker({
         />
       )}
 
-      {showNextAction && (
-        <RunNextAction run={run} canOperate={canOperate} onAdvance={onAdvance} busy={busy} compact={!vertical} onHighlight={onHighlight} />
-      )}
+      <RunNextAction run={run} canOperate={canOperate} onAdvance={onAdvance} busy={busy} onHighlight={onHighlight} />
     </div>
   );
 }
