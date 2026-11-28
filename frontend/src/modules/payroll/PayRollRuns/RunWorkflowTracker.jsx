@@ -1,7 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, Check, Loader2, Lock } from "lucide-react";
+import { ArrowRight, Loader2, Lock } from "lucide-react";
 
+import Stepper from "./Stepper";
 import {
   PAYROLL_OPERATOR_LABEL,
   PAYROLL_STATUS_ORDER,
@@ -105,23 +106,6 @@ function StepTooltip({ id, anchor, step, state, run, canOperate }) {
   );
 }
 
-function StepMarker({ state, index }) {
-  if (state === "done") {
-    return (
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-white">
-        <Check size={14} strokeWidth={3} aria-hidden="true" />
-      </span>
-    );
-  }
-  return (
-    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-[11px] font-bold ${
-      state === "current" ? "border-info bg-info/10 text-info ring-4 ring-info/15" : "border-border bg-surface text-foreground-muted"}`}
-    >
-      {index + 1}
-    </span>
-  );
-}
-
 /** The "Next action" line on its own (the detail view shows it beside the tracker). */
 export function RunNextAction({ run, canOperate, onAdvance, busy, compact = true, onHighlight }) {
   const guide = STEP_GUIDE[run.status];
@@ -198,7 +182,6 @@ export default function RunWorkflowTracker({
   const vertical = orientation === "vertical";
 
   const stepButtonProps = (step) => ({
-    type: "button",
     onMouseEnter: (e) => { const anchor = e.currentTarget; lightUp(step); setOpen((o) => (o?.pinned ? o : { step, pinned: false, anchor })); },
     onMouseLeave: () => { lightOff(); setOpen((o) => (o?.pinned ? o : null)); },
     onFocus: (e) => { const anchor = e.currentTarget; lightUp(step); setOpen((o) => (o?.pinned ? o : { step, pinned: false, anchor })); },
@@ -213,63 +196,19 @@ export default function RunWorkflowTracker({
 
   return (
     <div ref={containerRef}>
-      <ol aria-label="Payroll run progress" className={vertical ? "space-y-0" : "flex items-start"}>
-        {PAYROLL_STATUS_ORDER.map((step, idx) => {
+      <Stepper
+        label="Payroll run progress"
+        orientation={vertical ? "vertical" : "horizontal"}
+        steps={PAYROLL_STATUS_ORDER.map((step, idx) => {
           const state = stepState(idx, currentIdx);
           const done = state === "done" ? stepCompletion(step, run) : null;
           const sub = state === "done"
             ? (done?.by ? `${done.by}${done.at ? ` · ${formatWhen(done.at)}` : ""}` : "Done")
             : state === "current" ? "Current step" : null;
-          const labelCls = state === "upcoming" ? "text-foreground-muted" : "text-foreground";
-          const dim = state === "upcoming" ? "opacity-60" : "";
-
-          if (vertical) {
-            return (
-              <li key={step} className={`relative ${dim}`} aria-current={state === "current" ? "step" : undefined}>
-                {idx < PAYROLL_STATUS_ORDER.length - 1 && (
-                  <span aria-hidden="true" className={`absolute left-[13px] top-8 h-[calc(100%-24px)] w-px ${idx < currentIdx ? "bg-primary" : "bg-border"}`} />
-                )}
-                <button
-                  {...stepButtonProps(step)}
-                  className={`flex w-full items-start gap-2.5 rounded-[10px] px-1 py-1.5 text-left transition-colors hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-primary ${
-                    state === "current" ? "bg-info/5" : ""}`}
-                >
-                  <StepMarker state={state} index={idx} />
-                  <span className="min-w-0 pt-0.5">
-                    <span className={`block text-[13px] font-semibold ${labelCls}`}>{step}</span>
-                    {sub && (
-                      <span className={`block text-[11px] leading-tight ${state === "current" ? "font-semibold text-info" : "text-foreground-muted"}`}>
-                        {sub}
-                      </span>
-                    )}
-                  </span>
-                </button>
-              </li>
-            );
-          }
-
-          return (
-            <li key={step} className={`relative flex flex-1 flex-col ${dim}`} aria-current={state === "current" ? "step" : undefined}>
-              {idx !== 0 && (
-                <span aria-hidden="true" className={`absolute top-[13px] h-[2px] ${idx <= currentIdx ? "bg-primary" : "bg-border"}`}
-                  style={{ left: "-50%", right: "50%" }} />
-              )}
-              <button
-                {...stepButtonProps(step)}
-                className="z-10 mx-auto flex flex-col items-center rounded-[10px] px-1 py-1 text-center transition-colors hover:bg-surface focus-visible:outline-2 focus-visible:outline-primary"
-              >
-                <StepMarker state={state} index={idx} />
-                <span className={`mt-1.5 text-[11px] font-bold ${labelCls}`}>{step}</span>
-                {sub && (
-                  <span className={`mt-0.5 hidden text-[10px] leading-tight sm:block ${state === "current" ? "font-semibold text-info" : "text-foreground-muted"}`}>
-                    {sub}
-                  </span>
-                )}
-              </button>
-            </li>
-          );
+          return { key: step, state, label: step, sub };
         })}
-      </ol>
+        getStepProps={(step) => stepButtonProps(step.key)}
+      />
 
       {open?.anchor && (
         <StepTooltip
