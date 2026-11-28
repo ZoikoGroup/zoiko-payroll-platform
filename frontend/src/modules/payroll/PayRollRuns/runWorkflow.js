@@ -121,17 +121,49 @@ export function monthLabel(date) {
   return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
+/** Runs ordered by pay period, newest first (the higher id first within a period). */
+export function sortRunsNewestFirst(runs) {
+  return [...(runs || [])].sort((a, b) => {
+    const da = periodStartDate(a)?.getTime() ?? 0;
+    const dbt = periodStartDate(b)?.getTime() ?? 0;
+    return dbt - da || (b.id ?? 0) - (a.id ?? 0);
+  });
+}
+
+function parseDay(value) {
+  if (!value) return null;
+  const [y, m, d] = String(value).split("-").map(Number);
+  return y && m && d ? new Date(y, m - 1, d) : null;
+}
+
+/**
+ * A run's pay period as a short range: "Feb 1–28, 2026",
+ * "Jan 25 – Feb 24, 2026", "Dec 25, 2025 – Jan 24, 2026".
+ * Falls back to the run's own period text when the dates are missing.
+ */
+export function periodRangeLabel(run) {
+  const start = parseDay(run?.periodStart);
+  const end = parseDay(run?.periodEnd);
+  if (!start || !end) return run?.period || "";
+  const mon = (d) => d.toLocaleDateString("en-US", { month: "short" });
+  const sy = start.getFullYear();
+  const ey = end.getFullYear();
+  if (sy !== ey) {
+    return `${mon(start)} ${start.getDate()}, ${sy} – ${mon(end)} ${end.getDate()}, ${ey}`;
+  }
+  if (start.getMonth() !== end.getMonth()) {
+    return `${mon(start)} ${start.getDate()} – ${mon(end)} ${end.getDate()}, ${ey}`;
+  }
+  return `${mon(start)} ${start.getDate()}–${end.getDate()}, ${ey}`;
+}
+
 /**
  * Which run the progress panel follows by default:
  *  - runs whose period starts in the current month, most recent first;
  *  - otherwise none for the month, plus the most recent run that isn't Closed.
  */
 export function pickDefaultRuns(runs, today = new Date()) {
-  const byRecency = [...(runs || [])].sort((a, b) => {
-    const da = periodStartDate(a)?.getTime() ?? 0;
-    const dbt = periodStartDate(b)?.getTime() ?? 0;
-    return dbt - da || (b.id ?? 0) - (a.id ?? 0);
-  });
+  const byRecency = sortRunsNewestFirst(runs);
   const thisMonth = byRecency.filter((r) => {
     const d = periodStartDate(r);
     return d && d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth();

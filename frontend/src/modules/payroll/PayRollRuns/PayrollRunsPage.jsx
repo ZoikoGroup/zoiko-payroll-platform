@@ -271,11 +271,9 @@ export default function PayrollRunsPage() {
     if (wizardStep < 4) setWizardStep((s) => s + 1);
     if (wizardStep === 3) {
       addToast?.("Payroll run submitted successfully.", "success");
-      // Follow the new run in Run progress and light up its next action.
-      if (createdRunId) {
-        setTrackedRunId(createdRunId);
-        setFlashRunId(createdRunId);
-      }
+      // Light up the new run's Advance button. Run progress is NOT switched to
+      // it: the panel only shows a run the user picks (dropdown or table row).
+      if (createdRunId) setFlashRunId(createdRunId);
       setView("list");
       setWizardStep(0);
       setEmployees([]);
